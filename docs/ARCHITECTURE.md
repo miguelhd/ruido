@@ -45,21 +45,21 @@ Ruido pins real-time DSP and UI/control scanning to separate `pi32v2` cores comm
 All synthesis and filtering run inside a unified **`4x` oversampled domain (`176,472 Hz`)** using single-precision `float` before decimating once to `44,118 Hz`.
 
 ### 3.1 Schmitt-Trigger Relaxation Oscillator Model (`4x` Voices)
-1. **Band-Limited Step Generation:** Phase accumulator (`[0, 1)`) with higher-order **PolyBLEP** anti-aliasing on both rising and falling transitions—ensuring alias-free odd harmonics at audio rates and sample-accurate, jitter-free impulses at sub-audio LFO rates (`0.02 - 20 Hz`).
-2. **RC Capacitor Tilt & DC Blocking:** Subtle leaky-integrator / high-pass roof sag modeling physical timing/coupling capacitor discharge across flat square tops.
-3. **1/f Thermal Drift:** Independent slow filtered random walk (`±1-3 cents`) per oscillator so unison/octaves breathe organically.
-4. **Shared Power-Rail Threshold Coupling (`ALGORITHM` Knob):** Each oscillator's transition feeds a transient impulse scaled by the `ALGORITHM` parameter (`0..100%`) into a virtual `Vdd` sag bus, nudging neighbor hysteresis thresholds (`Vt+`/`Vt-`) to reproduce analog CMOS weak injection locking.
+1. **Band-Limited Step Generation:** 32-bit unsigned integer (`uint32_t`) phase accumulators (`41 uHz` resolution, immune to `float32` sub-audio ULP stall down to `0.02 Hz`) with **4-point Integrated Cubic B-Spline PolyBLEP** anti-aliasing on both rising and falling transitions (`< -108 dBc` alias floor `< 20 kHz`) plus subtle per-inverter CMOS hysteresis duty spread (`~49.2% - 50.9%`).
+2. **RC Capacitor Tilt & DC Blocking:** Subtle leaky-integrator / high-pass roof sag (`~11.5 Hz` corner) modeling physical timing/coupling capacitor discharge across flat square tops.
+3. **1/f Thermal Drift:** Independent slow filtered random walk (`±2.2 cents`) per oscillator so unison/octaves breathe organically.
+4. **Shared Power-Rail Threshold Coupling (`ALGORITHM` Knob):** Each oscillator's transition feeds a transient crowbar/shoot-through pulse scaled by the `ALGORITHM` parameter (`0..100%`) into a virtual `Vdd` sag bus, nudging neighbor hysteresis thresholds (`Vt+`/`Vt-`) via a signed phase-response curve to reproduce analog `CD40106` Adler injection locking (`~1.6%` max capture range).
 
 ### 3.2 Per-Oscillator MS-20 (`Korg35`) Dual Filter (`8x` ZDF Stages Total)
 Each oscillator feeds **Pre-Filter Drive (`KNOB4`)** into its dedicated **2-pole Sallen-Key High-Pass Filter -> 2-pole Sallen-Key Low-Pass Filter**:
-- **Topology-Preserving Transform (TPT / ZDF):** Trapezoidal integrators with instantaneous analytical feedback resolution (Vadim Zavalishin's method)—zero `z^-1` unit-delay cramping, accurate resonance tracking to `20 kHz`, and unconditional stability under fast sweeps or sub-audio square pinging.
-- **Asymmetric Diode Clipper in Feedback:** Fast rational `tanh` / soft-clipping approximation inside the Sallen-Key resonance path so high resonance howls musically without thinning out low-frequency weight, decoupled from post-filter mix `Amplitude`.
-- **Smart-Park Shared Resonance:** Smooth edge taper (`Q -> 0.707`) as `HP Cutoff -> 20 Hz` or `LP Cutoff -> 20 kHz`, preventing sub-sonic rumble or ultrasonic self-oscillation on parked stages.
+- **Topology-Preserving Transform (TPT / ZDF):** Trapezoidal integrators with Picard warm-started, **fused single-division Newton-Raphson** resolution of the delay-free nonlinear feedback loop (`ADR-010`) and Van der Pol period elongation compensation above `k = 2.0`—zero `z^-1` unit-delay cramping, `< 0.6%` self-oscillation pitch accuracy to `8 kHz`, and unconditional stability (`F'(w) >= 0.20 > 0`).
+- **Asymmetric Diode Clipper in Feedback:** `C^2`-at-origin asymmetric Padé diode clipper (`+0.92 / -1.08`) inside both `HPF` and `LPF` Sallen-Key feedback paths so small-signal Butterworth passband stays `100%` linear while hot resonance generates rich even + odd harmonics decoupled from post-filter mix `Amplitude`.
+- **Smart-Park Shared Resonance:** Smooth `smoothstep` edge taper (`Q -> 0.7071`, internal poles gliding to `2.5 Hz` / `28 kHz`) as `HP Cutoff -> 20 Hz` or `LP Cutoff -> 20 kHz`, preventing sub-sonic rumble, bass square-wave roof tilt, or ultrasonic self-oscillation on parked stages.
 
 ### 3.3 Mixing, Stereo Spread, Master Bus Sag & Polyphase Decimation
-- **Clickless Vactrol Mute, Pressure Swell & Pan:** Per-sample one-pole slews (`~3 ms` time constant) on mutes, continuous `SARADC` key-pressure modulation, post-filter amplitudes, and `sin`/`cos` stereo pan weights (scaled by `SELECT` stereo spread or summed cleanly in `MONO` mode).
-- **Master Bus Sag:** Gentle transformer/op-amp soft-saturation summing bus restoring subtle intermodulation glue when multiple hot voices collide.
-- **Stereo Decimation (`176.47 kHz -> 44.12 kHz`):** Two cascaded 2x polyphase half-band IIR/FIR decimation stages providing steep stopband rejection above `20 kHz`.
+- **Clickless Vactrol Mute, Pressure Swell & Pan:** Per-sample one-pole slews (`3.8-5.0 ms` time constants with ULP-safe target snap) on mutes, continuous `SARADC` key-pressure modulation, post-filter amplitudes, and minimax constant-power (`sin`/`cos`) stereo pan weights (scaled by `SELECT` stereo spread or collapsed bit-identically in `MONO` mode).
+- **Master Bus Sag:** High-headroom (`0.75` linear knee, `±1.25` soft ceiling) transformer/op-amp summing bus restoring subtle intermodulation glue when multiple hot voices collide.
+- **Stereo Decimation (`176.472 kHz -> 44.118 kHz`):** Two cascaded 2x **Linear-Phase Symmetric Polyphase Half-Band FIR** stages (`Stage 1`: 31-tap `P=8`, `Stage 2`: 127-tap `P=32`, Kaiser-windowed) using double-mirrored unit-stride odd rings and 4-way unrolled stereo accumulators (`> 87 dB` stopband rejection to `20 kHz`, `< 0.0005 dB` passband ripple, `0°` phase dispersion).
 
 ### 3.4 Cycle Budget Estimate (Core 1 @ 240-320 MHz)
 Available cycles per `44.118 kHz` stereo frame: **`~5,440 - 7,250` cycles**.

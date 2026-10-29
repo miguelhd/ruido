@@ -80,3 +80,17 @@ This file tracks foundational engineering and UX decisions for **Ruido**. Append
 - **Context:** Community hardware research demonstrated that sampling `AC791N` `SARADC` channels across the silicone key matrix rows reads the analog resistance drop of the keys' conductive carbon pills under finger force without hardware modification.
 - **Decision:** Integrate continuous per-key pressure sensing on Core 0 to drive **Soma Lyra-8-style drone expression**: (1) swelling muted oscillators or opening MS-20 filter cutoff/drive (or pitch bend when `PIT` is active) on White Keys `5-8`, and (2) momentary **rubber-band snapshot morphing** when leaning into Snapshot White Keys `9-16`.
 - **Consequences:** Turns inexpensive rubber dome keys into a deeply expressive tactile drone surface.
+
+---
+
+## ADR-010: `uint32` Phase Accumulators, Fused Single-Division Korg35 ZDF Solver & Linear-Phase Polyphase Half-Band FIR Decimation
+- **Date:** 2026-10-29 · **Status:** Accepted
+- **Context:** Implementing Milestone 1 exposed three subtle real-world numerical & acoustic trade-offs at `176.472 kHz` (`4x` oversampling) on a single-precision (`float32`) embedded FPU:
+  1. At `0.02 Hz`, `dt = 1.13e-7`, whereas `ULP(1.0f)` in `float32` is `5.96e-8`—causing `float32` `[0, 1)` phase accumulators to suffer massive quantization error near `1.0f`.
+  2. Standard 2-step Newton-Raphson resolution of two Korg35 diode-clipped Sallen-Key stages (`HPF -> LPF`) across 4 voices at `4x` OS requires up to 256 serial `fdiv` instructions per stereo frame unless algebraically reduced.
+  3. Minimum-phase / allpass IIR half-band decimators introduce phase dispersion near `20 kHz` that tilts flat square-wave roofs and inflates peak crest factor (`~1.35-1.50`), eating headroom into external pedals.
+- **Decision:**
+  1. Drive all 4 Schmitt oscillators with **32-bit unsigned integer (`uint32_t`) phase accumulators** (`41 uHz` resolution, immune to `float32` ULP stall) paired with **4-point Integrated Cubic B-Spline PolyBLEP** (`~-108.5 to -112.6 dBc` alias floor `< 20 kHz`).
+  2. Place the Padé diode clipper `phi(y) = y*(27 + z^2)/(27 + 9*z^2)` and its exact derivative `((27 - 3*z^2)/(27 + 9*z^2))^2` over a single common denominator `D^2 - alpha*k*Nd^2`, collapsing each Korg35 ZDF Newton-Raphson iteration into **one `fdiv`** (with Van der Pol period elongation compensation above `k = 2.0`).
+  3. Use a **two-stage cascaded Linear-Phase Symmetric Polyphase Half-Band FIR Decimator** (`P=8` 31-tap Stage 1 + `P=32` 127-tap Stage 2, Kaiser-windowed) with double-mirrored unit-stride odd rings and 4-way unrolled accumulators—preserving `0°` phase dispersion (`1.159` isolated square crest factor) and `0.0005 dB` passband flatness.
+- **Consequences:** Exceeds the `-70 dB` alias gate by `~38 dB` (`-108.5 dBc` worst-case), tracks self-oscillation within `< 0.6%` up to `8 kHz`, keeps total `DroneEngine` SRAM at `27.36 KB` (including the 24 KB scope buffer), and cuts filter division pressure by `4x-8x` on `pi32v2`.

@@ -11,12 +11,12 @@ Each milestone has a strict verification gate before advancing to the next phase
 
 ---
 
-## Milestone 1: Core DSP Engine & Headless Audio Verification (`src/dsp/`, `tests/`)
-- [ ] Implement lock-free parameter state & per-sample clickless slew smoothers (`src/core/`).
-- [ ] Implement `4x` oversampled **Schmitt-Trigger Oscillator** (PolyBLEP, RC capacitor tilt, `1/f` drift, `ALGORITHM`-scaled shared power-rail threshold coupling, Audio `20-4000 Hz` + LFO `0.02-20 Hz` ranges).
-- [ ] Implement per-oscillator **MS-20 (`Korg35`) ZDF `HPF -> LPF`** filter pair with pre-filter `Drive`, internal asymmetric diode clipping, and Smart-Park Shared Resonance.
-- [ ] Implement constant-power stereo panner + `SELECT` stereo spread + `MONO`/`POLY` collapse, clickless mute/pressure modulation, nonlinear master bus sag, and cascaded polyphase half-band `4x -> 1x` stereo decimator.
-- [ ] **Verification Gate:** Headless C++ unit tests verifying zero `NaN`/denormals under extreme self-oscillation, alias suppression (`> 70 dB` rejection), zero DC offset runaway, and flat passband when filters are parked.
+## Milestone 1: Core DSP Engine & Headless Audio Verification (`src/dsp/`, `tests/`) *(Complete)*
+- [x] Implement lock-free parameter state & per-sample clickless slew smoothers (`src/core/`).
+- [x] Implement `4x` oversampled **Schmitt-Trigger Oscillator** (PolyBLEP, RC capacitor tilt, `1/f` drift, `ALGORITHM`-scaled shared power-rail threshold coupling, Audio `20-4000 Hz` + LFO `0.02-20 Hz` ranges).
+- [x] Implement per-oscillator **MS-20 (`Korg35`) ZDF `HPF -> LPF`** filter pair with pre-filter `Drive`, internal asymmetric diode clipping, and Smart-Park Shared Resonance.
+- [x] Implement constant-power stereo panner + `SELECT` stereo spread + `MONO`/`POLY` collapse, clickless mute/pressure modulation, nonlinear master bus sag, and cascaded polyphase half-band `4x -> 1x` stereo decimator.
+- [x] **Verification Gate:** Headless C++ unit tests verifying zero `NaN`/denormals under extreme self-oscillation, alias suppression (`> 70 dB` rejection — achieved `< -108.5 dBc`), zero DC offset runaway, and flat passband when filters are parked.
 
 ---
 
