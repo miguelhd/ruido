@@ -1,0 +1,35 @@
+# Build & compiled artifacts
+build/
+dist/
+out/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.elf
+*.bin
+*.fw
+*.fwsc
+*.wasm
+*.js.map
+
+# External SDKs & toolchains (pulled locally or via Docker, never committed)
+sdk/
+vendor/fw-AC79_AIoT_SDK/
+vendor/emsdk/
+.jieli/
+
+# IDE & OS metadata
+.DS_Store
+.vscode/
+.idea/
+compile_commands.json
+.cache/
+clangd/
+
+# Python / Node local tooling environments
+__pycache__/
+*.pyc
+.venv/
+node_modules/

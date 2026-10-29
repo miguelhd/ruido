@@ -1,0 +1,43 @@
+# Ruido — Development Roadmap
+
+Each milestone has a strict verification gate before advancing to the next phase so sound quality and code hygiene never regress.
+
+---
+
+## Milestone 0: Workspace Hygiene & Documentation Baseline *(Complete)*
+- [x] Initialize standalone Git repository and clean `src/` / `platforms/` / `tests/` / `docs/` separation.
+- [x] Establish C++17 formatting (`.clang-format`, `.editorconfig`) and agent guardrails (`AGENTS.md`, `src/dsp/AGENTS.md`).
+- [x] Record baseline product spec (`docs/PRODUCT.md` + `docs/assets/fm1-front-panel.png`), hardware/DSP architecture (`docs/ARCHITECTURE.md`), and ADRs (`ADR-001` through `ADR-009` in `docs/DECISIONS.md`).
+
+---
+
+## Milestone 1: Core DSP Engine & Headless Audio Verification (`src/dsp/`, `tests/`)
+- [ ] Implement lock-free parameter state & per-sample clickless slew smoothers (`src/core/`).
+- [ ] Implement `4x` oversampled **Schmitt-Trigger Oscillator** (PolyBLEP, RC capacitor tilt, `1/f` drift, `ALGORITHM`-scaled shared power-rail threshold coupling, Audio `20-4000 Hz` + LFO `0.02-20 Hz` ranges).
+- [ ] Implement per-oscillator **MS-20 (`Korg35`) ZDF `HPF -> LPF`** filter pair with pre-filter `Drive`, internal asymmetric diode clipping, and Smart-Park Shared Resonance.
+- [ ] Implement constant-power stereo panner + `SELECT` stereo spread + `MONO`/`POLY` collapse, clickless mute/pressure modulation, nonlinear master bus sag, and cascaded polyphase half-band `4x -> 1x` stereo decimator.
+- [ ] **Verification Gate:** Headless C++ unit tests verifying zero `NaN`/denormals under extreme self-oscillation, alias suppression (`> 70 dB` rejection), zero DC offset runaway, and flat passband when filters are parked.
+
+---
+
+## Milestone 2: Interactive macOS / WebAssembly Simulator (`platforms/sim/`, `src/ui/`)
+- [ ] Implement the portable `240x16` RGB565 scanline strip compositor (`src/ui/`):
+  - Osc-1 rising-edge-triggered anti-aliased CRT stereo waveform renderer.
+  - Alpha-blended translucent HUD (`120 ms` bloom, `1.5 s` hold, `800 ms` dissolve) including `[ HP |══════| LP ]` filter passband curve and headroom indicator.
+- [ ] Implement stateless two-hand controller (`OP1-4` filter holds, `OP5` Amp, `OP6` Pan, `GLO` global filter, `PIT` pitch pressure, left encoders, right single-taps) + encoder velocity ballistics + 27-key / 14-button varibright white LED engine (`src/core/`, `src/ui/`).
+- [ ] Wrap portable engine in `platforms/sim/` (WebAssembly + WebAudio + faithful FM-1 front-panel UI matching `docs/assets/fm1-front-panel.png`, including simulated finger-pressure expression on keys `5-16` & MIDI Aftertouch).
+- [ ] **Verification Gate:** Real-time auditioning from macOS audio interface directly into external pedals / Eurorack.
+
+---
+
+## Milestone 3: Drone Snapshots & Rubber-Band Pressure Morphing
+- [ ] Implement compact binary snapshot struct (`<= 128 bytes` per snapshot) for the 8 snapshot keys (`White Keys 9-16`).
+- [ ] Implement smooth glide on tap, continuous crossfade via the `PRESETS` encoder, and **rubber-band pressure morphing** when leaning into a snapshot key.
+
+---
+
+## Milestone 4: FM-1 Firmware Target & Hardware Bring-Up (`platforms/fm1/`, `tools/`)
+- [ ] Create reproducible `linux/amd64` Docker build environment in `tools/` with JieLi `pi32v2` Clang toolchain + `fm1_open` / `fw-AC79_AIoT_SDK` BSP.
+- [ ] Bind `platforms/fm1/` to Core 1 `jlstream` 64-sample audio callback, Core 0 SPI LCD DMA strip push, 7-encoder + button/key GPIO scanner, `SARADC` carbon-pill pressure reader, monochrome LED PWM driver, and NVS snapshot persistence.
+- [ ] Validate compiled `.fwsc` binary inside `fm1-emu` (verifying Flash `< 600 KB`, SRAM headroom, and Core 1 cycle margin).
+- [ ] **Verification Gate:** Flash `.fwsc` to physical M-VAVE FM-1 via USB-MIDI SysEx and verify thermal/CPU stability, tear-free scope framerate, calibrated carbon-pill pressure response, and stereo TRS output into external pedals/Eurorack.
