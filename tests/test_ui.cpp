@@ -35,8 +35,8 @@ void testMemoryFootprint() {
     CHECK(sizeof(ruido::ScopeHudRenderer) < 88064u);
 }
 
-void testTwoHandErgonomicsAndBallistics() {
-    std::printf("[Test 2] Stateless Two-Hand Modifiers & Encoder Velocity Ballistics...\n");
+void testTwoHandErgonomicsAndLinearGears() {
+    std::printf("[Test 2] Stateless Two-Hand Modifiers & 3-Gear Linear Quadrature Encoders...\n");
     ruido::LockFreeControlBus bus;
     ruido::RuidoController ctrl;
     ctrl.attachControlBus(&bus);
@@ -44,26 +44,28 @@ void testTwoHandErgonomicsAndBallistics() {
     // 1. Strictly linear 3-gear X4 quadrature rates (96 steps/turn, ZERO velocity acceleration)
     const float f0 = ctrl.state().voices[0].frequencyHz;
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Standard);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16, 0.250f); // Slow turn in Standard gear
-    const float fSlow = ctrl.state().voices[0].frequencyHz;
-    const float slowRatio = fSlow / f0;
-    CHECK(slowRatio > 1.35f && slowRatio < 1.40f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16);
+    const float fFirst = ctrl.state().voices[0].frequencyHz;
+    const float stepRatio = fFirst / f0;
+    CHECK(stepRatio > 1.35f && stepRatio < 1.40f);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFrequency);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
     CHECK(ctrl.hud().focusedVoice == 0u);
 
     ctrl.reset();
     ctrl.attachControlBus(&bus);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16, 0.004f); // Fast turn -> IDENTICAL linear step!
-    const float fFast = ctrl.state().voices[0].frequencyHz;
-    CHECK(near(fFast, fSlow, 1.0e-6f));
+    for (int i = 0; i < 16; ++i) {
+        ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 1); // 16 x 1-tick == 1 x 16-tick linear!
+    }
+    const float fAccum = ctrl.state().voices[0].frequencyHz;
+    CHECK(near(fAccum, fFirst, 0.02f));
 
     // Momentary OCT- Fine hold: surgical ~0.66-cent steps while held, Standard on release
     ctrl.reset();
     ctrl.attachControlBus(&bus);
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true);
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Fine);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16, 0.150f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16);
     const float fineRatio = ctrl.state().voices[0].frequencyHz / f0;
     CHECK(fineRatio > 1.005f && fineRatio < 1.008f);
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, false);
@@ -74,15 +76,15 @@ void testTwoHandErgonomicsAndBallistics() {
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Fast);
 
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -132, 0.120f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -132);
     CHECK(near(ctrl.state().voices[0].frequencyHz, ruido::kAudioFreqMinHz));
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 132, 0.120f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 132);
     CHECK(near(ctrl.state().voices[0].frequencyHz, ruido::kAudioFreqMaxHz));
 
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, true);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 132, 0.120f);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 132, 0.120f);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 132, 0.120f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 132);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 132);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 132);
     CHECK(near(ctrl.state().voices[0].hpCutoffHz, ruido::kFilterCutoffMaxHz));
     CHECK(near(ctrl.state().voices[0].hpResonance, 1.0f));
     CHECK(near(ctrl.state().voices[0].lpResonance, 1.0f));
@@ -105,10 +107,10 @@ void testTwoHandErgonomicsAndBallistics() {
     CHECK(ctrl.hud().focusedVoice == 2u);
 
     // Turn KNOB1..4 while OP3 takes priority -> updates Voice 2 HPF, HP RES, LPF, LP RES
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 20, 0.100f);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 30, 0.100f);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, -20, 0.100f);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 30, 0.100f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 20);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 30);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, -20);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 30);
     CHECK(ctrl.state().voices[2].hpCutoffHz > 20.5f);
     CHECK(ctrl.state().voices[2].hpResonance > 0.10f);
     CHECK(ctrl.state().voices[2].lpCutoffHz < 19500.0f);
@@ -124,8 +126,8 @@ void testTwoHandErgonomicsAndBallistics() {
 
     // 3. OP5 (Global Filter), OP6 (Panning), GLO (Amplitude)
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, true);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 30, 0.100f);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 30, 0.100f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 30);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 30);
     CHECK(ctrl.hud().mode == ruido::HudMode::GlobalFilter);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::GlobalFilter);
     for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
@@ -135,14 +137,14 @@ void testTwoHandErgonomicsAndBallistics() {
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
 
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -30, 0.100f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -30);
     CHECK(ctrl.hud().mode == ruido::HudMode::Panning);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Panning);
     CHECK(ctrl.state().voices[3].pan < 0.65f);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
 
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, -30, 0.100f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, -30);
     CHECK(ctrl.hud().mode == ruido::HudMode::Amplitude);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Amplitude);
     CHECK(ctrl.state().voices[1].amplitude < 0.65f);
@@ -160,7 +162,7 @@ void testTwoHandErgonomicsAndBallistics() {
     CHECK(near(ctrl.state().voices[0].amplitude, rememberedAmp));
 
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -3, 0.100f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -3);
     CHECK(ctrl.state().voices[0].muted);
     CHECK(near(ctrl.state().voices[0].amplitude, rememberedAmp));
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
@@ -174,7 +176,7 @@ void testTwoHandErgonomicsAndBallistics() {
     ctrl.onWhiteKeyGate(0u, false);
     CHECK(ctrl.state().voices[0].muted);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4, 0.120f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4);
     CHECK(!ctrl.state().voices[0].muted);
     CHECK(ctrl.state().voices[0].amplitude > 0.005f && ctrl.state().voices[0].amplitude < 0.05f);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
@@ -228,7 +230,7 @@ void testAllControlsDisplayOnScreen() {
     for (uint8_t e = 0u; e < static_cast<uint8_t>(ruido::EncoderId::Count); ++e) {
         ctrl.onButtonEvent(ruido::ButtonId::Home, true);
         ctrl.onButtonEvent(ruido::ButtonId::Home, false);
-        ctrl.onEncoderDelta(static_cast<ruido::EncoderId>(e), 2, 0.08f);
+        ctrl.onEncoderDelta(static_cast<ruido::EncoderId>(e), 2);
         CHECK(ctrl.hud().mode != ruido::HudMode::None);
     }
     ctrl.onButtonEvent(ruido::ButtonId::Home, true);
@@ -242,10 +244,10 @@ void testButtonsOctavesKeybedAndPressure() {
     ruido::RuidoController ctrl;
 
     // Global encoders & unassigned SELECT encoder reservation
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 40, 0.100f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 40);
     CHECK(ctrl.state().global.circuitCoupling > 0.30f);
 
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, -40, 0.100f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -40);
     CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedEncoder);
 
     // Momentary OCT- / OCT+ Knob Rate holds, LIFO chording, LEDs & immediate release dissolve
@@ -370,7 +372,7 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(ctrl.hud().mode == ruido::HudMode::None);
 
     // Instantaneous encoder turn: blooms to 1.0, holds readable for 1.5 s, then dissolves
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 2, 0.100f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 2);
     for (int i = 0; i < 16; ++i) {
         ctrl.tick(0.100f, tel); // 0.20 s bloom + 1.40 s hold -> still 1.0!
     }
@@ -383,7 +385,7 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(near(ctrl.hud().opacity, 0.0f));
 
     // HOME button clears active HUD immediately
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 3, 0.100f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 3);
     ctrl.tick(0.250f, tel);
     CHECK(ctrl.hud().opacity > 0.99f);
     ctrl.onButtonEvent(ruido::ButtonId::Home, true);
@@ -418,7 +420,7 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(near(ctrl.hud().opacity, 1.0f));
 
     // Standalone knob tweak while switch is latched shows tweak for 1.5 s then returns to switch:
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 2, 0.100f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 2);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFrequency);
     for (int i = 0; i < 16; ++i) {
         ctrl.tick(0.100f, tel);
@@ -538,10 +540,10 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
 
     // Open a resonant MS-20 filter hold on OP1 so live CRT beam + HUD + filter curve render
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, true);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 32, 0.050f);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 90, 0.050f);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, -32, 0.050f);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 120, 0.050f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 32);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 90);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, -32);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 120);
 
     std::array<float, ruido::kBlockFrames> outL{};
     std::array<float, ruido::kBlockFrames> outR{};
@@ -1324,32 +1326,32 @@ void testPerVoiceLfoPageAndHudGraph() {
 
     // 2. SELECT encoder steps OSC 1 (0) -> OSC 2 (1) -> OSC 3 (2) -> OSC 4 (3) -> ALL 4 (4),
     //    clamped cleanly at both ends with zero-windup instant reversal!
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4, 0.05f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     CHECK(ctrl.hud().lfoVoiceFocus == 1u);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 12, 0.05f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 12);
     CHECK(ctrl.hud().lfoVoiceFocus == 4u);
     CHECK(ctrl.hud().mode == ruido::HudMode::GlobalLfo);
 
     // Wind +200 extra CW ticks at ALL 4 rail -> stays at 4, single -4 CCW detent steps to 3 (OSC 4)
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 200, 0.05f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 200);
     CHECK(ctrl.hud().lfoVoiceFocus == 4u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4, 0.05f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
     CHECK(ctrl.hud().lfoVoiceFocus == 3u);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
 
     // Wind -200 CCW ticks past OSC 1 -> clamps at 0, single +4 CW detent steps to 1 (OSC 2)
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, -200, 0.05f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -200);
     CHECK(ctrl.hud().lfoVoiceFocus == 0u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4, 0.05f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     CHECK(ctrl.hud().lfoVoiceFocus == 1u);
 
     // 3. Per-voice editing on OSC 2 (KNOB 1-4 = TARGET | SHAPE | RATE | DEPTH) leaves OSC 1/3/4
     //    untouched, while ALL 4 edits all 4 voices simultaneously!
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16, 0.05f); // +4 steps -> Amplitude (index 4)
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 60, 0.05f); // SHAPE
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 40, 0.05f); // RATE
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 180, 0.05f); // DEPTH
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16); // +4 steps -> Amplitude (index 4)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 60); // SHAPE
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 40); // RATE
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 180); // DEPTH
     CHECK(ctrl.state().voices[1].lfoTarget == ruido::LfoTarget::Amplitude);
     CHECK(ctrl.state().voices[1].lfoShape > 0.20f);
     CHECK(ctrl.state().voices[1].lfoRateHz > 0.60f);
@@ -1359,17 +1361,17 @@ void testPerVoiceLfoPageAndHudGraph() {
     CHECK(near(ctrl.state().voices[2].lfoDepth, 0.0f));
 
     // Step SELECT to ALL 4 (4) and turn KNOB4 + KNOB1 -> updates all 4 voices
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 16, 0.05f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 16);
     CHECK(ctrl.hud().lfoVoiceFocus == 4u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -16, 0.05f); // Back to LpCutoff (0)
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 150, 0.05f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -16); // Back to LpCutoff (0)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 150);
     for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
         CHECK(ctrl.state().voices[v].lfoTarget == ruido::LfoTarget::LpCutoff);
         CHECK(ctrl.state().voices[v].lfoDepth > 0.60f);
     }
 
     // 4. Momentary OP1 filter hold overrides LFO Page temporarily and returns cleanly on release!
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, -16, 0.05f); // Focus OSC 1
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -16); // Focus OSC 1
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, true);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFilter);
@@ -1547,7 +1549,7 @@ void testPerVoiceLfoPageAndHudGraph() {
 int main() {
     std::printf("=== Ruido Milestone 2 Monochrome CRT & Sans-Serif HUD Verification ===\n");
     testMemoryFootprint();
-    testTwoHandErgonomicsAndBallistics();
+    testTwoHandErgonomicsAndLinearGears();
     testAllControlsDisplayOnScreen();
     testButtonsOctavesKeybedAndPressure();
     testHudEnvelopeAndVaribrightLeds();

@@ -279,9 +279,7 @@ float RuidoController::adjustLinear01(float current, int32_t ticks, KnobRate rat
     return clampf(current + delta, lo, hi);
 }
 
-void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks,
-                                     float dtSinceLastSec) noexcept {
-    (void)dtSinceLastSec;
+void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept {
     if (ticks == 0) {
         return;
     }

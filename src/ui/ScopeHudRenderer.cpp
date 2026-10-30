@@ -864,8 +864,7 @@ void ScopeHudRenderer::pushScopeSamples(const ScopeFrame* frames, size_t count) 
             CompactScopeSample packed{};
             packed.leftQ12 = packQ3_12(frames[i].left);
             packed.rightQ12 = packQ3_12(frames[i].right);
-            const uint8_t mask = (frames[i].voiceRisingMask != 0u) ? frames[i].voiceRisingMask :
-                                                                     frames[i].osc1RisingEdge;
+            const uint8_t mask = frames[i].voiceRisingMask;
             for (size_t v = 0u; v < kNumOscillators; ++v) {
                 const bool edge = ((mask >> v) & 1u) != 0u;
                 packed.voiceEdgeQ12[v] = packVoiceEdgeQ12(frames[i].voiceQ13[v], edge);
@@ -2627,9 +2626,7 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
             const char* swName = "PANEL";
             switch (frameHud_.lastButton) {
             case ButtonId::Fx: swName = "FX"; break;
-            case ButtonId::Sel: swName = "SEL"; break;
             case ButtonId::Env: swName = "ENV"; break;
-            case ButtonId::Lfo: swName = "LFO"; break;
             case ButtonId::Edit: swName = "EDIT"; break;
             case ButtonId::GloRight: swName = "GLO"; break;
             case ButtonId::Arp: swName = "ARP"; break;

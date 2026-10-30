@@ -12,12 +12,12 @@ const MIDI_KEYBED_MAP = [
   { kind: 'white', idx: 2 },  // 57 A3
   { kind: 'black', idx: 2 },  // 58 A#3 (OP3)
   { kind: 'white', idx: 3 },  // 59 B3
-  { kind: 'white', idx: 4 },  // 60 C4  (Lyra Pad 1)
+  { kind: 'white', idx: 4 },  // 60 C4  (Pressure Pad 1)
   { kind: 'black', idx: 3 },  // 61 C#4 (OP4)
-  { kind: 'white', idx: 5 },  // 62 D4  (Lyra Pad 2)
+  { kind: 'white', idx: 5 },  // 62 D4  (Pressure Pad 2)
   { kind: 'black', idx: 4 },  // 63 D#4 (OP5 Global Filter)
-  { kind: 'white', idx: 6 },  // 64 E4  (Lyra Pad 3)
-  { kind: 'white', idx: 7 },  // 65 F4  (Lyra Pad 4)
+  { kind: 'white', idx: 6 },  // 64 E4  (Pressure Pad 3)
+  { kind: 'white', idx: 7 },  // 65 F4  (Pressure Pad 4)
   { kind: 'black', idx: 5 },  // 66 F#4 (OP6 Pan)
   { kind: 'white', idx: 8 },  // 67 G4  (Snap 1)
   { kind: 'black', idx: 6 },  // 68 G#4 (PIT)
@@ -147,8 +147,6 @@ async function ensureAudioRunning() {
         if (t && t.length >= 22) {
           uiF32.set(t, uiPtrs.telemetryIn);
           uiWasm.wasm_ui_apply_telemetry();
-        } else if (t) {
-          uiWasm.wasm_ui_set_telemetry(t[0], t[1], t[2], t[3], t[4], t[5]);
         }
         if (msg.scopeBuffer && msg.scopeCount > 0) {
           uiU8.set(new Uint8Array(msg.scopeBuffer), uiPtrs.scopeIn);
@@ -203,7 +201,7 @@ function sendEncoderSteps(encId, ticks) {
   if (!uiWasm || ticks === 0) return;
   ensureAudioRunning();
 
-  uiWasm.wasm_ui_encoder(encId, ticks, 0.016);
+  uiWasm.wasm_ui_encoder(encId, ticks);
 
   // 96 X4 quadrature transitions = 360 deg (3.75 deg/step), strictly 1:1 linear with zero acceleration
   encoderAngles[encId] = (encoderAngles[encId] + ticks * 3.75) % 360;
@@ -508,7 +506,7 @@ function bindButtonsAndKeybed() {
     });
   });
 
-  // 16 Bottom White Silicone Keys (0..3 Mutes, 4..7 Lyra Pressure Pads, 8..15 Snapshots)
+  // 16 Bottom White Silicone Keys (0..3 Mutes, 4..7 Pressure Pads, 8..15 Snapshots)
   document.querySelectorAll('.white-key').forEach((keyEl) => {
     const wIdx = Number(keyEl.dataset.white);
     const hasPressure = wIdx >= 4;
@@ -836,7 +834,7 @@ async function initWebMidi() {
           flushControlToWorklet();
         }
       } else if (status === 0xd0) {
-        // Channel Aftertouch -> applies to any held pressure pads (or all 4 Lyra pads)
+        // Channel Aftertouch -> applies to any held pressure pads (or all 4 pressure pads)
         const p = clamp01(d1 / 127);
         const targets = heldMidiWhitePads.size > 0 ? heldMidiWhitePads : [4, 5, 6, 7];
         for (const wIdx of targets) {

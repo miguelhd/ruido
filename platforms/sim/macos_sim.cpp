@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
     std::printf("=== Ruido Native macOS CoreAudio Auditioner (44,118 Hz / 4x OS) ===\n");
     std::printf("  [1-4] OP1-4 Filter | [5] OP5 Global Filter | [6] OP6 Pan | [g] GLO Amp\n");
     std::printf("  [q/w/e/r] KNOB 1-4 +            | [u/i/o/p] KNOB 1-4 -\n");
-    std::printf("  [z/x/c/v] Osc 1-4 Mutes         | [a/s/d/f] Pulse Lyra Pressure\n");
+    std::printf("  [z/x/c/v] Osc 1-4 Mutes         | [a/s/d/f] Pulse Pad Pressure\n");
     std::printf("  [ [ / ] ] ALGORITHM Coupling    | [ - / = ] Knob Rate (Fine/Fast)\n");
     std::printf(
         "  [l] LFO Page | [, / .] SELECT   | [h] HOME | [m] MONO/POLY | [Space] PLAY/STOP\n");

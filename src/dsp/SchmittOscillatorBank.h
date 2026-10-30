@@ -10,7 +10,7 @@ namespace ruido {
 struct OscillatorBankOutput {
     std::array<float, kNumOscillators> samples{};
     std::array<float, kNumOscillators> gateHigh{}; // 1.0f high, 0.0f low (for LED pulse)
-    bool osc1RisingEdge = false;                   // True on sample where Osc 1 wrapped 0
+    uint8_t risingMask = 0u;                       // Bit v set on sample where Osc v wrapped 0
 };
 
 // 4-voice CMOS Schmitt-Trigger relaxation oscillator bank (CD40106 model) running at

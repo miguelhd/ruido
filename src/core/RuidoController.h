@@ -24,7 +24,7 @@ public:
 
     // Endless encoder rotation: `ticks` signed X4 quadrature steps (96 steps = 360 deg turn).
     // Speed is strictly constant/linear per gear (Standard, Hold OCT- Fine, Hold OCT+ Fast).
-    void onEncoderDelta(EncoderId encoder, int32_t ticks, float dtSinceLastSec = 0.0f) noexcept;
+    void onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept;
 
     // Analog MASTER volume potentiometer [0.0f, 1.0f]
     void onMasterPot(float normalizedLevel) noexcept;

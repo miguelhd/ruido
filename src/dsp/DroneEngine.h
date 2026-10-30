@@ -101,7 +101,6 @@ private:
     OnePoleSmoother pitchModeSmoother_{}; // 0.0 = MS-20 Filter/LPG, 1.0 = Pitch Bend (SEL)
 
     // 36-frame delay aligning 4-voice rising edges & scope taps with PolyBLEP + FIR delay
-    std::array<float, kNumOscillators> prevOscGateHigh_{1.0f, 1.0f, 1.0f, 1.0f};
     std::array<uint64_t, kNumOscillators> voiceEdgeDelayLines_{0u, 0u, 0u, 0u};
     std::array<std::array<int16_t, kNumOscillators>, 64> voiceScopeDelay_{};
     uint32_t voiceScopeDelayWrite_ = 0u;

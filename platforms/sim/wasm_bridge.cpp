@@ -261,11 +261,11 @@ void wasm_ui_init() {
 }
 
 RUIDO_EXPORT("wasm_ui_encoder")
-void wasm_ui_encoder(uint32_t encoderId, int32_t ticks, float dtSec) {
+void wasm_ui_encoder(uint32_t encoderId, int32_t ticks) {
     if (gCtrl == nullptr || encoderId >= static_cast<uint32_t>(ruido::EncoderId::Count)) {
         return;
     }
-    gCtrl->onEncoderDelta(static_cast<ruido::EncoderId>(encoderId), ticks, dtSec);
+    gCtrl->onEncoderDelta(static_cast<ruido::EncoderId>(encoderId), ticks);
     gControlDirty = true;
     refreshSummary();
 }
@@ -332,19 +332,6 @@ void wasm_ui_push_scope(uint32_t count) {
     }
     const size_t n = (count > kMaxScopeBatch) ? kMaxScopeBatch : count;
     gRenderer->pushScopeSamples(gScopeBatchIn, n);
-}
-
-RUIDO_EXPORT("wasm_ui_set_telemetry")
-void wasm_ui_set_telemetry(float pL, float pR, float g0, float g1, float g2, float g3) {
-    if (gUiTelemetry == nullptr) {
-        return;
-    }
-    gUiTelemetry->peakLeft.store(pL, std::memory_order_relaxed);
-    gUiTelemetry->peakRight.store(pR, std::memory_order_relaxed);
-    gUiTelemetry->oscGateHigh[0].store(g0, std::memory_order_relaxed);
-    gUiTelemetry->oscGateHigh[1].store(g1, std::memory_order_relaxed);
-    gUiTelemetry->oscGateHigh[2].store(g2, std::memory_order_relaxed);
-    gUiTelemetry->oscGateHigh[3].store(g3, std::memory_order_relaxed);
 }
 
 RUIDO_EXPORT("wasm_ui_get_telemetry_in_ptr")

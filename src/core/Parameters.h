@@ -234,7 +234,6 @@ inline constexpr float unquantizeVoiceScopeQ13(int16_t q) noexcept {
 struct ScopeFrame {
     float left = 0.0f;
     float right = 0.0f;
-    uint8_t osc1RisingEdge = 0u;
     uint8_t voiceRisingMask = 0u;
     std::array<int16_t, kNumOscillators> voiceQ13{0, 0, 0, 0};
 };

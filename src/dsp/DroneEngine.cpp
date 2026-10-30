@@ -36,7 +36,6 @@ void DroneEngine::init(float baseSampleRate) noexcept {
     decimator_.reset();
     coeffCache_ = {};
     filterCoeffs_ = {};
-    prevOscGateHigh_ = {1.0f, 1.0f, 1.0f, 1.0f};
     voiceEdgeDelayLines_ = {0u, 0u, 0u, 0u};
     voiceScopeDelay_ = {};
     voiceScopeDelayWrite_ = 0u;
@@ -81,7 +80,6 @@ void DroneEngine::reset() noexcept {
     decimator_.reset();
     coeffCache_ = {};
     filterCoeffs_ = {};
-    prevOscGateHigh_ = {1.0f, 1.0f, 1.0f, 1.0f};
     voiceEdgeDelayLines_ = {0u, 0u, 0u, 0u};
     voiceScopeDelay_ = {};
     voiceScopeDelayWrite_ = 0u;
@@ -100,7 +98,7 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
         const VoiceParams& vp = state.voices[i];
         VoiceSmoothers& sm = voiceSmoothers_[i];
 
-        const float clampedBaseHz = clampf(vp.frequencyHz, kLfoFreqMinHz, kAudioFreqMaxHz);
+        const float clampedBaseHz = clampf(vp.frequencyHz, kAudioFreqMinHz, kAudioFreqMaxHz);
 
         const float amp = clampf(vp.amplitude, 0.0f, 1.0f);
         const float pan = clampf(vp.pan, -1.0f, 1.0f);
@@ -257,15 +255,7 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
 
         for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
             const OscillatorBankOutput oscOut = oscBank_.processSample(oscFreqs, coupling);
-            if (oscOut.osc1RisingEdge) {
-                voiceRisingInFrame |= 1u;
-            }
-            for (size_t v = 1u; v < kNumOscillators; ++v) {
-                if (prevOscGateHigh_[v] < 0.5f && oscOut.gateHigh[v] > 0.5f) {
-                    voiceRisingInFrame |= static_cast<uint8_t>(1u << v);
-                }
-            }
-            prevOscGateHigh_ = oscOut.gateHigh;
+            voiceRisingInFrame |= oscOut.risingMask;
             lastGateHigh = oscOut.gateHigh;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 voiceSub[i][sub] = oscOut.samples[i];
@@ -332,8 +322,7 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
                 delayedMask |= static_cast<uint8_t>(1u << v);
             }
         }
-        const uint8_t delayedEdge = static_cast<uint8_t>(delayedMask & 1u);
-        scopeBuffer_.push({cleanL, cleanR, delayedEdge, delayedMask, delayedVoices});
+        scopeBuffer_.push({cleanL, cleanR, delayedMask, delayedVoices});
     }
 
     telemetry_.peakLeft.store(blockPeakL, std::memory_order_relaxed);

@@ -183,16 +183,19 @@ void testMemoryFootprintAndLockFreeBus() {
     EXPECT_TRUE(!tearDetected, "Torn multi-parameter read detected across threads");
 }
 
-// 2. Ultra-slow 0.02 Hz LFO precision (proving 32-bit phase accumulator never stalls)
+// 2. Ultra-slow 0.02 Hz LFO precision & 20 Hz audio oscillator floor (ADR-019 / ADR-022)
 void testUltraSlowLfoPrecision() {
-    std::printf("[Test 2] Sub-audio LFO precision (0.02 Hz & 0.50 Hz)...\n");
+    std::printf("[Test 2] Sub-audio LFO precision (0.02 Hz & 0.50 Hz) & 20 Hz voice floor...\n");
     static ruido::DroneEngine engine;
     engine.init(ruido::kBaseSampleRate);
     engine.setAnalogCharacterEnabled(false, true);
 
     ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
     st.global.circuitCoupling = 0.0f;
-    st.voices[0].frequencyHz = 0.50f; // 2.000 s period = 88,236 base frames
+    st.voices[0].frequencyHz = 0.50f; // Out-of-bounds (< 20 Hz): must clamp cleanly to 20.0 Hz
+    st.voices[0].lfoRateHz = 0.50f;   // 2.000 s period = 88,236 base frames
+    st.voices[0].lfoDepth = 1.0f;
+    st.voices[0].lfoShape = 0.75f;    // Slewed Square
     st.voices[1].muted = true;
     st.voices[2].muted = true;
     st.voices[3].muted = true;
@@ -203,77 +206,121 @@ void testUltraSlowLfoPrecision() {
     std::array<float, ruido::kBlockFrames> outR{};
     std::array<ruido::ScopeFrame, ruido::kBlockFrames> scopeOut{};
 
-    int firstEdgeFrame = -1;
-    int secondEdgeFrame = -1;
-    bool sawGateHigh = false;
-    bool sawGateLow = false;
+    int firstWrapFrame = -1;
+    int secondWrapFrame = -1;
+    bool sawLfoHigh = false;
+    bool sawLfoLow = false;
+    float prevLfoPhase = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
+    int firstVoiceEdge = -1;
+    int secondVoiceEdge = -1;
 
     const int totalFrames05Hz = static_cast<int>(ruido::kBaseSampleRate * 4.5f);
     for (int baseFrame = 0; baseFrame < totalFrames05Hz;
          baseFrame += static_cast<int>(ruido::kBlockFrames)) {
         engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
-        const float gate = engine.telemetry().oscGateHigh[0].load(std::memory_order_relaxed);
-        if (gate > 0.5f) {
-            sawGateHigh = true;
-        } else {
-            sawGateLow = true;
+        const float lfoOut = engine.telemetry().lfoOutput[0].load(std::memory_order_relaxed);
+        const float curPhase = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
+        if (lfoOut > 0.5f) {
+            sawLfoHigh = true;
+        } else if (lfoOut < -0.5f) {
+            sawLfoLow = true;
         }
+        if (prevLfoPhase > 0.80f && curPhase < 0.20f) {
+            const int endFrame = baseFrame + static_cast<int>(ruido::kBlockFrames);
+            if (firstWrapFrame < 0) {
+                firstWrapFrame = endFrame;
+            } else if (secondWrapFrame < 0) {
+                secondWrapFrame = endFrame;
+            }
+        }
+        prevLfoPhase = curPhase;
+
         const size_t n = engine.scopeBuffer().popBatch(scopeOut.data(), scopeOut.size());
         for (size_t i = 0u; i < n; ++i) {
-            if (scopeOut[i].osc1RisingEdge != 0u && (baseFrame + static_cast<int>(i)) > 100) {
-                if (firstEdgeFrame < 0) {
-                    firstEdgeFrame = baseFrame + static_cast<int>(i);
-                } else if (secondEdgeFrame < 0) {
-                    secondEdgeFrame = baseFrame + static_cast<int>(i);
+            if ((scopeOut[i].voiceRisingMask & 1u) != 0u &&
+                (baseFrame + static_cast<int>(i)) > 200) {
+                if (firstVoiceEdge < 0) {
+                    firstVoiceEdge = baseFrame + static_cast<int>(i);
+                } else if (secondVoiceEdge < 0) {
+                    secondVoiceEdge = baseFrame + static_cast<int>(i);
                 }
             }
         }
     }
 
-    EXPECT_TRUE(sawGateHigh && sawGateLow, "0.50 Hz LFO failed to toggle LED gate state");
-    EXPECT_TRUE(firstEdgeFrame > 0 && secondEdgeFrame > firstEdgeFrame,
-                "0.50 Hz LFO did not emit two rising edges");
-    if (firstEdgeFrame > 0 && secondEdgeFrame > firstEdgeFrame) {
+    EXPECT_TRUE(sawLfoHigh && sawLfoLow, "0.50 Hz VoiceLfoBank failed bipolar swing");
+    EXPECT_TRUE(firstWrapFrame > 0 && secondWrapFrame > firstWrapFrame,
+                "0.50 Hz VoiceLfoBank did not complete two phase wraps");
+    if (firstWrapFrame > 0 && secondWrapFrame > firstWrapFrame) {
         const double measuredPeriodSec =
-            static_cast<double>(secondEdgeFrame - firstEdgeFrame) /
+            static_cast<double>(secondWrapFrame - firstWrapFrame) /
             static_cast<double>(ruido::kBaseSampleRate);
         std::printf("  0.50 Hz LFO measured period = %.5f s (expected 2.00000 s)\n",
                     measuredPeriodSec);
         EXPECT_TRUE(std::fabs(measuredPeriodSec - 2.0) < 0.005,
                     "0.50 Hz period inaccurate: %.5f s", measuredPeriodSec);
     }
+    EXPECT_TRUE(firstVoiceEdge > 0 && secondVoiceEdge > firstVoiceEdge,
+                "Clamped 20 Hz Osc 1 did not emit rising edges");
+    if (firstVoiceEdge > 0 && secondVoiceEdge > firstVoiceEdge) {
+        const double voiceHz = static_cast<double>(ruido::kBaseSampleRate) /
+                               static_cast<double>(secondVoiceEdge - firstVoiceEdge);
+        EXPECT_TRUE(std::fabs(voiceHz - 20.0) < 0.15,
+                    "Out-of-bounds base voice frequency failed 20 Hz clamp (got %.3f Hz)",
+                    voiceHz);
+    }
 
-    // Now test extreme minimum 0.02 Hz (50.0 s period) over 55 seconds to prove zero float32 stall!
+    // Verify extreme minimum 0.02 Hz (50.0 s period) over 55 s on both VoiceLfoBank and
+    // SchmittOscillatorBank 32-bit phase accumulators (zero float32 stall)!
     engine.reset();
-    st.voices[0].frequencyHz = 0.02f;
+    st.voices[0].frequencyHz = 55.0f;
+    st.voices[0].lfoRateHz = 0.02f;
     engine.controlBus().publish(st);
     engine.snapParametersToLatest();
-
-    // Drain scope buffer
     while (engine.scopeBuffer().popBatch(scopeOut.data(), scopeOut.size()) > 0u) {
     }
 
-    int edgeCount002Hz = 0;
-    int lastEdge002 = -1;
+    int wrapCount002Hz = 0;
+    int lastWrap002 = -1;
+    prevLfoPhase = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
     const int frames55Sec = static_cast<int>(ruido::kBaseSampleRate * 55.0f);
     for (int baseFrame = 0; baseFrame < frames55Sec;
          baseFrame += static_cast<int>(ruido::kBlockFrames)) {
         engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
-        const size_t n = engine.scopeBuffer().popBatch(scopeOut.data(), scopeOut.size());
-        for (size_t i = 0u; i < n; ++i) {
-            if (scopeOut[i].osc1RisingEdge != 0u && (baseFrame + static_cast<int>(i)) > 1000) {
-                ++edgeCount002Hz;
-                lastEdge002 = baseFrame + static_cast<int>(i);
-            }
+        (void)engine.scopeBuffer().popBatch(scopeOut.data(), scopeOut.size());
+        const float curPhase = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
+        if (prevLfoPhase > 0.80f && curPhase < 0.20f && baseFrame > 1000) {
+            ++wrapCount002Hz;
+            lastWrap002 = baseFrame + static_cast<int>(ruido::kBlockFrames);
         }
+        prevLfoPhase = curPhase;
     }
     const double firstWrapSec =
-        static_cast<double>(lastEdge002) / static_cast<double>(ruido::kBaseSampleRate);
-    std::printf("  0.02 Hz LFO wrapped at t = %.3f s (expected ~50.0 s, edges=%d)\n",
-                firstWrapSec, edgeCount002Hz);
-    EXPECT_TRUE(edgeCount002Hz == 1 && std::fabs(firstWrapSec - 50.0) < 0.25,
-                "0.02 Hz LFO phase accumulator stalled or drifted (edges=%d, t=%.3f s)",
-                edgeCount002Hz, firstWrapSec);
+        static_cast<double>(lastWrap002) / static_cast<double>(ruido::kBaseSampleRate);
+    std::printf("  0.02 Hz LFO wrapped at t = %.3f s (expected ~50.0 s, wraps=%d)\n",
+                firstWrapSec, wrapCount002Hz);
+    EXPECT_TRUE(wrapCount002Hz == 1 && std::fabs(firstWrapSec - 50.0) < 0.25,
+                "0.02 Hz VoiceLfoBank phase accumulator stalled or drifted (wraps=%d, t=%.3f s)",
+                wrapCount002Hz, firstWrapSec);
+
+    ruido::SchmittOscillatorBank slowOsc;
+    slowOsc.reset(ruido::kBaseSampleRate);
+    slowOsc.setAnalogCharacterEnabled(false, false);
+    int oscWraps = 0;
+    int oscLastWrap = -1;
+    const std::array<float, ruido::kNumOscillators> slowFreqs{0.02f, 20.0f, 20.0f, 20.0f};
+    for (int f = 0; f < frames55Sec; ++f) {
+        const ruido::OscillatorBankOutput o = slowOsc.processSample(slowFreqs, 0.0f);
+        if ((o.risingMask & 1u) != 0u && f > 1000) {
+            ++oscWraps;
+            oscLastWrap = f;
+        }
+    }
+    const double oscWrapSec =
+        static_cast<double>(oscLastWrap) / static_cast<double>(ruido::kBaseSampleRate);
+    EXPECT_TRUE(oscWraps == 1 && std::fabs(oscWrapSec - 50.0) < 0.05,
+                "0.02 Hz SchmittOscillatorBank phase accumulator stalled (wraps=%d, t=%.3f s)",
+                oscWraps, oscWrapSec);
 }
 
 // 3. Exact Blackman-Harris 32768-pt FFT Alias Suppression Test (> 70 dB Gate)
@@ -795,7 +842,7 @@ void testClicklessTransitionsAndMonoPoly() {
             engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
             const size_t nPop = engine.scopeBuffer().popBatch(drain.data(), drain.size());
             for (size_t i = 0u; i < nPop; ++i) {
-                if (b >= 40 && drain[i].osc1RisingEdge != 0u) {
+                if (b >= 40 && (drain[i].voiceRisingMask & 1u) != 0u) {
                     if (edgeCount == 0u) {
                         firstEdge = totalFrames;
                     }
@@ -1504,7 +1551,7 @@ void testPerVoiceAnalogLfoModels() {
             engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
             const size_t nPop = engine.scopeBuffer().popBatch(drain.data(), drain.size());
             for (size_t i = 0u; i < nPop; ++i) {
-                if (b >= 20 && drain[i].osc1RisingEdge != 0u) {
+                if (b >= 20 && (drain[i].voiceRisingMask & 1u) != 0u) {
                     if (hasPrev) {
                         const size_t per = sampleIdx - prevEdge;
                         minPeriod = std::min(minPeriod, per);

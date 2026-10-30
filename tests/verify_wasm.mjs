@@ -46,10 +46,10 @@ const scopeFrameBytes = ex.wasm_dsp_get_scope_frame_size();
 
 // Exercise OP1 dual-resonant MS-20 filter hold + controller -> DSP control bus transfer
 ex.wasm_ui_black_key(0, 1);
-ex.wasm_ui_encoder(3, 30, 0.05);  // HPF
-ex.wasm_ui_encoder(4, 45, 0.05);  // HP RES
-ex.wasm_ui_encoder(5, -30, 0.05); // LPF
-ex.wasm_ui_encoder(6, 55, 0.05);  // LP RES
+ex.wasm_ui_encoder(3, 30);  // HPF
+ex.wasm_ui_encoder(4, 45);  // HP RES
+ex.wasm_ui_encoder(5, -30); // LPF
+ex.wasm_ui_encoder(6, 55);  // LP RES
 assert.equal(ex.wasm_ui_consume_dirty(), 1);
 
 const ctrlSize = ex.wasm_dsp_get_control_size();
@@ -81,14 +81,11 @@ for (let b = 0; b < 24; b++) {
 assert.ok(energyL > 1.0 && energyR > 1.0);
 
 const telIdx = ex.wasm_dsp_read_telemetry() >> 2;
-ex.wasm_ui_set_telemetry(
-  f32[telIdx + 0],
-  f32[telIdx + 1],
-  f32[telIdx + 2],
-  f32[telIdx + 3],
-  f32[telIdx + 4],
-  f32[telIdx + 5]
-);
+const telInIdx = ex.wasm_ui_get_telemetry_in_ptr() >> 2;
+for (let i = 0; i < 22; i++) {
+  f32[telInIdx + i] = f32[telIdx + i];
+}
+ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.2);
 
 // Verify 41 varibright LEDs (unassigned buttons 0.0, SEL === White Keys 5-8 in both modes)
@@ -122,12 +119,12 @@ const summaryIdx = ex.wasm_ui_get_summary_ptr() >> 2;
 assert.equal(f32[summaryIdx + 39], 1.0); // lfoPageOpen === true
 assert.equal(f32[summaryIdx + 40], 0.0); // lfoVoiceFocus === 0 (OSC 1)
 
-ex.wasm_ui_encoder(0, 4, 0.016); // SELECT -> OSC 2
+ex.wasm_ui_encoder(0, 4); // SELECT -> OSC 2
 assert.equal(f32[summaryIdx + 40], 1.0);
-ex.wasm_ui_encoder(3, 8, 0.016);   // KNOB1 TARGET -> HPF (2)
-ex.wasm_ui_encoder(4, 240, 0.016); // KNOB2 SHAPE -> 1.0 (Smooth Drift)
-ex.wasm_ui_encoder(5, 60, 0.016);  // KNOB3 RATE
-ex.wasm_ui_encoder(6, 200, 0.016); // KNOB4 DEPTH > 0.8
+ex.wasm_ui_encoder(3, 8);   // KNOB1 TARGET -> HPF (2)
+ex.wasm_ui_encoder(4, 240); // KNOB2 SHAPE -> 1.0 (Smooth Drift)
+ex.wasm_ui_encoder(5, 60);  // KNOB3 RATE
+ex.wasm_ui_encoder(6, 200); // KNOB4 DEPTH > 0.8
 assert.equal(f32[summaryIdx + 41], 2.0);
 assert.ok(f32[summaryIdx + 42] > 0.95);
 assert.ok(f32[summaryIdx + 44] > 0.80);
@@ -143,7 +140,6 @@ for (let b = 0; b < 8; b++) {
 }
 
 const tel22Idx = ex.wasm_dsp_read_telemetry() >> 2;
-const telInIdx = ex.wasm_ui_get_telemetry_in_ptr() >> 2;
 for (let i = 0; i < 22; i++) {
   f32[telInIdx + i] = f32[tel22Idx + i];
 }

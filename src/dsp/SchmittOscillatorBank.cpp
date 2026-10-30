@@ -174,9 +174,7 @@ OscillatorBankOutput SchmittOscillatorBank::processSample(
                 addCubicBsplineBlep(v.blepResidual, d, 2.0f);
                 // Positive CMOS shoot-through pull toward threshold advance
                 v.lastEdgePulse += 0.22f;
-                if (i == 0u) {
-                    out.osc1RisingEdge = true;
-                }
+                out.risingMask |= static_cast<uint8_t>(1u << i);
             }
             v.currentLevel = (v.phase < v.dutyThreshold) ? 1.0f : -1.0f;
         }
