@@ -14,7 +14,8 @@
 namespace ruido {
 
 constexpr bool isKnobFocusableMode(HudMode mode) noexcept {
-    return mode == HudMode::VoiceFrequency || mode == HudMode::VoiceFilter ||
+    return mode == HudMode::VoiceFrequency || mode == HudMode::PulseWidth ||
+           mode == HudMode::VoiceDrift || mode == HudMode::VoiceFilter ||
            mode == HudMode::Amplitude || mode == HudMode::Panning || mode == HudMode::VoiceGate ||
            mode == HudMode::VoicePressure || mode == HudMode::VoiceLfo || isGlobalHudMode(mode);
 }
@@ -126,6 +127,21 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         formatCompactHz(valStr, valCap, lfoHz * pMul);
         break;
     }
+    case KnobBankMode::PulseWidth: {
+        const VoiceParams& vp = control.voices[k];
+        size_t p = appendStr(roleLbl, 0u, roleCap, "OSC ");
+        appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
+        outGlobal.bipolar = true;
+        formatPercent(valStr, valCap, clampf(vp.pulseWidth, kPulseWidthMin, kPulseWidthMax));
+        break;
+    }
+    case KnobBankMode::VoiceDrift: {
+        const VoiceParams& vp = control.voices[k];
+        size_t p = appendStr(roleLbl, 0u, roleCap, "OSC ");
+        appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
+        formatPercent(valStr, valCap, clampf(vp.drift, 0.0f, 1.0f));
+        break;
+    }
     case KnobBankMode::VoiceFilter: {
         const uint8_t refV = (hud.mode == HudMode::VoicePressure) ? (hud.focusedVoice & 3u)
                                                                   : (hud.fxVoiceFocus & 3u);
@@ -150,10 +166,12 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         const VoiceParams& vp = control.voices[k];
         size_t p = appendStr(roleLbl, 0u, roleCap, "OSC ");
         appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
+        const VoiceAudibility aud = computeVoiceAudibility(vp, control.voicePressure[k], pitchMode);
         const float liveAmp = (vp.lfoTarget == LfoTarget::Amplitude)
                                   ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoOutput[k])
                                   : vp.amplitude;
-        formatPercent(valStr, valCap, vp.muted ? 0.0f : clampf(liveAmp, 0.0f, 1.0f));
+        formatPercent(valStr, valCap,
+                      (aud.muteBlend >= 0.999f) ? 0.0f : clampf(liveAmp, 0.0f, 1.0f));
         break;
     }
     case KnobBankMode::Panning: {

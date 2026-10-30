@@ -61,6 +61,7 @@ class ScopeHudRenderer {
     std::array<float, kNumOscillators> frameLfoPhase_{0.0f, 0.25f, 0.50f, 0.75f};
     std::array<uint32_t, kNumOscillators> frameLfoDriftPacked_{0u, 0u, 0u, 0u};
     std::array<float, kNumOscillators> frameVoicePeak_{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, kNumOscillators> frameVoiceDrift_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> prevVoiceFreqHz_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> knobPosSignedSmooth_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> knobDimSmooth_{0.0f, 0.0f, 0.0f, 0.0f};

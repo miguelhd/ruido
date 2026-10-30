@@ -69,19 +69,25 @@ enum class BlackKeyId : uint8_t {
 // 5 multi-voice destinations selected via SELECT while holding keybed GLO
 enum class GlobalTarget : uint8_t { Freq = 0, Filter = 1, Lfo = 2, Amp = 3, All = 4, Count = 5 };
 
+// 4 per-oscillator modes selected via discrete SELECT on the latching EDIT page
+// (signal-flow order: Osc Width -> Osc Drift -> Channel Level/Drive -> Stereo Pan; default = Level)
+enum class EditTarget : uint8_t { Width = 0, Drift = 1, Level = 2, Pan = 3, Count = 4 };
+
 // Active mapping of top-right KNOB1..KNOB4 (displayed in the 4 bottom HUD columns unless None)
 enum class KnobBankMode : uint8_t {
     Frequency = 0,
-    VoiceFilter = 1,
-    Amplitude = 2,
-    Panning = 3,
-    Lfo = 4,
-    GlobalFreq = 5,
-    GlobalFilter = 6,
-    GlobalLfo = 7,
-    GlobalAmp = 8,
-    GlobalAll = 9,
-    None = 10
+    PulseWidth = 1,
+    VoiceDrift = 2,
+    VoiceFilter = 3,
+    Amplitude = 4,
+    Panning = 5,
+    Lfo = 6,
+    GlobalFreq = 7,
+    GlobalFilter = 8,
+    GlobalLfo = 9,
+    GlobalAmp = 10,
+    GlobalAll = 11,
+    None = 12
 };
 
 // Encoder sweep rate selected via OCT- (Fine) and OCT+ (Coarse: ~1.3 turns full sweep)
@@ -91,30 +97,68 @@ enum class KnobRate : int8_t { Fine = -1, Standard = 0, Coarse = 1 };
 enum class HudMode : uint8_t {
     None = 0,
     VoiceFrequency = 1,
-    VoiceFilter = 2,
-    Amplitude = 3,
-    Panning = 4,
-    MasterLevel = 5,
-    RailCoupling = 6,
-    UnassignedEncoder = 7,
-    KnobRate = 8,
-    VoiceGate = 9,
-    VoicePressure = 10,
-    SnapshotSlot = 11,
-    UnassignedKey = 12,
-    OutputRouting = 13,
-    AudioOutput = 14,
-    SaveArmed = 15,
-    ScopeFreeze = 16,
-    UnassignedButton = 17,
-    VoiceLfo = 18,
-    GlobalFreq = 19,
-    GlobalFilter = 20,
-    GlobalLfo = 21,
-    GlobalAmp = 22,
-    GlobalAll = 23,
-    GlobalConfig = 24
+    PulseWidth = 2,
+    VoiceDrift = 3,
+    VoiceFilter = 4,
+    Amplitude = 5,
+    Panning = 6,
+    MasterLevel = 7,
+    RailCoupling = 8,
+    UnassignedEncoder = 9,
+    KnobRate = 10,
+    VoiceGate = 11,
+    VoicePressure = 12,
+    SnapshotSlot = 13,
+    UnassignedKey = 14,
+    OutputRouting = 15,
+    AudioOutput = 16,
+    SaveArmed = 17,
+    ScopeFreeze = 18,
+    UnassignedButton = 19,
+    VoiceLfo = 20,
+    GlobalFreq = 21,
+    GlobalFilter = 22,
+    GlobalLfo = 23,
+    GlobalAmp = 24,
+    GlobalAll = 25,
+    GlobalConfig = 26
 };
+
+constexpr KnobBankMode knobBankForEditTarget(EditTarget target) noexcept {
+    switch (target) {
+    case EditTarget::Width:
+        return KnobBankMode::PulseWidth;
+    case EditTarget::Drift:
+        return KnobBankMode::VoiceDrift;
+    case EditTarget::Level:
+        return KnobBankMode::Amplitude;
+    case EditTarget::Pan:
+    case EditTarget::Count:
+        return KnobBankMode::Panning;
+    }
+    return KnobBankMode::Amplitude;
+}
+
+constexpr HudMode hudModeForEditTarget(EditTarget target) noexcept {
+    switch (target) {
+    case EditTarget::Width:
+        return HudMode::PulseWidth;
+    case EditTarget::Drift:
+        return HudMode::VoiceDrift;
+    case EditTarget::Level:
+        return HudMode::Amplitude;
+    case EditTarget::Pan:
+    case EditTarget::Count:
+        return HudMode::Panning;
+    }
+    return HudMode::Amplitude;
+}
+
+constexpr bool isPerOscKnobBank(KnobBankMode bank) noexcept {
+    return bank == KnobBankMode::Frequency || bank == KnobBankMode::PulseWidth ||
+           bank == KnobBankMode::VoiceDrift || bank == KnobBankMode::Amplitude ||
+           bank == KnobBankMode::Panning;
+}
 
 // Monochrome PWM LED rest brightness for White Keys 5-8 carbon-pill filter/LPG pads
 inline constexpr float kPadFilterBaseLed = 0.24f;
@@ -124,6 +168,7 @@ struct HudState {
     KnobBankMode knobBank = KnobBankMode::Frequency;
     KnobRate knobRate = KnobRate::Standard;
     GlobalTarget globalTarget = GlobalTarget::All;
+    EditTarget editTarget = EditTarget::Level;
     GlobalConfigState config{};
     ButtonId lastButton = ButtonId::Count;
     BlackKeyId lastBlackKey = BlackKeyId::Count;

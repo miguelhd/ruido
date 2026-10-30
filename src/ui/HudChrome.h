@@ -11,7 +11,7 @@ namespace ruido {
 
 struct HudGaugeTargets {
     std::array<float, kNumOscillators> posSigned{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<bool, kNumOscillators> dimmed{false, false, false, false};
+    std::array<float, kNumOscillators> dimAmount{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<bool, kNumOscillators> focused{false, false, false, false};
     float headerBarNorm = 0.0f;
     bool hasHeaderBar = false;

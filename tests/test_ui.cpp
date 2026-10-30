@@ -762,8 +762,8 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     CHECK(identical8);
     CHECK(identical24);
     CHECK(strictlyMonochrome);
-    CHECK(pitchBlackPixels > 25000u); // Pitch-black #000000 background preserved
-    CHECK(litPixels > 1200u);
+    CHECK(pitchBlackPixels > 16000u); // Pitch-black #000000 sky preserved above full-screen filter
+    CHECK(litPixels > 2400u);
 
     // 2. Verify zero vertical waveform compression when non-filter HUD opens vs closes:
     // Close FX page, let the filter backdrop dim recovery settle cleanly, then compare ScopeFreeze
@@ -783,6 +783,13 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     hiddenHud.scopeFrozen = true;
     renderer.prepareFrame(0.016f, ctrl.state(), hiddenHud, engine.telemetry());
     renderer.renderFullScreenStrips(img8.data()); // HUD opacity == 0.0
+    size_t idleBlackPixels = 0u;
+    for (const uint16_t px : img8) {
+        if (px == 0x0000u) {
+            ++idleBlackPixels;
+        }
+    }
+    CHECK(idleBlackPixels > 25000u); // Pitch-black #000000 idle CRT background preserved
 
     bool centerWaveUncompressed = true;
     size_t centerLit = 0u;
@@ -977,8 +984,8 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     CHECK(lockedDelta < 0.8);
     CHECK(beatingDelta < 7.0);
 
-    // 7. Verify Concept A3 1/3-Screen (y = 102..182, 80 px) Dual-Resonance Filter Graph,
-    //    0% Voice Offset on OP5, and smooth 70% BG Wave Dimming transition on OP1 hold/release:
+    // 7. Verify Full-Screen (x = 0..239, y = 26..186, 160 px) Dual-Resonance MS-20 Filter Graph,
+    //    0% Voice Offset on GLO GlobalFilter, and smooth 72% BG Wave Dimming on FX open/close:
     ruido::RuidoController a3Ctrl;
     ruido::EngineControlState a3State = ruido::EngineControlState::makeDefault();
     for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
@@ -998,16 +1005,20 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
 
     auto sumUpperBandGray = [](const std::array<uint16_t, 240u * 240u>& img) -> double {
         double sum = 0.0;
-        // Measure y = 40..92 (strictly outside top header 0..34 and filter graph 95..188)
-        for (size_t y = 40u; y < 92u; ++y) {
+        // Measure y = 38..80 in outer columns (x < 76 or x >= 196), strictly outside top header
+        // scrim (0..34), 0 dB horizon (y = 86), and 150..1500 Hz resonant horns (x = 92..182)
+        for (size_t y = 38u; y < 80u; ++y) {
             for (size_t x = 0u; x < 240u; ++x) {
+                if (x >= 76u && x < 196u) {
+                    continue;
+                }
                 sum += static_cast<double>((img[y * 240u + x] >> 5u) & 0x3Fu) * 4.0;
             }
         }
         return sum;
     };
     const double lumIdle = sumUpperBandGray(img24);
-    CHECK(lumIdle > 5000.0);
+    CHECK(lumIdle > 2000.0);
 
     // Open FX Filter page: step 64 ms (4 x 16 ms) -> mid-attack dimming; then settle -> ~72% dimmed
     a3Ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
@@ -1034,25 +1045,27 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     CHECK(lumMidAttack > lumSettledFilter * 1.15);
     CHECK(dimRatio > 0.24 && dimRatio < 0.36); // 28-30% kept luminance == ~72% BG Wave Dimming
 
-    // Verify 80 px 1/3-screen filter zone: resonant horns reach y = 102..126 & A3 fill reaches 182
+    // Verify full-screen 160 px filter zone: resonant horns reach upper half (y = 26..80)
+    // and passband silhouette fills all the way down to y = 186!
     size_t hornPixels = 0u;
-    size_t a3FillPixels = 0u;
-    for (size_t x = 20u; x < 220u; ++x) {
-        for (size_t y = 102u; y < 126u; ++y) {
+    size_t fullFillPixels = 0u;
+    for (size_t x = 90u; x < 185u; ++x) {
+        for (size_t y = 26u; y < 80u; ++y) {
             if (img16[y * 240u + x] > 0x3186u) {
                 ++hornPixels;
             }
         }
-        for (size_t y = 148u; y <= 182u; ++y) {
+        for (size_t y = 92u; y <= 186u; ++y) {
             if (img16[y * 240u + x] > img24[y * 240u + x]) {
-                ++a3FillPixels;
+                ++fullFillPixels;
             }
         }
     }
-    CHECK(hornPixels > 80u);
-    CHECK(a3FillPixels > 1200u);
+    CHECK(hornPixels > 160u);
+    CHECK(fullFillPixels > 2400u);
 
-    // Verify 0% Voice Offset: GLO GlobalFilter matches FX VoiceFilter pixel-for-pixel (y=102..182)
+    // Verify 0% Voice Offset: GLO GlobalFilter matches FX VoiceFilter pixel-for-pixel across
+    // the entire full-screen filter viewport (x = 0..239, y = 26..186)
     a3Ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
     a3Ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
     a3Ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
@@ -1065,8 +1078,8 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     }
     calmRenderer.renderFullScreenStrips(img8.data());
     bool zeroVoiceOffsetIdentical = true;
-    for (size_t y = 102u; y <= 182u; ++y) {
-        for (size_t x = 10u; x <= 230u; ++x) {
+    for (size_t y = 26u; y <= 186u; ++y) {
+        for (size_t x = 0u; x < 240u; ++x) {
             if (img16[y * 240u + x] != img8[y * 240u + x]) {
                 zeroVoiceOffsetIdentical = false;
             }
@@ -1096,6 +1109,72 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     calmRenderer.renderFullScreenStrips(img8.data());
     const double lumRecovered = sumUpperBandGray(img8);
     CHECK(near(static_cast<float>(lumRecovered / lumIdle), 1.0f, 0.01f));
+
+    // Verify edge-to-edge horizontal span (x = 0..3 and x = 236..239), top-of-viewport Korg35
+    // self-oscillation crest (y = 26..36), and 8/16/24-row strip bit-exactness on FX page:
+    {
+        ruido::ScopeHudRenderer fltFullRenderer;
+        ruido::EngineControlState fltFullSt = ruido::EngineControlState::makeDefault();
+        fltFullSt.global.masterRun = false;
+        fltFullSt.global.masterTrim = 0.0f;
+        fltFullSt.voices[0].hpCutoffHz = ruido::kFilterCutoffMinHz;
+        fltFullSt.voices[0].hpResonance = 0.0f;
+        fltFullSt.voices[0].lpCutoffHz = ruido::kFilterCutoffMaxHz;
+        fltFullSt.voices[0].lpResonance = 0.0f;
+        a3Ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
+        a3Ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+        for (int step = 0; step < 12; ++step) {
+            a3Ctrl.tick(0.032f, calmEngine.telemetry());
+            fltFullRenderer.prepareFrame(0.032f, fltFullSt, a3Ctrl.hud(), calmEngine.telemetry());
+        }
+        fltFullRenderer.renderFullScreenStrips(img16.data());
+        size_t leftEdgeFltLit = 0u;
+        size_t rightEdgeFltLit = 0u;
+        for (size_t y = 84u; y <= 186u; ++y) {
+            for (size_t x = 0u; x <= 3u; ++x) {
+                if (((img16[y * 240u + x] >> 5u) & 0x3Fu) >= 4u) {
+                    ++leftEdgeFltLit;
+                }
+            }
+            for (size_t x = 236u; x <= 239u; ++x) {
+                if (((img16[y * 240u + x] >> 5u) & 0x3Fu) >= 4u) {
+                    ++rightEdgeFltLit;
+                }
+            }
+        }
+        CHECK(leftEdgeFltLit > 80u);
+        CHECK(rightEdgeFltLit > 80u);
+
+        // Crank LP RES -> 0.98 at 800 Hz: Korg35 horn reaches top viewport rows y = 26..36
+        fltFullSt.voices[0].lpCutoffHz = 800.0f;
+        fltFullSt.voices[0].lpResonance = 0.98f;
+        for (int step = 0; step < 12; ++step) {
+            fltFullRenderer.prepareFrame(0.040f, fltFullSt, a3Ctrl.hud(), calmEngine.telemetry());
+        }
+        fltFullRenderer.renderFullScreenStrips(img16.data());
+        for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 8u)) {
+            fltFullRenderer.renderStrip(y, 8u, img8.data() + static_cast<size_t>(y) * 240u);
+        }
+        for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 24u)) {
+            fltFullRenderer.renderStrip(y, 24u, img24.data() + static_cast<size_t>(y) * 240u);
+        }
+        bool fltStripEq = true;
+        size_t topViewportHornLit = 0u;
+        for (size_t i = 0u; i < img16.size(); ++i) {
+            if (img16[i] != img8[i] || img16[i] != img24[i]) {
+                fltStripEq = false;
+            }
+        }
+        for (size_t y = 26u; y <= 36u; ++y) {
+            for (size_t x = 0u; x < 240u; ++x) {
+                if (((img16[y * 240u + x] >> 5u) & 0x3Fu) >= 16u) {
+                    ++topViewportHornLit;
+                }
+            }
+        }
+        CHECK(fltStripEq);
+        CHECK(topViewportHornLit > 20u);
+    }
 
     // 8. Verify Zero Hard-Cut Transitions:
     //    (a) Active wave -> y=120 flatline on PLAY/STOP off (no 1-frame snap)

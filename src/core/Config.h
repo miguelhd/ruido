@@ -20,6 +20,10 @@ inline constexpr size_t kNumSnapshots = 8u;
 // Oscillator & per-voice LFO frequency bounds (unbroken sub-cycle -> ultrasonic continuum)
 inline constexpr float kAudioFreqMinHz = 0.05f;
 inline constexpr float kAudioFreqMaxHz = 20000.0f;
+inline constexpr float kPulseWidthMin = 0.05f;
+inline constexpr float kPulseWidthMax = 0.95f;
+inline constexpr float kDefaultVoiceDrift = 0.10f;
+inline constexpr float kDefaultVoiceAmp = 0.65f;
 inline constexpr float kLfoFreqMinHz = 0.01f;
 inline constexpr float kLfoFreqMaxHz = 2000.0f;
 

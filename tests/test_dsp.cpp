@@ -2099,6 +2099,157 @@ void testUnbrokenExtremesSubBassOverdriveSyncAndAudioLfo() {
     }
 }
 
+// 14. Piecewise-slope PolyBLEP Pulse Width (5%..95%) & 0%..100% 1/f Analog Drift verification
+void testPulseWidthAndVoiceDriftPhysics() {
+    std::printf(
+        "[Test 14] Piecewise-slope PolyBLEP PWM (5%%-95%%) & 0%%-100%% 1/f thermal drift...\n");
+
+    // (a) Exact fundamental pitch invariance across 5%, 25%, 50%, and 95% duty cycles
+    ruido::SchmittOscillatorBank bank;
+    bank.reset(ruido::kOversampledRate);
+    bank.setAnalogCharacterEnabled(false, false);
+
+    const std::array<float, ruido::kNumOscillators> freqs = {220.0f, 220.0f, 220.0f, 220.0f};
+    const std::array<float, ruido::kNumOscillators> duties = {0.05f, 0.25f, 0.50f, 0.95f};
+    const std::array<float, ruido::kNumOscillators> zeroDrifts = {0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<uint32_t, ruido::kNumOscillators> risingCounts{0u, 0u, 0u, 0u};
+    std::array<double, ruido::kNumOscillators> highCounts{0.0, 0.0, 0.0, 0.0};
+
+    constexpr size_t kOneSecSamples = 176472u;
+    for (size_t n = 0u; n < kOneSecSamples; ++n) {
+        const auto out = bank.processSample(freqs, duties, zeroDrifts, 0.0f);
+        for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
+            if (((out.risingMask >> v) & 1u) != 0u) {
+                ++risingCounts[v];
+            }
+            highCounts[v] += static_cast<double>(out.gateHigh[v]);
+        }
+    }
+    for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
+        const double measDuty = highCounts[v] / static_cast<double>(kOneSecSamples);
+        EXPECT_TRUE(risingCounts[v] >= 219u && risingCounts[v] <= 221u,
+                    "PWM voice %zu lost fundamental pitch lock at duty=%.2f (rises=%u)", v,
+                    static_cast<double>(duties[v]), risingCounts[v]);
+        EXPECT_TRUE(std::fabs(measDuty - static_cast<double>(duties[v])) < 0.015,
+                    "PWM voice %zu gate duty mismatch (expected %.2f, got %.4f)", v,
+                    static_cast<double>(duties[v]), measDuty);
+    }
+
+    // (b) Full-engine 32768-pt Blackman-Harris FFT on narrow 15% pulse at irrational 997.31 Hz:
+    // verifies BOTH strong even-harmonic generation (H2 > -5 dBc) AND alias suppression (< -75 dBc)
+    constexpr size_t kFftSize = 32768u;
+    static std::array<double, kFftSize> fftRe{};
+    static std::array<double, kFftSize> fftIm{};
+    static ruido::DroneEngine engine;
+    engine.init(ruido::kBaseSampleRate);
+    engine.setAnalogCharacterEnabled(false, true);
+
+    const float f0 = 997.31f;
+    ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+    st.global.circuitCoupling = 0.0f;
+    st.global.monoCollapse = true;
+    st.voices[0].frequencyHz = f0;
+    st.voices[0].pulseWidth = 0.15f;
+    st.voices[0].drift = 0.0f;
+    st.voices[0].amplitude = ruido::kCleanAmpKnee;
+    st.voices[0].pan = 0.0f;
+    st.voices[0].hpCutoffHz = 2.0f;
+    st.voices[0].hpResonance = 0.0f;
+    st.voices[0].lpCutoffHz = 28000.0f;
+    st.voices[0].lpResonance = 0.0f;
+    st.voices[0].muted = false;
+    st.voices[1].muted = true;
+    st.voices[2].muted = true;
+    st.voices[3].muted = true;
+    engine.controlBus().publish(st);
+    engine.snapParametersToLatest();
+
+    std::array<float, ruido::kBlockFrames> outL{};
+    std::array<float, ruido::kBlockFrames> outR{};
+    std::array<ruido::ScopeFrame, ruido::kBlockFrames> drain{};
+    for (int w = 0; w < 64; ++w) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+    }
+    for (size_t offset = 0u; offset < kFftSize; offset += ruido::kBlockFrames) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            const double ph = (2.0 * 3.14159265358979323846 * static_cast<double>(offset + i)) /
+                              static_cast<double>(kFftSize);
+            const double w = 0.35875 - 0.48829 * std::cos(ph) + 0.14128 * std::cos(2.0 * ph) -
+                             0.01168 * std::cos(3.0 * ph);
+            fftRe[offset + i] = static_cast<double>(outL[i]) * w;
+            fftIm[offset + i] = 0.0;
+        }
+    }
+    radix2Fft(fftRe.data(), fftIm.data(), kFftSize);
+
+    const double binHz =
+        static_cast<double>(ruido::kBaseSampleRate) / static_cast<double>(kFftSize);
+    auto peakNear = [&](double hz) -> double {
+        const size_t c = static_cast<size_t>(std::round(hz / binHz));
+        double pk = 0.0;
+        for (size_t b = (c > 4u ? c - 4u : 1u); b <= c + 4u; ++b) {
+            pk = std::max(pk, std::hypot(fftRe[b], fftIm[b]));
+        }
+        return pk;
+    };
+    const double magFund = peakNear(static_cast<double>(f0));
+    const double mag2nd = peakNear(2.0 * static_cast<double>(f0));
+    const double h2Db = 20.0 * std::log10(std::max(mag2nd / magFund, 1.0e-15));
+
+    double worstAliasDb = -200.0;
+    const size_t minBin = static_cast<size_t>(std::ceil(60.0 / binHz));
+    const size_t maxBin = static_cast<size_t>(std::floor(20000.0 / binHz));
+    const double nyquist = 0.5 * static_cast<double>(ruido::kBaseSampleRate);
+    for (size_t b = minBin; b <= maxBin; ++b) {
+        const double freq = static_cast<double>(b) * binHz;
+        bool isTrueHarmonic = false;
+        for (int k = 1; k <= 64; ++k) {
+            const double harmHz = static_cast<double>(k) * static_cast<double>(f0);
+            if (harmHz >= nyquist) {
+                break;
+            }
+            if (std::fabs(freq - harmHz) <= 14.0 * binHz) {
+                isTrueHarmonic = true;
+                break;
+            }
+        }
+        if (isTrueHarmonic) {
+            continue;
+        }
+        const double db =
+            20.0 * std::log10(std::max(std::hypot(fftRe[b], fftIm[b]) / magFund, 1.0e-15));
+        if (db > worstAliasDb) {
+            worstAliasDb = db;
+        }
+    }
+    std::printf("  15%% Pulse @ %.2f Hz: 2nd harmonic = %.2f dBc, worst alias <20 kHz = %.2f dBc\n",
+                static_cast<double>(f0), h2Db, worstAliasDb);
+    EXPECT_TRUE(h2Db > -5.0, "15%% pulse failed to generate strong 2nd harmonic (%.2f dBc)", h2Db);
+    EXPECT_TRUE(worstAliasDb < -75.0, "15%% pulse alias floor exceeded -75 dBc (%.2f dBc)",
+                worstAliasDb);
+
+    // (c) 0% LOCKED vs 100% ANALOG 1/F thermal drift telemetry & crystal pitch lock
+    bank.reset(ruido::kOversampledRate);
+    bank.setAnalogCharacterEnabled(true, true);
+    const std::array<float, ruido::kNumOscillators> mixedDrifts = {0.0f, 1.0f, 0.10f, 1.0f};
+    float maxLockedNorm = 0.0f;
+    float maxWideNorm = 0.0f;
+    for (size_t n = 0u; n < kOneSecSamples; ++n) {
+        const auto out = bank.processSample(freqs, duties, mixedDrifts, 0.0f);
+        maxLockedNorm = std::max(maxLockedNorm, std::fabs(out.driftNorm[0]));
+        maxWideNorm = std::max(maxWideNorm, std::fabs(out.driftNorm[1]));
+    }
+    std::printf("  Thermal drift |driftNorm|: 0%% LOCKED = %.6f, 100%% ANALOG 1/F = %.4f\n",
+                static_cast<double>(maxLockedNorm), static_cast<double>(maxWideNorm));
+    EXPECT_TRUE(maxLockedNorm == 0.0f, "0%% LOCKED drift leaked non-zero wander (%.6f)",
+                static_cast<double>(maxLockedNorm));
+    EXPECT_TRUE(maxWideNorm > 0.05f, "100%% ANALOG 1/F drift failed to wander (%.5f)",
+                static_cast<double>(maxWideNorm));
+}
+
 } // namespace
 
 int main() {
@@ -2117,6 +2268,7 @@ int main() {
     testPerVoiceAnalogLfoModels();
     testRev2OtaSallenKeyPhysics();
     testUnbrokenExtremesSubBassOverdriveSyncAndAudioLfo();
+    testPulseWidthAndVoiceDriftPhysics();
 
     if (gFailures == 0) {
         std::printf("\n[PASS] All Milestone 1 DSP verification gates passed!\n");

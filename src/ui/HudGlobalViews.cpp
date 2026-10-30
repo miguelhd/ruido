@@ -50,7 +50,9 @@ bool HudGlobalViews::anyActiveTarget(const HudState& rawHud) const noexcept {
     return rawHud.knobBank == KnobBankMode::GlobalFreq ||
            rawHud.knobBank == KnobBankMode::GlobalAmp ||
            rawHud.knobBank == KnobBankMode::GlobalAll ||
-           (rawHud.mode == HudMode::GlobalConfig && rawHud.configPageOpen);
+           (rawHud.editPageOpen && !rawHud.modifierHeld &&
+            rawHud.knobBank == KnobBankMode::Panning) ||
+           rawHud.configPageOpen;
 }
 
 bool HudGlobalViews::hasResidualPhase() const noexcept {
@@ -63,10 +65,14 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
                             const std::array<float, kNumOscillators>& lfoOutput) noexcept {
     const bool hudVisible = (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None);
     const bool freqActive = hudVisible && (rawHud.knobBank == KnobBankMode::GlobalFreq);
-    const bool ampActive = hudVisible && (rawHud.knobBank == KnobBankMode::GlobalAmp);
+    const bool ampActive =
+        hudVisible &&
+        (rawHud.knobBank == KnobBankMode::GlobalAmp ||
+         (rawHud.editPageOpen && !rawHud.modifierHeld && rawHud.knobBank == KnobBankMode::Panning));
     const bool allActive = hudVisible && (rawHud.knobBank == KnobBankMode::GlobalAll);
-    const bool cfgActive = hudVisible && (rawHud.mode == HudMode::GlobalConfig) &&
-                           (rawHud.configPageOpen || rawHud.opacity >= 0.99f);
+    const bool cfgActive =
+        hudVisible && (rawHud.configPageOpen ||
+                       (rawHud.mode == HudMode::GlobalConfig && rawHud.opacity >= 0.99f));
 
     const bool snapFreq = (freqPhase_ <= 0.015f);
     const bool snapAmp = (ampPhase_ <= 0.015f);
@@ -87,6 +93,9 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         const VoiceParams& vp = control.voices[v];
+        const VoiceAudibility aud = computeVoiceAudibility(vp, control.voicePressure[v], pitchMode);
+        const bool silentMute = aud.muteBlend >= 0.999f;
+        const float dim = aud.inaudibleDim;
         const float pMul = computeVoicePitchRatio(control.voicePressure[v], pitchMode);
         const float lfoHz = (vp.lfoTarget == LfoTarget::Pitch)
                                 ? applyLfoPitchHz(vp.frequencyHz, vp.lfoDepth, lfoOutput[v])
@@ -95,7 +104,7 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         const float liveAmpRaw = (vp.lfoTarget == LfoTarget::Amplitude)
                                      ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoOutput[v])
                                      : vp.amplitude;
-        const float liveAmp = vp.muted ? 0.0f : clampf(liveAmpRaw, 0.0f, 1.0f);
+        const float liveAmp = silentMute ? 0.0f : clampf(liveAmpRaw, 0.0f, 1.0f);
         const float livePanRaw = (vp.lfoTarget == LfoTarget::Pan)
                                      ? applyLfoPan(vp.pan, vp.lfoDepth, lfoOutput[v])
                                      : vp.pan;
@@ -106,8 +115,9 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
                 clampf((fastLog2(liveHz) - kGvAudioLogMin) * (1.0f / kGvAudioLogSpan), 0.0f, 1.0f);
             const float tx = kFreqXLeft + uFreq * kFreqXSpan;
             const float ty =
-                vp.muted ? (kStageYBot - 5.0f) : (kStageYBot - 14.0f - liveAmp * 94.0f);
-            const float ti = vp.muted ? 0.28f : (0.68f + 0.32f * liveAmp);
+                silentMute ? (kStageYBot - 5.0f) : (kStageYBot - 14.0f - liveAmp * 94.0f);
+            const float baseTi = 0.68f + 0.32f * liveAmp;
+            const float ti = baseTi + (0.28f - baseTi) * dim;
             freqStemX_[v] = snapFreq ? tx : slewScalar(freqStemX_[v], tx, alphaSlew, 0.01f);
             freqStemTopY_[v] = snapFreq ? ty : slewScalar(freqStemTopY_[v], ty, alphaSlew, 0.01f);
             freqStemInt_[v] = snapFreq ? ti : slewScalar(freqStemInt_[v], ti, alphaSlew, 0.002f);
@@ -116,8 +126,9 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         if (ampActive) {
             const float tx = 120.0f + livePan * 96.0f;
             const float ty =
-                vp.muted ? (kStageYBot - 5.0f) : (kStageYBot - 12.0f - liveAmp * 96.0f);
-            const float ti = vp.muted ? 0.26f : (0.66f + 0.34f * liveAmp);
+                silentMute ? (kStageYBot - 5.0f) : (kStageYBot - 12.0f - liveAmp * 96.0f);
+            const float baseTi = 0.66f + 0.34f * liveAmp;
+            const float ti = baseTi + (0.26f - baseTi) * dim;
             ampStemX_[v] = snapAmp ? tx : slewScalar(ampStemX_[v], tx, alphaSlew, 0.01f);
             ampStemTopY_[v] = snapAmp ? ty : slewScalar(ampStemTopY_[v], ty, alphaSlew, 0.01f);
             ampStemInt_[v] = snapAmp ? ti : slewScalar(ampStemInt_[v], ti, alphaSlew, 0.002f);
@@ -126,8 +137,7 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         if (allActive) {
             const float uFlt =
                 clampf((fastLog2(liveHz) - kFilterLogMin) * (1.0f / kFilterLogSpan), 0.0f, 1.0f);
-            const float tx =
-                static_cast<float>(kFilterXStart) + uFlt * static_cast<float>(kFilterSweepPts - 1u);
+            const float tx = filterNormToScreenX(uFlt);
             const ModulatedFilterParams mod =
                 computeLiveVoiceFilter(vp, control.voicePressure[v], pitchMode, lfoOutput[v]);
             const DualMs20Coeffs c = makeDualMs20Coeffs(mod.hpCutoffHz, mod.hpResonance,
@@ -135,9 +145,11 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
             const float db = evalDualMs20Db(liveHz, c);
             const float trans = clampf(fastExp2(db * (1.0f / 6.0206f)), 0.08f, 1.35f);
             const float effH = clampf(liveAmp * trans, 0.0f, 1.25f);
-            const float ty = vp.muted ? (kFilterYBot - 4.0f)
-                                      : clampf(kFilterYBot - 8.0f - effH * 56.0f, 98.0f, 180.0f);
-            const float ti = vp.muted ? 0.24f : clampf(0.56f + 0.44f * effH, 0.30f, 1.0f);
+            const float ty = silentMute ? (kFilterYBot - 6.0f)
+                                        : clampf(kFilterYBot - 12.0f - effH * 112.0f,
+                                                 kFilterYTop + 2.0f, kFilterYBot - 4.0f);
+            const float baseTi = clampf(0.56f + 0.44f * effH, 0.30f, 1.0f);
+            const float ti = baseTi + (0.24f - baseTi) * dim;
             allStemX_[v] = snapAll ? tx : slewScalar(allStemX_[v], tx, alphaSlew, 0.01f);
             allStemTopY_[v] = snapAll ? ty : slewScalar(allStemTopY_[v], ty, alphaSlew, 0.01f);
             allStemInt_[v] = snapAll ? ti : slewScalar(allStemInt_[v], ti, alphaSlew, 0.002f);
@@ -230,7 +242,7 @@ void HudGlobalViews::compositeGlobalAmpStrip(int y0, int y1, uint8_t* lumBuf,
 
 void HudGlobalViews::compositeGlobalAllOverlayStrip(int y0, int y1, uint8_t* lumBuf,
                                                     uint8_t alpha8) const noexcept {
-    if (alpha8 == 0u || y1 <= 92 || y0 >= 188) {
+    if (alpha8 == 0u || y1 <= 18 || y0 >= 196) {
         return;
     }
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};

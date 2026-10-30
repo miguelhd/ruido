@@ -54,12 +54,15 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
             const GlobalColumnSummary gs =
                 evaluateGlobalColumn(hud.knobBank, k, control, lfoOutput);
             out.posSigned[k] = gs.posSigned;
-            out.dimmed[k] = false;
+            out.dimAmount[k] = 0.0f;
             continue;
         }
 
+        const VoiceAudibility aud =
+            isPerOscKnobBank(hud.knobBank)
+                ? computeVoiceAudibility(control.voices[k], control.voicePressure[k], pitchMode)
+                : VoiceAudibility{0.0f, 0.0f, 0.0f};
         float tgtSigned = 0.0f;
-        bool dimmed = false;
         switch (hud.knobBank) {
         case KnobBankMode::Frequency: {
             const VoiceParams& vp = control.voices[k];
@@ -71,7 +74,16 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
                                           (fastLog2(kAudioFreqMaxHz) - fastLog2(kAudioFreqMinHz)),
                                       0.0f, 1.0f);
             tgtSigned = 2.0f * norm - 1.0f;
-            dimmed = vp.muted && (control.voicePressure[k] <= 0.001f);
+            break;
+        }
+        case KnobBankMode::PulseWidth: {
+            const VoiceParams& vp = control.voices[k];
+            tgtSigned = clampf((vp.pulseWidth - 0.50f) * (1.0f / 0.45f), -1.0f, 1.0f);
+            break;
+        }
+        case KnobBankMode::VoiceDrift: {
+            const VoiceParams& vp = control.voices[k];
+            tgtSigned = 2.0f * clampf(vp.drift, 0.0f, 1.0f) - 1.0f;
             break;
         }
         case KnobBankMode::VoiceFilter: {
@@ -97,9 +109,8 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
             const float liveAmp = (vp.lfoTarget == LfoTarget::Amplitude)
                                       ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoOutput[k])
                                       : vp.amplitude;
-            const float norm = vp.muted ? 0.0f : clampf(liveAmp, 0.0f, 1.0f);
+            const float norm = (aud.muteBlend >= 0.999f) ? 0.0f : clampf(liveAmp, 0.0f, 1.0f);
             tgtSigned = 2.0f * norm - 1.0f;
-            dimmed = vp.muted;
             break;
         }
         case KnobBankMode::Panning: {
@@ -108,7 +119,6 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
                                       ? applyLfoPan(vp.pan, vp.lfoDepth, lfoOutput[k])
                                       : vp.pan;
             tgtSigned = clampf(livePan * panScale, -1.0f, 1.0f);
-            dimmed = vp.muted;
             break;
         }
         case KnobBankMode::Lfo: {
@@ -132,7 +142,7 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
         }
 
         out.posSigned[k] = tgtSigned;
-        out.dimmed[k] = dimmed;
+        out.dimAmount[k] = aud.inaudibleDim;
     }
 
     return out;
@@ -179,6 +189,11 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     float headerBarNorm = 0.0f;
     float voiceLiveHz = 0.0f;
 
+    const float hdrPitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
+    const auto voiceAud = [&](size_t vi) noexcept {
+        return computeVoiceAudibility(control.voices[vi], control.voicePressure[vi], hdrPitchMode);
+    };
+
     switch (hud.mode) {
     case HudMode::None:
         break;
@@ -186,13 +201,72 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         appendStr(leftMain, 0u, sizeof(leftMain), "FREQUENCY");
         size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
         appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
-        const float pitchMul = computeVoicePitchRatio(
-            control.voicePressure[v], control.global.pitchPressureMode ? 1.0f : 0.0f);
+        const float pitchMul = computeVoicePitchRatio(control.voicePressure[v], hdrPitchMode);
         const float liveHz = (focVp.lfoTarget == LfoTarget::Pitch)
                                  ? applyLfoPitchHz(focVp.frequencyHz, focVp.lfoDepth, lfoOutput[v])
                                  : focVp.frequencyHz;
         voiceLiveHz = liveHz * pitchMul;
         appendPrecisionHz(rightText, 0u, sizeof(rightText), voiceLiveHz);
+        break;
+    }
+    case HudMode::PulseWidth: {
+        appendStr(leftMain, 0u, sizeof(leftMain), "WIDTH");
+        if (hud.focusedKnob < kNumOscillators) {
+            const uint8_t kv = hud.focusedKnob & 3u;
+            size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
+            appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(kv + 1u));
+            const VoiceParams& wvp = control.voices[kv];
+            if (voiceAud(kv).muteBlend >= 0.999f) {
+                appendStr(rightText, 0u, sizeof(rightText), "MUTED");
+            } else {
+                appendStr(rightText, 0u, sizeof(rightText),
+                          (absf(wvp.pulseWidth - 0.50f) <= 0.015f) ? "SQUARE" : "PULSE");
+            }
+        } else {
+            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
+            bool anyActive = false;
+            bool anyPulse = false;
+            for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
+                if (voiceAud(vi).muteBlend < 0.999f) {
+                    anyActive = true;
+                    if (absf(control.voices[vi].pulseWidth - 0.50f) > 0.015f) {
+                        anyPulse = true;
+                    }
+                }
+            }
+            appendStr(rightText, 0u, sizeof(rightText),
+                      !anyActive ? "ALL MUTED" : (anyPulse ? "PULSE" : "SQUARE"));
+        }
+        break;
+    }
+    case HudMode::VoiceDrift: {
+        appendStr(leftMain, 0u, sizeof(leftMain), "DRIFT");
+        if (hud.focusedKnob < kNumOscillators) {
+            const uint8_t kv = hud.focusedKnob & 3u;
+            size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
+            appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(kv + 1u));
+            const VoiceParams& dvp = control.voices[kv];
+            if (voiceAud(kv).muteBlend >= 0.999f) {
+                appendStr(rightText, 0u, sizeof(rightText), "MUTED");
+            } else {
+                appendStr(rightText, 0u, sizeof(rightText),
+                          (dvp.drift <= 0.004f) ? "LOCKED" : "ANALOG 1/F");
+            }
+        } else {
+            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
+            bool anyActive = false;
+            bool anyDrifting = false;
+            for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
+                if (voiceAud(vi).muteBlend < 0.999f) {
+                    anyActive = true;
+                    if (control.voices[vi].drift > 0.004f) {
+                        anyDrifting = true;
+                    }
+                }
+            }
+            appendStr(rightText, 0u, sizeof(rightText),
+                      !anyActive ? "ALL MUTED" : (anyDrifting ? "ANALOG 1/F" : "LOCKED"));
+        }
         break;
     }
     case HudMode::VoiceFilter: {
@@ -214,7 +288,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
                 (avp.lfoTarget == LfoTarget::Amplitude)
                     ? applyLfoAmplitude(avp.amplitude, avp.lfoDepth, lfoOutput[kv])
                     : avp.amplitude;
-            if (avp.muted) {
+            if (voiceAud(kv).muteBlend >= 0.999f) {
                 appendStr(rightText, 0u, sizeof(rightText), "MUTED");
             } else if (liveAmp > kCleanAmpKnee + 0.003f) {
                 const VoiceChannelGain cg = computeVoiceChannelGain(liveAmp);
@@ -231,7 +305,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             float maxAmp = 0.0f;
             for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
                 const VoiceParams& avp = control.voices[vi];
-                if (!avp.muted) {
+                if (voiceAud(vi).muteBlend < 0.999f) {
                     anyActive = true;
                     const float la =
                         (avp.lfoTarget == LfoTarget::Amplitude)
@@ -258,6 +332,13 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     }
     case HudMode::Panning:
         appendStr(leftMain, 0u, sizeof(leftMain), "PANNING");
+        if (hud.focusedKnob < kNumOscillators) {
+            size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
+            appendUInt(leftSuffix, lp, sizeof(leftSuffix),
+                       static_cast<uint32_t>((hud.focusedKnob & 3u) + 1u));
+        } else if (hud.editPageOpen && !hud.modifierHeld) {
+            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
+        }
         appendStr(rightText, 0u, sizeof(rightText),
                   control.global.monoCollapse ? "DUAL MONO" : "STEREO");
         break;
@@ -286,7 +367,11 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         appendStr(leftMain, 0u, sizeof(leftMain), "GATE");
         size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
         appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
-        appendStr(rightText, 0u, sizeof(rightText), focVp.muted ? "MUTED" : "ACTIVE");
+        const VoiceAudibility ga = voiceAud(v);
+        const char* gateStatus = (ga.muteBlend >= 0.999f)
+                                     ? "MUTED"
+                                     : ((ga.subAudioBlend >= 0.5f) ? "SUB-AUDIO" : "ACTIVE");
+        appendStr(rightText, 0u, sizeof(rightText), gateStatus);
         break;
     }
     case HudMode::VoicePressure: {
@@ -544,19 +629,20 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
 
         const float dim = clampf(knobDimSmooth[k], 0.0f, 1.0f);
         const float foc = clampf(knobFocusSmooth[k], 0.0f, 1.0f);
+        const float effFoc = foc * (1.0f - dim);
         const float posSigned = clampf(knobPosSignedSmooth[k], -1.0f, 1.0f);
 
-        const float baseLbl = 154.0f + (96.0f - 154.0f) * dim;
-        const auto lblGray = static_cast<uint8_t>(baseLbl + (255.0f - baseLbl) * foc + 0.5f);
+        const float baseLbl = 154.0f + (72.0f - 154.0f) * dim;
+        const auto lblGray = static_cast<uint8_t>(baseLbl + (255.0f - baseLbl) * effFoc + 0.5f);
         cv.drawSansCentered(kFontSansSmall, cx, 191, roleLbl, lblGray, 1);
 
         const float cxF = static_cast<float>(cx);
         const float bxf = cxF - 20.0f;
         const float bwf = 40.0f;
         const float byf = 207.5f;
-        const float trackLum = 42.0f + (24.0f - 42.0f) * dim;
-        const float unfocLum = 178.0f + (72.0f - 178.0f) * dim;
-        const float activeLum = unfocLum + (235.0f - unfocLum) * (1.0f - dim) * foc;
+        const float trackLum = 42.0f + (22.0f - 42.0f) * dim;
+        const float unfocLum = 178.0f + (64.0f - 178.0f) * dim;
+        const float activeLum = unfocLum + (235.0f - unfocLum) * effFoc;
         const float targetX = cxF + posSigned * 20.0f;
 
         cv.drawHorizontalFilament(bxf, bxf + bwf, byf, trackLum, 0.58f, true);
@@ -567,27 +653,26 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
             }
         }
         if (bipolar) {
-            cv.drawVerticalSlit(cxF, byf - 2.2f, byf + 2.2f, 85.0f);
+            cv.drawVerticalSlit(cxF, byf - 2.2f, byf + 2.2f, 85.0f + (42.0f - 85.0f) * dim);
             if (absf(targetX - cxF) > 0.4f) {
                 cv.drawHorizontalFilament(cxF, targetX, byf, activeLum, 0.68f, false);
             }
-            const float beadIntUnfoc = 0.82f + (0.36f - 0.82f) * dim;
-            const float beadInt = beadIntUnfoc + (1.0f - beadIntUnfoc) * (1.0f - dim) * foc;
-            const float beadRad = 1.90f + (2.25f - 1.90f) * foc;
+            const float beadIntUnfoc = 0.82f + (0.30f - 0.82f) * dim;
+            const float beadInt = beadIntUnfoc + (1.0f - beadIntUnfoc) * effFoc;
+            const float beadRad = 1.90f + (2.25f - 1.90f) * effFoc;
             cv.drawOpticalBead(targetX, byf, beadInt, beadRad);
         } else {
             if (targetX - bxf > 0.32f) {
                 cv.drawHorizontalFilament(bxf, targetX, byf, activeLum, 0.68f, false);
             }
-            const float beadIntUnfoc = 0.80f + (0.34f - 0.80f) * dim;
-            const float beadInt = beadIntUnfoc + (1.0f - beadIntUnfoc) * (1.0f - dim) * foc;
-            const float beadRad = 1.85f + (2.30f - 1.85f) * foc;
+            const float beadIntUnfoc = 0.80f + (0.28f - 0.80f) * dim;
+            const float beadInt = beadIntUnfoc + (1.0f - beadIntUnfoc) * effFoc;
+            const float beadRad = 1.85f + (2.30f - 1.85f) * effFoc;
             cv.drawOpticalBead(targetX, byf, beadInt, beadRad);
         }
 
-        const float baseVal = 224.0f + (112.0f - 224.0f) * dim;
-        const auto valGray =
-            static_cast<uint8_t>(baseVal + (255.0f - baseVal) * (1.0f - dim) * foc + 0.5f);
+        const float baseVal = 224.0f + (96.0f - 224.0f) * dim;
+        const auto valGray = static_cast<uint8_t>(baseVal + (255.0f - baseVal) * effFoc + 0.5f);
         cv.drawSansCentered(kFontSansMedium, cx, 214, valStr, valGray, 0);
     }
 }

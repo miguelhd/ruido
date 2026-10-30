@@ -9,8 +9,6 @@
 namespace ruido {
 
 namespace {
-constexpr float kSubAudioLoOct = cxLog2Pos(15.0f);
-constexpr float kInvSubAudioSpanOct = 1.0f / (cxLog2Pos(25.0f) - cxLog2Pos(15.0f));
 // Exact integer multiples of 1000.0 s animPhase wrap (1500 & 350 cycles -> zero wrap discontinuity)
 constexpr float kMutedPulseHz = 1.50f;
 constexpr float kSubAudioBreathHz = 0.35f;
@@ -19,11 +17,12 @@ constexpr float kSubAudioBreathHz = 0.35f;
 void LedSmoothState::reset(const EngineControlState& state) noexcept {
     animPhase = 0.0f;
     playStopRunSmooth = state.global.masterRun ? 1.0f : 0.0f;
+    const float pitchMode = state.global.pitchPressureMode ? 1.0f : 0.0f;
     for (size_t i = 0u; i < kNumOscillators; ++i) {
-        muteBlendSmooth[i] = state.voices[i].muted ? 1.0f : 0.0f;
-        const float audible = smoothstep01(
-            (fastLog2(state.voices[i].frequencyHz) - kSubAudioLoOct) * kInvSubAudioSpanOct);
-        subAudioBlendSmooth[i] = 1.0f - audible;
+        const VoiceAudibility aud =
+            computeVoiceAudibility(state.voices[i], state.voicePressure[i], pitchMode);
+        muteBlendSmooth[i] = aud.muteBlend;
+        subAudioBlendSmooth[i] = aud.subAudioBlend;
     }
 }
 
@@ -131,10 +130,6 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
 
         // Taper visual LFO modulation on key LEDs above 2..7 Hz so audio-rate FM/AM never strobes
         const float lfoVisWeight = 1.0f - smoothstep01((vp.lfoRateHz - 2.0f) * 0.20f);
-        const float visHz =
-            (vp.lfoTarget == LfoTarget::Pitch && vp.lfoDepth > 0.0f)
-                ? applyLfoPitchHz(vp.frequencyHz, vp.lfoDepth * lfoVisWeight, lfoRaw)
-                : vp.frequencyHz;
         const float visAmp =
             (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > 0.0f)
                 ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth * lfoVisWeight, lfoRaw)
@@ -143,18 +138,16 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
                                       ? clampf(vp.lfoDepth * lfoVisWeight, 0.0f, 1.0f)
                                       : 0.0f;
 
-        const float subAudioTarget =
-            1.0f - smoothstep01((fastLog2(visHz) - kSubAudioLoOct) * kInvSubAudioSpanOct);
+        const VoiceAudibility aud = computeVoiceAudibility(vp, p, pitchMode);
         smooth.subAudioBlendSmooth[i] +=
-            (subAudioTarget - smooth.subAudioBlendSmooth[i]) * subAlpha;
-        if (absf(subAudioTarget - smooth.subAudioBlendSmooth[i]) < 1.0e-4f) {
-            smooth.subAudioBlendSmooth[i] = subAudioTarget;
+            (aud.subAudioBlend - smooth.subAudioBlendSmooth[i]) * subAlpha;
+        if (absf(aud.subAudioBlend - smooth.subAudioBlendSmooth[i]) < 1.0e-4f) {
+            smooth.subAudioBlendSmooth[i] = aud.subAudioBlend;
         }
 
-        const float muteTarget = vp.muted ? 1.0f : 0.0f;
-        smooth.muteBlendSmooth[i] += (muteTarget - smooth.muteBlendSmooth[i]) * muteAlpha;
-        if (absf(muteTarget - smooth.muteBlendSmooth[i]) < 1.0e-4f) {
-            smooth.muteBlendSmooth[i] = muteTarget;
+        smooth.muteBlendSmooth[i] += (aud.muteBlend - smooth.muteBlendSmooth[i]) * muteAlpha;
+        if (absf(aud.muteBlend - smooth.muteBlendSmooth[i]) < 1.0e-4f) {
+            smooth.muteBlendSmooth[i] = aud.muteBlend;
         }
 
         const float subBlend = smoothstep01(smooth.subAudioBlendSmooth[i]);

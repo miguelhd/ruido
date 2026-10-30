@@ -150,7 +150,7 @@ async function ensureAudioRunning() {
       } else if (msg.type === 'telemetry') {
         const t = msg.telemetry;
         if (t && t.length >= 26) {
-          uiF32.set(t, uiPtrs.telemetryIn);
+          uiF32.set(t.subarray(0, 30), uiPtrs.telemetryIn);
           uiWasm.wasm_ui_apply_telemetry();
         }
         if (msg.scopeBuffer && msg.scopeCount > 0) {
@@ -408,10 +408,11 @@ function bindKnobs() {
       (e) => {
         e.preventDefault();
         const knobBank = uiWasm && uiPtrs ? Math.round(uiF32[uiPtrs.summary + 47]) : 0;
+        // KnobBankMode: Lfo = 6, GlobalLfo = 9, None (GlobalConfig) = 12
         const isDiscrete =
-          (encId === 0 && knobBank !== 1) ||
-          (encId === 3 && (knobBank === 4 || knobBank === 7)) ||
-          (encId >= 3 && knobBank === 10);
+          encId === 0 ||
+          (encId === 2 && knobBank === 12) ||
+          (encId === 3 && (knobBank === 6 || knobBank === 9));
 
         if (isDiscrete) {
           if (e.deltaMode === 1 || Math.abs(e.deltaY) >= 24) {

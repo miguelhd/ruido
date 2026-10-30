@@ -29,6 +29,7 @@ void ScopeHudRenderer::reset() noexcept {
     frameLfoPhase_ = {0.0f, 0.25f, 0.50f, 0.75f};
     frameLfoDriftPacked_ = {0u, 0u, 0u, 0u};
     frameVoicePeak_ = {0.0f, 0.0f, 0.0f, 0.0f};
+    frameVoiceDrift_ = {0.0f, 0.0f, 0.0f, 0.0f};
     knobPosSignedSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
     knobDimSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
     knobFocusSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -71,13 +72,12 @@ void ScopeHudRenderer::updateHudGauges(float dtClamped, bool snapImmediate) noex
     for (uint8_t k = 0u; k < 4u; ++k) {
         if (snapBank) {
             knobPosSignedSmooth_[k] = tgt.posSigned[k];
-            knobDimSmooth_[k] = tgt.dimmed[k] ? 1.0f : 0.0f;
+            knobDimSmooth_[k] = tgt.dimAmount[k];
             knobFocusSmooth_[k] = tgt.focused[k] ? 1.0f : 0.0f;
         } else {
             knobPosSignedSmooth_[k] =
                 slewScalar(knobPosSignedSmooth_[k], tgt.posSigned[k], alphaGauge);
-            knobDimSmooth_[k] =
-                slewScalar(knobDimSmooth_[k], tgt.dimmed[k] ? 1.0f : 0.0f, alphaGauge);
+            knobDimSmooth_[k] = slewScalar(knobDimSmooth_[k], tgt.dimAmount[k], alphaGauge);
             knobFocusSmooth_[k] =
                 slewScalar(knobFocusSmooth_[k], tgt.focused[k] ? 1.0f : 0.0f, alphaGauge);
         }
@@ -101,6 +101,8 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
             frameLfoDriftPacked_[v] = telemetry.lfoDriftPacked[v].load(std::memory_order_relaxed);
             frameVoicePeak_[v] =
                 streamStalled ? 0.0f : telemetry.voicePeak[v].load(std::memory_order_relaxed);
+            frameVoiceDrift_[v] =
+                streamStalled ? 0.0f : telemetry.voiceDriftNorm[v].load(std::memory_order_relaxed);
         }
     }
     const float pL = streamStalled ? 0.0f : telemetry.peakLeft.load(std::memory_order_relaxed);
@@ -189,6 +191,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.lfoVoiceFocus = releaseLatchHud_.lfoVoiceFocus;
         effectiveHud.fxPageOpen = releaseLatchHud_.fxPageOpen;
         effectiveHud.editPageOpen = releaseLatchHud_.editPageOpen;
+        effectiveHud.editTarget = releaseLatchHud_.editTarget;
         effectiveHud.globalTarget = releaseLatchHud_.globalTarget;
         effectiveHud.configCursor = releaseLatchHud_.configCursor;
         effectiveHud.config = releaseLatchHud_.config;
@@ -220,7 +223,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     }
 
     globalViews_.update(dtClamped, control, hud, frameLfoOutput_);
-    ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_);
+    ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_, frameVoiceDrift_);
     const bool extraCenterView = globalViews_.anyActiveTarget(hud) || ampGraph_.isActive(hud);
     graphs_.update(dtClamped, control, hud, effectiveHud, extraCenterView, frameLfoOutput_,
                    frameLfoDriftPacked_);
@@ -295,11 +298,11 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
 
     float effFilterAlpha01 = 0.0f;
     float effLfoAlpha01 = 0.0f;
-    float effEditAmpAlpha01 = 0.0f;
+    float effEditGraphAlpha01 = 0.0f;
     float dummy01 = 0.0f;
     const uint8_t filterAlpha8 = resolveViewAlpha(graphs_.filterGraphPhase(), effFilterAlpha01);
     const uint8_t lfoAlpha8 = resolveViewAlpha(graphs_.lfoGraphPhase(), effLfoAlpha01);
-    const uint8_t editAmpAlpha8 = resolveViewAlpha(ampGraph_.phase(), effEditAmpAlpha01);
+    (void)resolveViewAlpha(ampGraph_.maxPhase(), effEditGraphAlpha01);
     const uint8_t freqAlpha8 = resolveViewAlpha(globalViews_.freqPhase(), dummy01);
     const uint8_t ampAlpha8 = resolveViewAlpha(globalViews_.ampPhase(), dummy01);
     const uint8_t allAlpha8 = resolveViewAlpha(globalViews_.allOverlayPhase(), dummy01);
@@ -308,8 +311,8 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     cv.applyVerticalScrim(0, 34, 0.80f, true);
     if (frameHud_.knobBank != KnobBankMode::None) {
         float graphEnvMax = (effFilterAlpha01 > effLfoAlpha01) ? effFilterAlpha01 : effLfoAlpha01;
-        if (effEditAmpAlpha01 > graphEnvMax) {
-            graphEnvMax = effEditAmpAlpha01;
+        if (effEditGraphAlpha01 > graphEnvMax) {
+            graphEnvMax = effEditGraphAlpha01;
         }
         const int botScrimTop = 178 - static_cast<int>(8.0f * graphEnvMax + 0.5f);
         cv.applyVerticalScrim(botScrimTop, 240, 0.90f, false);
@@ -319,8 +322,7 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
                               frameControl_, frameHud_, frameLfoPhase_);
     graphs_.compositeFilterStrip(y0, y1, stripHeight, lumBuf, linScratch, effFilterAlpha01,
                                  filterAlpha8);
-    ampGraph_.compositeStrip(y0, y1, stripHeight, lumBuf, linScratch, effEditAmpAlpha01,
-                             editAmpAlpha8, frameHud_);
+    ampGraph_.compositeStrip(y0, y1, stripHeight, lumBuf, linScratch, hudAlpha01, frameHud_);
     globalViews_.compositeGlobalAllOverlayStrip(y0, y1, lumBuf, allAlpha8);
     globalViews_.compositeGlobalFreqStrip(y0, y1, lumBuf, freqAlpha8);
     globalViews_.compositeGlobalAmpStrip(y0, y1, lumBuf, ampAlpha8);

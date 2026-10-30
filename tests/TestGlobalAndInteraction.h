@@ -539,16 +539,29 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(maxConfigSepG6 == 0u);
     RTEST_CHECK(maxSelectedLeftEdgeG6 <= 10u);
 
-    // Row 0: GLO RELEASE -> step CW to SNAP BACK via Knob2
+    // Row 0: GLO RELEASE -> step CW to SNAP BACK via ALGORITHM encoder (Knob1 must NOT edit menu!)
     RTEST_CHECK(ctrl.hud().config.gloRelease == ruido::GloReleaseMode::Latch);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 4);
-    RTEST_CHECK(ctrl.hud().config.gloRelease == ruido::GloReleaseMode::SnapBack);
+    const float osc1BeforeMenuTurn = ctrl.state().voices[0].frequencyHz;
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 8);
+    RTEST_CHECK(ctrl.hud().config.gloRelease == ruido::GloReleaseMode::Latch);
+    RTEST_CHECK(ctrl.state().voices[0].frequencyHz > osc1BeforeMenuTurn * 1.10f);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFrequency);
+    for (int i = 0; i < 18; ++i) {
+        ctrl.tick(0.100f, tel);
+    }
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::GlobalConfig);
+    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::None);
 
-    // Step SELECT -> Row 1: OUTPUT ROUTING -> step CW to DUAL MONO via Knob4, synced with MONO/POLY
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
+    RTEST_CHECK(ctrl.hud().config.gloRelease == ruido::GloReleaseMode::SnapBack);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::GlobalConfig);
+
+    // Step SELECT -> Row 1: OUTPUT ROUTING -> step CW to DUAL MONO via ALGORITHM, synced with
+    // MONO/POLY
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 1u);
     RTEST_CHECK(!ctrl.state().global.monoCollapse);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 4);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     RTEST_CHECK(ctrl.state().global.monoCollapse);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, true);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, false);
@@ -583,7 +596,7 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
 
 template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(CheckFn checkFn) {
     std::printf(
-        "[Test 10] Latching EDIT Channel Level/Drive Page, SELECT Gang Fader & HudAmpGraph...\n");
+        "[Test 10] 4-Mode Latching EDIT Page (WIDTH · DRIFT · LEVEL/Drive · PAN) & Visuals...\n");
     const auto nearF = [](float a, float b, float eps = 1.0e-4f) {
         return std::fabs(a - b) <= eps;
     };
@@ -596,8 +609,8 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     ctrl.attachControlBus(&engine.controlBus());
     engine.snapParametersToLatest();
 
-    // 1. Tap EDIT: opens latched Channel Level & Drive page, mutually exclusive with
-    // FX/LFO/CONFIG/SAVE
+    // 1. Tap EDIT: opens latched at EditTarget::Level (Channel Level & 4.5x Drive),
+    //    mutually exclusive with FX/LFO/CONFIG/SAVE
     ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
     ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
     RTEST_CHECK(ctrl.hud().fxPageOpen);
@@ -610,6 +623,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
     ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
     RTEST_CHECK(ctrl.hud().editPageOpen);
+    RTEST_CHECK(ctrl.hud().editTarget == ruido::EditTarget::Level);
     RTEST_CHECK(!ctrl.hud().fxPageOpen);
     RTEST_CHECK(!ctrl.hud().lfoPageOpen);
     RTEST_CHECK(!ctrl.hud().configPageOpen);
@@ -624,7 +638,46 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(nearF(ctrl.hud().opacity, 1.0f));
     RTEST_CHECK(nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)], 1.0f));
 
-    // 2. KNOB1 -> 100% (4.5x Drive), mute Voice 1 via White Key 2, SELECT 4-voice gang fader
+    // 2. Discrete SELECT steps across WIDTH(0) · DRIFT(1) · LEVEL(2) · PAN(3) (1 item / 4 ticks)
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -8); // Level(2) -> Width(0)
+    RTEST_CHECK(ctrl.hud().editTarget == ruido::EditTarget::Width);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::PulseWidth);
+    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::PulseWidth);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -80);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 80);
+    RTEST_CHECK(ctrl.state().voices[0].pulseWidth < 0.25f);
+    RTEST_CHECK(ctrl.state().voices[3].pulseWidth > 0.75f);
+
+    ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true); // Gear-invariant Fine detent
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);    // Width(0) -> Drift(1)
+    ctrl.onButtonEvent(ruido::ButtonId::OctMinus, false);
+    RTEST_CHECK(ctrl.hud().editTarget == ruido::EditTarget::Drift);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::VoiceDrift);
+    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::VoiceDrift);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -80); // Lock Osc 1 to 0% drift
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 120); // Boost Osc 2 thermal drift
+    RTEST_CHECK(nearF(ctrl.state().voices[0].drift, 0.0f));
+    RTEST_CHECK(ctrl.state().voices[1].drift > 0.55f);
+
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8); // Drift(1) -> Pan(3)
+    RTEST_CHECK(ctrl.hud().editTarget == ruido::EditTarget::Pan);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Panning);
+    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Panning);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 60);
+    RTEST_CHECK(ctrl.state().voices[2].pan > -0.20f);
+
+    // Close & re-open EDIT -> remembers last selected EditTarget (Pan -> step back to Level)
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    RTEST_CHECK(ctrl.hud().editTarget == ruido::EditTarget::Pan);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4); // Pan(3) -> Level(2)
+    RTEST_CHECK(ctrl.hud().editTarget == ruido::EditTarget::Level);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Amplitude);
+    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Amplitude);
+
+    // KNOB1 -> 100% (4.5x Drive kept 100% intact!), mute Voice 1 via White Key 2
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 200);
     RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, 1.0f));
     RTEST_CHECK(nearF(ruido::computeVoiceChannelGain(ctrl.state().voices[0].amplitude).preDrive,
@@ -633,22 +686,6 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     ctrl.onWhiteKeyGate(1u, true);
     ctrl.onWhiteKeyGate(1u, false);
     RTEST_CHECK(ctrl.state().voices[1].muted);
-
-    // Return to EDIT focus via SELECT gang fader (-16 ticks): unmuted voices drop together,
-    // muted Voice 1 stays muted!
-    const float v2Before = ctrl.state().voices[2].amplitude;
-    const float v3Before = ctrl.state().voices[3].amplitude;
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, -16);
-    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Amplitude);
-    RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
-    RTEST_CHECK(ctrl.state().voices[1].muted);
-    RTEST_CHECK(ctrl.state().voices[2].amplitude < v2Before - 0.04f);
-    RTEST_CHECK(nearF(ctrl.state().voices[2].amplitude, ctrl.state().voices[3].amplitude));
-    (void)v3Before;
-
-    // Crank Knob1 back to 100% (4.5x drive) for visual & LED flare verification
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 200);
-    RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, 1.0f));
 
     // 3. Momentary OP6 / Keybed GLO override EDIT temporarily and return seamlessly on release
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
@@ -724,6 +761,50 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     RTEST_CHECK(driveZonePxHot > driveZonePxClean + 220u);
 
+    // Verify 240x8 == 240x16 == 240x24 strip equivalence & monochrome neutrality across all 4 EDIT
+    // modes (WIDTH · DRIFT · LEVEL · PAN)
+    driveTel.voiceDriftNorm[2].store(0.35f, std::memory_order_relaxed);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -16); // Clamp to Width(0)
+    for (int em = 0; em < 4; ++em) {
+        renderer.reset();
+        for (int f = 0; f < 10; ++f) {
+            ctrl.tick(0.025f, driveTel);
+            renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
+        }
+        renderer.renderFullScreenStrips(amp16.data());
+        for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 8u)) {
+            renderer.renderStrip(y, 8u, amp8.data() + static_cast<size_t>(y) * 240u);
+        }
+        for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 24u)) {
+            renderer.renderStrip(y, 24u, amp24.data() + static_cast<size_t>(y) * 240u);
+        }
+        bool mEq = true;
+        bool mMono = true;
+        size_t mCenterPx = 0u;
+        for (size_t y = 0u; y < 240u; ++y) {
+            for (size_t x = 0u; x < 240u; ++x) {
+                const size_t idx = y * 240u + x;
+                const uint16_t px = amp16[idx];
+                if (px != amp8[idx] || px != amp24[idx]) {
+                    mEq = false;
+                }
+                const uint16_t r5 = (px >> 11u) & 0x1Fu;
+                const uint16_t g6 = (px >> 5u) & 0x3Fu;
+                const uint16_t b5 = px & 0x1Fu;
+                if (r5 != b5 || g6 != ((r5 << 1u) | (r5 >> 4u))) {
+                    mMono = false;
+                }
+                if (y >= 46u && y <= 178u && y != 120u && g6 >= 8u) {
+                    ++mCenterPx;
+                }
+            }
+        }
+        RTEST_CHECK(mEq);
+        RTEST_CHECK(mMono);
+        RTEST_CHECK(mCenterPx > 80u);
+        ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    }
+
     // 5. Close EDIT via 2nd EDIT tap -> smooth 150 ms fade-out & live EDIT LED overdrive flare!
     ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
     ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
@@ -744,6 +825,134 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)];
     RTEST_CHECK(editLedQuietDrive >= 0.24f && editLedQuietDrive <= 0.28f);
     RTEST_CHECK(editLedHotDrive > 0.75f && editLedHotDrive <= 0.86f);
+
+    // 6. 1-to-1 Lower-Rail OSC 1-4 Dimming & 0% / Sub-Audio Alignment (Zero Screen Pulsing):
+    ctrl.reset();
+    renderer.reset();
+    const auto maxOscLabelG6 = [&](const std::array<uint16_t, 240u * 240u>& img, size_t col) {
+        uint16_t maxG6 = 0u;
+        const size_t x0 = col * 60u + 8u;
+        const size_t x1 = col * 60u + 52u;
+        for (size_t y = 191u; y <= 201u; ++y) {
+            for (size_t x = x0; x <= x1; ++x) {
+                const uint16_t g6 = (img[y * 240u + x] >> 5u) & 0x3Fu;
+                if (g6 > maxG6) {
+                    maxG6 = g6;
+                }
+            }
+        }
+        return maxG6;
+    };
+
+    // (a) Mute Osc 1 via White Key 1 (focusedKnob == 0): OSC 1 text dims immediately (never 255
+    //     white!) and exhibits ZERO pulsing across frames while White Key 1 pulses at 1.50 Hz!
+    ctrl.onWhiteKeyGate(0u, true);
+    ctrl.onWhiteKeyGate(0u, false);
+    RTEST_CHECK(ctrl.state().voices[0].muted);
+    RTEST_CHECK(ctrl.hud().focusedKnob == 0u);
+    quietSt = ctrl.state();
+    quietSt.global.masterRun = false;
+    quietSt.global.masterTrim = 0.0f;
+    for (int f = 0; f < 16; ++f) {
+        ctrl.tick(0.016f, driveTel);
+        renderer.prepareFrame(0.016f, quietSt, ctrl.hud(), driveTel);
+    }
+    renderer.renderFullScreenStrips(amp16.data());
+    RTEST_CHECK(maxOscLabelG6(amp16, 0u) <= 22u); // Dimmed (~72/255 -> g6 ~18), even when focused!
+    RTEST_CHECK(maxOscLabelG6(amp16, 2u) >= 35u); // Audible unfocused OSC 3 stays bright (~154/255)
+
+    float ledMuteA = ctrl.leds().whiteKeyLeds[0];
+    for (int f = 0; f < 15; ++f) {
+        ctrl.tick(0.016f, driveTel);
+        renderer.prepareFrame(0.016f, quietSt, ctrl.hud(), driveTel);
+    }
+    float ledMuteB = ctrl.leds().whiteKeyLeds[0];
+    renderer.renderFullScreenStrips(clean16.data());
+    RTEST_CHECK(std::fabs(ledMuteB - ledMuteA) > 0.05f); // Physical button pulses!
+    bool lowerRailSteadyOnMute = true;
+    for (size_t y = 190u; y < 240u; ++y) {
+        for (size_t x = 0u; x < 60u; ++x) {
+            if (amp16[y * 240u + x] != clean16[y * 240u + x]) {
+                lowerRailSteadyOnMute = false;
+            }
+        }
+    }
+    RTEST_CHECK(lowerRailSteadyOnMute); // Zero pulsing on screen!
+
+    // (b) Unmute Osc 1, then sweep Osc 1 into sub-audio (< 20 Hz, down to 0.05 Hz lower rail):
+    //     White Key 1 breathes at 0.35 Hz while OSC 1 text dims steadily with zero screen pulsing!
+    ctrl.onWhiteKeyGate(0u, true);
+    ctrl.onWhiteKeyGate(0u, false);
+    RTEST_CHECK(!ctrl.state().voices[0].muted);
+    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -120); // Clamps at 0.05 Hz lower rail!
+    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
+    RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, ruido::kAudioFreqMinHz));
+    RTEST_CHECK(ctrl.hud().focusedKnob == 0u);
+    quietSt = ctrl.state();
+    quietSt.global.masterRun = false;
+    quietSt.global.masterTrim = 0.0f;
+    for (int f = 0; f < 30; ++f) {
+        ctrl.tick(0.016f, driveTel);
+        renderer.prepareFrame(0.016f, quietSt, ctrl.hud(), driveTel);
+    }
+    const float ledSubA = ctrl.leds().whiteKeyLeds[0];
+    renderer.renderFullScreenStrips(amp16.data());
+    RTEST_CHECK(maxOscLabelG6(amp16, 0u) <= 22u); // Sub-audio OSC 1 dimmed even while focused!
+    RTEST_CHECK(maxOscLabelG6(amp16, 2u) >= 35u);
+
+    for (int f = 0; f < 20; ++f) {
+        ctrl.tick(0.016f, driveTel);
+        renderer.prepareFrame(0.016f, quietSt, ctrl.hud(), driveTel);
+    }
+    const float ledSubB = ctrl.leds().whiteKeyLeds[0];
+    RTEST_CHECK(std::fabs(ledSubB - ledSubA) > 0.015f); // White Key 1 breathes at 0.35 Hz!
+    renderer.renderFullScreenStrips(clean16.data());
+    bool lowerRailSteadySubAudio = true;
+    for (size_t y = 190u; y < 240u; ++y) {
+        for (size_t x = 0u; x < 60u; ++x) {
+            if (amp16[y * 240u + x] != clean16[y * 240u + x]) {
+                lowerRailSteadySubAudio = false;
+            }
+        }
+    }
+    RTEST_CHECK(lowerRailSteadySubAudio); // Zero pulsing on screen in sub-audio!
+
+    // Sweep Osc 1 back >= 25 Hz -> OSC 1 undims to crisp focused white!
+    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 80);
+    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
+    RTEST_CHECK(ctrl.state().voices[0].frequencyHz > 50.0f);
+    quietSt = ctrl.state();
+    quietSt.global.masterRun = false;
+    quietSt.global.masterTrim = 0.0f;
+    for (int f = 0; f < 16; ++f) {
+        ctrl.tick(0.016f, driveTel);
+        renderer.prepareFrame(0.016f, quietSt, ctrl.hud(), driveTel);
+    }
+    renderer.renderFullScreenStrips(amp16.data());
+    RTEST_CHECK(maxOscLabelG6(amp16, 0u) >= 60u);
+
+    // (c) EDIT Level 0% lower rail auto-mutes, Fine +1 CW unmutes, and White Key 1 unmute recovers
+    //     default 65% audible level instead of staying stuck silent at 0%!
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -240);
+    RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, 0.0f));
+    RTEST_CHECK(ctrl.state().voices[0].muted);
+
+    ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true); // Fine gear: +1 tick = 0.00090 > 1e-4
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 1);
+    ctrl.onButtonEvent(ruido::ButtonId::OctMinus, false);
+    RTEST_CHECK(!ctrl.state().voices[0].muted);
+    RTEST_CHECK(ctrl.state().voices[0].amplitude > 0.0005f);
+
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -20); // Back to 0% lower rail -> muted
+    RTEST_CHECK(ctrl.state().voices[0].muted);
+    ctrl.onWhiteKeyGate(0u, true);
+    ctrl.onWhiteKeyGate(0u, false); // Tap pulsing White Key 1 -> restores 65% audible level!
+    RTEST_CHECK(!ctrl.state().voices[0].muted);
+    RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, ruido::kDefaultVoiceAmp));
 #undef RTEST_CHECK
 }
 

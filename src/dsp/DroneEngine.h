@@ -50,6 +50,8 @@ class DroneEngine {
   private:
     struct VoiceSmoothers {
         LogFreqSmoother freqHz;
+        CriticallyDampedSmoother pulseWidth;
+        CriticallyDampedSmoother drift;
         LogFreqSmoother hpCutoffHz;
         CriticallyDampedSmoother hpResonance;
         LogFreqSmoother lpCutoffHz;

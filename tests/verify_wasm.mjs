@@ -83,7 +83,7 @@ assert.ok(energyL > 1.0 && energyR > 1.0);
 
 const telIdx = ex.wasm_dsp_read_telemetry() >> 2;
 const telInIdx = ex.wasm_ui_get_telemetry_in_ptr() >> 2;
-for (let i = 0; i < 26; i++) {
+for (let i = 0; i < 30; i++) {
   f32[telInIdx + i] = f32[telIdx + i];
 }
 ex.wasm_ui_apply_telemetry();
@@ -155,20 +155,29 @@ for (let b = 0; b < 8; b++) {
   ex.wasm_dsp_process_block(128);
 }
 
-const tel26Idx = ex.wasm_dsp_read_telemetry() >> 2;
-for (let i = 0; i < 26; i++) {
-  f32[telInIdx + i] = f32[tel26Idx + i];
+const tel30Idx = ex.wasm_dsp_read_telemetry() >> 2;
+for (let i = 0; i < 30; i++) {
+  f32[telInIdx + i] = f32[tel30Idx + i];
 }
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.1);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 5] - 1.0) < 1e-4); // LFO LED === 100% while open
 
-// Verify EDIT Page (button 6): latching open, 4.5x overdrive on KNOB1, monochrome HudAmpGraph & LED flare
+// Verify EDIT Page (button 6): 4-mode SELECT (WIDTH=0, DRIFT=1, LEVEL=2, PAN=3) & 4.5x overdrive
 ex.wasm_ui_button(6, 1);
 ex.wasm_ui_button(6, 0);
 assert.equal(f32[summaryIdx + 48], 1.0); // editPageOpen === true
+assert.equal(f32[summaryIdx + 51], 2.0); // editTarget === Level (2) default
 assert.equal(f32[summaryIdx + 39], 0.0); // lfoPageOpen closed automatically
-ex.wasm_ui_encoder(3, 180); // Crank Osc 1 into 100% (4.5x pre-filter overdrive)
+ex.wasm_ui_encoder(0, -8);               // SELECT -> Width (0)
+assert.equal(f32[summaryIdx + 51], 0.0);
+ex.wasm_ui_encoder(3, -40);              // Narrow Osc 1 pulse width
+ex.wasm_ui_encoder(0, 4);                // SELECT -> Drift (1)
+assert.equal(f32[summaryIdx + 51], 1.0);
+ex.wasm_ui_encoder(4, 60);               // Increase Osc 2 analog drift
+ex.wasm_ui_encoder(0, 4);                // SELECT -> Level (2)
+assert.equal(f32[summaryIdx + 51], 2.0);
+ex.wasm_ui_encoder(3, 180);              // Crank Osc 1 into 100% (4.5x pre-filter overdrive)
 u8.copyWithin(
   ex.wasm_dsp_get_control_ptr(),
   ex.wasm_ui_get_control_ptr(),
@@ -178,8 +187,8 @@ ex.wasm_dsp_publish_control(1);
 for (let b = 0; b < 6; b++) {
   ex.wasm_dsp_process_block(128);
 }
-for (let i = 0; i < 26; i++) {
-  f32[telInIdx + i] = f32[tel26Idx + i];
+for (let i = 0; i < 30; i++) {
+  f32[telInIdx + i] = f32[tel30Idx + i];
 }
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.1);
@@ -221,12 +230,18 @@ ex.wasm_ui_tick_and_render(0.2);
 assert.equal(f32[summaryIdx + 39], 0.0);
 assert.ok(f32[ledsIdx + 27 + 5] >= 0.149 && f32[ledsIdx + 27 + 5] <= 0.61);
 
-// Verify right-panel GLO opens GLOBAL CONFIG (button 7) & keybed GLO + SELECT steps GlobalTarget
+// Verify right-panel GLO opens GLOBAL CONFIG (button 7), ALGORITHM scrolls options, & keybed GLO + SELECT steps GlobalTarget
 ex.wasm_ui_button(7, 1);
 ex.wasm_ui_button(7, 0);
 ex.wasm_ui_tick_and_render(0.2);
 assert.equal(f32[summaryIdx + 45], 1.0);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 7] - 1.0) < 1e-4);
+ex.wasm_ui_encoder(0, 4);                // SELECT -> Row 1 (OUTPUT ROUTING)
+assert.equal(f32[summaryIdx + 35], 0.0); // STEREO initially
+ex.wasm_ui_encoder(2, 4);                // ALGORITHM -> DUAL MONO!
+assert.equal(f32[summaryIdx + 35], 1.0);
+ex.wasm_ui_encoder(2, -4);               // ALGORITHM -> back to STEREO!
+assert.equal(f32[summaryIdx + 35], 0.0);
 ex.wasm_ui_button(7, 1);
 ex.wasm_ui_button(7, 0);
 ex.wasm_ui_tick_and_render(0.2);

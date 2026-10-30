@@ -47,7 +47,7 @@ class HudGlobalViews {
     std::array<float, kNumOscillators> ampStemInt_{0.0f, 0.0f, 0.0f, 0.0f};
 
     std::array<float, kNumOscillators> allStemX_{40.0f, 70.0f, 100.0f, 130.0f};
-    std::array<float, kNumOscillators> allStemTopY_{182.0f, 182.0f, 182.0f, 182.0f};
+    std::array<float, kNumOscillators> allStemTopY_{186.0f, 186.0f, 186.0f, 186.0f};
     std::array<float, kNumOscillators> allStemInt_{0.0f, 0.0f, 0.0f, 0.0f};
 
     float freqPhase_ = 0.0f;

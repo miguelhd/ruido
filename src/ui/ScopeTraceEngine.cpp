@@ -166,10 +166,21 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
     size_t anchorVoice = 0u;
     bool hasAudioAnchor = false;
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        if (!control.voices[v].muted && control.voices[v].frequencyHz >= kAudioFreqMinHz) {
+        const VoiceParams& vp = control.voices[v];
+        if (!vp.muted && vp.amplitude > 1.0e-4f && vp.frequencyHz >= 20.0f) {
             anchorVoice = v;
             hasAudioAnchor = true;
             break;
+        }
+    }
+    if (!hasAudioAnchor) {
+        for (size_t v = 0u; v < kNumOscillators; ++v) {
+            const VoiceParams& vp = control.voices[v];
+            if (!vp.muted && vp.amplitude > 1.0e-4f && vp.frequencyHz >= kAudioFreqMinHz) {
+                anchorVoice = v;
+                hasAudioAnchor = true;
+                break;
+            }
         }
     }
 
@@ -236,6 +247,7 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
 
                 size_t candInt = edgePos;
                 float candFrac = 0.0f;
+                bool foundCrossing = false;
                 for (int off = -3; off <= 32; ++off) {
                     const size_t p1 =
                         (edgePos + static_cast<size_t>(off + static_cast<int>(kHistorySize))) &
@@ -244,11 +256,15 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
                     const float v0 = unpackVoiceEdgeSample(history_[p0].voiceEdgeQ12[anchorVoice]);
                     const float v1 = unpackVoiceEdgeSample(history_[p1].voiceEdgeQ12[anchorVoice]);
                     const float slope = v1 - v0;
-                    if (v0 <= 0.0f && v1 > 0.0f && slope > 0.002f) {
+                    if (v0 <= 0.0f && v1 > 0.0f && slope > 1.0e-4f) {
                         candInt = p0;
                         candFrac = clampf(-v0 / slope, 0.0f, 1.0f);
+                        foundCrossing = true;
                         break;
                     }
+                }
+                if (!foundCrossing) {
+                    continue;
                 }
                 candidates[numCand++] = {candInt, candFrac};
                 minNextBack = back + 16u;
@@ -257,7 +273,7 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
 
         chosenTrigInt = latestEdgeLimit;
         float chosenTrigFrac = 0.0f;
-        if (numCand == 1u || (numCand > 1u && !trigSigValid_)) {
+        if (numCand == 1u || (numCand > 1u && (!trigSigValid_ || busPresenceSmooth_ < 0.08f))) {
             chosenTrigInt = candidates[0].trigInt;
             chosenTrigFrac = candidates[0].trigFrac;
         } else if (numCand > 1u) {

@@ -24,16 +24,18 @@ enum class LfoTarget : uint8_t {
 
 // User-facing per-oscillator state (serializable into <= 128B quantized snapshots in Milestone 3).
 struct VoiceParams {
-    float frequencyHz = 110.0f;                // [0.05, 20000] Hz unbroken sub-cycle -> audio range
-    float hpCutoffHz = kFilterCutoffMinHz;     // [2.0, 28000.0] Hz (2 Hz + 0% RES = parked flat)
-    float hpResonance = 0.0f;                  // [0.0, 1.0] Rev 2 (0-60%) -> Korg35 (60-100%) Peak
-    float lpCutoffHz = kFilterCutoffMaxHz;     // [2.0, 28000.0] Hz (28 kHz + 0% RES = parked flat)
-    float lpResonance = 0.0f;                  // [0.0, 1.0] Rev 2 (0-60%) -> Korg35 (60-100%) Peak
-    float amplitude = 0.65f;                   // [0.0, 0.70] clean VCA; (0.70, 1.0] MS-20 overdrive
-    float pan = 0.0f;                          // [-1.0 (Left), +1.0 (Right)]
-    float lfoRateHz = 0.25f;                   // [0.01, 2000.0] Hz ultra-slow -> audio-rate FM/AM
-    float lfoShape = 0.0f;                     // [0.0, 1.0] Sine -> Tri -> Saw -> Square -> Drift
-    float lfoDepth = 0.0f;                     // [0.0, 1.0] LFO modulation amount (0 = off)
+    float frequencyHz = 110.0f;            // [0.05, 20000] Hz unbroken sub-cycle -> audio range
+    float pulseWidth = 0.50f;              // [0.05, 0.95] CMOS Schmitt duty cycle (50% = square)
+    float drift = kDefaultVoiceDrift;      // [0.00, 1.00] 1/f analog thermal pitch instability
+    float hpCutoffHz = kFilterCutoffMinHz; // [2.0, 28000.0] Hz (2 Hz + 0% RES = parked flat)
+    float hpResonance = 0.0f;              // [0.0, 1.0] Rev 2 (0-60%) -> Korg35 (60-100%) Peak
+    float lpCutoffHz = kFilterCutoffMaxHz; // [2.0, 28000.0] Hz (28 kHz + 0% RES = parked flat)
+    float lpResonance = 0.0f;              // [0.0, 1.0] Rev 2 (0-60%) -> Korg35 (60-100%) Peak
+    float amplitude = kDefaultVoiceAmp;    // [0.0, 0.70] clean VCA; (0.70, 1.0] MS-20 overdrive
+    float pan = 0.0f;                      // [-1.0 (Left), +1.0 (Right)]
+    float lfoRateHz = 0.25f;               // [0.01, 2000.0] Hz ultra-slow -> audio-rate FM/AM
+    float lfoShape = 0.0f;                 // [0.0, 1.0] Sine -> Tri -> Saw -> Square -> Drift
+    float lfoDepth = 0.0f;                 // [0.0, 1.0] LFO modulation amount (0 = off)
     LfoTarget lfoTarget = LfoTarget::LpCutoff; // KNOB1 LFO destination
     bool muted = false;                        // White Keys 1-4 latching mute
 };
@@ -151,6 +153,8 @@ struct EngineControlState {
         constexpr std::array<float, kNumOscillators> kInitPans = {-0.35f, 0.35f, -0.65f, 0.65f};
         for (size_t i = 0; i < kNumOscillators; ++i) {
             s.voices[i].frequencyHz = kInitFreqs[i];
+            s.voices[i].pulseWidth = 0.50f;
+            s.voices[i].drift = kDefaultVoiceDrift;
             s.voices[i].hpCutoffHz = kFilterCutoffMinHz;
             s.voices[i].hpResonance = 0.0f;
             s.voices[i].lpCutoffHz = kFilterCutoffMaxHz;
@@ -332,6 +336,13 @@ struct EngineTelemetry {
     };
     // Post-VCA per-voice peak amplitude [0.0, ~2.0] for EDIT page plasma & overdrive LED flare
     std::array<std::atomic<float>, kNumOscillators> voicePeak{
+        std::atomic<float>{0.0f},
+        std::atomic<float>{0.0f},
+        std::atomic<float>{0.0f},
+        std::atomic<float>{0.0f},
+    };
+    // Instantaneous [-1.0, +1.0] normalized 1/f thermal pitch drift per voice (EDIT -> DRIFT)
+    std::array<std::atomic<float>, kNumOscillators> voiceDriftNorm{
         std::atomic<float>{0.0f},
         std::atomic<float>{0.0f},
         std::atomic<float>{0.0f},

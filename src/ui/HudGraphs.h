@@ -12,16 +12,21 @@
 
 namespace ruido {
 
-// Concept A3 1/3-screen (80 px: y = 102..182, x = 10..230) filter graph & backdrop dim constants
-inline constexpr int kFilterXStart = 10;
-inline constexpr size_t kFilterSweepPts = 221u;
+// Full-screen (x = 0..239 edge-to-edge, y = 26..186) MS-20 dual-filter graph & backdrop dim
+inline constexpr int kFilterXStart = 0;
+inline constexpr size_t kFilterSweepPts = kDisplayWidth + 1u;
 inline constexpr float kFilterLogMin = cxLog2Pos(kFilterCutoffMinHz);
 inline constexpr float kFilterLogSpan = cxLog2Pos(kFilterCutoffMaxHz) - kFilterLogMin;
-inline constexpr float kFilterYTop = 102.0f;
-inline constexpr float kFilterYZeroDb = 132.0f;
-inline constexpr float kFilterYBot = 182.0f;
-inline constexpr float kFilterDbToPx = 1.68f;
+inline constexpr float kFilterYTop = 26.0f;
+inline constexpr float kFilterYZeroDb = 86.0f;
+inline constexpr float kFilterYBot = 186.0f;
+inline constexpr float kFilterDbToPx = 3.36f;
 inline constexpr float kFilterBgDimDepth = 0.72f; // 72% BG waveform dimming behind active graphs
+
+inline constexpr float filterNormToScreenX(float u01) noexcept {
+    return clampf(u01 * static_cast<float>(kDisplayWidth) - 0.5f, 0.0f,
+                  static_cast<float>(kDisplayWidth - 1u));
+}
 
 // Full-screen (x = 0..239 edge-to-edge, y = 26..188) bipolar per-voice LFO visualization
 inline constexpr float kLfoYTop = 26.0f;
@@ -156,12 +161,12 @@ class HudGraphs {
     std::array<std::array<int16_t, kFilterSweepPts>, 2> filterCompCurvesFixed_{};
     std::array<float, 2> filterCompWeights_{0.0f, 0.0f};
     float filterDivergenceSmooth_ = 0.0f;
-    float filterHpBeadX_ = 10.0f;
-    float filterHpBeadY_ = 132.0f;
+    float filterHpBeadX_ = 0.0f;
+    float filterHpBeadY_ = kFilterYZeroDb;
     float filterHpBeadInt_ = 0.0f;
     float filterHpBeadRad_ = 2.0f;
-    float filterLpBeadX_ = 230.0f;
-    float filterLpBeadY_ = 132.0f;
+    float filterLpBeadX_ = static_cast<float>(kDisplayWidth - 1u);
+    float filterLpBeadY_ = kFilterYZeroDb;
     float filterLpBeadInt_ = 0.0f;
     float filterLpBeadRad_ = 2.0f;
     float filterGraphPhase_ = 0.0f;

@@ -6,13 +6,13 @@ namespace ruido {
 
 namespace {
 
-// Subtle per-inverter CMOS hysteresis threshold duty ratios modeled after real CD40106
-// manufacturing spread (~49.2% to ~50.9%), yielding organic ~-35 dB 2nd/4th harmonics.
-constexpr std::array<uint32_t, kNumOscillators> kInverterDutyThresholds = {
-    2113123901u, // ~0.4920
-    2177548411u, // ~0.5070
-    2130303770u, // ~0.4960
-    2186138346u, // ~0.5090
+// Subtle per-inverter CMOS hysteresis threshold duty offsets around 50% modeled after real
+// CD40106 manufacturing spread (~49.2% to ~50.9%), yielding organic ~-35 dB 2nd/4th harmonics.
+constexpr std::array<float, kNumOscillators> kInverterDutyTrim = {
+    -0.0080f, // ~0.4920 at 50%
+    +0.0070f, // ~0.5070 at 50%
+    -0.0040f, // ~0.4960 at 50%
+    +0.0090f, // ~0.5090 at 50%
 };
 
 constexpr std::array<uint32_t, kNumOscillators> kInitialRngSeeds = {
@@ -30,7 +30,8 @@ constexpr std::array<uint32_t, kNumOscillators> kInitialPhases = {
 };
 
 constexpr float kUint32ToNormFloat = 2.3283064365386963e-10f; // 1.0 / 2^32
-constexpr uint32_t kMaxPhaseInc = 0x1F000000u;                // ~21.37 kHz (< fs/8 safe BLEP)
+constexpr uint32_t kHalfPhase = 0x80000000u;
+constexpr uint32_t kMaxPhaseInc = 0x1F000000u; // >= 4.13 ticks per half-cycle (< fs/8 safe BLEP)
 
 } // namespace
 
@@ -52,8 +53,7 @@ void SchmittOscillatorBank::reset(float sampleRate) noexcept {
     for (size_t i = 0; i < kNumOscillators; ++i) {
         VoiceState& v = voices_[i];
         v.phase = kInitialPhases[i];
-        v.dutyThreshold = kInverterDutyThresholds[i];
-        v.currentLevel = (v.phase < v.dutyThreshold) ? 1.0f : -1.0f;
+        v.currentLevel = (v.phase < kHalfPhase) ? 1.0f : -1.0f;
         v.naiveD1 = v.currentLevel;
         v.naiveD2 = v.currentLevel;
         v.blepResidual = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -64,6 +64,7 @@ void SchmittOscillatorBank::reset(float sampleRate) noexcept {
         v.driftSlow = 0.0f;
         v.driftCounter = static_cast<uint32_t>(i * 16u);
         v.cachedDriftRatio = 1.0f;
+        v.cachedDriftNorm = 0.0f;
         v.lastEdgePulse = 0.0f;
         voiceRailSag_[i] = 0.0f;
     }
@@ -102,6 +103,8 @@ float SchmittOscillatorBank::nextWhiteNoise(uint32_t& state) noexcept {
 
 OscillatorBankOutput
 SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& freqHz,
+                                     const std::array<float, kNumOscillators>& pulseWidth,
+                                     const std::array<float, kNumOscillators>& drift,
                                      float circuitCoupling) noexcept {
     OscillatorBankOutput out{};
     const float coupling = clampf(circuitCoupling, 0.0f, 1.0f);
@@ -133,15 +136,25 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
 
         // Subsampled thermal pitch drift update every 64 oversampled ticks (~2.75 kHz rate)
         if ((v.driftCounter++ & 63u) == 0u) {
+            const float dAmt = clampf(drift[i], 0.0f, 1.0f);
             if (enableDrift_) {
                 const float wn = nextWhiteNoise(v.rngState);
                 v.driftFast = sanitizeState(0.996f * v.driftFast + 0.004f * wn);
                 v.driftSlow = sanitizeState(0.9997f * v.driftSlow + 0.0003f * v.driftFast);
-                // ~+-2.2 cents organic analog thermal wander
-                const float driftOct = (0.35f * v.driftFast + 0.65f * v.driftSlow) * 0.0035f;
-                v.cachedDriftRatio = 1.0f + driftOct * 0.69314718f;
+                if (dAmt > 1.0e-5f) {
+                    const float wanderNorm = clampf(
+                        0.35f * (v.driftFast * 12.5f) + 0.65f * (v.driftSlow * 45.0f), -1.0f, 1.0f);
+                    // 0% = 0c locked, 10% default = ~+-2.2c analog warmth, 100% = ~+-120c drift
+                    const float maxDriftOct = dAmt * (0.018f + 0.082f * dAmt * dAmt);
+                    v.cachedDriftRatio = fastExp2(wanderNorm * maxDriftOct);
+                    v.cachedDriftNorm = wanderNorm * dAmt;
+                } else {
+                    v.cachedDriftRatio = 1.0f;
+                    v.cachedDriftNorm = 0.0f;
+                }
             } else {
                 v.cachedDriftRatio = 1.0f;
+                v.cachedDriftNorm = 0.0f;
             }
         }
 
@@ -163,10 +176,28 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
 
         const float targetHz =
             clampf(freqHz[i] * v.cachedDriftRatio * railPullRatio, 0.005f, 21200.0f);
-        const float incFloat = targetHz * hzToPhaseU32_;
-        uint32_t incU32 = (incFloat >= 1.0f) ? static_cast<uint32_t>(incFloat) : 1u;
-        if (incU32 > kMaxPhaseInc) {
-            incU32 = kMaxPhaseInc;
+        const float baseIncFloat = targetHz * hzToPhaseU32_;
+
+        // Piecewise-slope CD40106 diode-shunted PWM around fixed kHalfPhase (0x80000000):
+        // preserves exact 1/f fundamental pitch invariance and mid-cycle response down to 0.05 Hz
+        // while guarding 4-tap Cubic B-Spline PolyBLEP non-overlap near Nyquist.
+        const float pwClamped = clampf(pulseWidth[i], kPulseWidthMin, kPulseWidthMax);
+        const float trimWeight = clampf(1.0f - absf(2.0f * pwClamped - 1.0f), 0.0f, 1.0f);
+        const float minSafeDuty =
+            clampf(baseIncFloat * (0.5f / static_cast<float>(kMaxPhaseInc)), kPulseWidthMin, 0.49f);
+        const float effDuty =
+            clampf(pwClamped + kInverterDutyTrim[i] * trimWeight, minSafeDuty, 1.0f - minSafeDuty);
+
+        const float halfBaseInc = 0.5f * baseIncFloat;
+        const float incHighFloat = halfBaseInc / effDuty;
+        const float incLowFloat = halfBaseInc / (1.0f - effDuty);
+        uint32_t incHighU32 = (incHighFloat >= 1.0f) ? static_cast<uint32_t>(incHighFloat) : 1u;
+        uint32_t incLowU32 = (incLowFloat >= 1.0f) ? static_cast<uint32_t>(incLowFloat) : 1u;
+        if (incHighU32 > kMaxPhaseInc) {
+            incHighU32 = kMaxPhaseInc;
+        }
+        if (incLowU32 > kMaxPhaseInc) {
+            incLowU32 = kMaxPhaseInc;
         }
 
         const uint8_t neighborRose =
@@ -174,33 +205,44 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
         if (chaos > 0.02f && neighborRose != 0u && v.currentLevel < 0.0f &&
             v.phase >= syncCapturePhase) {
             // Starved-rail Vt+ threshold collapse: band-limited hard-sync snap at d = 0.5
-            v.phase = (incU32 >> 1u);
+            v.phase = (incHighU32 >> 1u);
             addCubicBsplineBlep(v.blepResidual, 0.5f, 2.0f);
             v.lastEdgePulse += 0.22f;
             v.currentLevel = 1.0f;
             out.risingMask |= static_cast<uint8_t>(1u << i);
+        } else if (v.phase < kHalfPhase) {
+            const uint32_t remToHalf = kHalfPhase - v.phase;
+            if (incHighU32 < remToHalf) {
+                v.phase += incHighU32;
+            } else {
+                const uint32_t overHigh = incHighU32 - remToHalf;
+                const float d = static_cast<float>(overHigh) / static_cast<float>(incHighU32);
+                addCubicBsplineBlep(v.blepResidual, d, -2.0f);
+                v.lastEdgePulse -= 0.16f;
+                uint32_t postLow = static_cast<uint32_t>(d * static_cast<float>(incLowU32) + 0.5f);
+                if (postLow >= kHalfPhase) {
+                    postLow = kHalfPhase - 1u;
+                }
+                v.phase = kHalfPhase + postLow;
+                v.currentLevel = -1.0f;
+            }
         } else {
-            // Advance 32-bit unsigned phase accumulator
-            v.phase += incU32;
-
-            // Only compute reciprocal 1 / incU32 on the rare samples where an edge occurs
-            const uint32_t distPastDuty = v.phase - v.dutyThreshold;
-            const bool fell = (distPastDuty < incU32);
-            const bool rose = (v.phase < incU32);
-            if (fell || rose) {
-                const float invIncFloat = 1.0f / static_cast<float>(incU32);
-                if (fell) {
-                    const float d = static_cast<float>(distPastDuty) * invIncFloat;
-                    addCubicBsplineBlep(v.blepResidual, d, -2.0f);
-                    v.lastEdgePulse -= 0.16f;
+            const uint32_t remToWrap = 0u - v.phase;
+            if (incLowU32 < remToWrap) {
+                v.phase += incLowU32;
+            } else {
+                const uint32_t overLow = incLowU32 - remToWrap;
+                const float d = static_cast<float>(overLow) / static_cast<float>(incLowU32);
+                addCubicBsplineBlep(v.blepResidual, d, 2.0f);
+                v.lastEdgePulse += 0.22f;
+                out.risingMask |= static_cast<uint8_t>(1u << i);
+                uint32_t postHigh =
+                    static_cast<uint32_t>(d * static_cast<float>(incHighU32) + 0.5f);
+                if (postHigh >= kHalfPhase) {
+                    postHigh = kHalfPhase - 1u;
                 }
-                if (rose) {
-                    const float d = static_cast<float>(v.phase) * invIncFloat;
-                    addCubicBsplineBlep(v.blepResidual, d, 2.0f);
-                    v.lastEdgePulse += 0.22f;
-                    out.risingMask |= static_cast<uint8_t>(1u << i);
-                }
-                v.currentLevel = (v.phase < v.dutyThreshold) ? 1.0f : -1.0f;
+                v.phase = postHigh;
+                v.currentLevel = 1.0f;
             }
         }
 
@@ -226,6 +268,7 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
 
         out.samples[i] = voiceSample;
         out.gateHigh[i] = (v.currentLevel > 0.0f) ? 1.0f : 0.0f;
+        out.driftNorm[i] = v.cachedDriftNorm;
     }
 
     prevRisingMask_ = out.risingMask;

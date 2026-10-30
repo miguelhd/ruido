@@ -9,8 +9,9 @@ namespace ruido {
 
 struct OscillatorBankOutput {
     std::array<float, kNumOscillators> samples{};
-    std::array<float, kNumOscillators> gateHigh{}; // 1.0f high, 0.0f low (for LED pulse)
-    uint8_t risingMask = 0u;                       // Bit v set on sample where Osc v wrapped 0
+    std::array<float, kNumOscillators> gateHigh{};  // 1.0f high, 0.0f low (for LED pulse)
+    std::array<float, kNumOscillators> driftNorm{}; // [-1.0f, +1.0f] live 1/f thermal drift
+    uint8_t risingMask = 0u;                        // Bit v set on sample where Osc v wrapped 0
 };
 
 // 4-voice CMOS Schmitt-Trigger relaxation oscillator bank (CD40106 model) running at
@@ -34,12 +35,21 @@ class SchmittOscillatorBank {
     }
 
     OscillatorBankOutput processSample(const std::array<float, kNumOscillators>& freqHz,
+                                       const std::array<float, kNumOscillators>& pulseWidth,
+                                       const std::array<float, kNumOscillators>& drift,
                                        float circuitCoupling) noexcept;
+
+    OscillatorBankOutput processSample(const std::array<float, kNumOscillators>& freqHz,
+                                       float circuitCoupling) noexcept {
+        constexpr std::array<float, kNumOscillators> kDefaultPw = {0.50f, 0.50f, 0.50f, 0.50f};
+        constexpr std::array<float, kNumOscillators> kDefaultDr = {
+            kDefaultVoiceDrift, kDefaultVoiceDrift, kDefaultVoiceDrift, kDefaultVoiceDrift};
+        return processSample(freqHz, kDefaultPw, kDefaultDr, circuitCoupling);
+    }
 
   private:
     struct VoiceState {
         uint32_t phase = 0u;
-        uint32_t dutyThreshold = 0x80000000u;
         float currentLevel = 1.0f;
         float naiveD1 = 1.0f;
         float naiveD2 = 1.0f;
@@ -55,6 +65,7 @@ class SchmittOscillatorBank {
         float driftSlow = 0.0f;
         uint32_t driftCounter = 0u;
         float cachedDriftRatio = 1.0f;
+        float cachedDriftNorm = 0.0f;
 
         // Rail sag transient emitted on this voice's previous sample
         float lastEdgePulse = 0.0f;

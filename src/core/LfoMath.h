@@ -261,6 +261,40 @@ inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float
                                      vp.muted ? 0.0f : 1.0f, pitchMode);
 }
 
+inline constexpr float kSubAudioLoOct = cxLog2Pos(15.0f);
+inline constexpr float kInvSubAudioSpanOct = 1.0f / (cxLog2Pos(25.0f) - cxLog2Pos(15.0f));
+inline constexpr float kSilentAmpThreshold = 1.0e-4f;
+
+// Shared 1-to-1 audibility state used by both White Keys 1-4 LEDs and HUD OSC 1-4 dimming.
+// Evaluates strictly steady circuit state (never LFO/animation phase) so HUD dimming never pulses.
+struct VoiceAudibility {
+    float subAudioBlend; // 0.0 >= 25 Hz -> 1.0 <= 15 Hz (sub-audio below hearing range)
+    float muteBlend;     // 1.0 when user-muted or 0% silent VCA, lifting smoothly on LPG swell
+    float inaudibleDim;  // max(muteBlend, subAudioBlend) in [0.0, 1.0]
+};
+
+inline VoiceAudibility computeVoiceAudibility(const VoiceParams& vp, float voicePressure,
+                                              float pitchMode) noexcept {
+    const float p = clampf(voicePressure, 0.0f, 1.0f);
+    const float effHz = clampf(vp.frequencyHz * computeVoicePitchRatio(p, pitchMode),
+                               kAudioFreqMinHz * 0.5f, kAudioFreqMaxHz);
+    const float subAudioBlend =
+        1.0f - smoothstep01((fastLog2(effHz) - kSubAudioLoOct) * kInvSubAudioSpanOct);
+
+    const bool hasAudibleAmp =
+        (vp.amplitude > kSilentAmpThreshold) ||
+        (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > kSilentAmpThreshold);
+    float muteBlend = 0.0f;
+    if (!hasAudibleAmp) {
+        muteBlend = 1.0f;
+    } else if (vp.muted) {
+        const float lpgGate = p * (0.65f + 0.35f * p);
+        muteBlend = clampf(1.0f - lpgGate, 0.0f, 1.0f);
+    }
+    const float inaudibleDim = (muteBlend > subAudioBlend) ? muteBlend : subAudioBlend;
+    return {subAudioBlend, muteBlend, inaudibleDim};
+}
+
 inline constexpr const char* lfoTargetName(LfoTarget target) noexcept {
     switch (target) {
     case LfoTarget::Pitch:

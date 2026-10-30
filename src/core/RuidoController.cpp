@@ -4,6 +4,7 @@
 #include "core/EncoderMath.h"
 #include "core/GlobalControl.h"
 #include "core/LedEngine.h"
+#include "core/LfoMath.h"
 
 namespace ruido {
 
@@ -48,7 +49,7 @@ KnobBankMode RuidoController::baseKnobBank() const noexcept {
         return KnobBankMode::VoiceFilter;
     }
     if (hud_.editPageOpen) {
-        return KnobBankMode::Amplitude;
+        return knobBankForEditTarget(hud_.editTarget);
     }
     return hud_.lfoPageOpen ? KnobBankMode::Lfo : KnobBankMode::Frequency;
 }
@@ -159,6 +160,23 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
     }
 
     if (encoder == EncoderId::Algorithm) {
+        if (mod == HeldModifier::None && hud_.configPageOpen) {
+            const auto item = static_cast<ConfigItemId>(
+                (hud_.configCursor < kNumGlobalConfigItems) ? hud_.configCursor : 0u);
+            const int32_t curVal = globalConfigGetIndex(item, hud_.config, state_.global);
+            const int32_t maxVal = globalConfigMaxIndex(item);
+            const int32_t nextVal =
+                stepClampedDetent(curVal, maxVal, ticks, rate, configTickAccum_);
+            if (globalConfigSetIndex(item, nextVal, hud_.config, state_.global)) {
+                publishState();
+            }
+            hud_.focusedKnob = kNoFocusedKnob;
+            hud_.knobBank = KnobBankMode::None;
+            latchedHudMode_ = HudMode::GlobalConfig;
+            hud_.mode = HudMode::GlobalConfig;
+            env_.latchPage();
+            return;
+        }
         state_.global.circuitCoupling =
             adjustLinear01(state_.global.circuitCoupling, ticks, rate, 0.0f, 1.0f);
         triggerHud(HudMode::RailCoupling, hud_.focusedVoice, kNoFocusedKnob);
@@ -207,13 +225,15 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             return;
         }
         if (mod == HeldModifier::None && hud_.editPageOpen) {
-            applyGlobalKnobDelta(GlobalTarget::Amp, 0u, ticks, rate, targetTickAccum_, state_);
-            hud_.knobBank = KnobBankMode::Amplitude;
+            const int32_t maxEdit = static_cast<int32_t>(EditTarget::Count) - 1;
+            hud_.editTarget = static_cast<EditTarget>(stepClampedDetent(
+                static_cast<int32_t>(hud_.editTarget), maxEdit, ticks, rate, selectTickAccum_));
+            targetTickAccum_ = 0;
             hud_.focusedKnob = kNoFocusedKnob;
-            latchedHudMode_ = HudMode::Amplitude;
-            hud_.mode = HudMode::Amplitude;
+            hud_.knobBank = knobBankForEditTarget(hud_.editTarget);
+            latchedHudMode_ = hudModeForEditTarget(hud_.editTarget);
+            hud_.mode = latchedHudMode_;
             env_.latchPage();
-            publishState();
             return;
         }
         hud_.lastEncoder = EncoderId::Select;
@@ -235,23 +255,6 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
 
     switch (mod) {
     case HeldModifier::None: {
-        if (hud_.configPageOpen) {
-            const auto item = static_cast<ConfigItemId>(
-                (hud_.configCursor < kNumGlobalConfigItems) ? hud_.configCursor : 0u);
-            const int32_t curVal = globalConfigGetIndex(item, hud_.config, state_.global);
-            const int32_t maxVal = globalConfigMaxIndex(item);
-            const int32_t nextVal =
-                stepClampedDetent(curVal, maxVal, ticks, rate, configTickAccum_);
-            if (globalConfigSetIndex(item, nextVal, hud_.config, state_.global)) {
-                publishState();
-            }
-            hud_.focusedKnob = kNoFocusedKnob;
-            hud_.knobBank = KnobBankMode::None;
-            latchedHudMode_ = HudMode::GlobalConfig;
-            hud_.mode = HudMode::GlobalConfig;
-            env_.latchPage();
-            return;
-        }
         if (hud_.fxPageOpen) {
             const size_t vIdx = static_cast<size_t>(hud_.fxVoiceFocus & 3u);
             VoiceParams& vp = state_.voices[vIdx];
@@ -292,20 +295,12 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             hud_.mode = HudMode::VoiceLfo;
             env_.latchPage();
         } else if (hud_.editPageOpen) {
-            VoiceParams& vp = state_.voices[kIdx];
-            if (vp.muted) {
-                if (ticks > 0) {
-                    vp.muted = false;
-                    vp.amplitude = adjustLinear01(0.0f, ticks, rate, 0.0f, 1.0f);
-                }
-            } else {
-                vp.amplitude = adjustLinear01(vp.amplitude, ticks, rate, 0.0f, 1.0f);
-            }
-            hud_.knobBank = KnobBankMode::Amplitude;
+            applyEditKnobDelta(hud_.editTarget, state_.voices[kIdx], ticks, rate);
+            hud_.knobBank = knobBankForEditTarget(hud_.editTarget);
             hud_.focusedKnob = kIdx;
             hud_.focusedVoice = kIdx;
-            latchedHudMode_ = HudMode::Amplitude;
-            hud_.mode = HudMode::Amplitude;
+            latchedHudMode_ = hudModeForEditTarget(hud_.editTarget);
+            hud_.mode = latchedHudMode_;
             env_.latchPage();
         } else {
             adjustVoiceFrequency(state_.voices[kIdx], ticks, rate);
@@ -415,7 +410,8 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
                 hud_.focusedVoice = static_cast<uint8_t>(hud_.lfoVoiceFocus & 3u);
                 latchedHudMode_ = HudMode::VoiceLfo;
             } else {
-                latchedHudMode_ = isEdit ? HudMode::Amplitude : HudMode::GlobalConfig;
+                latchedHudMode_ =
+                    isEdit ? hudModeForEditTarget(hud_.editTarget) : HudMode::GlobalConfig;
             }
             latchedButton_ = button;
             hud_.lastButton = button;
@@ -553,8 +549,19 @@ void RuidoController::onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexce
 
     if (whiteKeyIndex < 4u) {
         if (pressed && !wasPressed) {
-            state_.voices[whiteKeyIndex].muted = !state_.voices[whiteKeyIndex].muted;
-            triggerHud(HudMode::VoiceGate, whiteKeyIndex, whiteKeyIndex);
+            VoiceParams& vp = state_.voices[whiteKeyIndex];
+            const bool lfoAmpActive =
+                (vp.lfoTarget == LfoTarget::Amplitude) && (vp.lfoDepth > kSilentAmpThreshold);
+            if (!vp.muted && vp.amplitude <= kSilentAmpThreshold && !lfoAmpActive) {
+                vp.amplitude = kDefaultVoiceAmp;
+            } else {
+                vp.muted = !vp.muted;
+                if (!vp.muted && vp.amplitude <= 0.01f && !lfoAmpActive) {
+                    vp.amplitude = kDefaultVoiceAmp;
+                }
+            }
+            triggerHud(HudMode::VoiceGate, whiteKeyIndex,
+                       isPerOscKnobBank(hud_.knobBank) ? whiteKeyIndex : kNoFocusedKnob);
             publishState();
         }
         return;
