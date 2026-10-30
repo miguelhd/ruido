@@ -344,7 +344,7 @@ void testButtonsOctavesKeybedAndPressure() {
 }
 
 void testHudEnvelopeAndVaribrightLeds() {
-    std::printf("[Test 5] Soft S-Curve HUD Envelope & 41-LED Varibright Engine...\n");
+    std::printf("[Test 5] Soft S-Curve HUD Envelope & 42-Channel Hardware LED Engine...\n");
     ruido::RuidoController ctrl;
     ruido::EngineTelemetry tel{};
 
@@ -528,6 +528,34 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op6)], 0.25f));
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Glo)], 0.25f));
     CHECK(near(ctrl.leds().whiteKeyLeds[0], 0.60f + 0.40f * ctrl.state().voices[0].amplitude));
+
+    // Verify dual-channel PLAY/STOP split cap:
+    // - AUDIO OUTPUT = ON: PLAY (Green) = 1.0, STOP (Red/Orange) = 0.0
+    // - Mid-transition (~32 ms): both channels > 0 (smooth Yellow/Amber optical crossfade)
+    // - AUDIO OUTPUT = OFF settled: PLAY (Green) = 0.0, STOP (Red/Orange) breathing [0.15, 0.70]
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::PlayStop)], 1.0f));
+    CHECK(near(ctrl.leds().stopLed, 0.0f));
+
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    ctrl.tick(0.032f, tel);
+    CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::PlayStop)] > 0.20f &&
+          ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::PlayStop)] < 0.85f);
+    CHECK(ctrl.leds().stopLed > 0.02f);
+
+    for (int i = 0; i < 20; ++i) {
+        ctrl.tick(0.050f, tel);
+    }
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::PlayStop)], 0.0f));
+    CHECK(ctrl.leds().stopLed >= 0.149f && ctrl.leds().stopLed <= 0.701f);
+
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    for (int i = 0; i < 20; ++i) {
+        ctrl.tick(0.050f, tel);
+    }
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::PlayStop)], 1.0f));
+    CHECK(near(ctrl.leds().stopLed, 0.0f));
 }
 
 void testMonochromeCrtScanlineAndUncompressedWave() {

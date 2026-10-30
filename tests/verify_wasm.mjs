@@ -1,7 +1,7 @@
 // Automated Node V8 verification for `platforms/sim/web/ruido.wasm`:
 //  1. Zero unexpected imports (freestanding linear memory + stack + indirect table only).
 //  2. Finite, non-silent stereo DSP synthesis & scope ring streaming at 44,118 Hz.
-//  3. Two-hand controller + 41-channel varibright LED + 240x16 RGB565->RGBA8888 rendering.
+//  3. Two-hand controller + 42-channel hardware LED + 240x16 RGB565->RGBA8888 rendering.
 
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
@@ -88,7 +88,7 @@ for (let i = 0; i < 22; i++) {
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.2);
 
-// Verify 41 varibright LEDs (unassigned buttons 0.0, SEL === White Keys 5-8 in both modes)
+// Verify 42 hardware LED channels (unassigned buttons 0.0, SEL === White Keys 5-8, Green PLAY / Red-Orange STOP)
 const ledsIdx = ex.wasm_ui_get_leds_ptr() >> 2;
 assert.ok(Math.abs(f32[ledsIdx + 0] - 1.0) < 1e-4);   // OP1 held -> 100%
 assert.ok(Math.abs(f32[ledsIdx + 4] - 0.15) < 1e-4);  // OP5 Global Filter -> 15%
@@ -98,6 +98,9 @@ assert.ok(Math.abs(f32[ledsIdx + 6] - 0.0) < 1e-6);   // PIT black key -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 10] - 0.0) < 1e-6);  // 11th black key -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 27 + 2] - 0.0) < 1e-6); // FX button -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 27 + 5] - 0.0) < 1e-6); // LFO button -> 0% when closed & depth==0
+assert.ok(Math.abs(f32[ledsIdx + 27 + 12] - 1.0) < 1e-4); // PLAY Green LED -> 100% while running
+assert.ok(Math.abs(f32[ledsIdx + 27 + 13] - 0.0) < 1e-6); // REC Red LED -> 0%
+assert.ok(Math.abs(f32[ledsIdx + 41] - 0.0) < 1e-6);      // STOP Red/Orange LED -> 0% while running
 assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.24) < 1e-4); // SEL Filter/LPG mode -> 24%
 for (let i = 0; i < 4; i++) {
   assert.equal(f32[ledsIdx + 11 + 4 + i], f32[ledsIdx + 27 + 3]); // Keys 5-8 === SEL
@@ -169,6 +172,15 @@ ex.wasm_ui_button(8, 0);
 ex.wasm_ui_tick_and_render(0.016);
 assert.equal(f32[summaryIdx + 39], 0.0);
 assert.ok(f32[ledsIdx + 27 + 5] >= 0.11 && f32[ledsIdx + 27 + 5] <= 0.61);
+
+// Toggle PLAY/STOP -> AUDIO OUTPUT OFF: PLAY (Green) -> 0%, STOP (Red/Orange) breathes [15%, 70%]
+ex.wasm_ui_button(12, 1);
+ex.wasm_ui_button(12, 0);
+for (let i = 0; i < 12; i++) {
+  ex.wasm_ui_tick_and_render(0.1);
+}
+assert.ok(Math.abs(f32[ledsIdx + 27 + 12] - 0.0) < 1e-4);
+assert.ok(f32[ledsIdx + 41] >= 0.149 && f32[ledsIdx + 41] <= 0.701);
 
 console.log(
   `[PASS] Wasm V8 verification (${(bytes.length / 1024).toFixed(1)} KB wasm, ${shades.size} neutral B&W shades).`

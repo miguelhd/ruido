@@ -13,7 +13,7 @@
 | **Rotary Controls** | **1x `MASTER` analog pot + 7x endless encoders** | Left: `SELECT`, `PRESETS`, `ALGORITHM` (no push switches); Right: `KNOB1`-`KNOB4` |
 | **Buttons & Keys** | **14 tactile buttons + 27 silicone keys (`F3-G5`)** | Left `OCT-`/`OCT+`, right `2x6` button matrix, 11 labeled black keys + 16 white keys |
 | **Keybed Pressure** | **Carbon-pill `SARADC` resistance sensing** | Matrix rows tied to `AC791N` SARADC pins (`PA7`/`PA8` technique) yield continuous per-key analog pressure without hardware mods |
-| **LEDs** | **27 key LEDs + 14 button LEDs** | Monochrome white; per-LED software PWM brightness |
+| **LEDs** | **42 physical LED channels (27 keys + 14 buttons)** | `2 × 74HC595` software-PWM matrix: 27 white key LEDs, 12 white button LEDs (`OCT-/+`, `FX`..`SEQ`), dual-channel **Green `PLAY` + Red/Orange `STOP`** under `PLAY/STOP` (mixes to Yellow), and **Red** under `REC` |
 | **Connectivity** | **USB-C** (MIDI + Audio + SysEx OTA), **BLE MIDI**, **3.5mm TRS MIDI IN** | Protected USB-MIDI SysEx bootloader allows safe `.fwsc` flashing & stock recovery |
 
 > **Electrical Routing Note for Pedals & Eurorack:** Because the 3.5mm output is a **stereo TRS** headphone/line driver, users should use a **3.5mm TRS stereo breakout** (never a mono TS patch cable directly, which shorts the Right ring to ground). Output is AC-coupled (~1-2 Vpp), ideal for pedals and suited for Eurorack via an input boost/VCA module.
@@ -30,7 +30,7 @@ Ruido pins real-time DSP and UI/control scanning to separate `pi32v2` cores comm
 │                                             │ ─────────────────────> │                                             │
 │ • GPIO + SARADC Key Matrix (Gate + Pressure)│                        │ • 44.118 kHz Modulation: 4x Analog Voice LFO│
 │ • 7x Encoder Quadrature + 3-Gear Rate Scale │    Lock-Free SPSC +    │ • 4x Oversampled Domain (176,472 Hz):       │
-│ • Varibright White LED PWM Refresh          │  LFO/Gate Telemetry    │   - 4x Schmitt PolyBLEP Oscillators         │
+│ • 42-Channel Hardware LED PWM Refresh       │  LFO/Gate Telemetry    │   - 4x Schmitt PolyBLEP Oscillators         │
 │ • 240x16 Ping-Pong Scanline Strip Renderer  │ <───────────────────── │   - Shared Power-Rail Coupling (`ALGORITHM`)│
 │ • SPI DMA Display Transfer (~45-55 FPS)     │                        │   - 4x Series ZDF MS-20 (HPF -> LPF)        │
 │ • Snapshot Rubber-Band / Slew & Flash NVS   │                        │   - Clickless Mute/Pressure + Sin/Cos Pan   │

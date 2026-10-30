@@ -83,11 +83,11 @@ Reference faceplate photo: [`docs/assets/fm1-front-panel.png`](assets/fm1-front-
 
 ### 3.3 Right-Panel `2x6` Function Buttons (Latching Toggles & Focused Pages)
 - **`SEL`:** **Pressure Pad Mode Select (`PRESSURE TARGET`)** — toggles **White Keys 5–8** between **MS-20 Filter Accent / Vactrol LPG** (default) and **Pitch Bend**. To connect `SEL` visually to `Keys 5-8` on monochrome white LEDs without ever looking "off", **`SEL` and all four `Keys 5-8` share identical PWM brightness in both modes** (`24%` soft glow in Filter/LPG mode <-> `72%` bright glow in Pitch Bend mode, stepping in unison on tap, plus `SEL` flaring toward `100%` alongside any pressed pad).
-- **`PLAY/STOP`:** **Audio Output** toggle (`ON` / `OFF`, clickless fade to silence and back for safe cable patching).
+- **`PLAY/STOP`:** **Audio Output** toggle (`ON` / `OFF`, clickless fade to silence and back for safe cable patching). Drives the hardware's dual-channel `PLAY/STOP` LEDs: steady **Green** (`PLAY` LED) when `ON`, breathing **Red/Amber-Orange** (`STOP` LED) when `OFF`, crossfading smoothly through warm **Yellow/Amber**.
 - **`HOME`:** **Exit Page / Clear HUD to Pure Scope** (tap dismisses any active overlay immediately).
 - **`SAVE`:** Tap `SAVE` (`STORE SNAPSHOT` / `TAP KEY 9-16`) then tap a Snapshot white key (`9-16`) to store the current patch.
 - **`LFO`:** Opens/closes the **Per-Voice LFO Page** (see §3.4 below); LED glows at `100%` while the page is open, breathes continuously (`12%–60%`) with active LFO modulation when closed, and stays `0%` unlit when all 4 LFOs are at `0%` depth.
-- **Unassigned / Reserved Switches (`FX`, `ENV`, `EDIT`, `GLO` under knobs, `ARP`, `SEQ`, `REC`):** LEDs stay **`0%` completely unlit** at rest while unassigned (`GLO` under the knobs is reserved for a future Configuration Menu where `Stereo / Dual Mono` routing will live); pressing any unassigned switch displays its silkscreen name + `UNASSIGNED` in the HUD header so every control confirms hardware contact.
+- **Unassigned / Reserved Switches (`FX`, `ENV`, `EDIT`, `GLO` under knobs, `ARP`, `SEQ`, `REC`):** LEDs stay **`0%` completely unlit** at rest while unassigned (`REC` is physically a single-color **Red** LED on the FM-1 PCB; `GLO` under the knobs is reserved for a future Configuration Menu where `Stereo / Dual Mono` routing will live); pressing any unassigned switch displays its silkscreen name + `UNASSIGNED` in the HUD header so every control confirms hardware contact.
 
 ### 3.4 Per-Voice LFO Page (`LFO OSC 1..4` / `LFO GLOBAL` — `ADR-022`)
 Each of the 4 voices (`Osc 1..4`) owns **1 dedicated LFO** matching its dedicated MS-20 filter, VCA, and panner:

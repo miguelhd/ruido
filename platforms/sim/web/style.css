@@ -381,10 +381,57 @@ body {
   background: #131313;
 }
 
+/* Hardware-accurate PLAY/STOP dual-channel LED (Green PLAY + Red/Orange STOP -> Yellow mix) */
 .play-stop-btn {
+  --led-play: 1;
+  --led-stop: 0;
+  --ps-r: 46;
+  --ps-g: 232;
+  --ps-b: 110;
+  --ps-color: rgb(46, 232, 110);
   font-size: 0.60rem;
   line-height: 1.05;
   gap: 2px;
+  border-color: color-mix(in srgb, #2a2a2a calc((1 - var(--led) * 0.58) * 100%), var(--ps-color) calc(var(--led) * 58%));
+  color: color-mix(in srgb, #6e6e6e calc((1 - var(--led)) * 100%), var(--ps-color) calc(var(--led) * 100%));
+  text-shadow: none;
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.72),
+    inset 0 1px 1px rgba(var(--ps-r), var(--ps-g), var(--ps-b), calc(0.06 + var(--led) * 0.24));
+}
+
+.play-stop-btn::before {
+  background: color-mix(in srgb, #2e2e2e calc((1 - var(--led)) * 100%), var(--ps-color) calc(var(--led) * 100%));
+  box-shadow:
+    0 0 calc(var(--led) * 12px) rgba(var(--ps-r), var(--ps-g), var(--ps-b), calc(var(--led) * 0.88)),
+    0 0 calc(var(--led) * 4px) rgba(var(--ps-r), var(--ps-g), var(--ps-b), var(--led));
+}
+
+.play-stop-btn .play-label {
+  color: color-mix(in srgb, #6e6e6e calc((1 - var(--led-play)) * 100%), #57ff92 calc(var(--led-play) * 100%));
+  text-shadow: 0 0 calc(var(--led-play) * 9px) rgba(58, 240, 120, calc(var(--led-play) * 0.82));
+}
+
+.play-stop-btn .stop-label {
+  color: color-mix(in srgb, #6e6e6e calc((1 - var(--led-stop)) * 100%), #ff6a3d calc(var(--led-stop) * 100%));
+  text-shadow: 0 0 calc(var(--led-stop) * 9px) rgba(255, 86, 42, calc(var(--led-stop) * 0.84));
+}
+
+/* Hardware-accurate REC single-channel Red LED */
+.rec-btn {
+  border-color: color-mix(in srgb, #2a2a2a calc((1 - var(--led) * 0.62) * 100%), #ff4538 calc(var(--led) * 62%));
+  color: color-mix(in srgb, #6e6e6e calc((1 - var(--led)) * 100%), #ff5a4d calc(var(--led) * 100%));
+  text-shadow: 0 0 calc(var(--led) * 9px) rgba(255, 62, 48, calc(var(--led) * 0.82));
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.72),
+    inset 0 1px 1px rgba(255, 90, 77, calc(0.06 + var(--led) * 0.24));
+}
+
+.rec-btn::before {
+  background: color-mix(in srgb, #2e2e2e calc((1 - var(--led)) * 100%), #ff4538 calc(var(--led) * 100%));
+  box-shadow:
+    0 0 calc(var(--led) * 12px) rgba(255, 59, 48, calc(var(--led) * 0.88)),
+    0 0 calc(var(--led) * 4px) rgba(255, 92, 77, var(--led));
 }
 
 .btn-divider {

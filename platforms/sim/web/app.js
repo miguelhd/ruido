@@ -906,7 +906,9 @@ function startDisplayAndLedLoop() {
     uiWasm.wasm_ui_tick_and_render(dtSec);
     ctx.putImageData(imageData, 0, 0);
 
-    // Refresh all 41 monochrome white software-PWM LED levels
+    // Refresh all 42 hardware software-PWM LED channels:
+    // [0..10] 11 white black keys, [11..26] 16 white keys, [27..38] 12 white buttons,
+    // [39] Green PLAY LED, [40] Red REC LED, [41] Red/Amber-Orange STOP LED
     const ledsBase = uiPtrs.leds;
     for (let i = 0; i < 11; i++) {
       if (blackKeyEls[i]) {
@@ -919,9 +921,29 @@ function startDisplayAndLedLoop() {
       }
     }
     for (let i = 0; i < 14; i++) {
-      if (buttonEls[i]) {
+      if (buttonEls[i] && i !== 12) {
         buttonEls[i].style.setProperty('--led', uiF32[ledsBase + 27 + i].toFixed(3));
       }
+    }
+    const playStopEl = buttonEls[12];
+    if (playStopEl) {
+      const playG = clamp01(uiF32[ledsBase + 27 + 12]);
+      const stopR = clamp01(uiF32[ledsBase + 41]);
+      const rawR = 46 * playG + 255 * stopR;
+      const rawG = 232 * playG + 82 * stopR;
+      const rawB = 110 * playG + 34 * stopR;
+      const peak = Math.max(rawR, rawG, rawB, 1e-4);
+      const nr = Math.round((rawR / peak) * 255);
+      const ng = Math.round((rawG / peak) * 255);
+      const nb = Math.round((rawB / peak) * 255);
+      const level = clamp01(Math.max(playG, stopR, (playG + stopR) * 0.75));
+      playStopEl.style.setProperty('--led', level.toFixed(3));
+      playStopEl.style.setProperty('--led-play', playG.toFixed(3));
+      playStopEl.style.setProperty('--led-stop', stopR.toFixed(3));
+      playStopEl.style.setProperty('--ps-r', String(nr));
+      playStopEl.style.setProperty('--ps-g', String(ng));
+      playStopEl.style.setProperty('--ps-b', String(nb));
+      playStopEl.style.setProperty('--ps-color', `rgb(${nr}, ${ng}, ${nb})`);
     }
 
     requestAnimationFrame(frame);

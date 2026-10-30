@@ -404,7 +404,7 @@ const float* wasm_ui_get_leds_ptr() {
     if (gCtrl == nullptr) {
         return nullptr;
     }
-    return gCtrl->leds().blackKeyLeds.data();
+    return reinterpret_cast<const float*>(&gCtrl->leds());
 }
 
 RUIDO_EXPORT("wasm_ui_get_control_ptr")
