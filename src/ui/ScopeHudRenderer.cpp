@@ -2509,6 +2509,8 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
             break;
         case HudMode::VoiceFrequency: {
             appendStr(leftMain, 0u, sizeof(leftMain), "FREQUENCY");
+            size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
+            appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
             const float pitchMul = computeVoicePitchRatio(
                 frameControl_.voicePressure[v],
                 frameControl_.global.pitchPressureMode ? 1.0f : 0.0f);
@@ -2516,10 +2518,7 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
                 (focVp.lfoTarget == LfoTarget::Pitch) ?
                     applyLfoPitchHz(focVp.frequencyHz, focVp.lfoDepth, frameLfoOutput_[v]) :
                     focVp.frequencyHz;
-            size_t p = appendStr(rightText, 0u, sizeof(rightText), "OSC ");
-            p = appendUInt(rightText, p, sizeof(rightText), static_cast<uint32_t>(v + 1u));
-            p = appendStr(rightText, p, sizeof(rightText), "  ");
-            appendPrecisionHz(rightText, p, sizeof(rightText), liveHz * pitchMul);
+            appendPrecisionHz(rightText, 0u, sizeof(rightText), liveHz * pitchMul);
             break;
         }
         case HudMode::Amplitude:
@@ -2618,7 +2617,7 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
         case HudMode::AudioOutput:
             appendStr(leftMain, 0u, sizeof(leftMain), "AUDIO OUTPUT");
             appendStr(rightText, 0u, sizeof(rightText),
-                      frameControl_.global.masterRun ? "ACTIVE" : "MUTED");
+                      frameControl_.global.masterRun ? "ON" : "OFF");
             break;
         case HudMode::SaveArmed:
             appendStr(leftMain, 0u, sizeof(leftMain), "STORE SNAPSHOT");
@@ -2678,9 +2677,9 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
 
         // Universal non-empty right-side fallback so the top-right header area is never blank
         if (frameHud_.mode != HudMode::None && !showHeaderBar && rightText[0] == '\0') {
-            const char* defStatus = !frameControl_.global.masterRun   ? "AUDIO MUTED" :
+            const char* defStatus = !frameControl_.global.masterRun   ? "AUDIO OFF" :
                                     frameControl_.global.monoCollapse ? "DUAL MONO" :
-                                                                        "STEREO OUT";
+                                                                        "STEREO";
             appendStr(rightText, 0u, sizeof(rightText), defStatus);
         }
 
