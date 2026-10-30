@@ -36,31 +36,14 @@ inline constexpr float smoothstep01(float t) noexcept {
     return c * c * (3.0f - 2.0f * c);
 }
 
-// C1-continuous algebraic tanh approximation on [-3, 3] with exact analytical derivative:
-//   f(x)  = x*(27 + x^2) / (27 + 9*x^2)  for |x| < 3,  sgn(x) for |x| >= 3
-//   f'(x) = ((9 - x^2) / (9 + 3*x^2))^2  for |x| < 3,  0      for |x| >= 3
-// Guarantees 0 <= f'(x) <= 1 everywhere, C1 smooth at |x| = 3, zero transcendentals.
+// Value + exact analytical derivative pair for Newton-Raphson nonlinear circuit solvers.
 struct SatResult {
     float value;
     float deriv;
 };
 
-inline SatResult padeClipWithDeriv(float x) noexcept {
-    if (x >= 3.0f) {
-        return {1.0f, 0.0f};
-    }
-    if (x <= -3.0f) {
-        return {-1.0f, 0.0f};
-    }
-    const float x2 = x * x;
-    // Share a single reciprocal across both value and exact derivative:
-    //   (9 - x^2) / (9 + 3*x^2) == (27 - 3*x^2) / (27 + 9*x^2)
-    const float invDenom = 1.0f / (27.0f + 9.0f * x2);
-    const float val = (x * (27.0f + x2)) * invDenom;
-    const float ratio = (27.0f - 3.0f * x2) * invDenom;
-    return {val, ratio * ratio};
-}
-
+// C1-continuous algebraic tanh approximation on [-3, 3] (zero transcendentals):
+//   f(x) = x*(27 + x^2) / (27 + 9*x^2)  for |x| < 3,  sgn(x) for |x| >= 3
 inline float padeClip(float x) noexcept {
     if (x >= 3.0f) {
         return 1.0f;
@@ -70,24 +53,6 @@ inline float padeClip(float x) noexcept {
     }
     const float x2 = x * x;
     return (x * (27.0f + x2)) / (27.0f + 9.0f * x2);
-}
-
-// Asymmetric Korg35 silicon diode pair clipper:
-// Positive knee saturates at +vPos (~0.92), negative knee at -vNeg (~1.08).
-// Preserves C2 smoothness across x = 0 (phi(0) = 0, phi'(0) = 1) so small-signal
-// Butterworth passband is 100% linear while hot resonance generates even + odd harmonics.
-inline SatResult korg35DiodeClip(float x) noexcept {
-    constexpr float kPosLimit = 0.92f;
-    constexpr float kInvPosLimit = 1.0f / kPosLimit;
-    constexpr float kNegLimit = 1.08f;
-    constexpr float kInvNegLimit = 1.0f / kNegLimit;
-
-    if (x >= 0.0f) {
-        const SatResult r = padeClipWithDeriv(x * kInvPosLimit);
-        return {kPosLimit * r.value, r.deriv};
-    }
-    const SatResult r = padeClipWithDeriv(x * kInvNegLimit);
-    return {kNegLimit * r.value, r.deriv};
 }
 
 // High-headroom master bus analog transformer / op-amp soft ceiling:

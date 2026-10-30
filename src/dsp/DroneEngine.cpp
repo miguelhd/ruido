@@ -33,6 +33,7 @@ void DroneEngine::init(float baseSampleRate) noexcept {
     }
     decimator_.reset();
     coeffCache_ = {};
+    filterCoeffs_ = {};
     prevOscGateHigh_ = {1.0f, 1.0f, 1.0f, 1.0f};
     voiceEdgeDelayLines_ = {0u, 0u, 0u, 0u};
     voiceScopeDelay_ = {};
@@ -77,6 +78,7 @@ void DroneEngine::reset() noexcept {
     }
     decimator_.reset();
     coeffCache_ = {};
+    filterCoeffs_ = {};
     prevOscGateHigh_ = {1.0f, 1.0f, 1.0f, 1.0f};
     voiceEdgeDelayLines_ = {0u, 0u, 0u, 0u};
     voiceScopeDelay_ = {};
@@ -224,9 +226,9 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
                 cache.hpRes = mod.hpResonance;
                 cache.lpHz = mod.lpCutoffHz;
                 cache.lpRes = mod.lpResonance;
-                cache.filter = Ms20DualFilter::prepareCoeffs(mod.hpCutoffHz, mod.hpResonance,
-                                                             mod.lpCutoffHz, mod.lpResonance,
-                                                             invOversampledRate_);
+                filterCoeffs_[i] = Ms20DualFilter::prepareCoeffs(
+                    mod.hpCutoffHz, mod.hpResonance, mod.lpCutoffHz, mod.lpResonance,
+                    invOversampledRate_);
             }
 
             const float modAmp = applyLfoAmplitude(
@@ -246,7 +248,8 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         }
 
         // Run unified 4x oversampled (176.472 kHz) synthesis, rail coupling, ZDF filters & bus sag
-        std::array<StereoFrame, 4> osStereo{};
+        std::array<std::array<float, kOversampleFactor>, kNumOscillators> voiceSub{};
+        std::array<StereoFrame, kOversampleFactor> osStereo{};
         std::array<float, kNumOscillators> voiceScopeAccum{0.0f, 0.0f, 0.0f, 0.0f};
         uint8_t voiceRisingInFrame = 0u;
 
@@ -262,30 +265,32 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             }
             prevOscGateHigh_ = oscOut.gateHigh;
             lastGateHigh = oscOut.gateHigh;
+            for (size_t i = 0u; i < kNumOscillators; ++i) {
+                voiceSub[i][sub] = oscOut.samples[i];
+            }
+        }
 
-            if (exactMono) {
-                float sumMono = 0.0f;
-                for (size_t i = 0u; i < kNumOscillators; ++i) {
-                    const float filtered = filters_[i].processPrepared(oscOut.samples[i],
-                                                                       coeffCache_[i].filter);
-                    voiceScopeAccum[i] += filtered;
-                    sumMono += filtered * gainL[i];
-                }
+        Ms20DualFilter::processQuadBank4x(filters_, voiceSub, filterCoeffs_);
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            voiceScopeAccum[i] =
+                voiceSub[i][0] + voiceSub[i][1] + voiceSub[i][2] + voiceSub[i][3];
+        }
+
+        if (exactMono) {
+            for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
+                const float sumMono = voiceSub[0][sub] * gainL[0] + voiceSub[1][sub] * gainL[1] +
+                                      voiceSub[2][sub] * gainL[2] + voiceSub[3][sub] * gainL[3];
                 const float busMono = masterBusSoftClip(sumMono) * finalScale;
                 osStereo[sub] = {busMono, busMono};
-            } else {
-                float sumL = 0.0f;
-                float sumR = 0.0f;
-                for (size_t i = 0u; i < kNumOscillators; ++i) {
-                    const float filtered = filters_[i].processPrepared(oscOut.samples[i],
-                                                                       coeffCache_[i].filter);
-                    voiceScopeAccum[i] += filtered;
-                    sumL += filtered * gainL[i];
-                    sumR += filtered * gainR[i];
-                }
-                const float busL = masterBusSoftClip(sumL) * finalScale;
-                const float busR = masterBusSoftClip(sumR) * finalScale;
-                osStereo[sub] = {busL, busR};
+            }
+        } else {
+            for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
+                const float sumL = voiceSub[0][sub] * gainL[0] + voiceSub[1][sub] * gainL[1] +
+                                   voiceSub[2][sub] * gainL[2] + voiceSub[3][sub] * gainL[3];
+                const float sumR = voiceSub[0][sub] * gainR[0] + voiceSub[1][sub] * gainR[1] +
+                                   voiceSub[2][sub] * gainR[2] + voiceSub[3][sub] * gainR[3];
+                osStereo[sub] = {masterBusSoftClip(sumL) * finalScale,
+                                 masterBusSoftClip(sumR) * finalScale};
             }
         }
 

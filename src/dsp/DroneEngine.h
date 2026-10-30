@@ -71,7 +71,6 @@ private:
         float hpRes = -1.0f;
         float lpHz = -1.0f;
         float lpRes = -1.0f;
-        Ms20DualFilter::Coeffs filter{};
         float panEff = -99.0f;
         float panL = 0.70710678f;
         float panR = 0.70710678f;
@@ -90,6 +89,7 @@ private:
     SchmittOscillatorBank oscBank_{};
     VoiceLfoBank lfoBank_{};
     std::array<Ms20DualFilter, kNumOscillators> filters_{};
+    std::array<Ms20DualFilter::Coeffs, kNumOscillators> filterCoeffs_{};
     StereoHalfBandDecimator4x decimator_{};
 
     std::array<VoiceSmoothers, kNumOscillators> voiceSmoothers_{};

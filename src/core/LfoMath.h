@@ -186,7 +186,7 @@ inline float applyLfoCutoffHz(float baseHz, float depth01, float lfoBipolar) noe
     return clampf(fastExp2(modOct), kFilterCutoffMinHz, kFilterCutoffMaxHz);
 }
 
-// Headroom-aware Korg35 resonance modulation (shared by LP RES and HP RES).
+// Headroom-aware MS-20 Rev 2 OTA resonance modulation (shared by LP RES and HP RES).
 inline float applyLfoResonance(float baseRes, float depth01, float lfoBipolar) noexcept {
     const float d = clampf(depth01, 0.0f, 1.0f);
     if (d <= 0.0f) {

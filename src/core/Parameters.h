@@ -49,7 +49,7 @@ struct GlobalParams {
 
 // Effective filter + VCA parameters produced by White Keys 5-8 continuous pressure:
 //  - Filter/LPG mode (pitchMode = 0): zero pitch shift; active voices sweep MS-20 HPF/LPF Accent
-//    + independent Korg35 HP/LP Resonance; muted voices swell through a Vactrol LPG.
+//    + independent Rev 2 OTA HP/LP Resonance; muted voices swell through a Vactrol LPG.
 //  - Pitch Bend mode (pitchMode = 1): filter stays at base settings while pressure bends pitch
 //    upward (+6 semitones at full pressure) and swells muted voices open via the VCA gate.
 struct ModulatedFilterParams {
@@ -84,7 +84,7 @@ inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpRes
         return {hpBase, hpResBase, lpBase, lpResBase, effGate};
     }
 
-    // 1. Active Voice: MS-20 Filter Accent + Independent Korg35 HP/LP Resonance
+    // 1. Active Voice: MS-20 Filter Accent + Independent Rev 2 OTA HP/LP Resonance
     // log2(2500 Hz) = 11.287712f; 3.0-octave transition up to 20,000 Hz
     const float lpOpenness = smoothstep01((fastLog2(lpBase) - 11.287712f) * (1.0f / 3.0f));
     const float lpOctDelta = (4.0f * (1.0f - lpOpenness) - 1.35f * lpOpenness) * fp;

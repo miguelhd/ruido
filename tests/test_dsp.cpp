@@ -395,7 +395,7 @@ void testSpectralAliasSuppression() {
 
 // 4. Parked MS-20 filter passband flatness, Smart-Park resonance & self-oscillation tracking
 void testMs20FilterPassbandAndSmartPark() {
-    std::printf("[Test 4] MS-20 Korg35 ZDF parked flatness, Smart-Park & self-oscillation...\n");
+    std::printf("[Test 4] MS-20 Rev 2 OTA ZDF parked flatness, Smart-Park & self-oscillation...\n");
     ruido::Ms20DualFilter filter;
 
     constexpr std::array<float, 4> kProbeFreqs = {120.0f, 440.0f, 1000.0f, 4000.0f};
@@ -1417,7 +1417,7 @@ void testPerVoiceAnalogLfoModels() {
                     mn, mx);
     }
 
-    // (c) LpResonance & (d) HpResonance: sweep 0% resonance up into singing Korg35 self-oscillation
+    // (c) LpResonance & (d) HpResonance: sweep 0% resonance up into singing MS-20 self-oscillation
     {
         auto cfgLp = base;
         cfgLp.voices[0].lpCutoffHz = 900.0f;
@@ -1433,7 +1433,7 @@ void testPerVoiceAnalogLfoModels() {
         double lpDiffRatio = 0.0;
         measureMinMaxBlockRms(cfgLp, modLpMin, modLpMax, domL, domR, &lpDiffRatio);
         EXPECT_TRUE(modLpMax > baseLpMax * 1.24 && lpDiffRatio > 1.80,
-                    "LpResonance LFO failed Korg35 LPF peak (base=%.3f, mod=%.3f, hf=%.2fx)",
+                    "LpResonance LFO failed MS-20 LPF peak (base=%.3f, mod=%.3f, hf=%.2fx)",
                     baseLpMax, modLpMax, lpDiffRatio);
 
         auto cfgHp = base;
@@ -1449,7 +1449,7 @@ void testPerVoiceAnalogLfoModels() {
         double modHpMax = 0.0;
         measureMinMaxBlockRms(cfgHp, modHpMin, modHpMax, domL, domR);
         EXPECT_TRUE(modHpMax > baseHpMax * 1.30,
-                    "HpResonance LFO failed to excite Korg35 HPF peak (base=%.3f, mod=%.3f)",
+                    "HpResonance LFO failed to excite MS-20 HPF peak (base=%.3f, mod=%.3f)",
                     baseHpMax, modHpMax);
     }
 
@@ -1517,6 +1517,210 @@ void testPerVoiceAnalogLfoModels() {
     }
 }
 
+// 12. MS-20 Rev 2 (KLM-307 LM13600 OTA Sallen-Key) 0%-RES warmth, DC rejection & 4-lane parity
+void testRev2OtaSallenKeyPhysics() {
+    std::printf(
+        "[Test 12] MS-20 Rev 2 LM13600 OTA 0%%-RES warmth, capacitive DC & SIMD parity...\n");
+
+    // (a) 0%-Resonance LM13600 OTA Harmonic Warmth & Alias Floor (32768-pt Blackman-Harris FFT):
+    // Drive a pure 300 Hz full-scale sine through engaged LPF (450 Hz, RES = 0.0) at 4x OS and
+    // verify genuine 2nd + 3rd harmonic OTA saturation with < -85 dBc ultrasonic alias floor.
+    {
+        constexpr size_t kFftSize = 32768u;
+        static std::array<double, kFftSize> fftRe{};
+        static std::array<double, kFftSize> fftIm{};
+
+        ruido::Ms20DualFilter filter;
+        ruido::StereoHalfBandDecimator4x decim;
+        filter.reset();
+        decim.reset();
+        const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(
+            20.0f, 0.0f, 450.0f, 0.0f, ruido::kInvOversampledRate);
+
+        constexpr double kTestHz = 300.0;
+        size_t osStep = 0u;
+        std::array<ruido::StereoFrame, 4> in4x{};
+
+        for (size_t w = 0u; w < 4096u; ++w) {
+            for (size_t s = 0u; s < 4u; ++s) {
+                const float x = static_cast<float>(
+                    std::sin(2.0 * 3.14159265358979323846 * kTestHz *
+                             static_cast<double>(osStep++) *
+                             static_cast<double>(ruido::kInvOversampledRate)));
+                const float y = filter.processPrepared(x, coeffs);
+                in4x[s] = {y, y};
+            }
+            (void)decim.process4x(in4x);
+        }
+
+        for (size_t n = 0u; n < kFftSize; ++n) {
+            for (size_t s = 0u; s < 4u; ++s) {
+                const float x = static_cast<float>(
+                    std::sin(2.0 * 3.14159265358979323846 * kTestHz *
+                             static_cast<double>(osStep++) *
+                             static_cast<double>(ruido::kInvOversampledRate)));
+                const float y = filter.processPrepared(x, coeffs);
+                in4x[s] = {y, y};
+            }
+            const ruido::StereoFrame dec = decim.process4x(in4x);
+            const double ph = (2.0 * 3.14159265358979323846 * static_cast<double>(n)) /
+                              static_cast<double>(kFftSize);
+            const double win = 0.35875 - 0.48829 * std::cos(ph) + 0.14128 * std::cos(2.0 * ph) -
+                               0.01168 * std::cos(3.0 * ph);
+            fftRe[n] = static_cast<double>(dec.left) * win;
+            fftIm[n] = 0.0;
+        }
+
+        radix2Fft(fftRe.data(), fftIm.data(), kFftSize);
+        const double binHz =
+            static_cast<double>(ruido::kBaseSampleRate) / static_cast<double>(kFftSize);
+
+        auto peakNearHz = [&](double targetHz) -> double {
+            const size_t center = static_cast<size_t>(std::round(targetHz / binHz));
+            double pk = 0.0;
+            for (size_t b = (center > 4u ? center - 4u : 1u); b <= center + 4u; ++b) {
+                pk = std::max(pk, std::hypot(fftRe[b], fftIm[b]));
+            }
+            return pk;
+        };
+
+        const double h1 = peakNearHz(kTestHz);
+        const double h2Db = 20.0 * std::log10(std::max(peakNearHz(2.0 * kTestHz) / h1, 1.0e-15));
+        const double h3Db = 20.0 * std::log10(std::max(peakNearHz(3.0 * kTestHz) / h1, 1.0e-15));
+
+        double worstAliasDb = -200.0;
+        const size_t minBin = static_cast<size_t>(std::ceil(60.0 / binHz));
+        const size_t maxBin = static_cast<size_t>(std::floor(20000.0 / binHz));
+        const double nyquist = 0.5 * static_cast<double>(ruido::kBaseSampleRate);
+        for (size_t b = minBin; b <= maxBin; ++b) {
+            const double freq = static_cast<double>(b) * binHz;
+            bool isHarmonic = false;
+            for (int m = 1; m <= 100; ++m) {
+                const double hm = static_cast<double>(m) * kTestHz;
+                if (hm >= nyquist) {
+                    break;
+                }
+                if (std::fabs(freq - hm) <= 12.0 * binHz) {
+                    isHarmonic = true;
+                    break;
+                }
+            }
+            if (!isHarmonic) {
+                const double db =
+                    20.0 * std::log10(std::max(std::hypot(fftRe[b], fftIm[b]) / h1, 1.0e-15));
+                worstAliasDb = std::max(worstAliasDb, db);
+            }
+        }
+
+        std::printf("  RES=0%% LM13600 OTA @ 300 Hz -> H2=%.2f dBc, H3=%.2f dBc, alias=%.2f dBc\n",
+                    h2Db, h3Db, worstAliasDb);
+        EXPECT_TRUE(h3Db > -48.0 && h3Db < -20.0,
+                    "Expected warm 3rd-harmonic LM13600 OTA saturation at RES=0%% (got %.2f dBc)",
+                    h3Db);
+        EXPECT_TRUE(h2Db > -70.0 && h2Db < -24.0,
+                    "Expected LM13600 Wilson-mirror 2nd harmonic at RES=0%% (got %.2f dBc)",
+                    h2Db);
+        EXPECT_TRUE(worstAliasDb < -85.0,
+                    "C^2 LM13600 OTA exceeded -85 dBc alias floor (got %.2f dBc)", worstAliasDb);
+    }
+
+    // (b) Capacitive C1/C2 Sallen-Key Zero-DC Rejection under +0.85 DC bias + self-oscillation:
+    {
+        auto measureSteadyMean = [](float dcBias) -> double {
+            ruido::Ms20DualFilter filter;
+            filter.reset();
+            const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(
+                90.0f, 0.65f, 1200.0f, 0.85f, ruido::kInvOversampledRate);
+            const size_t totalSamples = static_cast<size_t>(ruido::kOversampledRate * 2.0f);
+            const size_t halfSamples = totalSamples / 2u;
+            const size_t winLen = totalSamples - halfSamples;
+            double sumOut = 0.0;
+            double sumWin = 0.0;
+            for (size_t n = 0u; n < totalSamples; ++n) {
+                const float x = dcBias + 0.65f * std::sin(ruido::kTwoPi * 240.0f *
+                                                          static_cast<float>(n) *
+                                                          ruido::kInvOversampledRate);
+                const float y = filter.processPrepared(x, coeffs);
+                if (n >= halfSamples) {
+                    const double w =
+                        1.0 - std::cos((2.0 * 3.14159265358979323846 *
+                                        static_cast<double>(n - halfSamples)) /
+                                       static_cast<double>(winLen));
+                    sumOut += static_cast<double>(y) * w;
+                    sumWin += w;
+                }
+            }
+            return sumOut / sumWin;
+        };
+        const double meanNoBias = measureSteadyMean(0.0f);
+        const double meanWithBias = measureSteadyMean(0.85f);
+        const double dcLeak = std::fabs(meanWithBias - meanNoBias);
+        std::printf("  +0.85 DC input -> steady DC = %+.6f (leak = %.2e)\n", meanWithBias, dcLeak);
+        EXPECT_TRUE(std::fabs(meanWithBias) < 1.5e-3,
+                    "Capacitive Sallen-Key limit-cycle DC exceeded 1.5 mV (mean=%+.6f)",
+                    meanWithBias);
+        EXPECT_TRUE(dcLeak < 1.0e-5,
+                    "Capacitive Sallen-Key leaked input DC bias without post-blocker (leak=%.2e)",
+                    dcLeak);
+    }
+
+    // (c) Exact numerical parity between processQuadBank4x (allBypass / noneBypass / mixed)
+    //     and standalone per-sample Ms20DualFilter::processPrepared:
+    {
+        float maxParityDiff = 0.0f;
+        for (int mode = 0; mode < 3; ++mode) {
+            std::array<ruido::Ms20DualFilter, 4> bankFilters{};
+            std::array<ruido::Ms20DualFilter, 4> refFilters{};
+            std::array<ruido::Ms20DualFilter::Coeffs, 4> coeffs{};
+            for (size_t v = 0u; v < 4u; ++v) {
+                bankFilters[v].reset();
+                refFilters[v].reset();
+                if (mode == 0) {
+                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(
+                        20.0f, 0.0f, 20000.0f, 0.0f, ruido::kInvOversampledRate);
+                } else if (mode == 1) {
+                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(
+                        75.0f + 55.0f * static_cast<float>(v), 0.72f,
+                        600.0f + 450.0f * static_cast<float>(v), 0.88f, ruido::kInvOversampledRate);
+                } else {
+                    const float hp = (v & 1u) != 0u ? 180.0f : 20.0f;
+                    const float lp = (v & 2u) != 0u ? 950.0f : 20000.0f;
+                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(
+                        hp, 0.85f, lp, 0.85f, ruido::kInvOversampledRate);
+                }
+            }
+
+            for (size_t frame = 0u; frame < 1024u; ++frame) {
+                std::array<std::array<float, 4>, 4> voiceSub{};
+                std::array<std::array<float, 4>, 4> refOut{};
+                for (size_t sub = 0u; sub < 4u; ++sub) {
+                    const float t = static_cast<float>(frame * 4u + sub) * 0.037f;
+                    for (size_t v = 0u; v < 4u; ++v) {
+                        const float sig = (std::sin(t * (1.0f + 0.3f * static_cast<float>(v))) >=
+                                           0.0f) ?
+                                              0.95f :
+                                              -0.95f;
+                        voiceSub[v][sub] = sig;
+                        refOut[v][sub] = refFilters[v].processPrepared(sig, coeffs[v]);
+                    }
+                }
+                ruido::Ms20DualFilter::processQuadBank4x(bankFilters, voiceSub, coeffs);
+                for (size_t v = 0u; v < 4u; ++v) {
+                    for (size_t sub = 0u; sub < 4u; ++sub) {
+                        maxParityDiff =
+                            std::max(maxParityDiff, std::fabs(voiceSub[v][sub] - refOut[v][sub]));
+                    }
+                }
+            }
+        }
+        std::printf("  processQuadBank4x vs processPrepared max |diff| = %.3e\n",
+                    static_cast<double>(maxParityDiff));
+        EXPECT_TRUE(maxParityDiff < 1.0e-6f,
+                    "SIMD processQuadBank4x diverged from scalar processPrepared (diff=%.3e)",
+                    static_cast<double>(maxParityDiff));
+    }
+}
+
 } // namespace
 
 int main() {
@@ -1533,6 +1737,7 @@ int main() {
     testDecimatorLinearPhaseCrest();
     testThroughputBenchmark();
     testPerVoiceAnalogLfoModels();
+    testRev2OtaSallenKeyPhysics();
 
     if (gFailures == 0) {
         std::printf("\n[PASS] All Milestone 1 DSP verification gates passed!\n");
