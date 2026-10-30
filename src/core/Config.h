@@ -17,15 +17,15 @@ inline constexpr size_t kOversampledBlockFrames = kBlockFrames * kOversampleFact
 inline constexpr size_t kNumOscillators = 4u;
 inline constexpr size_t kNumSnapshots = 8u;
 
-// Oscillator & per-voice LFO frequency bounds
-inline constexpr float kAudioFreqMinHz = 20.0f;
-inline constexpr float kAudioFreqMaxHz = 4000.0f;
-inline constexpr float kLfoFreqMinHz = 0.02f;
-inline constexpr float kLfoFreqMaxHz = 30.0f;
+// Oscillator & per-voice LFO frequency bounds (unbroken sub-cycle -> ultrasonic continuum)
+inline constexpr float kAudioFreqMinHz = 0.05f;
+inline constexpr float kAudioFreqMaxHz = 20000.0f;
+inline constexpr float kLfoFreqMinHz = 0.01f;
+inline constexpr float kLfoFreqMaxHz = 2000.0f;
 
-// MS-20 dual filter bounds
-inline constexpr float kFilterCutoffMinHz = 20.0f;
-inline constexpr float kFilterCutoffMaxHz = 20000.0f;
+// MS-20 dual filter bounds (infrasonic 2 Hz rumble -> 28 kHz ultrasonic openness @ 176.47 kHz)
+inline constexpr float kFilterCutoffMinHz = 2.0f;
+inline constexpr float kFilterCutoffMaxHz = 28000.0f;
 inline constexpr float kFilterMaxSafeHz = 30000.0f; // Safe ceiling @ 176.47 kHz
 
 // Lock-free SPSC oscilloscope ring buffer capacity (power of two)

@@ -71,6 +71,21 @@ inline float masterBusSoftClip(float x) noexcept {
     return x;
 }
 
+// Post-decimator DAC rail guard: 100% bit-exact linear pass-through up to |x| <= 1.15f,
+// catching linear-phase FIR Gibbs overshoot on ultrasonic square edges below +-1.45f.
+inline float dacSafetyClip(float x) noexcept {
+    constexpr float kLinearCeil = 1.15f;
+    constexpr float kMargin = 0.30f; // Max asymptotic DAC output = 1.15 + 0.30 = 1.45f
+    constexpr float kInvMargin = 1.0f / kMargin;
+    if (x > kLinearCeil) {
+        return kLinearCeil + kMargin * padeClip((x - kLinearCeil) * kInvMargin);
+    }
+    if (x < -kLinearCeil) {
+        return -kLinearCeil + kMargin * padeClip((x + kLinearCeil) * kInvMargin);
+    }
+    return x;
+}
+
 // Constant-power stereo panner: pan in [-1.0f (Left), +1.0f (Right)].
 // Uses 5th-order minimax sin polynomial on [0, pi/2] (max error < 1.5e-4, zero libm calls).
 inline void equalPowerPan(float pan, float& gainL, float& gainR) noexcept {

@@ -112,12 +112,12 @@ void testTwoHandErgonomicsAndLinearGears() {
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 30);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, -20);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 30);
-    CHECK(ctrl.state().voices[2].hpCutoffHz > 20.5f);
+    CHECK(ctrl.state().voices[2].hpCutoffHz > 2.2f);
     CHECK(ctrl.state().voices[2].hpResonance > 0.10f);
-    CHECK(ctrl.state().voices[2].lpCutoffHz < 19500.0f);
+    CHECK(ctrl.state().voices[2].lpCutoffHz < 27000.0f);
     CHECK(ctrl.state().voices[2].lpResonance > 0.10f);
     // Voice 0 filter untouched while OP3 superseded OP1
-    CHECK(near(ctrl.state().voices[0].hpCutoffHz, 20.0f));
+    CHECK(near(ctrl.state().voices[0].hpCutoffHz, ruido::kFilterCutoffMinHz));
 
     // Release OP3 -> automatically falls back to still-held OP1!
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op3, false);
@@ -125,7 +125,7 @@ void testTwoHandErgonomicsAndLinearGears() {
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
     CHECK(!ctrl.hud().modifierHeld);
 
-    // 3. OP5 (Per-Voice Amplitude), OP6 (Panning), Keybed GLO + SELECT (Global Filter / All)
+    // 3. EDIT Page (Channel Level & MS-20 Drive), OP5 (Unassigned), OP6 (Panning), Keybed GLO
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
     CHECK(ctrl.hud().mode == ruido::HudMode::GlobalAll);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::GlobalAll);
@@ -147,29 +147,39 @@ void testTwoHandErgonomicsAndLinearGears() {
     CHECK(ctrl.state().voices[3].pan < 0.65f);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
 
+    // OP5 is now unassigned (shows UnassignedKey, leaves KNOB1-4 on Frequency)
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, true);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, -30);
-    CHECK(ctrl.hud().mode == ruido::HudMode::Amplitude);
-    CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Amplitude);
-    CHECK(ctrl.state().voices[1].amplitude < 0.65f);
+    CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedKey);
+    CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
+    CHECK(near(ctrl.state().voices[1].amplitude, 0.65f));
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
 
-    // 4. Mute memory + OP5 Amplitude mixer 0% display & fade-in unmute:
-    //    - Muting Voice 0 via White Key 1 remembers its pre-mute amplitude (0.65)
-    //    - Viewing OP5 (or nudging CCW while muted at 0%) keeps mute & remembered 0.65 intact
-    //    - Unmuting via White Key 1 restores 0.65
-    //    - Muting again and turning KNOB1 CW while holding OP5 unmutes & fades in from 0.0!
+    // Tap EDIT button -> opens latching Channel Level & MS-20 Overdrive page
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    CHECK(ctrl.hud().editPageOpen);
+    CHECK(ctrl.hud().mode == ruido::HudMode::Amplitude);
+    CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Amplitude);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, -30);
+    CHECK(ctrl.state().voices[1].amplitude < 0.65f);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    CHECK(!ctrl.hud().editPageOpen);
+
+    // 4. Mute memory + EDIT Amplitude/Drive page 0% display & fade-in unmute:
     const float rememberedAmp = ctrl.state().voices[0].amplitude;
     ctrl.onWhiteKeyGate(0u, true);
     ctrl.onWhiteKeyGate(0u, false);
     CHECK(ctrl.state().voices[0].muted);
     CHECK(near(ctrl.state().voices[0].amplitude, rememberedAmp));
 
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -3);
     CHECK(ctrl.state().voices[0].muted);
     CHECK(near(ctrl.state().voices[0].amplitude, rememberedAmp));
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
 
     ctrl.onWhiteKeyGate(0u, true);
     ctrl.onWhiteKeyGate(0u, false);
@@ -179,11 +189,13 @@ void testTwoHandErgonomicsAndLinearGears() {
     ctrl.onWhiteKeyGate(0u, true);
     ctrl.onWhiteKeyGate(0u, false);
     CHECK(ctrl.state().voices[0].muted);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4);
     CHECK(!ctrl.state().voices[0].muted);
     CHECK(ctrl.state().voices[0].amplitude > 0.005f && ctrl.state().voices[0].amplitude < 0.05f);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
 
     // Verify lock-free bus received latest published state
     const ruido::EngineControlState& snapped = bus.consumeLatest();
@@ -482,15 +494,16 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(near(ctrl.hud().opacity, 0.0f));
     CHECK(ctrl.hud().mode == ruido::HudMode::None);
 
-    // Verify unassigned buttons, PIT key, & resting 11th black key are strictly 0% dark,
-    // assigned LFO & GLO right buttons rest at 15%, and SEL === White Keys 5-8
+    // Verify unassigned buttons, OP5/PIT keys, & resting 11th black key are strictly 0% dark,
+    // assigned LFO, EDIT & GLO right buttons rest at 15%, and SEL === White Keys 5-8
     const auto& leds = ctrl.leds();
+    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op5)], 0.0f));
     CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Pit)], 0.0f));
     CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::ScopeFreezeKey)], 0.0f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)], 0.0f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Env)], 0.0f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)], 0.15f));
-    CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)], 0.0f));
+    CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)], 0.15f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::GloRight)], 0.15f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Arp)], 0.0f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Seq)], 0.0f));
@@ -531,9 +544,9 @@ void testHudEnvelopeAndVaribrightLeds() {
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
     ctrl.tick(0.016f, tel);
 
-    // Verify OP1-4 filter family rests at 15% glow; OP5, OP6 & GLO landmarks rest at 25% glow
+    // Verify OP1-4 filter family rests at 15% glow; OP6 & GLO landmarks rest at 25%; OP5 = 0%
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op1)], 0.15f));
-    CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op5)], 0.25f));
+    CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op5)], 0.0f));
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op6)], 0.25f));
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Glo)], 0.25f));
     CHECK(near(ctrl.leds().whiteKeyLeds[0], 0.60f + 0.40f * ctrl.state().voices[0].amplitude));
@@ -1176,8 +1189,8 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
         trRenderer.prepareFrame(0.020f, trCtrl.state(), trCtrl.hud(), trEngine.telemetry());
     }
 
-    // (d) Momentary OP5 release holds AMPLITUDE labels smoothly during dissolve (no FREQUENCY snap)
-    trCtrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, true);
+    // (d) Momentary OP6 release holds PANNING labels smoothly during dissolve (no FREQUENCY snap)
+    trCtrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
     for (int f = 0; f < 12; ++f) {
         trCtrl.tick(0.030f, trEngine.telemetry());
         ruido::HudState h = trCtrl.hud();
@@ -1186,7 +1199,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     }
     trRenderer.renderFullScreenStrips(img16.data());
 
-    trCtrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
+    trCtrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
     CHECK(trCtrl.hud().knobBank == ruido::KnobBankMode::Frequency);
     trCtrl.tick(0.016f, trEngine.telemetry());
     {
@@ -1207,7 +1220,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
         }
     }
     botStripDelta /= static_cast<double>(botStripPx);
-    CHECK(botStripDelta < 2.5); // Text readout stays AMPLITUDE ("65%") on frame 1 of fade-out!
+    CHECK(botStripDelta < 2.5); // Text readout stays PANNING ("75L..") on frame 1 of fade-out!
 
     // (e) Live HOME dismissal smoothly restores background brightness (no 1-frame snap)
     trCtrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, true);
@@ -1414,7 +1427,7 @@ void testPerVoiceLfoPageAndHudGraph() {
 
     // 3. Per-voice editing on OSC 2 (KNOB 1-4 = TARGET | SHAPE | RATE | DEPTH) leaves OSC 1/3/4
     //    untouched, while Keybed GLO -> GLOBAL LFO edits all 4 voices simultaneously!
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16);  // +4 steps -> Amplitude (index 4)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16);  // +4 steps from LpCutoff(1) -> Amplitude(5)
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 60);  // SHAPE
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 40);  // RATE
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 180); // DEPTH
@@ -1430,10 +1443,10 @@ void testPerVoiceLfoPageAndHudGraph() {
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -8); // All(4) - 2 = Lfo(2)
     CHECK(ctrl.hud().mode == ruido::HudMode::GlobalLfo);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -16); // Back to LpCutoff (0)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -16); // Clamps at first option: Pitch (0)
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 150);
     for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
-        CHECK(ctrl.state().voices[v].lfoTarget == ruido::LfoTarget::LpCutoff);
+        CHECK(ctrl.state().voices[v].lfoTarget == ruido::LfoTarget::Pitch);
         CHECK(ctrl.state().voices[v].lfoDepth > 0.60f);
     }
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
@@ -1625,6 +1638,7 @@ int main() {
     testPerVoiceLfoPageAndHudGraph();
     ruido_test::runUnified150msFadesAndRateSplitHeaderTests(check);
     ruido_test::runGlobalFiveModesAndConfigMenuTests(check);
+    ruido_test::runEditChannelDrivePageAndAmpGraphTests(check);
 
     if (gFailures == 0) {
         std::printf("\nALL UI & CONTROLLER VERIFICATION GATES PASSED (0 failures).\n");

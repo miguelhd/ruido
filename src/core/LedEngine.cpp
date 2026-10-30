@@ -14,9 +14,8 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
     for (size_t i = 0u; i < 4u; ++i) {
         outLeds.blackKeyLeds[i] = ctx.blackKeyHeld[i] ? 1.0f : 0.15f;
     }
-    // Mix / Spatial pair (OP5 Amplitude + OP6 Panning) & GLO (Global): 25% landmark rest, 100% held
-    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op5)] =
-        ctx.blackKeyHeld[static_cast<size_t>(BlackKeyId::Op5)] ? 1.0f : 0.25f;
+    // Spatial (OP6 Panning) & Global (GLO) landmarks: 25% rest, 100% held; OP5 & PIT unassigned 0%
+    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op5)] = 0.0f;
     outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op6)] =
         ctx.blackKeyHeld[static_cast<size_t>(BlackKeyId::Op6)] ? 1.0f : 0.25f;
     outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Pit)] = 0.0f;
@@ -37,6 +36,8 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
 
     float maxLfoDepth = 0.0f;
     size_t dominantLfoVoice = 0u;
+    float maxOverdriveNorm = 0.0f;
+    float maxOverdrivePeak = 0.0f;
 
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceParams& vp = ctx.state.voices[i];
@@ -50,10 +51,21 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
         const float ampDepth =
             (vp.lfoTarget == LfoTarget::Amplitude) ? clampf(vp.lfoDepth, 0.0f, 1.0f) : 0.0f;
         const float gate = ctx.telemetry.oscGateHigh[i].load(std::memory_order_relaxed);
+        const float vPeak = ctx.telemetry.voicePeak[i].load(std::memory_order_relaxed);
 
         if (vp.lfoDepth > maxLfoDepth) {
             maxLfoDepth = vp.lfoDepth;
             dominantLfoVoice = i;
+        }
+        if (!vp.muted && effAmp > kCleanAmpKnee) {
+            const float driveNorm =
+                clampf((effAmp - kCleanAmpKnee) * (1.0f / (1.0f - kCleanAmpKnee)), 0.0f, 1.0f);
+            if (driveNorm > maxOverdriveNorm) {
+                maxOverdriveNorm = driveNorm;
+            }
+            if (vPeak > maxOverdrivePeak) {
+                maxOverdrivePeak = vPeak;
+            }
         }
 
         if (vp.muted) {
@@ -99,6 +111,17 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] = ctx.hud.saveArmed ? 1.0f : 0.15f;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::GloRight)] =
         ctx.hud.configPageOpen ? 1.0f : 0.15f;
+
+    // EDIT button (Channel Level & MS-20 Drive): 100% when open, 15% clean rest, live flare > 70%
+    if (ctx.hud.editPageOpen) {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Edit)] = 1.0f;
+    } else if (maxOverdriveNorm > 1.0e-4f) {
+        const float peakNorm = clampf(maxOverdrivePeak, 0.0f, 1.0f);
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Edit)] =
+            clampf(0.15f + (0.10f + 0.60f * peakNorm) * maxOverdriveNorm, 0.15f, 0.85f);
+    } else {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Edit)] = 0.15f;
+    }
 
     if (ctx.hud.lfoPageOpen) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] = 1.0f;

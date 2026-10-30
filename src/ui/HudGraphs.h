@@ -15,8 +15,8 @@ namespace ruido {
 // Concept A3 1/3-screen (80 px: y = 102..182, x = 10..230) filter graph & backdrop dim constants
 inline constexpr int kFilterXStart = 10;
 inline constexpr size_t kFilterSweepPts = 221u;
-inline constexpr float kFilterLogMin = 4.32192809f;  // log2(20 Hz)
-inline constexpr float kFilterLogSpan = 9.96578428f; // log2(20000 / 20)
+inline constexpr float kFilterLogMin = cxLog2Pos(kFilterCutoffMinHz);
+inline constexpr float kFilterLogSpan = cxLog2Pos(kFilterCutoffMaxHz) - kFilterLogMin;
 inline constexpr float kFilterYTop = 102.0f;
 inline constexpr float kFilterYZeroDb = 132.0f;
 inline constexpr float kFilterYBot = 182.0f;
@@ -27,9 +27,9 @@ inline constexpr float kFilterBgDimDepth = 0.72f; // 72% BG waveform dimming beh
 inline constexpr float kLfoYTop = 26.0f;
 inline constexpr float kLfoYZero = 107.0f; // Midpoint between top header and bottom strip
 inline constexpr float kLfoYBot = 188.0f;
-inline constexpr float kLfoMaxAmpPx = 75.0f;       // +-75 px (150 px peak-to-peak) excursion
-inline constexpr float kLfoLogMin = -5.64385619f;  // log2(0.02 Hz)
-inline constexpr float kLfoLogSpan = 10.55074679f; // log2(30.0 / 0.02)
+inline constexpr float kLfoMaxAmpPx = 75.0f; // +-75 px (150 px peak-to-peak) excursion
+inline constexpr float kLfoLogMin = cxLog2Pos(kLfoFreqMinHz);
+inline constexpr float kLfoLogSpan = cxLog2Pos(kLfoFreqMaxHz) - kLfoLogMin;
 
 constexpr std::array<float, kFilterSweepPts> makeFilterSweepFreqs() noexcept {
     std::array<float, kFilterSweepPts> freqs{};
@@ -64,15 +64,23 @@ inline DualMs20Coeffs makeDualMs20Coeffs(float hpHz, float hpRes, float lpHz,
     const float rLp = clampf(lpRes, 0.0f, 1.0f);
 
     constexpr float kButterK = 2.0f - kSqrt2;
-    const float targetKHp = kButterK + rHp * (1.42f - 0.42f * rHp) * (2.82f - kButterK);
-    const float targetKLp = kButterK + rLp * (1.42f - 0.42f * rLp) * (2.82f - kButterK);
-    const float hpAct = smoothstep01((clampedHp - 20.0f) * 0.25f);
-    const float lpAct = smoothstep01((20000.0f - clampedLp) * (1.0f / 1200.0f));
+    const float korgHp = smoothstep01((rHp - 0.60f) * (1.0f / 0.40f));
+    const float korgLp = smoothstep01((rLp - 0.60f) * (1.0f / 0.40f));
+    const float targetKHp =
+        kButterK + rHp * (1.42f - 0.42f * rHp) * (1.84f - kButterK) + 0.07f * korgHp;
+    const float targetKLp =
+        kButterK + rLp * (1.42f - 0.42f * rLp) * (1.84f - kButterK) + 0.07f * korgLp;
+    const float hpResWake = smoothstep01(rHp * (1.0f / 0.02f));
+    const float lpResWake = smoothstep01(rLp * (1.0f / 0.02f));
+    const float hpFreqWake = smoothstep01((clampedHp - kFilterCutoffMinHz) * (1.0f / 1.5f));
+    const float lpFreqWake = smoothstep01((kFilterCutoffMaxHz - clampedLp) * (1.0f / 900.0f));
+    const float hpAct = clampf(hpFreqWake + (1.0f - hpFreqWake) * hpResWake, 0.0f, 1.0f);
+    const float lpAct = clampf(lpFreqWake + (1.0f - lpFreqWake) * lpResWake, 0.0f, 1.0f);
 
-    const float dampHp = clampf(2.0f - (kButterK + hpAct * (targetKHp - kButterK)), 0.14f, 1.42f);
-    const float dampLp = clampf(2.0f - (kButterK + lpAct * (targetKLp - kButterK)), 0.14f, 1.42f);
-    const float effHp = 2.5f + hpAct * (clampedHp - 2.5f);
-    const float effLp = 28000.0f + lpAct * (clampedLp - 28000.0f);
+    const float dampHp = clampf(2.0f - (kButterK + hpAct * (targetKHp - kButterK)), 0.09f, 1.42f);
+    const float dampLp = clampf(2.0f - (kButterK + lpAct * (targetKLp - kButterK)), 0.09f, 1.42f);
+    const float effHp = clampedHp;
+    const float effLp = clampedLp;
 
     return {
         1.0f / effHp, dampHp * dampHp,

@@ -52,7 +52,7 @@ void applyGlobalFreqKnob(uint8_t knobIdx, int32_t ticks, KnobRate rate,
 
     if (knobIdx == 0u) {
         const float octPerStep = (rate == KnobRate::Fine)     ? 0.00055f
-                                 : (rate == KnobRate::Coarse) ? 0.06000f
+                                 : (rate == KnobRate::Coarse) ? 0.14500f
                                                               : 0.02850f;
         const float rawDelta = static_cast<float>(ticks) * octPerStep;
         const float delta = clampf(rawDelta, kGcAudioLogMin - minLog, kGcAudioLogMax - maxLog);
@@ -79,9 +79,9 @@ void applyGlobalFreqKnob(uint8_t knobIdx, int32_t ticks, KnobRate rate,
             }
         }
         const float stepOct = (rate == KnobRate::Fine)     ? 0.00045f
-                              : (rate == KnobRate::Coarse) ? 0.02800f
-                                                           : 0.01200f;
-        float maxScale = 2.20f;
+                              : (rate == KnobRate::Coarse) ? 0.04500f
+                                                           : 0.01500f;
+        float maxScale = 6.0f;
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             if (unit[i] > 0.01f) {
                 const float cap = (kGcAudioLogMax - meanLog) / unit[i];

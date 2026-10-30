@@ -30,7 +30,7 @@ constexpr std::array<uint32_t, kNumOscillators> kInitialPhases = {
 };
 
 constexpr float kUint32ToNormFloat = 2.3283064365386963e-10f; // 1.0 / 2^32
-constexpr uint32_t kMaxPhaseInc = 0x18000000u;                // Cap < fs/8 for safe BLEP
+constexpr uint32_t kMaxPhaseInc = 0x1F000000u;                // ~21.37 kHz (< fs/8 safe BLEP)
 
 } // namespace
 
@@ -42,10 +42,12 @@ void SchmittOscillatorBank::reset(float sampleRate) noexcept {
     sampleRate_ = (sampleRate > 1000.0f) ? sampleRate : kOversampledRate;
     hzToPhaseU32_ = 4294967296.0f / sampleRate_;
 
-    // ~11.5 Hz AC coupling / capacitor roof-tilt corner (classic CMOS coupling cap feel)
-    rcHighpassPole_ = fastExp(-kTwoPi * 11.5f / sampleRate_);
+    // 1.5 Hz AC coupling / capacitor roof-tilt corner:
+    // preserves 99.5% weight on 15 Hz sub-bass while sculpting < 2 Hz into sharp relaxation pulses.
+    rcHighpassPole_ = fastExp(-kTwoPi * 1.5f / sampleRate_);
     // ~0.45 ms shared Vdd rail decoupling recovery time constant
     railDecayCoeff_ = fastExp(-1.0f / (0.00045f * sampleRate_));
+    prevRisingMask_ = 0u;
 
     for (size_t i = 0; i < kNumOscillators; ++i) {
         VoiceState& v = voices_[i];
@@ -103,17 +105,27 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
                                      float circuitCoupling) noexcept {
     OscillatorBankOutput out{};
     const float coupling = clampf(circuitCoupling, 0.0f, 1.0f);
-    // Quadratic taper on ALGORITHM encoder: 0% = isolated, 25% = subtle shimmer,
-    // 100% = ~1.6% starved-CMOS Vdd rail Adler injection-locking capture range.
-    const float couplingGain = coupling * (0.10f + 0.65f * coupling);
+    // Two-regime ALGORITHM coupling:
+    //  - [0.00, 0.45]: smooth CD40106 Vdd rail sag & subtle organic chorus shimmer (25% default)
+    //  - (0.45, 1.00]: starved-rail voltage collapse -> PWM duty warp, subharmonic sync locks,
+    //                  and hard phase-lock tearing across the 4 inverters
+    const float chaos = smoothstep01((coupling - 0.45f) * (1.0f / 0.55f));
+    const float couplingGain = coupling * (0.10f + 0.65f * coupling) + 4.80f * chaos * chaos;
+    const float minPull = 0.55f - 0.43f * chaos;
+    const float maxPull = 1.75f + 2.75f * chaos;
+    const uint8_t lastRising = prevRisingMask_;
+    const uint32_t syncCapturePhase =
+        0xFFFFFFFFu - static_cast<uint32_t>(chaos * 601295424.0f); // upper 14% Vt+ threshold window
 
-    // Update per-voice rail sag states from previous sample's switching crowbar transients
+    // Update per-voice rail sag states & total static output load from previous sample
     float totalRailSag = 0.0f;
+    float totalGateLoad = 0.0f;
     for (size_t i = 0; i < kNumOscillators; ++i) {
         voiceRailSag_[i] =
             sanitizeState(voiceRailSag_[i] * railDecayCoeff_ + voices_[i].lastEdgePulse);
         voices_[i].lastEdgePulse = 0.0f;
         totalRailSag += voiceRailSag_[i];
+        totalGateLoad += voices_[i].currentLevel;
     }
 
     for (size_t i = 0; i < kNumOscillators; ++i) {
@@ -133,50 +145,63 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
             }
         }
 
-        // Compute neighbor-only Vdd rail sag tugging on this inverter's Vt+/Vt- thresholds.
-        // Signed phase-response curve (+1 near rising wrap 0/1, -1 near falling duty 0.5)
-        // couples constructively on both rising and falling edges (Adler injection locking).
+        // Compute neighbor-only Vdd rail sag + starved-CMOS gate-load duty asymmetry
         float railPullRatio = 1.0f;
         if (couplingGain > 0.0f) {
             const float neighborSag = totalRailSag - voiceRailSag_[i];
             const float phaseNorm = static_cast<float>(v.phase) * kUint32ToNormFloat;
-            // Fast C1 cosine-like PRC on [0, 1): +1 at 0 & 1, -1 at 0.5, 0 at 0.25 & 0.75
-            const float dHalf = absf(2.0f * phaseNorm - 1.0f); // [0 at 0.5, 1 at 0/1]
+            const float dHalf = absf(2.0f * phaseNorm - 1.0f);
             const float signedPrc = dHalf * dHalf * (3.0f - 2.0f * dHalf) * 2.0f - 1.0f;
-            railPullRatio = clampf(1.0f - couplingGain * neighborSag * signedPrc, 0.55f, 1.75f);
+            float pull = 1.0f - couplingGain * neighborSag * signedPrc;
+            if (chaos > 0.0f) {
+                const float neighborLoad = (totalGateLoad - v.currentLevel) * (1.0f / 3.0f);
+                const float asymSign = (v.currentLevel > 0.0f) ? 0.36f : -0.36f;
+                pull += chaos * asymSign * neighborLoad;
+            }
+            railPullRatio = clampf(pull, minPull, maxPull);
         }
 
         const float targetHz =
-            clampf(freqHz[i] * v.cachedDriftRatio * railPullRatio, 0.005f, 16000.0f);
+            clampf(freqHz[i] * v.cachedDriftRatio * railPullRatio, 0.005f, 21200.0f);
         const float incFloat = targetHz * hzToPhaseU32_;
         uint32_t incU32 = (incFloat >= 1.0f) ? static_cast<uint32_t>(incFloat) : 1u;
         if (incU32 > kMaxPhaseInc) {
             incU32 = kMaxPhaseInc;
         }
 
-        // Advance 32-bit unsigned phase accumulator
-        v.phase += incU32;
+        const uint8_t neighborRose =
+            static_cast<uint8_t>((lastRising | out.risingMask) & static_cast<uint8_t>(~(1u << i)));
+        if (chaos > 0.02f && neighborRose != 0u && v.currentLevel < 0.0f &&
+            v.phase >= syncCapturePhase) {
+            // Starved-rail Vt+ threshold collapse: band-limited hard-sync snap at d = 0.5
+            v.phase = (incU32 >> 1u);
+            addCubicBsplineBlep(v.blepResidual, 0.5f, 2.0f);
+            v.lastEdgePulse += 0.22f;
+            v.currentLevel = 1.0f;
+            out.risingMask |= static_cast<uint8_t>(1u << i);
+        } else {
+            // Advance 32-bit unsigned phase accumulator
+            v.phase += incU32;
 
-        // Only compute reciprocal 1 / incU32 on the rare samples (~0.2%) where an edge occurs
-        const uint32_t distPastDuty = v.phase - v.dutyThreshold;
-        const bool fell = (distPastDuty < incU32);
-        const bool rose = (v.phase < incU32);
-        if (fell || rose) {
-            const float invIncFloat = 1.0f / static_cast<float>(incU32);
-            if (fell) {
-                const float d = static_cast<float>(distPastDuty) * invIncFloat;
-                addCubicBsplineBlep(v.blepResidual, d, -2.0f);
-                // Negative rail transient on discharge
-                v.lastEdgePulse -= 0.16f;
+            // Only compute reciprocal 1 / incU32 on the rare samples where an edge occurs
+            const uint32_t distPastDuty = v.phase - v.dutyThreshold;
+            const bool fell = (distPastDuty < incU32);
+            const bool rose = (v.phase < incU32);
+            if (fell || rose) {
+                const float invIncFloat = 1.0f / static_cast<float>(incU32);
+                if (fell) {
+                    const float d = static_cast<float>(distPastDuty) * invIncFloat;
+                    addCubicBsplineBlep(v.blepResidual, d, -2.0f);
+                    v.lastEdgePulse -= 0.16f;
+                }
+                if (rose) {
+                    const float d = static_cast<float>(v.phase) * invIncFloat;
+                    addCubicBsplineBlep(v.blepResidual, d, 2.0f);
+                    v.lastEdgePulse += 0.22f;
+                    out.risingMask |= static_cast<uint8_t>(1u << i);
+                }
+                v.currentLevel = (v.phase < v.dutyThreshold) ? 1.0f : -1.0f;
             }
-            if (rose) {
-                const float d = static_cast<float>(v.phase) * invIncFloat;
-                addCubicBsplineBlep(v.blepResidual, d, 2.0f);
-                // Positive CMOS shoot-through pull toward threshold advance
-                v.lastEdgePulse += 0.22f;
-                out.risingMask |= static_cast<uint8_t>(1u << i);
-            }
-            v.currentLevel = (v.phase < v.dutyThreshold) ? 1.0f : -1.0f;
         }
 
         // Read completed band-limited sample (n - 2) and shift 4-tap BLEP delay line
@@ -203,6 +228,7 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
         out.gateHigh[i] = (v.currentLevel > 0.0f) ? 1.0f : 0.0f;
     }
 
+    prevRisingMask_ = out.risingMask;
     return out;
 }
 

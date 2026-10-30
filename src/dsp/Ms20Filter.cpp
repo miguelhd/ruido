@@ -1,210 +1,8 @@
 #include "dsp/Ms20Filter.h"
 
-#include "core/DspMath.h"
+#include "dsp/Ms20Math.h"
 
 namespace ruido {
-
-namespace {
-
-// Exact Butterworth maximally-flat Sallen-Key gain: k = 2 - sqrt(2) => Q = 0.70710678
-constexpr float kButterworthK = 2.0f - kSqrt2; // 0.58578644f
-// Self-oscillation Hopf bifurcation occurs at k = 2.0f; kMax = 3.68f drives creamy MS-20 Rev 2
-// LM13600 + 1S1588 silicon limit cycles while ultrasonic loop-gain clamp guarantees df > 0.12.
-constexpr float kMaxResonanceK = 3.68f;
-
-// C^2 quintic LM13600 diode-linearized OTA rail spans:
-// P(u) = u*(1 - (2/3)*u^2 + (1/5)*u^4) has asymptote (8/15)*span, so span = (15/8)*I_max.
-// Realistic KLM-307 ~1.08 nominal OTA saturation knee delivers creamy 0%-RES 2nd/3rd harmonic
-// saturation, while monolithic LM13600 Wilson mirror tolerances (~1.5% - 2.4%) self-cancel
-// limit-cycle rectification DC across HPF (C2-buffered output) and LPF (|y1| = sqrt(2)*|w|).
-constexpr float kHpOta1Pos = (15.0f / 8.0f) * 1.064f;
-constexpr float kInvHpOta1Pos = 1.0f / kHpOta1Pos;
-constexpr float kHpOta1Neg = (15.0f / 8.0f) * 1.096f;
-constexpr float kInvHpOta1Neg = 1.0f / kHpOta1Neg;
-constexpr float kHpOta2Rail = (15.0f / 8.0f) * 1.080f;
-constexpr float kInvHpOta2Rail = 1.0f / kHpOta2Rail;
-
-constexpr float kLpOta1Rail = (15.0f / 8.0f) * 1.080f;
-constexpr float kInvLpOta1Rail = 1.0f / kLpOta1Rail;
-constexpr float kLpOta2Pos = (15.0f / 8.0f) * 1.108f;
-constexpr float kInvLpOta2Pos = 1.0f / kLpOta2Pos;
-constexpr float kLpOta2Neg = (15.0f / 8.0f) * 1.052f;
-constexpr float kInvLpOta2Neg = 1.0f / kLpOta2Neg;
-
-// C^4-deadband / C^2-rail 1S1588 anti-parallel silicon PN-junction feedback knees:
-// Q(u) = u*(1 - (3/5)*u^4 + (2/7)*u^6) has asymptote (24/35)*span, so span = (35/24)*V_diode.
-// Matched KLM-307 IC5 (HPF) & IC6 (LPF) anti-parallel silicon pairs prevent limit-cycle DC shift.
-constexpr float kHpDiodeSpan = (35.0f / 24.0f) * 1.07f;
-constexpr float kInvHpDiodeSpan = 1.0f / kHpDiodeSpan;
-
-constexpr float kLpDiodeSpan = (35.0f / 24.0f) * 0.91f;
-constexpr float kInvLpDiodeSpan = 1.0f / kLpDiodeSpan;
-
-constexpr float kDiodeOhmicSlope = 0.024f;
-constexpr float kDiodeJunctionWeight = 1.0f - kDiodeOhmicSlope;
-
-// Pure-FPU branchless NaN/Inf/subnormal scrubber (zero GPR<->FPU register stalls; under
-// -ffp-contract=off, +1e-18f - 1e-18f flushes |x| < ~3e-26f to bit-exact +0.0f).
-inline float scrubFilterState(float x) noexcept {
-    const float bounded = clampf(x, -64.0f, 64.0f);
-    return (bounded + 1.0e-18f) - 1.0e-18f;
-}
-
-inline float mapResonanceToK(float resonance) noexcept {
-    const float r = clampf(resonance, 0.0f, 1.0f);
-    // Concave taper: liquid vocal Q by 25%, self-oscillation by ~35%, fat silicon howl above 65%
-    const float shaped = r * (1.42f - 0.42f * r);
-    return kButterworthK + shaped * (kMaxResonanceK - kButterworthK);
-}
-
-// Groszkowski reactive-power + dual-OTA compression pitch compensation for HPF & LPF limit cycles
-inline float compensateHpSelfOscPitch(float hz, float k) noexcept {
-    if (k <= 2.0f) {
-        return hz;
-    }
-    const float excess = k - 2.0f;
-    return hz * (1.0f + excess * (0.062f + 0.046f * excess));
-}
-
-inline float compensateLpSelfOscPitch(float hz, float k) noexcept {
-    if (k <= 2.0f) {
-        return hz;
-    }
-    const float excess = k - 2.0f;
-    return hz * (1.0f + excess * (0.068f + 0.053f * excess));
-}
-
-// Pure-FPU C^2-continuous LM13600 diode-linearized OTA transconductor:
-//   sigma(v)  = vc * (1 - (2/3)*u^2 + (1/5)*u^4),   vc = clamp(v, -negSpan, posSpan)
-//   sigma'(v) = (1 - u^2)^2 in [0, 1]
-inline SatResult evalOta(float v, float posSpan, float negSpan, float invPosSpan,
-                         float invNegSpan) noexcept {
-    const float vc = clampf(v, -negSpan, posSpan);
-    const float u = vc * ((vc >= 0.0f) ? invPosSpan : invNegSpan);
-    const float u2 = u * u;
-    const float oneMinusU2 = 1.0f - u2;
-    return {vc * (1.0f - u2 * (0.66666667f - 0.20f * u2)), oneMinusU2 * oneMinusU2};
-}
-
-inline SatResult evalOtaSymmetric(float v, float span, float invSpan) noexcept {
-    const float vc = clampf(v, -span, span);
-    const float u = vc * invSpan;
-    const float u2 = u * u;
-    const float oneMinusU2 = 1.0f - u2;
-    return {vc * (1.0f - u2 * (0.66666667f - 0.20f * u2)), oneMinusU2 * oneMinusU2};
-}
-
-// Pure-FPU C^4-deadband / C^2-rail 1S1588 anti-parallel silicon PN-junction feedback limiter:
-//   Q(u)  = u * (1 - (3/5)*u^4 + (2/7)*u^6)   (zero u^3 term -> flat small-signal deadband!)
-//   Q'(u) = (1 - u^2)^2 * (1 + 2*u^2) in [0, 1]
-inline SatResult evalSiliconDiode(float w, float span, float invSpan) noexcept {
-    const float wc = clampf(w, -span, span);
-    const float u = wc * invSpan;
-    const float u2 = u * u;
-    const float u4 = u2 * u2;
-    const float oneMinusU2 = 1.0f - u2;
-    const float dVal = wc * (1.0f - u4 * (0.60f - 0.28571429f * u2));
-    const float dDeriv = (oneMinusU2 * oneMinusU2) * (1.0f + 2.0f * u2);
-    return {kDiodeJunctionWeight * dVal + kDiodeOhmicSlope * w,
-            kDiodeJunctionWeight * dDeriv + kDiodeOhmicSlope};
-}
-
-inline float stepHpNonlinear(float x, float& s1, float& s2, float& hist1, float& hist2, float g,
-                             float k, float otaScale, float invOtaScale) noexcept {
-    const float pos1 = kHpOta1Pos * otaScale;
-    const float neg1 = kHpOta1Neg * otaScale;
-    const float invPos1 = kInvHpOta1Pos * invOtaScale;
-    const float invNeg1 = kInvHpOta1Neg * invOtaScale;
-    const float rail2 = kHpOta2Rail * otaScale;
-    const float invRail2 = kInvHpOta2Rail * invOtaScale;
-    const float dSpan = kHpDiodeSpan * otaScale;
-    const float invDSpan = kInvHpDiodeSpan * invOtaScale;
-
-    // Smooth capacitor-sum q = y2 - x = v_C1 + v_C2 never jumps on input steps dx!
-    const float xPlusS1 = x + s1;
-    float y2 = x + clampf(2.0f * hist1 - hist2, -8.0f, 8.0f);
-    float finalOta2 = -y2;
-
-    for (int iter = 0; iter < 3; ++iter) {
-        const SatResult ota2 = evalOtaSymmetric(-y2, rail2, invRail2);
-        const float y1 = y2 - s2 - g * ota2.value;
-
-        const SatResult fb = evalSiliconDiode(k * y2, dSpan, invDSpan);
-        const SatResult ota1 = evalOta(fb.value - y1, pos1, neg1, invPos1, invNeg1);
-
-        const float fHp = y1 - xPlusS1 - g * ota1.value;
-        const float d1 = g * ota1.deriv;
-        const float d2 = g * ota2.deriv;
-        const float dFb = k * fb.deriv;
-        const float dfDy2 = (1.0f + d1) * (1.0f + d2) - d1 * dFb;
-
-        const float dy2 = fHp / dfDy2;
-        y2 -= dy2;
-        finalOta2 = ota2.value + ota2.deriv * dy2;
-
-        if (absf(dy2) < 1.0e-2f) {
-            break;
-        }
-    }
-
-    const float ic2 = g * finalOta2;
-    const float y1 = y2 - s2 - ic2;
-    s1 = 2.0f * (y1 - x) - s1;
-    s2 = s2 + 2.0f * ic2;
-    hist2 = hist1;
-    hist1 = y2 - x;
-    return y2;
-}
-
-inline float stepLpNonlinear(float x, float& s1, float& s2, float& hist1, float& hist2, float g,
-                             float k, float otaScale, float invOtaScale) noexcept {
-    const float rail1 = kLpOta1Rail * otaScale;
-    const float invRail1 = kInvLpOta1Rail * invOtaScale;
-    const float pos2 = kLpOta2Pos * otaScale;
-    const float neg2 = kLpOta2Neg * otaScale;
-    const float invPos2 = kInvLpOta2Pos * invOtaScale;
-    const float invNeg2 = kInvLpOta2Neg * invOtaScale;
-    const float dSpan = kLpDiodeSpan * otaScale;
-    const float invDSpan = kInvLpDiodeSpan * invOtaScale;
-
-    // 2-point extrapolation of continuous Stage-2 differential voltage w = y1 - y2:
-    float w = clampf(2.0f * hist1 - hist2, -8.0f, 8.0f);
-    float finalOta2 = w;
-
-    for (int iter = 0; iter < 3; ++iter) {
-        const SatResult ota2 = evalOta(w, pos2, neg2, invPos2, invNeg2);
-        const float y2 = s2 + g * ota2.value;
-        const float y1 = w + y2;
-
-        const SatResult ota1 = evalOtaSymmetric(x - y1, rail1, invRail1);
-        const SatResult fb = evalSiliconDiode(k * w, dSpan, invDSpan);
-
-        const float fLp = y1 - s1 - g * (ota1.value + fb.value);
-        const float d1 = g * ota1.deriv;
-        const float d2 = g * ota2.deriv;
-        const float dFb = k * fb.deriv;
-        const float dfDw = (1.0f + d1) * (1.0f + d2) - g * dFb;
-
-        const float dw = fLp / dfDw;
-        w -= dw;
-        finalOta2 = ota2.value - ota2.deriv * dw;
-
-        if (absf(dw) < 1.0e-2f) {
-            break;
-        }
-    }
-
-    const float ic2 = g * finalOta2;
-    const float y2 = s2 + ic2;
-    const float y1 = w + y2;
-    s1 = 2.0f * y1 - s1;
-    s2 = s2 + 2.0f * ic2;
-    hist2 = hist1;
-    hist1 = w;
-    return y2;
-}
-
-} // namespace
 
 void Ms20DualFilter::reset() noexcept {
     hpf_.reset();
@@ -213,64 +11,81 @@ void Ms20DualFilter::reset() noexcept {
 
 Ms20DualFilter::Coeffs Ms20DualFilter::prepareCoeffs(float hpCutoffHz, float hpResonance,
                                                      float lpCutoffHz, float lpResonance,
-                                                     float invSampleRate) noexcept {
+                                                     float invSampleRate, float preDrive) noexcept {
     Coeffs c{};
     const float hpHz = clampf(hpCutoffHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
     const float lpHz = clampf(lpCutoffHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
     const float hpRes = clampf(hpResonance, 0.0f, 1.0f);
     const float lpRes = clampf(lpResonance, 0.0f, 1.0f);
 
-    // Tight Smart-Park Independent HP & LP Engagement:
-    // Transparent linear bypass when parked right at 20 Hz / 20 kHz, waking smoothly into full
-    // LM13600 OTA saturation & 1S1588 resonance within a few encoder ticks (HP > 24, LP < 18.8k).
-    const float targetKHp = mapResonanceToK(hpRes);
-    const float targetKLp = mapResonanceToK(lpRes);
-    const float hpActive = smoothstep01((hpHz - 20.0f) * (1.0f / 4.0f));
-    const float lpActive = smoothstep01((20000.0f - lpHz) * (1.0f / 1200.0f));
+    c.preDrive = clampf(preDrive, 1.0f, 6.0f);
+    c.driveBlend = smoothstep01((c.preDrive - 1.0f) * (1.0f / 3.5f));
 
-    c.kHp = kButterworthK + hpActive * (targetKHp - kButterworthK);
-    c.kLp = kButterworthK + lpActive * (targetKLp - kButterworthK);
+    // Zero Smart-Park Resonance Muting:
+    // Linear bypass engages ONLY when parked right at 2 Hz / 28 kHz with 0% RES and 1.0x drive.
+    // Any resonance (> 0%) or pre-filter overdrive (> 1.0x) wakes 100% nonlinear silicon across
+    // the entire 2 Hz - 28 kHz continuum.
+    const float hpResWake = smoothstep01(hpRes * (1.0f / 0.015f));
+    const float lpResWake = smoothstep01(lpRes * (1.0f / 0.015f));
+    const float driveWake = smoothstep01((c.preDrive - 1.0f) * (1.0f / 0.06f));
+    const float hpFreqWake = smoothstep01((hpHz - kFilterCutoffMinHz) * (1.0f / 1.5f));
+    const float lpFreqWake = smoothstep01((kFilterCutoffMaxHz - lpHz) * (1.0f / 900.0f));
+
+    const float hpWakeMax = (hpResWake > driveWake) ? hpResWake : driveWake;
+    const float lpWakeMax = (lpResWake > driveWake) ? lpResWake : driveWake;
+    const float hpActive = clampf(hpFreqWake + (1.0f - hpFreqWake) * hpWakeMax, 0.0f, 1.0f);
+    const float lpActive = clampf(lpFreqWake + (1.0f - lpFreqWake) * lpWakeMax, 0.0f, 1.0f);
+
+    const float hpChaos = computeKorg35Chaos(hpRes);
+    const float lpChaos = computeKorg35Chaos(lpRes);
+
+    c.kHp = mapResonanceToK(hpRes);
+    c.kLp = mapResonanceToK(lpRes);
 
     c.hpLinearBypass = (hpActive <= 1.0e-4f);
     if (!c.hpLinearBypass) {
         c.invOtaScaleHp = (hpActive > 0.05f) ? hpActive : 0.05f;
         c.otaScaleHp = 1.0f / c.invOtaScaleHp;
+        c.hpDiodeSpan = kHpDiodeSpan * c.otaScaleHp * (1.0f - 0.12f * hpChaos);
+        c.invHpDiodeSpan = 1.0f / c.hpDiodeSpan;
     }
 
     c.lpLinearBypass = (lpActive <= 1.0e-4f);
     if (!c.lpLinearBypass) {
-        c.invOtaScaleLp = (lpActive > 0.05f) ? lpActive : 0.05f;
-        c.otaScaleLp = 1.0f / c.invOtaScaleLp;
+        const float invOtaLp = (lpActive > 0.05f) ? lpActive : 0.05f;
+        const float otaScaleLp = 1.0f / invOtaLp;
+        c.lpRail1 = kLpOta1Rail * otaScaleLp;
+        c.invLpRail1 = 1.0f / c.lpRail1;
+        c.lpPos2 = kLpOta2Pos * otaScaleLp * (1.0f + 0.14f * lpChaos);
+        c.lpNeg2 = kLpOta2Neg * otaScaleLp * (1.0f - 0.16f * lpChaos);
+        c.invLpPos2 = 1.0f / c.lpPos2;
+        c.invLpNeg2 = 1.0f / c.lpNeg2;
+        c.lpDiodeSpan = kLpDiodeSpan * otaScaleLp * (1.0f - 0.12f * lpChaos);
+        c.invLpDiodeSpan = 1.0f / c.lpDiodeSpan;
     }
 
-    // Per-stage KLM-307 passband-vs-resonance dividers: lets each stage's silicon peak tower
-    // prominently above the passband and prevents a self-oscillating HPF from swamping LPF.
-    const float hpFocus = hpRes * hpActive;
-    const float lpFocus = lpRes * lpActive;
-    c.hpInScale = 1.0f / (1.0f + 0.70f * hpFocus);
-    c.interStageScale = (1.0f + 0.64f * hpFocus) / (1.0f + 0.70f * lpFocus);
-    c.lpOutScale = 1.0f + 0.58f * lpFocus;
+    // Rev 2 (0-60%) balances passband vs resonance; Korg35 (60-100%) unpads HPF -> LPF coupling
+    // so dual-stage self-oscillation slams LPF OTAs into raw intermodulation screaming.
+    const float hpRev2 = clampf(hpRes, 0.0f, 0.60f) * hpActive;
+    const float lpRev2 = clampf(lpRes, 0.0f, 0.60f) * lpActive;
+    c.hpInScale = 1.0f / (1.0f + 0.68f * hpRev2);
+    const float baseInter = (1.0f + 0.64f * hpRev2) / (1.0f + 0.68f * lpRev2);
+    c.interStageScale = baseInter * (1.0f + 0.52f * hpChaos + 0.18f * lpChaos);
+    c.lpOutScale = 1.0f + 0.56f * lpRev2 + 0.42f * lpChaos;
 
-    const float effectiveHpHz = compensateHpSelfOscPitch(2.5f + hpActive * (hpHz - 2.5f), c.kHp);
-    const float effectiveLpHz =
-        compensateLpSelfOscPitch(28000.0f + lpActive * (lpHz - 28000.0f), c.kLp);
+    const float effectiveHpHz = compensateHpSelfOscPitch(hpHz, c.kHp);
+    const float effectiveLpHz = compensateLpSelfOscPitch(lpHz, c.kLp);
 
     c.gHp = fastPrewarpTan(effectiveHpHz, invSampleRate);
     c.gLp = fastPrewarpTan(effectiveLpHz, invSampleRate);
 
-    // Ultrasonic zero-delay loop-gain cap (only active above ~17.5 kHz): guarantees df > 0.12
-    // globally across all R^2 even under deeply saturated OTAs.
-    if (c.gHp > 0.15f) {
-        const float maxSafeKHp = 0.88f * (1.0f + c.gHp) / c.gHp;
-        if (c.kHp > maxSafeKHp) {
-            c.kHp = maxSafeKHp;
-        }
+    // Exact Nyquist zero-delay loop-gain guard: guarantees Jacobian df >= 0.12 globally across
+    // all R^2 while keeping k > 2.0 (active self-oscillation) all the way up to 28 kHz!
+    if (c.gHp * (c.kHp - 1.0f) > 0.88f) {
+        c.kHp = 1.0f + 0.88f / c.gHp;
     }
-    if (c.gLp > 0.15f) {
-        const float maxSafeKLp = 0.88f * (1.0f + 0.90f * c.gLp) / c.gLp;
-        if (c.kLp > maxSafeKLp) {
-            c.kLp = maxSafeKLp;
-        }
+    if (c.gLp * (c.kLp - 0.72f) > 0.88f) {
+        c.kLp = 0.72f + 0.88f / c.gLp;
     }
 
     const float onePlusGHp = 1.0f + c.gHp;
@@ -299,8 +114,8 @@ float Ms20DualFilter::processHighPass(OtaSallenKeyStage& st, float x, const Coef
     float s2 = st.s2;
     float h1 = st.hist1;
     float h2 = st.hist2;
-    const float y2 =
-        stepHpNonlinear(x, s1, s2, h1, h2, c.gHp, c.kHp, c.otaScaleHp, c.invOtaScaleHp);
+    const float y2 = stepHpNonlinear(x, s1, s2, h1, h2, c.gHp, c.kHp, c.otaScaleHp, c.invOtaScaleHp,
+                                     c.hpDiodeSpan, c.invHpDiodeSpan);
     st.s1 = scrubFilterState(s1);
     st.s2 = scrubFilterState(s2);
     st.hist1 = scrubFilterState(h1);
@@ -327,7 +142,8 @@ float Ms20DualFilter::processLowPass(OtaSallenKeyStage& st, float x, const Coeff
     float h1 = st.hist1;
     float h2 = st.hist2;
     const float y2 =
-        stepLpNonlinear(x, s1, s2, h1, h2, c.gLp, c.kLp, c.otaScaleLp, c.invOtaScaleLp);
+        stepLpNonlinear(x, s1, s2, h1, h2, c.gLp, c.kLp, c.lpRail1, c.invLpRail1, c.lpPos2,
+                        c.lpNeg2, c.invLpPos2, c.invLpNeg2, c.lpDiodeSpan, c.invLpDiodeSpan);
     st.s1 = scrubFilterState(s1);
     st.s2 = scrubFilterState(s2);
     st.hist1 = scrubFilterState(h1);
@@ -336,8 +152,8 @@ float Ms20DualFilter::processLowPass(OtaSallenKeyStage& st, float x, const Coeff
 }
 
 float Ms20DualFilter::processPrepared(float input, const Coeffs& c) noexcept {
-    const float cleanIn = clampf(input, -16.0f, 16.0f);
-    const float afterHp = processHighPass(hpf_, cleanIn * c.hpInScale, c);
+    const float drivenIn = applyMs20InputOverdrive(input, c.preDrive, c.driveBlend);
+    const float afterHp = processHighPass(hpf_, drivenIn * c.hpInScale, c);
     const float afterLp = processLowPass(lpf_, afterHp * c.interStageScale, c);
     return afterLp * c.lpOutScale;
 }
@@ -374,7 +190,9 @@ void Ms20DualFilter::processQuadBank4x(
 
         for (size_t sub = 0u; sub < 4u; ++sub) {
             for (size_t v = 0u; v < 4u; ++v) {
-                const float x = clampf(voiceSamples[v][sub], -16.0f, 16.0f) * inScale[v];
+                const float driven = applyMs20InputOverdrive(
+                    voiceSamples[v][sub], coeffs[v].preDrive, coeffs[v].driveBlend);
+                const float x = driven * inScale[v];
                 const float onePlusG = 1.0f + g[v];
                 const float y2 = (x + s1[v] + onePlusG * s2[v]) * invDet[v];
                 const float y1 = onePlusG * y2 - s2[v];
@@ -423,8 +241,8 @@ void Ms20DualFilter::processQuadBank4x(
             invNeg1[v] = kInvHpOta1Neg * coeffs[v].invOtaScaleHp;
             rail2[v] = kHpOta2Rail * coeffs[v].otaScaleHp;
             invRail2[v] = kInvHpOta2Rail * coeffs[v].invOtaScaleHp;
-            dSpan[v] = kHpDiodeSpan * coeffs[v].otaScaleHp;
-            invDSpan[v] = kInvHpDiodeSpan * coeffs[v].invOtaScaleHp;
+            dSpan[v] = coeffs[v].hpDiodeSpan;
+            invDSpan[v] = coeffs[v].invHpDiodeSpan;
         }
 
         for (size_t sub = 0u; sub < 4u; ++sub) {
@@ -433,9 +251,10 @@ void Ms20DualFilter::processQuadBank4x(
             alignas(16) std::array<float, 4> dy2{};
             alignas(16) std::array<float, 4> finalOta2{};
 
-            // Auto-vectorized 4-voice SIMD Iteration 0 (hides fdiv latency 4x across voices!)
             for (size_t v = 0u; v < 4u; ++v) {
-                x[v] = clampf(voiceSamples[v][sub], -16.0f, 16.0f) * inScale[v];
+                const float driven = applyMs20InputOverdrive(
+                    voiceSamples[v][sub], coeffs[v].preDrive, coeffs[v].driveBlend);
+                x[v] = driven * inScale[v];
                 y2[v] = x[v] + clampf(2.0f * h1[v] - h2[v], -8.0f, 8.0f);
                 const SatResult ota2 = evalOtaSymmetric(-y2[v], rail2[v], invRail2[v]);
                 const float y1 = y2[v] - s2[v] - g[v] * ota2.value;
@@ -498,8 +317,10 @@ void Ms20DualFilter::processQuadBank4x(
         for (size_t v = 0u; v < 4u; ++v) {
             const float inScale = coeffs[v].hpInScale;
             for (size_t sub = 0u; sub < 4u; ++sub) {
-                const float cleanIn = clampf(voiceSamples[v][sub], -16.0f, 16.0f) * inScale;
-                voiceSamples[v][sub] = processHighPass(filters[v].hpf_, cleanIn, coeffs[v]);
+                const float driven = applyMs20InputOverdrive(
+                    voiceSamples[v][sub], coeffs[v].preDrive, coeffs[v].driveBlend);
+                voiceSamples[v][sub] =
+                    processHighPass(filters[v].hpf_, driven * inScale, coeffs[v]);
             }
         }
     }
@@ -566,24 +387,23 @@ void Ms20DualFilter::processQuadBank4x(
             coeffs[3].interStageScale};
         alignas(16) const std::array<float, 4> outScale{coeffs[0].lpOutScale, coeffs[1].lpOutScale,
                                                         coeffs[2].lpOutScale, coeffs[3].lpOutScale};
-        alignas(16) std::array<float, 4> rail1{};
-        alignas(16) std::array<float, 4> invRail1{};
-        alignas(16) std::array<float, 4> pos2{};
-        alignas(16) std::array<float, 4> neg2{};
-        alignas(16) std::array<float, 4> invPos2{};
-        alignas(16) std::array<float, 4> invNeg2{};
-        alignas(16) std::array<float, 4> dSpan{};
-        alignas(16) std::array<float, 4> invDSpan{};
-        for (size_t v = 0u; v < 4u; ++v) {
-            rail1[v] = kLpOta1Rail * coeffs[v].otaScaleLp;
-            invRail1[v] = kInvLpOta1Rail * coeffs[v].invOtaScaleLp;
-            pos2[v] = kLpOta2Pos * coeffs[v].otaScaleLp;
-            neg2[v] = kLpOta2Neg * coeffs[v].otaScaleLp;
-            invPos2[v] = kInvLpOta2Pos * coeffs[v].invOtaScaleLp;
-            invNeg2[v] = kInvLpOta2Neg * coeffs[v].invOtaScaleLp;
-            dSpan[v] = kLpDiodeSpan * coeffs[v].otaScaleLp;
-            invDSpan[v] = kInvLpDiodeSpan * coeffs[v].invOtaScaleLp;
-        }
+        alignas(16) const std::array<float, 4> rail1{coeffs[0].lpRail1, coeffs[1].lpRail1,
+                                                     coeffs[2].lpRail1, coeffs[3].lpRail1};
+        alignas(16) const std::array<float, 4> invRail1{coeffs[0].invLpRail1, coeffs[1].invLpRail1,
+                                                        coeffs[2].invLpRail1, coeffs[3].invLpRail1};
+        alignas(16) const std::array<float, 4> pos2{coeffs[0].lpPos2, coeffs[1].lpPos2,
+                                                    coeffs[2].lpPos2, coeffs[3].lpPos2};
+        alignas(16) const std::array<float, 4> neg2{coeffs[0].lpNeg2, coeffs[1].lpNeg2,
+                                                    coeffs[2].lpNeg2, coeffs[3].lpNeg2};
+        alignas(16) const std::array<float, 4> invPos2{coeffs[0].invLpPos2, coeffs[1].invLpPos2,
+                                                       coeffs[2].invLpPos2, coeffs[3].invLpPos2};
+        alignas(16) const std::array<float, 4> invNeg2{coeffs[0].invLpNeg2, coeffs[1].invLpNeg2,
+                                                       coeffs[2].invLpNeg2, coeffs[3].invLpNeg2};
+        alignas(16) const std::array<float, 4> dSpan{coeffs[0].lpDiodeSpan, coeffs[1].lpDiodeSpan,
+                                                     coeffs[2].lpDiodeSpan, coeffs[3].lpDiodeSpan};
+        alignas(16) const std::array<float, 4> invDSpan{
+            coeffs[0].invLpDiodeSpan, coeffs[1].invLpDiodeSpan, coeffs[2].invLpDiodeSpan,
+            coeffs[3].invLpDiodeSpan};
 
         for (size_t sub = 0u; sub < 4u; ++sub) {
             alignas(16) std::array<float, 4> x{};
@@ -591,7 +411,6 @@ void Ms20DualFilter::processQuadBank4x(
             alignas(16) std::array<float, 4> dw{};
             alignas(16) std::array<float, 4> finalOta2{};
 
-            // Auto-vectorized 4-voice SIMD Iteration 0
             for (size_t v = 0u; v < 4u; ++v) {
                 x[v] = voiceSamples[v][sub] * interScale[v];
                 w[v] = clampf(2.0f * h1[v] - h2[v], -8.0f, 8.0f);

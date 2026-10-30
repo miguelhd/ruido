@@ -44,6 +44,7 @@ UI_SRCS := \
 	src/core/LedEngine.cpp \
 	src/core/RuidoController.cpp \
 	src/ui/ScopeTraceEngine.cpp \
+	src/ui/HudAmpGraph.cpp \
 	src/ui/HudGraphs.cpp \
 	src/ui/HudGlobalViews.cpp \
 	src/ui/HudChrome.cpp \

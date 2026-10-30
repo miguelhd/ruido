@@ -50,12 +50,12 @@ class DroneEngine {
   private:
     struct VoiceSmoothers {
         LogFreqSmoother freqHz;
-        CriticallyDampedSmoother amplitude;
-        CriticallyDampedSmoother pan;
         LogFreqSmoother hpCutoffHz;
         CriticallyDampedSmoother hpResonance;
         LogFreqSmoother lpCutoffHz;
         CriticallyDampedSmoother lpResonance;
+        CriticallyDampedSmoother amplitude;
+        CriticallyDampedSmoother pan;
         OnePoleSmoother vactrolGate;
         VactrolSmoother pressure;
     };
@@ -65,6 +65,7 @@ class DroneEngine {
         float hpRes = -1.0f;
         float lpHz = -1.0f;
         float lpRes = -1.0f;
+        float preDrive = -1.0f;
         float panEff = -99.0f;
         float panL = 0.70710678f;
         float panR = 0.70710678f;
@@ -88,6 +89,7 @@ class DroneEngine {
 
     std::array<VoiceSmoothers, kNumOscillators> voiceSmoothers_{};
     std::array<VoiceCoeffCache, kNumOscillators> coeffCache_{};
+    std::array<float, kNumOscillators> prevOscFreqHz_{55.0f, 82.41f, 110.15f, 164.81f};
     CriticallyDampedSmoother couplingSmoother_{};
     CriticallyDampedSmoother masterTrimSmoother_{};
     OnePoleSmoother monoMixSmoother_{};   // 0.0 = Stereo (POLY), 1.0 = Dual-Mono (MONO)

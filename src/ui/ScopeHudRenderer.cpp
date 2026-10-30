@@ -15,6 +15,7 @@ ScopeHudRenderer::ScopeHudRenderer() noexcept {
 void ScopeHudRenderer::reset() noexcept {
     traceEngine_.reset();
     graphs_.reset();
+    ampGraph_.reset();
     globalViews_.reset();
 
     frameControl_ = EngineControlState::makeDefault();
@@ -27,10 +28,13 @@ void ScopeHudRenderer::reset() noexcept {
     frameLfoOutput_ = {0.0f, 0.0f, 0.0f, 0.0f};
     frameLfoPhase_ = {0.0f, 0.25f, 0.50f, 0.75f};
     frameLfoDriftPacked_ = {0u, 0u, 0u, 0u};
+    frameVoicePeak_ = {0.0f, 0.0f, 0.0f, 0.0f};
     knobPosSignedSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
     knobDimSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
     knobFocusSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
     headerBarSmooth_ = 0.0f;
+    fineOverlayPhase_ = 0.0f;
+    coarseOverlayPhase_ = 0.0f;
     renderedOpacityLevel_ = 0.0f;
     smoothedPeakL_ = 0.0f;
     smoothedPeakR_ = 0.0f;
@@ -88,16 +92,17 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
 
     const float dtClamped = clampf(dtSec, 0.001f, 0.250f);
     traceEngine_.advanceWatchdog(dtClamped, hud.scopeFrozen);
+    const bool streamStalled = traceEngine_.isStreamStalled(hud.scopeFrozen);
     if (!hud.scopeFrozen) {
         for (size_t v = 0u; v < kNumOscillators; ++v) {
             frameLfoOutput_[v] = telemetry.lfoOutput[v].load(std::memory_order_relaxed);
             frameLfoPhase_[v] =
                 wrapLfoPhase01(telemetry.lfoPhase[v].load(std::memory_order_relaxed));
             frameLfoDriftPacked_[v] = telemetry.lfoDriftPacked[v].load(std::memory_order_relaxed);
+            frameVoicePeak_[v] =
+                streamStalled ? 0.0f : telemetry.voicePeak[v].load(std::memory_order_relaxed);
         }
     }
-
-    const bool streamStalled = traceEngine_.isStreamStalled(hud.scopeFrozen);
     const float pL = streamStalled ? 0.0f : telemetry.peakLeft.load(std::memory_order_relaxed);
     const float pR = streamStalled ? 0.0f : telemetry.peakRight.load(std::memory_order_relaxed);
     const float alphaPeakAtk = 1.0f - fastExpNeg(dtClamped * (1.0f / 0.028f));
@@ -123,10 +128,13 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         prevRawHud_ = hud;
         if (dtSec <= 0.0f || syntheticInstantHide ||
             (renderedOpacityLevel_ <= 0.002f && !graphs_.hasResidualPhase() &&
-             !globalViews_.hasResidualPhase())) {
+             !ampGraph_.hasResidualPhase() && !globalViews_.hasResidualPhase())) {
             frameHud_ = hud;
             renderedOpacityLevel_ = 0.0f;
+            fineOverlayPhase_ = 0.0f;
+            coarseOverlayPhase_ = 0.0f;
             graphs_.clearImmediate();
+            ampGraph_.clearImmediate();
             globalViews_.clearImmediate();
             hudGaugesPrimed_ = false;
             return;
@@ -134,11 +142,14 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
 
         renderedOpacityLevel_ = stepHudFadeLinear(renderedOpacityLevel_, false, dtClamped);
         graphs_.stepFadeOut(dtClamped);
+        ampGraph_.stepFadeOut(dtClamped);
         globalViews_.update(dtClamped, control, hud, frameLfoOutput_);
         frameHud_.opacity = smoothstep01(renderedOpacityLevel_);
         if (renderedOpacityLevel_ <= 0.001f && !graphs_.hasResidualPhase() &&
-            !globalViews_.hasResidualPhase()) {
+            !ampGraph_.hasResidualPhase() && !globalViews_.hasResidualPhase()) {
             renderedOpacityLevel_ = 0.0f;
+            fineOverlayPhase_ = 0.0f;
+            coarseOverlayPhase_ = 0.0f;
             frameHud_.mode = HudMode::None;
             frameHud_.opacity = 0.0f;
             hudGaugesPrimed_ = false;
@@ -146,12 +157,12 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         return;
     }
 
-    const bool nowPinnedOrOpen = hud.modifierHeld || hud.lfoPageOpen || hud.configPageOpen ||
-                                 hud.saveArmed ||
+    const bool nowPinnedOrOpen = hud.modifierHeld || hud.lfoPageOpen || hud.editPageOpen ||
+                                 hud.configPageOpen || hud.saveArmed ||
                                  (hud.scopeFrozen && hud.mode == HudMode::ScopeFreeze);
     const bool prevWasPinnedOrOpen =
-        prevRawHud_.modifierHeld || prevRawHud_.lfoPageOpen || prevRawHud_.configPageOpen ||
-        prevRawHud_.saveArmed ||
+        prevRawHud_.modifierHeld || prevRawHud_.lfoPageOpen || prevRawHud_.editPageOpen ||
+        prevRawHud_.configPageOpen || prevRawHud_.saveArmed ||
         (prevRawHud_.scopeFrozen && prevRawHud_.mode == HudMode::ScopeFreeze);
     const bool fadingSameMode = !nowPinnedOrOpen && !freqChanged && (hud.opacity > 0.001f) &&
                                 ((prevWasPinnedOrOpen && hud.mode == prevRawHud_.mode &&
@@ -175,9 +186,14 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.focusedVoice = releaseLatchHud_.focusedVoice;
         effectiveHud.focusedKnob = releaseLatchHud_.focusedKnob;
         effectiveHud.lfoVoiceFocus = releaseLatchHud_.lfoVoiceFocus;
+        effectiveHud.editPageOpen = releaseLatchHud_.editPageOpen;
         effectiveHud.globalTarget = releaseLatchHud_.globalTarget;
         effectiveHud.configCursor = releaseLatchHud_.configCursor;
         effectiveHud.config = releaseLatchHud_.config;
+        if (releaseLatchHud_.mode == HudMode::KnobRate) {
+            effectiveHud.rateHoldActive = releaseLatchHud_.rateHoldActive;
+            effectiveHud.knobRate = releaseLatchHud_.knobRate;
+        }
     }
 
     frameHud_ = effectiveHud;
@@ -185,14 +201,27 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     prevRawHud_ = hud;
 
     const bool snapGauges = !hudGaugesPrimed_;
+    const bool wantFine = effectiveHud.rateHoldActive && (effectiveHud.knobRate == KnobRate::Fine);
+    const bool wantCoarse =
+        effectiveHud.rateHoldActive && (effectiveHud.knobRate == KnobRate::Coarse);
+    if (snapGauges) {
+        fineOverlayPhase_ = wantFine ? 1.0f : 0.0f;
+        coarseOverlayPhase_ = wantCoarse ? 1.0f : 0.0f;
+    } else {
+        fineOverlayPhase_ = stepHudFadeLinear(fineOverlayPhase_, wantFine, dtClamped);
+        coarseOverlayPhase_ = stepHudFadeLinear(coarseOverlayPhase_, wantCoarse, dtClamped);
+    }
+
     hudGaugesPrimed_ = (effectiveHud.opacity > 0.004f);
     if (hudGaugesPrimed_) {
         updateHudGauges(dtClamped, snapGauges);
     }
 
     globalViews_.update(dtClamped, control, hud, frameLfoOutput_);
-    graphs_.update(dtClamped, control, hud, effectiveHud, globalViews_.anyActiveTarget(hud),
-                   frameLfoOutput_, frameLfoDriftPacked_);
+    ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_);
+    const bool extraCenterView = globalViews_.anyActiveTarget(hud) || ampGraph_.isActive(hud);
+    graphs_.update(dtClamped, control, hud, effectiveHud, extraCenterView, frameLfoOutput_,
+                   frameLfoDriftPacked_);
 }
 
 void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,
@@ -264,9 +293,11 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
 
     float effFilterAlpha01 = 0.0f;
     float effLfoAlpha01 = 0.0f;
+    float effEditAmpAlpha01 = 0.0f;
     float dummy01 = 0.0f;
     const uint8_t filterAlpha8 = resolveViewAlpha(graphs_.filterGraphPhase(), effFilterAlpha01);
     const uint8_t lfoAlpha8 = resolveViewAlpha(graphs_.lfoGraphPhase(), effLfoAlpha01);
+    const uint8_t editAmpAlpha8 = resolveViewAlpha(ampGraph_.phase(), effEditAmpAlpha01);
     const uint8_t freqAlpha8 = resolveViewAlpha(globalViews_.freqPhase(), dummy01);
     const uint8_t ampAlpha8 = resolveViewAlpha(globalViews_.ampPhase(), dummy01);
     const uint8_t allAlpha8 = resolveViewAlpha(globalViews_.allOverlayPhase(), dummy01);
@@ -274,8 +305,10 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
 
     cv.applyVerticalScrim(0, 34, 0.80f, true);
     if (frameHud_.knobBank != KnobBankMode::None) {
-        const float graphEnvMax =
-            (effFilterAlpha01 > effLfoAlpha01) ? effFilterAlpha01 : effLfoAlpha01;
+        float graphEnvMax = (effFilterAlpha01 > effLfoAlpha01) ? effFilterAlpha01 : effLfoAlpha01;
+        if (effEditAmpAlpha01 > graphEnvMax) {
+            graphEnvMax = effEditAmpAlpha01;
+        }
         const int botScrimTop = 178 - static_cast<int>(8.0f * graphEnvMax + 0.5f);
         cv.applyVerticalScrim(botScrimTop, 240, 0.90f, false);
     }
@@ -284,11 +317,14 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
                               frameControl_, frameHud_, frameLfoPhase_);
     graphs_.compositeFilterStrip(y0, y1, stripHeight, lumBuf, linScratch, effFilterAlpha01,
                                  filterAlpha8);
+    ampGraph_.compositeStrip(y0, y1, stripHeight, lumBuf, linScratch, effEditAmpAlpha01,
+                             editAmpAlpha8, frameHud_);
     globalViews_.compositeGlobalAllOverlayStrip(y0, y1, lumBuf, allAlpha8);
     globalViews_.compositeGlobalFreqStrip(y0, y1, lumBuf, freqAlpha8);
     globalViews_.compositeGlobalAmpStrip(y0, y1, lumBuf, ampAlpha8);
     globalViews_.compositeGlobalConfigStrip(y0, y1, lumBuf, cfgAlpha8, frameControl_, frameHud_);
-    compositeTopHeaderStrip(cv, frameControl_, frameHud_, frameLfoOutput_, headerBarSmooth_);
+    compositeTopHeaderStrip(cv, frameControl_, frameHud_, frameLfoOutput_, headerBarSmooth_,
+                            fineOverlayPhase_, coarseOverlayPhase_);
     compositeBottomKnobStrip(cv, frameControl_, frameHud_, frameLfoOutput_, knobPosSignedSmooth_,
                              knobDimSmooth_, knobFocusSmooth_);
 }

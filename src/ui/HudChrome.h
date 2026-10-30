@@ -28,7 +28,7 @@ void compositeIdlePeakMeters(const MonoStripCanvas& idleCv, float smoothedPeakL,
 void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState& control,
                              const HudState& hud,
                              const std::array<float, kNumOscillators>& lfoOutput,
-                             float headerBarSmooth) noexcept;
+                             float headerBarSmooth, float finePhase, float coarsePhase) noexcept;
 
 void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlState& control,
                               const HudState& hud,

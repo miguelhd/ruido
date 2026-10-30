@@ -22,16 +22,26 @@ class Ms20DualFilter {
         float kHp = 0.58578644f;
         float otaScaleHp = 20.0f;
         float invOtaScaleHp = 0.05f;
+        float hpDiodeSpan = 31.0f;
+        float invHpDiodeSpan = 0.032f;
         float invLinDetHp = 1.0f;
         bool hpLinearBypass = true;
 
         float gLp = 0.25f;
         float kLp = 0.58578644f;
-        float otaScaleLp = 20.0f;
-        float invOtaScaleLp = 0.05f;
+        float lpRail1 = 40.5f;
+        float invLpRail1 = 0.0247f;
+        float lpPos2 = 41.55f;
+        float lpNeg2 = 39.45f;
+        float invLpPos2 = 0.0241f;
+        float invLpNeg2 = 0.0253f;
+        float lpDiodeSpan = 26.5f;
+        float invLpDiodeSpan = 0.0377f;
         float invLinDetLp = 0.70618806f;
         bool lpLinearBypass = true;
 
+        float preDrive = 1.0f;
+        float driveBlend = 0.0f;
         float hpInScale = 1.0f;
         float interStageScale = 1.0f;
         float lpOutScale = 1.0f;
@@ -42,7 +52,8 @@ class Ms20DualFilter {
     void reset() noexcept;
 
     static Coeffs prepareCoeffs(float hpCutoffHz, float hpResonance, float lpCutoffHz,
-                                float lpResonance, float invSampleRate) noexcept;
+                                float lpResonance, float invSampleRate,
+                                float preDrive = 1.0f) noexcept;
 
     float processPrepared(float input, const Coeffs& c) noexcept;
 
@@ -54,9 +65,9 @@ class Ms20DualFilter {
         const std::array<Coeffs, kNumOscillators>& coeffs) noexcept;
 
     float processSample(float input, float hpCutoffHz, float hpResonance, float lpCutoffHz,
-                        float lpResonance, float invSampleRate) noexcept {
-        return processPrepared(
-            input, prepareCoeffs(hpCutoffHz, hpResonance, lpCutoffHz, lpResonance, invSampleRate));
+                        float lpResonance, float invSampleRate, float preDrive = 1.0f) noexcept {
+        return processPrepared(input, prepareCoeffs(hpCutoffHz, hpResonance, lpCutoffHz,
+                                                    lpResonance, invSampleRate, preDrive));
     }
 
   private:

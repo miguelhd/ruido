@@ -66,10 +66,13 @@ inline float evalAnalogSine(float phase01) noexcept {
 }
 
 // 0.25 -> 0.50 Landmarks: MS-20 variable-symmetry Triangle -> Sawtooth with C^1 quadratic
-// vertex fillets, rate-adaptive capacitor flyback, exact +-1.0 peak, and exact 0.0 DC integral.
+// vertex fillets, rate-adaptive capacitor flyback across 0.01 Hz .. 2 kHz, +-1.0 peak, 0.0 DC.
 inline float evalSkewedTriSaw(float phase01, float skew01, float rateHz) noexcept {
     const float s = clampf(skew01, 0.0f, 1.0f);
-    const float minFall = clampf(0.012f + clampf(rateHz, 0.0f, 40.0f) * 0.0032f, 0.012f, 0.18f);
+    const float rClamped = clampf(rateHz, 0.0f, kLfoFreqMaxHz);
+    const float lowSlew = clampf(rClamped * (1.0f / 40.0f), 0.0f, 1.0f);
+    const float audioSlew = smoothstep01((rClamped - 40.0f) * (1.0f / 1960.0f));
+    const float minFall = clampf(0.012f + 0.128f * lowSlew + 0.280f * audioSlew, 0.012f, 0.42f);
     const float r = 0.5f + s * ((1.0f - minFall) - 0.5f);
     const float halfR = 0.5f * r;
     const float halfF = 0.5f - halfR;
@@ -86,9 +89,12 @@ inline float evalSkewedTriSaw(float phase01, float skew01, float rateHz) noexcep
     return clampf(sign * arch * invPeak, -1.0f, 1.0f);
 }
 
-// 0.75 Landmark: Vactrol-slewed Schmitt square wave (C^1 cubic edges, crisp flat plateaus, 0 DC).
+// 0.75 Landmark: Vactrol-slewed Schmitt square wave (C^1 cubic edges across 0.01 Hz .. 2 kHz, 0 DC)
 inline float evalAnalogSquare(float phase01, float rateHz) noexcept {
-    const float halfEdge = clampf(0.008f + clampf(rateHz, 0.0f, 40.0f) * 0.0022f, 0.008f, 0.12f);
+    const float rClamped = clampf(rateHz, 0.0f, kLfoFreqMaxHz);
+    const float lowSlew = clampf(rClamped * (1.0f / 40.0f), 0.0f, 1.0f);
+    const float audioSlew = smoothstep01((rClamped - 40.0f) * (1.0f / 1960.0f));
+    const float halfEdge = clampf(0.008f + 0.088f * lowSlew + 0.144f * audioSlew, 0.008f, 0.24f);
     const float sign = (phase01 <= 0.5f) ? 1.0f : -1.0f;
     const float q = (phase01 <= 0.5f) ? phase01 : (1.0f - phase01);
 
@@ -169,35 +175,38 @@ inline float evalMorphedLfoWave(float phase01, float shape01, float rateHz,
 }
 
 // Headroom-aware MS-20 filter cutoff modulation (shared by LPF and HPF).
-// Shifts center smoothly inward when parked near 20 Hz or 20 kHz so sweeps never flat-top.
+// Shifts center smoothly inward when parked near 2 Hz or 28 kHz, and slams full rail-to-rail
+// (+-7.5 octaves / 15-octave span) at extreme depth.
 inline float applyLfoCutoffHz(float baseHz, float depth01, float lfoBipolar) noexcept {
     const float d = clampf(depth01, 0.0f, 1.0f);
     if (d <= 0.0f) {
         return baseHz;
     }
-    constexpr float kOctMin = 4.32192809f;  // log2(20 Hz)
-    constexpr float kOctMax = 14.28771238f; // log2(20000 Hz)
-    const float halfSpan = 4.5f * d * (0.30f + 0.70f * d);
+    constexpr float kOctMin = cxLog2Pos(kFilterCutoffMinHz);
+    constexpr float kOctMax = cxLog2Pos(kFilterCutoffMaxHz);
+    constexpr float kHalfRange = 0.5f * (kOctMax - kOctMin);
+    const float halfSpan = 7.5f * d * (0.25f + 0.75f * d);
+    const float guard = (halfSpan < kHalfRange) ? halfSpan : kHalfRange;
     const float baseOct = fastLog2(clampf(baseHz, kFilterCutoffMinHz, kFilterCutoffMaxHz));
-    const float centerOct = clampf(baseOct, kOctMin + halfSpan, kOctMax - halfSpan);
+    const float centerOct = clampf(baseOct, kOctMin + guard, kOctMax - guard);
     const float modOct = centerOct + halfSpan * clampf(lfoBipolar, -1.0f, 1.0f);
     return clampf(fastExp2(modOct), kFilterCutoffMinHz, kFilterCutoffMaxHz);
 }
 
-// Headroom-aware MS-20 Rev 2 OTA resonance modulation (shared by LP RES and HP RES).
+// Uncapped MS-20 Rev 2 / Korg35 resonance modulation across full [0.0, 1.0] self-oscillation span.
 inline float applyLfoResonance(float baseRes, float depth01, float lfoBipolar) noexcept {
     const float d = clampf(depth01, 0.0f, 1.0f);
     if (d <= 0.0f) {
         return baseRes;
     }
     const float cleanBase = clampf(baseRes, 0.0f, 1.0f);
-    const float resCeil = (cleanBase > 0.96f) ? cleanBase : 0.96f;
-    const float halfSpan = 0.47f * d;
-    const float center = clampf(cleanBase, halfSpan, resCeil - halfSpan);
+    const float halfSpan = 0.54f * d;
+    const float guard = (halfSpan < 0.5f) ? halfSpan : 0.5f;
+    const float center = clampf(cleanBase, guard, 1.0f - guard);
     return clampf(center + halfSpan * clampf(lfoBipolar, -1.0f, 1.0f), 0.0f, 1.0f);
 }
 
-// Concave audio-taper VCA tremolo modulation (drops to 0.0 at 100% depth trough).
+// Concave audio-taper VCA / overdrive modulation (0.0 silence trough -> 1.0 full 4.5x drive crest).
 inline float applyLfoAmplitude(float baseAmp, float depth01, float lfoBipolar) noexcept {
     const float d = clampf(depth01, 0.0f, 1.0f);
     if (d <= 0.0f) {
@@ -205,21 +214,21 @@ inline float applyLfoAmplitude(float baseAmp, float depth01, float lfoBipolar) n
     }
     const float cleanBase = clampf(baseAmp, 0.0f, 1.0f);
     const float ampMin = cleanBase * (1.0f - d);
-    const float ampMax = clampf(cleanBase * (1.0f + 0.45f * d), 0.0f, 1.0f);
+    const float ampMax = clampf(cleanBase + (1.0f - cleanBase) * d, 0.0f, 1.0f);
     const float u = 0.5f * (clampf(lfoBipolar, -1.0f, 1.0f) + 1.0f);
     const float shapedU = u * (0.65f + 0.35f * u);
     return clampf(ampMin + (ampMax - ampMin) * shapedU, 0.0f, 1.0f);
 }
 
-// Concave log-octave pitch vibrato -> +-2-octave FM sweep.
+// Concave log-octave pitch vibrato -> +-5-octave audio-rate FM / dive-bomb sweep.
 inline float applyLfoPitchHz(float baseHz, float depth01, float lfoBipolar) noexcept {
     const float d = clampf(depth01, 0.0f, 1.0f);
     if (d <= 0.0f) {
         return baseHz;
     }
-    const float octSpan = 2.0f * d * (0.12f + 0.88f * d);
-    return clampf(baseHz * fastExp2(octSpan * clampf(lfoBipolar, -1.0f, 1.0f)), kLfoFreqMinHz,
-                  kAudioFreqMaxHz * 4.0f);
+    const float octSpan = 5.0f * d * (0.10f + 0.90f * d);
+    return clampf(baseHz * fastExp2(octSpan * clampf(lfoBipolar, -1.0f, 1.0f)),
+                  kAudioFreqMinHz * 0.5f, kAudioFreqMaxHz);
 }
 
 // Headroom-aware constant-power stereo panner orbit across [-1.0, +1.0].
@@ -236,6 +245,8 @@ inline float applyLfoPan(float basePan, float depth01, float lfoBipolar) noexcep
 
 inline constexpr const char* lfoTargetName(LfoTarget target) noexcept {
     switch (target) {
+    case LfoTarget::Pitch:
+        return "PITCH";
     case LfoTarget::LpCutoff:
         return "LPF";
     case LfoTarget::LpResonance:
@@ -246,8 +257,6 @@ inline constexpr const char* lfoTargetName(LfoTarget target) noexcept {
         return "HP RES";
     case LfoTarget::Amplitude:
         return "AMP";
-    case LfoTarget::Pitch:
-        return "PITCH";
     case LfoTarget::Pan:
         return "PAN";
     case LfoTarget::Count:

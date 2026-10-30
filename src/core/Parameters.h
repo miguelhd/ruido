@@ -12,35 +12,56 @@ namespace ruido {
 
 // Per-voice LFO modulation destinations (1-to-1 with VoiceParams circuit parameters).
 enum class LfoTarget : uint8_t {
-    LpCutoff = 0,    // LPF (default)
-    LpResonance = 1, // LP RES
-    HpCutoff = 2,    // HPF
-    HpResonance = 3, // HP RES
-    Amplitude = 4,   // AMP
-    Pitch = 5,       // PITCH
+    Pitch = 0,       // PITCH
+    LpCutoff = 1,    // LPF (default)
+    LpResonance = 2, // LP RES
+    HpCutoff = 3,    // HPF
+    HpResonance = 4, // HP RES
+    Amplitude = 5,   // AMP
     Pan = 6,         // PAN
     Count = 7
 };
 
 // User-facing per-oscillator state (serializable into <= 128B quantized snapshots in Milestone 3).
 struct VoiceParams {
-    float frequencyHz = 110.0f;  // [20, 4000] Hz audio oscillator range
-    float amplitude = 0.70f;     // [0.0, 1.0] post-filter mix level
-    float pan = 0.0f;            // [-1.0 (Left), +1.0 (Right)]
-    float hpCutoffHz = 20.0f;    // [20.0, 20000.0] Hz (20 Hz = parked flat)
-    float hpResonance = 0.0f;    // [0.0, 1.0] Smart-Park independent MS-20 HPF Peak
-    float lpCutoffHz = 20000.0f; // [20.0, 20000.0] Hz (20 kHz = parked flat)
-    float lpResonance = 0.0f;    // [0.0, 1.0] Smart-Park independent MS-20 LPF Peak
-    float lfoRateHz = 0.25f;     // [0.02, 30.0] Hz dedicated per-voice LFO speed
-    float lfoShape = 0.0f;       // [0.0, 1.0] Sine -> Tri -> Saw -> Slewed Square -> Smooth Drift
-    float lfoDepth = 0.0f;       // [0.0, 1.0] Unipolar LFO modulation amount (0 = off)
+    float frequencyHz = 110.0f;                // [0.05, 20000] Hz unbroken sub-cycle -> audio range
+    float hpCutoffHz = kFilterCutoffMinHz;     // [2.0, 28000.0] Hz (2 Hz + 0% RES = parked flat)
+    float hpResonance = 0.0f;                  // [0.0, 1.0] Rev 2 (0-60%) -> Korg35 (60-100%) Peak
+    float lpCutoffHz = kFilterCutoffMaxHz;     // [2.0, 28000.0] Hz (28 kHz + 0% RES = parked flat)
+    float lpResonance = 0.0f;                  // [0.0, 1.0] Rev 2 (0-60%) -> Korg35 (60-100%) Peak
+    float amplitude = 0.65f;                   // [0.0, 0.70] clean VCA; (0.70, 1.0] MS-20 overdrive
+    float pan = 0.0f;                          // [-1.0 (Left), +1.0 (Right)]
+    float lfoRateHz = 0.25f;                   // [0.01, 2000.0] Hz ultra-slow -> audio-rate FM/AM
+    float lfoShape = 0.0f;                     // [0.0, 1.0] Sine -> Tri -> Saw -> Square -> Drift
+    float lfoDepth = 0.0f;                     // [0.0, 1.0] LFO modulation amount (0 = off)
     LfoTarget lfoTarget = LfoTarget::LpCutoff; // KNOB1 LFO destination
     bool muted = false;                        // White Keys 1-4 latching mute
 };
 
+// EDIT page two-zone channel gain law:
+//  - [0.00, 0.70]: clean post-filter VCA attenuation (0.0 -> 0.72x clean ceiling, preDrive = 1.0x)
+//  - (0.70, 1.00]: 1.0x -> 4.5x pre-filter MS-20 input overdrive + 0.72x -> 1.15x post-filter trim
+inline constexpr float kCleanAmpKnee = 0.70f;
+
+struct VoiceChannelGain {
+    float preDrive;
+    float postVca;
+};
+
+inline constexpr VoiceChannelGain computeVoiceChannelGain(float amplitude) noexcept {
+    const float a = clampf(amplitude, 0.0f, 1.0f);
+    if (a <= kCleanAmpKnee) {
+        return {1.0f, a * (0.72f / kCleanAmpKnee)};
+    }
+    const float u = (a - kCleanAmpKnee) * (1.0f / (1.0f - kCleanAmpKnee));
+    const float preDrive = 1.0f + 3.5f * u * (0.65f + 0.35f * u);
+    const float postVca = 0.72f + 0.43f * u;
+    return {preDrive, postVca};
+}
+
 // Global circuit & master routing state (Left encoders + SEL + MONO/POLY + PLAY/STOP).
 struct GlobalParams {
-    float circuitCoupling = 0.25f;  // ALGORITHM knob: [0.0, 1.0] CD40106 Vdd rail sag
+    float circuitCoupling = 0.25f;  // ALGORITHM knob: [0.0, 1.0] rail sag -> starved-rail sync
     float masterTrim = 0.85f;       // Software headroom trim before DAC / pedals
     bool monoCollapse = false;      // MONO vs POLY (true = Dual-Mono L==R)
     bool masterRun = true;          // PLAY/STOP button (clickless master kill/run)
@@ -49,9 +70,9 @@ struct GlobalParams {
 
 // Effective filter + VCA parameters produced by White Keys 5-8 continuous pressure:
 //  - Filter/LPG mode (pitchMode = 0): zero pitch shift; active voices sweep MS-20 HPF/LPF Accent
-//    + independent Rev 2 OTA HP/LP Resonance; muted voices swell through a Vactrol LPG.
+//    + full Rev 2 / Korg35 HP/LP Resonance (free to cross HPF > LPF); muted voices swell via LPG.
 //  - Pitch Bend mode (pitchMode = 1): filter stays at base settings while pressure bends pitch
-//    upward (+6 semitones at full pressure) and swells muted voices open via the VCA gate.
+//    upward (+24 semitones / +2 octaves at full pressure) and swells muted voices via VCA gate.
 struct ModulatedFilterParams {
     float hpCutoffHz;
     float hpResonance;
@@ -62,7 +83,7 @@ struct ModulatedFilterParams {
 
 inline float computeVoicePitchRatio(float pressure, float pitchMode) noexcept {
     const float pp = clampf(pressure, 0.0f, 1.0f) * clampf(pitchMode, 0.0f, 1.0f);
-    return (pp > 0.0f) ? fastExp2(0.50f * pp * pp) : 1.0f;
+    return (pp > 0.0f) ? fastExp2(2.0f * pp * pp) : 1.0f;
 }
 
 inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpResBase, float lpBase,
@@ -78,33 +99,34 @@ inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpRes
     const float pm = clampf(pitchMode, 0.0f, 1.0f);
     const float fp = p * (1.0f - pm);
 
-    const float lpgGate = p * (0.42f + 0.58f * p);
+    const float lpgGate = p * (0.65f + 0.35f * p);
     const float effGate = clampf(g + (1.0f - g) * lpgGate, 0.0f, 1.0f);
     if (fp <= 0.0f) {
         return {hpBase, hpResBase, lpBase, lpResBase, effGate};
     }
 
-    // 1. Active Voice: MS-20 Filter Accent + Independent Rev 2 OTA HP/LP Resonance
-    // log2(2500 Hz) = 11.287712f; 3.0-octave transition up to 20,000 Hz
-    const float lpOpenness = smoothstep01((fastLog2(lpBase) - 11.287712f) * (1.0f / 3.0f));
-    const float lpOctDelta = (4.0f * (1.0f - lpOpenness) - 1.35f * lpOpenness) * fp;
+    // 1. Active Voice: Uncapped MS-20 Filter Accent + Full Korg35 HP/LP Resonance
+    // log2(2500 Hz) = 11.287712f; 3.5-octave transition up to 28,000 Hz
+    const float lpOpenness = smoothstep01((fastLog2(lpBase) - 11.287712f) * (1.0f / 3.5f));
+    const float lpOctDelta = (4.8f * (1.0f - lpOpenness) - 1.65f * lpOpenness) * fp;
     const float lpAccent =
         clampf(lpBase * fastExp2(lpOctDelta), kFilterCutoffMinHz, kFilterCutoffMaxHz);
 
-    const float hpOctDelta = 5.4f * lpOpenness * fp;
-    const float maxSafeHp = clampf(lpAccent * 0.72f, kFilterCutoffMinHz, 12000.0f);
-    const float hpCeil = (hpBase > maxSafeHp) ? hpBase : maxSafeHp;
-    const float hpAccent = clampf(hpBase * fastExp2(hpOctDelta), kFilterCutoffMinHz, hpCeil);
+    const float hpOctDelta = 7.2f * lpOpenness * fp;
+    const float hpAccent =
+        clampf(hpBase * fastExp2(hpOctDelta), kFilterCutoffMinHz, kFilterCutoffMaxHz);
 
-    const float hpResAccent = clampf(hpResBase + 0.58f * fp, 0.0f, 0.93f);
-    const float lpResAccent = clampf(lpResBase + 0.62f * fp, 0.0f, 0.93f);
+    const float hpResAccent = clampf(hpResBase + 0.72f * fp, 0.0f, 1.0f);
+    const float lpResAccent = clampf(lpResBase + 0.78f * fp, 0.0f, 1.0f);
 
-    // 2. Muted Voice: Vactrol Low-Pass Gate (warm 95 Hz sub murmur -> full open harmonics)
-    const float invFp = 1.0f - fp;
-    const float lpLpg = clampf(lpBase * fastExp2(-7.0f * invFp * invFp), 95.0f, kFilterCutoffMaxHz);
+    // 2. Muted Voice: Vactrol Low-Pass Gate (warm 85 Hz sub murmur -> full base LPF harmonics)
+    const float lpgCeil = (lpBase > 85.0f) ? lpBase : 85.0f;
+    const float lpgSpanOct = fastLog2(lpgCeil * (1.0f / 85.0f));
+    const float lpLpg =
+        clampf(85.0f * fastExp2(lpgSpanOct * fp * (0.48f + 0.52f * fp)), 85.0f, kFilterCutoffMaxHz);
     const float hpLpg = hpBase;
     const float hpResLpg = hpResBase;
-    const float lpResLpg = clampf(lpResBase + 0.38f * fp * fp, 0.0f, 0.90f);
+    const float lpResLpg = clampf(lpResBase + 0.55f * fp * fp, 0.0f, 1.0f);
 
     return {
         hpLpg + g * (hpAccent - hpLpg),
@@ -129,12 +151,12 @@ struct EngineControlState {
         constexpr std::array<float, kNumOscillators> kInitPans = {-0.35f, 0.35f, -0.65f, 0.65f};
         for (size_t i = 0; i < kNumOscillators; ++i) {
             s.voices[i].frequencyHz = kInitFreqs[i];
-            s.voices[i].amplitude = 0.65f;
-            s.voices[i].pan = kInitPans[i];
             s.voices[i].hpCutoffHz = kFilterCutoffMinHz;
             s.voices[i].hpResonance = 0.0f;
             s.voices[i].lpCutoffHz = kFilterCutoffMaxHz;
             s.voices[i].lpResonance = 0.0f;
+            s.voices[i].amplitude = 0.65f;
+            s.voices[i].pan = kInitPans[i];
             s.voices[i].lfoRateHz = 0.25f;
             s.voices[i].lfoShape = 0.0f;
             s.voices[i].lfoDepth = 0.0f;
@@ -307,6 +329,13 @@ struct EngineTelemetry {
         std::atomic<uint32_t>{0u},
         std::atomic<uint32_t>{0u},
         std::atomic<uint32_t>{0u},
+    };
+    // Post-VCA per-voice peak amplitude [0.0, ~2.0] for EDIT page plasma & overdrive LED flare
+    std::array<std::atomic<float>, kNumOscillators> voicePeak{
+        std::atomic<float>{0.0f},
+        std::atomic<float>{0.0f},
+        std::atomic<float>{0.0f},
+        std::atomic<float>{0.0f},
     };
 };
 

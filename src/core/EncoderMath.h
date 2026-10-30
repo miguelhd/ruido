@@ -11,26 +11,26 @@ namespace ruido {
 
 // Strictly linear 3-gear X4 quadrature encoder scaling (96 steps = 360 deg; zero velocity accel):
 //   Fine (Hold OCT-)   : ~63 cents/turn audio (~0.66 cents/step)
-//   Standard           : ~2.8 turns full sweep
-//   Coarse (Hold OCT+) : ~1.3 turns full sweep
+//   Standard           : ~2.7 oct/turn audio (musical pitch sweeping)
+//   Coarse (Hold OCT+) : ~1.35 turns full 18.6-octave sweep (0.05 Hz <-> 20 kHz)
 inline void adjustVoiceFrequency(VoiceParams& vp, int32_t ticks, KnobRate rate) noexcept {
     const float steps = static_cast<float>(ticks);
     const float octPerStep =
-        (rate == KnobRate::Fine) ? 0.00055f : ((rate == KnobRate::Coarse) ? 0.06000f : 0.02850f);
+        (rate == KnobRate::Fine) ? 0.00055f : ((rate == KnobRate::Coarse) ? 0.14500f : 0.02850f);
     const float nextHz = vp.frequencyHz * fastExp2(steps * octPerStep);
     vp.frequencyHz = clampf(nextHz, kAudioFreqMinHz, kAudioFreqMaxHz);
 }
 
 inline float adjustFilterCutoff(float currentHz, int32_t ticks, KnobRate rate) noexcept {
     const float octPerStep =
-        (rate == KnobRate::Fine) ? 0.00250f : ((rate == KnobRate::Coarse) ? 0.07800f : 0.03650f);
+        (rate == KnobRate::Fine) ? 0.00250f : ((rate == KnobRate::Coarse) ? 0.10800f : 0.03650f);
     const float octDelta = static_cast<float>(ticks) * octPerStep;
     return clampf(currentHz * fastExp2(octDelta), kFilterCutoffMinHz, kFilterCutoffMaxHz);
 }
 
 inline float adjustLfoRate(float currentHz, int32_t ticks, KnobRate rate) noexcept {
     const float octPerStep =
-        (rate == KnobRate::Fine) ? 0.00250f : ((rate == KnobRate::Coarse) ? 0.08200f : 0.03800f);
+        (rate == KnobRate::Fine) ? 0.00250f : ((rate == KnobRate::Coarse) ? 0.13600f : 0.04200f);
     const float octDelta = static_cast<float>(ticks) * octPerStep;
     return clampf(currentHz * fastExp2(octDelta), kLfoFreqMinHz, kLfoFreqMaxHz);
 }

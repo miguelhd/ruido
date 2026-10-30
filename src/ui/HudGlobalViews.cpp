@@ -153,14 +153,14 @@ void HudGlobalViews::compositeGlobalFreqStrip(int y0, int y1, uint8_t* lumBuf,
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
     cv.drawHorizontalFilament(kFreqXLeft, kFreqXLeft + kFreqXSpan, kStageYBot, 36.0f, 0.50f, true);
 
-    // 6 octave ticks across 20..4000 Hz: 55, 110, 220, 440, 880, 1760 Hz
+    // 6 landmark ticks across 0.05 Hz .. 20 kHz: 0.5, 4, 32, 256, 2048, 16384 Hz
     static constexpr std::array<float, 6> kOctTickX = {
-        kFreqXLeft + ((cxLog2Pos(55.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
-        kFreqXLeft + ((cxLog2Pos(110.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
-        kFreqXLeft + ((cxLog2Pos(220.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
-        kFreqXLeft + ((cxLog2Pos(440.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
-        kFreqXLeft + ((cxLog2Pos(880.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
-        kFreqXLeft + ((cxLog2Pos(1760.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
+        kFreqXLeft + ((cxLog2Pos(0.5f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
+        kFreqXLeft + ((cxLog2Pos(4.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
+        kFreqXLeft + ((cxLog2Pos(32.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
+        kFreqXLeft + ((cxLog2Pos(256.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
+        kFreqXLeft + ((cxLog2Pos(2048.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
+        kFreqXLeft + ((cxLog2Pos(16384.0f) - kGvAudioLogMin) / kGvAudioLogSpan) * kFreqXSpan,
     };
     for (float tx : kOctTickX) {
         cv.drawVerticalSlit(tx, kStageYBot - 2.5f, kStageYBot + 2.5f, 58.0f);

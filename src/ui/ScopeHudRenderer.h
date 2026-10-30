@@ -2,6 +2,7 @@
 
 #include "core/ControlSurface.h"
 #include "core/Parameters.h"
+#include "ui/HudAmpGraph.h"
 #include "ui/HudGlobalViews.h"
 #include "ui/HudGraphs.h"
 #include "ui/ScopeTraceEngine.h"
@@ -49,6 +50,7 @@ class ScopeHudRenderer {
 
     ScopeTraceEngine traceEngine_{};
     HudGraphs graphs_{};
+    HudAmpGraph ampGraph_{};
     HudGlobalViews globalViews_{};
 
     EngineControlState frameControl_{};
@@ -58,11 +60,14 @@ class ScopeHudRenderer {
     std::array<float, kNumOscillators> frameLfoOutput_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> frameLfoPhase_{0.0f, 0.25f, 0.50f, 0.75f};
     std::array<uint32_t, kNumOscillators> frameLfoDriftPacked_{0u, 0u, 0u, 0u};
+    std::array<float, kNumOscillators> frameVoicePeak_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> prevVoiceFreqHz_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> knobPosSignedSmooth_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> knobDimSmooth_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> knobFocusSmooth_{0.0f, 0.0f, 0.0f, 0.0f};
     float headerBarSmooth_ = 0.0f;
+    float fineOverlayPhase_ = 0.0f;
+    float coarseOverlayPhase_ = 0.0f;
     float renderedOpacityLevel_ = 0.0f;
     float smoothedPeakL_ = 0.0f;
     float smoothedPeakR_ = 0.0f;

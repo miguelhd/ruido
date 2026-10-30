@@ -68,9 +68,10 @@ class SchmittOscillatorBank {
     float hzToPhaseU32_ = 4294967296.0f / kOversampledRate;
     float rcHighpassPole_ = 0.9996f;
 
-    // Shared Vdd supply rail sag states (fast crowbar spike + decoupling cap recovery)
+    // Shared Vdd supply rail sag states (fast crowbar spike + starved-rail sync state)
     std::array<float, kNumOscillators> voiceRailSag_{0.0f, 0.0f, 0.0f, 0.0f};
     float railDecayCoeff_ = 0.985f;
+    uint8_t prevRisingMask_ = 0u;
     bool enableDrift_ = true;
     bool enableRcTilt_ = true;
 };

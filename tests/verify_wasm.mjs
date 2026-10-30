@@ -82,7 +82,7 @@ assert.ok(energyL > 1.0 && energyR > 1.0);
 
 const telIdx = ex.wasm_dsp_read_telemetry() >> 2;
 const telInIdx = ex.wasm_ui_get_telemetry_in_ptr() >> 2;
-for (let i = 0; i < 22; i++) {
+for (let i = 0; i < 26; i++) {
   f32[telInIdx + i] = f32[telIdx + i];
 }
 ex.wasm_ui_apply_telemetry();
@@ -91,13 +91,14 @@ ex.wasm_ui_tick_and_render(0.2);
 // Verify 42 hardware LED channels (unassigned buttons 0.0, SEL === White Keys 5-8, Green PLAY / Red STOP)
 const ledsIdx = ex.wasm_ui_get_leds_ptr() >> 2;
 assert.ok(Math.abs(f32[ledsIdx + 0] - 1.0) < 1e-4);   // OP1 held -> 100%
-assert.ok(Math.abs(f32[ledsIdx + 4] - 0.25) < 1e-4);  // OP5 Amplitude landmark -> 25%
+assert.ok(Math.abs(f32[ledsIdx + 4] - 0.0) < 1e-6);   // OP5 black key -> 0% (unassigned)
 assert.ok(Math.abs(f32[ledsIdx + 5] - 0.25) < 1e-4);  // OP6 Panning landmark -> 25%
 assert.ok(Math.abs(f32[ledsIdx + 7] - 0.25) < 1e-4);  // GLO Global landmark -> 25%
 assert.ok(Math.abs(f32[ledsIdx + 6] - 0.0) < 1e-6);   // PIT black key -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 10] - 0.0) < 1e-6);  // 11th black key -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 27 + 2] - 0.0) < 1e-6); // FX button -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 27 + 5] - 0.15) < 1e-4); // LFO button -> 15% rest when closed & depth==0
+assert.ok(Math.abs(f32[ledsIdx + 27 + 6] - 0.15) < 1e-4); // EDIT button -> 15% rest when closed & clean
 assert.ok(Math.abs(f32[ledsIdx + 27 + 7] - 0.15) < 1e-4); // GLO right button -> 15% rest when closed
 assert.ok(Math.abs(f32[ledsIdx + 27 + 12] - 0.0) < 1e-6); // PLAY Green LED -> 0% while sound ON
 assert.ok(Math.abs(f32[ledsIdx + 27 + 13] - 0.0) < 1e-6); // REC Red LED -> 0%
@@ -125,11 +126,14 @@ assert.equal(f32[summaryIdx + 40], 0.0); // lfoVoiceFocus === 0 (OSC 1)
 
 ex.wasm_ui_encoder(0, 4); // SELECT -> OSC 2
 assert.equal(f32[summaryIdx + 40], 1.0);
-ex.wasm_ui_encoder(3, 8);   // KNOB1 TARGET -> HPF (2)
+assert.equal(f32[summaryIdx + 41], 1.0); // Default TARGET === LPF (1)
+ex.wasm_ui_encoder(3, -4);  // KNOB1 TARGET -> PITCH (0, first position)
+assert.equal(f32[summaryIdx + 41], 0.0);
+ex.wasm_ui_encoder(3, 12);  // KNOB1 TARGET -> HPF (3)
 ex.wasm_ui_encoder(4, 240); // KNOB2 SHAPE -> 1.0 (Smooth Drift)
 ex.wasm_ui_encoder(5, 60);  // KNOB3 RATE
 ex.wasm_ui_encoder(6, 200); // KNOB4 DEPTH > 0.8
-assert.equal(f32[summaryIdx + 41], 2.0);
+assert.equal(f32[summaryIdx + 41], 3.0);
 assert.ok(f32[summaryIdx + 42] > 0.95);
 assert.ok(f32[summaryIdx + 44] > 0.80);
 
@@ -143,13 +147,48 @@ for (let b = 0; b < 8; b++) {
   ex.wasm_dsp_process_block(128);
 }
 
-const tel22Idx = ex.wasm_dsp_read_telemetry() >> 2;
-for (let i = 0; i < 22; i++) {
-  f32[telInIdx + i] = f32[tel22Idx + i];
+const tel26Idx = ex.wasm_dsp_read_telemetry() >> 2;
+for (let i = 0; i < 26; i++) {
+  f32[telInIdx + i] = f32[tel26Idx + i];
 }
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.1);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 5] - 1.0) < 1e-4); // LFO LED === 100% while open
+
+// Verify EDIT Page (button 6): latching open, 4.5x overdrive on KNOB1, monochrome HudAmpGraph & LED flare
+ex.wasm_ui_button(6, 1);
+ex.wasm_ui_button(6, 0);
+assert.equal(f32[summaryIdx + 48], 1.0); // editPageOpen === true
+assert.equal(f32[summaryIdx + 39], 0.0); // lfoPageOpen closed automatically
+ex.wasm_ui_encoder(3, 180); // Crank Osc 1 into 100% (4.5x pre-filter overdrive)
+u8.copyWithin(
+  ex.wasm_dsp_get_control_ptr(),
+  ex.wasm_ui_get_control_ptr(),
+  ex.wasm_ui_get_control_ptr() + ctrlSize
+);
+ex.wasm_dsp_publish_control(1);
+for (let b = 0; b < 6; b++) {
+  ex.wasm_dsp_process_block(128);
+}
+for (let i = 0; i < 26; i++) {
+  f32[telInIdx + i] = f32[tel26Idx + i];
+}
+ex.wasm_ui_apply_telemetry();
+ex.wasm_ui_tick_and_render(0.1);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 6] - 1.0) < 1e-4); // EDIT LED === 100% while open
+
+// Re-open LFO page briefly so the subsequent LFO RGBA & HOME tests exercise LFO graph too,
+// after verifying HudAmpGraph RGBA neutrality right here!
+const editRgbaStart = ex.wasm_ui_get_rgba_ptr();
+const editRgbaBytes = u8.subarray(editRgbaStart, editRgbaStart + 240 * 240 * 4);
+for (let i = 0; i < editRgbaBytes.length; i += 4) {
+  assert.equal(editRgbaBytes[i], editRgbaBytes[i + 1]);
+  assert.equal(editRgbaBytes[i + 1], editRgbaBytes[i + 2]);
+}
+ex.wasm_ui_button(5, 1);
+ex.wasm_ui_button(5, 0);
+ex.wasm_ui_tick_and_render(0.1);
+assert.ok(f32[ledsIdx + 27 + 6] > 0.25); // Closed EDIT LED flares live with 4.5x overdrive!
 
 // Verify 240x240 RGBA frame is strictly 100% neutral monochrome (R === G === B) with rich CRT shades
 const rgbaStart = ex.wasm_ui_get_rgba_ptr();

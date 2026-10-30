@@ -63,15 +63,35 @@ inline void formatCompactHz(char* buf, size_t cap, float hz) noexcept {
     }
 }
 
-// High-precision 0.01 Hz frequency counter formatter for top-right header readouts
+// High-precision frequency counter formatter for top-right header readouts:
+//  - < 1000 Hz:    0.01 Hz resolution ("55.00 Hz", "999.99 Hz")
+//  - < 10000 Hz:   1 Hz / 0.001 kHz resolution ("1.234 kHz")
+//  - >= 10000 Hz:  10 Hz / 0.01 kHz resolution ("20.00 kHz")
 inline size_t appendPrecisionHz(char* buf, size_t pos, size_t cap, float hz) noexcept {
     const float f = clampf(hz, 0.01f, 99999.99f);
-    const uint32_t centi = static_cast<uint32_t>(f * 100.0f + 0.5f);
-    pos = appendUInt(buf, pos, cap, centi / 100u);
+    if (f < 1000.0f) {
+        const uint32_t centi = static_cast<uint32_t>(f * 100.0f + 0.5f);
+        pos = appendUInt(buf, pos, cap, centi / 100u);
+        pos = appendStr(buf, pos, cap, ".");
+        pos = appendUInt(buf, pos, cap, (centi / 10u) % 10u);
+        pos = appendUInt(buf, pos, cap, centi % 10u);
+        return appendStr(buf, pos, cap, " Hz");
+    }
+    if (f < 10000.0f) {
+        const uint32_t milliK = static_cast<uint32_t>(f + 0.5f);
+        pos = appendUInt(buf, pos, cap, milliK / 1000u);
+        pos = appendStr(buf, pos, cap, ".");
+        pos = appendUInt(buf, pos, cap, (milliK / 100u) % 10u);
+        pos = appendUInt(buf, pos, cap, (milliK / 10u) % 10u);
+        pos = appendUInt(buf, pos, cap, milliK % 10u);
+        return appendStr(buf, pos, cap, " kHz");
+    }
+    const uint32_t centiK = static_cast<uint32_t>(f * 0.1f + 0.5f);
+    pos = appendUInt(buf, pos, cap, centiK / 100u);
     pos = appendStr(buf, pos, cap, ".");
-    pos = appendUInt(buf, pos, cap, (centi / 10u) % 10u);
-    pos = appendUInt(buf, pos, cap, centi % 10u);
-    return appendStr(buf, pos, cap, " Hz");
+    pos = appendUInt(buf, pos, cap, (centiK / 10u) % 10u);
+    pos = appendUInt(buf, pos, cap, centiK % 10u);
+    return appendStr(buf, pos, cap, " kHz");
 }
 
 inline void formatPercent(char* buf, size_t cap, float norm01) noexcept {
@@ -131,6 +151,14 @@ inline void formatSignedCents(char* buf, size_t cap, float cents) noexcept {
     size_t p = appendStr(buf, 0u, cap, (cInt > 0) ? "+" : "-");
     p = appendUInt(buf, p, cap, static_cast<uint32_t>((cInt > 0) ? cInt : -cInt));
     appendStr(buf, p, cap, "c");
+}
+
+inline void formatMultiplierX(char* buf, size_t cap, float mult) noexcept {
+    const uint32_t deci = static_cast<uint32_t>(clampf(mult, 1.0f, 99.9f) * 10.0f + 0.5f);
+    size_t p = appendUInt(buf, 0u, cap, deci / 10u);
+    p = appendStr(buf, p, cap, ".");
+    p = appendUInt(buf, p, cap, deci % 10u);
+    appendStr(buf, p, cap, "x");
 }
 
 } // namespace ruido

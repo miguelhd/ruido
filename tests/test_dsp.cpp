@@ -183,16 +183,16 @@ void testMemoryFootprintAndLockFreeBus() {
     EXPECT_TRUE(!tearDetected, "Torn multi-parameter read detected across threads");
 }
 
-// 2. Ultra-slow 0.02 Hz LFO precision & 20 Hz audio oscillator floor (ADR-019 / ADR-022)
+// 2. Sub-audio 0.05 Hz .. 0.50 Hz oscillator & 0.01 Hz .. 0.50 Hz LFO precision
 void testUltraSlowLfoPrecision() {
-    std::printf("[Test 2] Sub-audio LFO precision (0.02 Hz & 0.50 Hz) & 20 Hz voice floor...\n");
+    std::printf("[Test 2] Sub-audio LFO & oscillator precision (0.02 Hz, 0.05 Hz & 0.50 Hz)...\n");
     static ruido::DroneEngine engine;
     engine.init(ruido::kBaseSampleRate);
     engine.setAnalogCharacterEnabled(false, true);
 
     ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
     st.global.circuitCoupling = 0.0f;
-    st.voices[0].frequencyHz = 0.50f; // Out-of-bounds (< 20 Hz): must clamp cleanly to 20.0 Hz
+    st.voices[0].frequencyHz = 0.50f; // Unbroken sub-audio oscillator: 2.000 s period!
     st.voices[0].lfoRateHz = 0.50f;   // 2.000 s period = 88,236 base frames
     st.voices[0].lfoDepth = 1.0f;
     st.voices[0].lfoShape = 0.75f; // Slewed Square
@@ -260,18 +260,20 @@ void testUltraSlowLfoPrecision() {
                     measuredPeriodSec);
     }
     EXPECT_TRUE(firstVoiceEdge > 0 && secondVoiceEdge > firstVoiceEdge,
-                "Clamped 20 Hz Osc 1 did not emit rising edges");
+                "0.50 Hz sub-audio Osc 1 did not emit rising edges");
     if (firstVoiceEdge > 0 && secondVoiceEdge > firstVoiceEdge) {
         const double voiceHz = static_cast<double>(ruido::kBaseSampleRate) /
                                static_cast<double>(secondVoiceEdge - firstVoiceEdge);
-        EXPECT_TRUE(std::fabs(voiceHz - 20.0) < 0.15,
-                    "Out-of-bounds base voice frequency failed 20 Hz clamp (got %.3f Hz)", voiceHz);
+        EXPECT_TRUE(std::fabs(voiceHz - 0.50) < 0.005,
+                    "0.50 Hz sub-audio oscillator inaccurate (got %.4f Hz)", voiceHz);
     }
 
-    // Verify extreme minimum 0.02 Hz (50.0 s period) over 55 s on both VoiceLfoBank and
-    // SchmittOscillatorBank 32-bit phase accumulators (zero float32 stall)!
+    // Verify out-of-bounds (< 0.05 Hz) voice frequency clamps cleanly to 0.05 Hz (20.000 s period),
+    // while 0.02 Hz LFO wraps cleanly at 50.0 s with zero float32 stall!
     engine.reset();
-    st.voices[0].frequencyHz = 55.0f;
+    engine.setAnalogCharacterEnabled(false, true);
+    st.voices[0].frequencyHz = 0.002f; // Below 0.05 Hz floor -> clamps to 0.05 Hz (20.0 s)
+    st.voices[0].lfoDepth = 0.0f;
     st.voices[0].lfoRateHz = 0.02f;
     engine.controlBus().publish(st);
     engine.snapParametersToLatest();
@@ -280,18 +282,38 @@ void testUltraSlowLfoPrecision() {
 
     int wrapCount002Hz = 0;
     int lastWrap002 = -1;
+    int clampEdge1 = -1;
+    int clampEdge2 = -1;
     prevLfoPhase = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
     const int frames55Sec = static_cast<int>(ruido::kBaseSampleRate * 55.0f);
     for (int baseFrame = 0; baseFrame < frames55Sec;
          baseFrame += static_cast<int>(ruido::kBlockFrames)) {
         engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
-        (void)engine.scopeBuffer().popBatch(scopeOut.data(), scopeOut.size());
+        const size_t n = engine.scopeBuffer().popBatch(scopeOut.data(), scopeOut.size());
+        for (size_t i = 0u; i < n; ++i) {
+            if ((scopeOut[i].voiceRisingMask & 1u) != 0u &&
+                (baseFrame + static_cast<int>(i)) > 200) {
+                if (clampEdge1 < 0) {
+                    clampEdge1 = baseFrame + static_cast<int>(i);
+                } else if (clampEdge2 < 0) {
+                    clampEdge2 = baseFrame + static_cast<int>(i);
+                }
+            }
+        }
         const float curPhase = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
         if (prevLfoPhase > 0.80f && curPhase < 0.20f && baseFrame > 1000) {
             ++wrapCount002Hz;
             lastWrap002 = baseFrame + static_cast<int>(ruido::kBlockFrames);
         }
         prevLfoPhase = curPhase;
+    }
+    EXPECT_TRUE(clampEdge1 > 0 && clampEdge2 > clampEdge1,
+                "Clamped 0.05 Hz Osc 1 did not emit two rising edges across 55 s");
+    if (clampEdge1 > 0 && clampEdge2 > clampEdge1) {
+        const double clampedPeriod = static_cast<double>(clampEdge2 - clampEdge1) /
+                                     static_cast<double>(ruido::kBaseSampleRate);
+        EXPECT_TRUE(std::fabs(clampedPeriod - 20.0) < 0.05,
+                    "0.05 Hz floor clamp period inaccurate (got %.4f s)", clampedPeriod);
     }
     const double firstWrapSec =
         static_cast<double>(lastWrap002) / static_cast<double>(ruido::kBaseSampleRate);
@@ -340,11 +362,11 @@ void testSpectralAliasSuppression() {
         st.global.circuitCoupling = 0.0f;
         st.global.monoCollapse = true;
         st.voices[0].frequencyHz = f0;
-        st.voices[0].amplitude = 0.80f;
+        st.voices[0].amplitude = ruido::kCleanAmpKnee;
         st.voices[0].pan = 0.0f;
-        st.voices[0].hpCutoffHz = 20.0f;
+        st.voices[0].hpCutoffHz = 2.0f;
         st.voices[0].hpResonance = 0.0f;
-        st.voices[0].lpCutoffHz = 20000.0f;
+        st.voices[0].lpCutoffHz = 28000.0f;
         st.voices[0].lpResonance = 0.0f;
         st.voices[0].muted = false;
         st.voices[1].muted = true;
@@ -437,57 +459,78 @@ void testSpectralAliasSuppression() {
     }
 }
 
-// 4. Parked MS-20 filter passband flatness, Smart-Park resonance & self-oscillation tracking
+// 4. Parked MS-20 filter passband flatness, unmuted rail resonance & Rev 2 -> Korg35 tracking
 void testMs20FilterPassbandAndSmartPark() {
-    std::printf("[Test 4] MS-20 Rev 2 OTA ZDF parked flatness, Smart-Park & self-oscillation...\n");
+    std::printf(
+        "[Test 4] MS-20 Rev 2 -> Korg35 parked flatness, unmuted rails & self-oscillation...\n");
     ruido::Ms20DualFilter filter;
 
-    constexpr std::array<float, 4> kProbeFreqs = {120.0f, 440.0f, 1000.0f, 4000.0f};
-    for (float reso : {0.0f, 1.0f}) {
-        for (float fProbe : kProbeFreqs) {
-            filter.reset();
-            const size_t totalSamples = 17647u * 2u; // 200 ms @ 176.472 kHz
-            const size_t measureStart = 17647u;
-            double sumInSq = 0.0;
-            double sumOutSq = 0.0;
+    constexpr std::array<float, 4> kProbeFreqs = {15.0f, 120.0f, 1000.0f, 8000.0f};
+    for (float fProbe : kProbeFreqs) {
+        filter.reset();
+        const size_t totalSamples = 17647u * 3u;
+        const size_t measureStart = 17647u;
+        double sumInSq = 0.0;
+        double sumOutSq = 0.0;
 
-            for (size_t n = 0u; n < totalSamples; ++n) {
-                const float x = 0.20f * std::sin(ruido::kTwoPi * fProbe * static_cast<float>(n) *
-                                                 ruido::kInvOversampledRate);
-                const float y = filter.processSample(x, 20.0f, reso, 20000.0f, reso,
-                                                     ruido::kInvOversampledRate);
-                if (n >= measureStart) {
-                    sumInSq += static_cast<double>(x) * static_cast<double>(x);
-                    sumOutSq += static_cast<double>(y) * static_cast<double>(y);
-                }
+        for (size_t n = 0u; n < totalSamples; ++n) {
+            const float x = 0.20f * std::sin(ruido::kTwoPi * fProbe * static_cast<float>(n) *
+                                             ruido::kInvOversampledRate);
+            const float y =
+                filter.processSample(x, 2.0f, 0.0f, 28000.0f, 0.0f, ruido::kInvOversampledRate);
+            if (n >= measureStart) {
+                sumInSq += static_cast<double>(x) * static_cast<double>(x);
+                sumOutSq += static_cast<double>(y) * static_cast<double>(y);
             }
-            const double gainDb = 10.0 * std::log10(sumOutSq / sumInSq);
-            EXPECT_TRUE(std::fabs(gainDb) < 0.20,
-                        "Parked filter not flat at %.0f Hz (reso=%.1f): %.3f dB",
-                        static_cast<double>(fProbe), static_cast<double>(reso), gainDb);
         }
+        const double gainDb = 10.0 * std::log10(sumOutSq / sumInSq);
+        EXPECT_TRUE(std::fabs(gainDb) < 0.15, "Parked filter not flat at %.0f Hz: %.3f dB",
+                    static_cast<double>(fProbe), gainDb);
     }
 
-    // Verify Smart-Park: kicking parked filter (HP=20, LP=20k) with HP/LP Res=1.0 decays silent!
+    // Verify Smart-Park resonance muting is GONE: HP=12 Hz, HP RES=1.0 actively self-oscillates
+    // in deep sub-bass, and LP=24 kHz, LP RES=1.0 self-oscillates cleanly in 4x oversampled space!
     filter.reset();
-    (void)filter.processSample(1.0f, 20.0f, 1.0f, 20000.0f, 1.0f, ruido::kInvOversampledRate);
-    double tailEnergy = 0.0;
+    (void)filter.processSample(0.5f, 12.0f, 1.0f, 28000.0f, 0.0f, ruido::kInvOversampledRate);
+    double subTailEnergy = 0.0;
+    for (size_t n = 0u; n < 176472u; ++n) {
+        const float y =
+            filter.processSample(0.0f, 12.0f, 1.0f, 28000.0f, 0.0f, ruido::kInvOversampledRate);
+        if (n >= 88236u) {
+            subTailEnergy += static_cast<double>(y) * static_cast<double>(y);
+        }
+    }
+    const double subOscRms = std::sqrt(subTailEnergy / 88236.0);
+    std::printf("  Unmuted sub-bass HP=12 Hz, Reso=1.0 self-oscillation RMS = %.3f\n", subOscRms);
+    EXPECT_TRUE(subOscRms > 0.25 && subOscRms < 2.2,
+                "Expected active 12 Hz sub-bass self-oscillation without Smart-Park (RMS=%.3f)",
+                subOscRms);
+
+    filter.reset();
+    (void)filter.processSample(0.5f, 2.0f, 0.0f, 24000.0f, 1.0f, ruido::kInvOversampledRate);
+    double ultraSq = 0.0;
+    float ultraPeak = 0.0f;
     for (size_t n = 0u; n < 88236u; ++n) {
         const float y =
-            filter.processSample(0.0f, 20.0f, 1.0f, 20000.0f, 1.0f, ruido::kInvOversampledRate);
-        if (n > 70000u) {
-            tailEnergy += static_cast<double>(y) * static_cast<double>(y);
+            filter.processSample(0.0f, 2.0f, 0.0f, 24000.0f, 1.0f, ruido::kInvOversampledRate);
+        if (!isFiniteNonSubnormal(y)) {
+            ultraPeak = 999.0f;
+        }
+        if (n >= 44118u) {
+            ultraSq += static_cast<double>(y) * static_cast<double>(y);
+            ultraPeak = std::max(ultraPeak, std::fabs(y));
         }
     }
-    const double parkedRms = std::sqrt(tailEnergy / 18236.0);
-    std::printf("  Smart-Park HP/LP Reso=1.0 tail RMS (HP=20, LP=20k) = %.3e\n", parkedRms);
-    EXPECT_TRUE(parkedRms < 1.0e-5, "Parked filter whistled/oscillated at Reso=1.0 (RMS=%.3e)",
-                parkedRms);
+    const double ultraRms = std::sqrt(ultraSq / 44118.0);
+    EXPECT_TRUE(ultraRms > 0.10 && ultraPeak < 3.5f,
+                "24 kHz Korg35 ultrasonic self-oscillation unstable (RMS=%.3f, Peak=%.3f)",
+                ultraRms, static_cast<double>(ultraPeak));
 
-    // Verify independent LPF self-oscillation pitch tracking across 200 Hz, 1 kHz, and 8 kHz!
+    // Verify musical Rev 2 zone (reso = 0.55) < 3% pitch tracking AND Korg35 (reso = 0.95) scream
+    // across 200 Hz, 1 kHz, and 8 kHz on both independent LPF and independent HPF!
     for (float targetFc : {200.0f, 1000.0f, 8000.0f}) {
         filter.reset();
-        (void)filter.processSample(0.01f, 20.0f, 0.0f, targetFc, 0.95f, ruido::kInvOversampledRate);
+        (void)filter.processSample(0.02f, 2.0f, 0.0f, targetFc, 0.55f, ruido::kInvOversampledRate);
 
         constexpr size_t kSettle = 88236u;
         constexpr size_t kMeasure = 88236u; // 0.500 s @ 176.472 kHz
@@ -496,8 +539,8 @@ void testMs20FilterPassbandAndSmartPark() {
         double oscSq = 0.0;
 
         for (size_t n = 0u; n < kSettle + kMeasure; ++n) {
-            const float y = filter.processSample(0.0f, 20.0f, 0.0f, targetFc, 0.95f,
-                                                 ruido::kInvOversampledRate);
+            const float y =
+                filter.processSample(0.0f, 2.0f, 0.0f, targetFc, 0.55f, ruido::kInvOversampledRate);
             if (n >= kSettle) {
                 if (prevY <= 0.0f && y > 0.0f) {
                     ++risingZeroCrossings;
@@ -508,21 +551,48 @@ void testMs20FilterPassbandAndSmartPark() {
         }
         const double measuredHz = static_cast<double>(risingZeroCrossings) / 0.5;
         const double oscRms = std::sqrt(oscSq / static_cast<double>(kMeasure));
-        std::printf("  LPF Self-Oscillation @ fc=%6.1f Hz -> measured=%7.1f Hz (RMS=%.3f)\n",
+        std::printf("  LPF Rev2 (0.55) Self-Osc @ fc=%6.1f Hz -> measured=%7.1f Hz (RMS=%.3f)\n",
                     static_cast<double>(targetFc), measuredHz, oscRms);
-        EXPECT_TRUE(oscRms > 0.15 && oscRms < 1.5,
+        EXPECT_TRUE(oscRms > 0.15 && oscRms < 1.8,
                     "LPF self-oscillation amplitude out of bounds at %.1f Hz (RMS=%.3f)",
                     static_cast<double>(targetFc), oscRms);
         EXPECT_TRUE(std::fabs(measuredHz - static_cast<double>(targetFc)) <
                         0.03 * static_cast<double>(targetFc),
-                    "LPF self-oscillation pitch tracking error > 3%% at %.1f Hz (got %.1f Hz)",
+                    "LPF Rev2 pitch tracking error > 3%% at %.1f Hz (got %.1f Hz)",
                     static_cast<double>(targetFc), measuredHz);
+
+        // Korg35 feral zone (reso = 0.95): hotter harmonic limit cycle + bounded reactive pull
+        filter.reset();
+        (void)filter.processSample(0.02f, 2.0f, 0.0f, targetFc, 0.95f, ruido::kInvOversampledRate);
+        prevY = 0.0f;
+        int k35Cross = 0;
+        double k35Sq = 0.0;
+        for (size_t n = 0u; n < kSettle + kMeasure; ++n) {
+            const float y =
+                filter.processSample(0.0f, 2.0f, 0.0f, targetFc, 0.95f, ruido::kInvOversampledRate);
+            if (n >= kSettle) {
+                if (prevY <= 0.0f && y > 0.0f) {
+                    ++k35Cross;
+                }
+                k35Sq += static_cast<double>(y) * static_cast<double>(y);
+            }
+            prevY = y;
+        }
+        const double k35Hz = static_cast<double>(k35Cross) / 0.5;
+        const double k35Rms = std::sqrt(k35Sq / static_cast<double>(kMeasure));
+        EXPECT_TRUE(k35Rms > oscRms && k35Rms < 2.2,
+                    "LPF Korg35 (0.95) failed hotter scream than Rev2 (%.3f vs %.3f)", k35Rms,
+                    oscRms);
+        EXPECT_TRUE(k35Hz > 0.80 * static_cast<double>(targetFc) &&
+                        k35Hz < 1.05 * static_cast<double>(targetFc),
+                    "LPF Korg35 pitch drifted excessively at %.1f Hz (got %.1f Hz)",
+                    static_cast<double>(targetFc), k35Hz);
     }
 
     // Verify independent HPF self-oscillation pitch tracking across 200 Hz, 1 kHz, and 8 kHz!
     for (float targetFc : {200.0f, 1000.0f, 8000.0f}) {
         filter.reset();
-        (void)filter.processSample(0.01f, targetFc, 0.95f, 20000.0f, 0.0f,
+        (void)filter.processSample(0.02f, targetFc, 0.55f, 28000.0f, 0.0f,
                                    ruido::kInvOversampledRate);
 
         constexpr size_t kSettle = 88236u;
@@ -532,7 +602,7 @@ void testMs20FilterPassbandAndSmartPark() {
         double oscSq = 0.0;
 
         for (size_t n = 0u; n < kSettle + kMeasure; ++n) {
-            const float y = filter.processSample(0.0f, targetFc, 0.95f, 20000.0f, 0.0f,
+            const float y = filter.processSample(0.0f, targetFc, 0.55f, 28000.0f, 0.0f,
                                                  ruido::kInvOversampledRate);
             if (n >= kSettle) {
                 if (prevY <= 0.0f && y > 0.0f) {
@@ -544,24 +614,24 @@ void testMs20FilterPassbandAndSmartPark() {
         }
         const double measuredHz = static_cast<double>(risingZeroCrossings) / 0.5;
         const double oscRms = std::sqrt(oscSq / static_cast<double>(kMeasure));
-        std::printf("  HPF Self-Oscillation @ fc=%6.1f Hz -> measured=%7.1f Hz (RMS=%.3f)\n",
+        std::printf("  HPF Rev2 (0.55) Self-Osc @ fc=%6.1f Hz -> measured=%7.1f Hz (RMS=%.3f)\n",
                     static_cast<double>(targetFc), measuredHz, oscRms);
-        EXPECT_TRUE(oscRms > 0.15 && oscRms < 1.5,
+        EXPECT_TRUE(oscRms > 0.15 && oscRms < 1.8,
                     "HPF self-oscillation amplitude out of bounds at %.1f Hz (RMS=%.3f)",
                     static_cast<double>(targetFc), oscRms);
         EXPECT_TRUE(std::fabs(measuredHz - static_cast<double>(targetFc)) <
                         0.03 * static_cast<double>(targetFc),
-                    "HPF self-oscillation pitch tracking error > 3%% at %.1f Hz (got %.1f Hz)",
+                    "HPF Rev2 pitch tracking error > 3%% at %.1f Hz (got %.1f Hz)",
                     static_cast<double>(targetFc), measuredHz);
     }
 
     // Verify early MS-20 self-oscillation onset (LP Reso=0.45 already sustains limit cycle)
     filter.reset();
-    (void)filter.processSample(0.02f, 20.0f, 0.0f, 800.0f, 0.45f, ruido::kInvOversampledRate);
+    (void)filter.processSample(0.02f, 2.0f, 0.0f, 800.0f, 0.45f, ruido::kInvOversampledRate);
     double earlyOscSq = 0.0;
     for (size_t n = 0u; n < 88236u; ++n) {
         const float y =
-            filter.processSample(0.0f, 20.0f, 0.0f, 800.0f, 0.45f, ruido::kInvOversampledRate);
+            filter.processSample(0.0f, 2.0f, 0.0f, 800.0f, 0.45f, ruido::kInvOversampledRate);
         if (n >= 44118u) {
             earlyOscSq += static_cast<double>(y) * static_cast<double>(y);
         }
@@ -570,8 +640,7 @@ void testMs20FilterPassbandAndSmartPark() {
     EXPECT_TRUE(earlyOscRms > 0.25, "Expected sustained self-oscillation by Reso=0.45 (RMS=%.3f)",
                 earlyOscRms);
 
-    // Verify simultaneous dual HPF (220 Hz) + LPF (880 Hz) self-oscillation maintains greater
-    // combined energy than single-stage alone while staying cleanly bounded!
+    // Verify simultaneous dual HPF (220 Hz) + LPF (880 Hz) Korg35 self-oscillation screams cleanly!
     filter.reset();
     (void)filter.processSample(0.02f, 220.0f, 0.95f, 880.0f, 0.95f, ruido::kInvOversampledRate);
     double dualSq = 0.0;
@@ -585,9 +654,9 @@ void testMs20FilterPassbandAndSmartPark() {
         }
     }
     const double dualRms = std::sqrt(dualSq / 44118.0);
-    std::printf("  Dual HPF(220)+LPF(880) Self-Oscillation: RMS=%.3f, Peak=%.3f\n", dualRms,
+    std::printf("  Dual Korg35 HPF(220)+LPF(880) Self-Oscillation: RMS=%.3f, Peak=%.3f\n", dualRms,
                 static_cast<double>(dualPeak));
-    EXPECT_TRUE(dualRms > 0.72 && dualPeak < 2.5f,
+    EXPECT_TRUE(dualRms > 0.72 && dualPeak < 3.5f,
                 "Simultaneous dual self-oscillation out of expected range (RMS=%.3f, Peak=%.3f)",
                 dualRms, static_cast<double>(dualPeak));
 }
@@ -613,12 +682,15 @@ void testExtremeStabilityAndZeroDenormals() {
         const float t = static_cast<float>(block) * 0.01f;
         for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
             const float ph = t + static_cast<float>(i) * 1.3f;
-            st.voices[i].frequencyHz = 20.0f + 3900.0f * (0.5f + 0.5f * std::sin(ph));
-            st.voices[i].hpCutoffHz = 20.0f + 18000.0f * (0.5f + 0.5f * std::cos(ph * 1.7f));
+            st.voices[i].frequencyHz = 0.05f + 19999.0f * (0.5f + 0.5f * std::sin(ph));
+            st.voices[i].hpCutoffHz = 2.0f + 27990.0f * (0.5f + 0.5f * std::cos(ph * 1.7f));
             st.voices[i].hpResonance = 1.0f;
-            st.voices[i].lpCutoffHz = 40.0f + 19500.0f * (0.5f + 0.5f * std::sin(ph * 2.3f));
+            st.voices[i].lpCutoffHz = 2.0f + 27990.0f * (0.5f + 0.5f * std::sin(ph * 2.3f));
             st.voices[i].lpResonance = 1.0f;
-            st.voices[i].amplitude = 1.0f;
+            st.voices[i].amplitude = 1.0f; // Full 4.5x pre-filter MS-20 overdrive!
+            st.voices[i].lfoRateHz = 2000.0f;
+            st.voices[i].lfoDepth = 1.0f;
+            st.voices[i].lfoTarget = static_cast<ruido::LfoTarget>(i % 7u);
             st.voices[i].pan = std::sin(ph * 0.5f);
             st.voicePressure[i] = 0.5f + 0.5f * std::sin(ph * 3.1f);
         }
@@ -756,7 +828,7 @@ void testClicklessTransitionsAndMonoPoly() {
     ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
     st.voices[0].frequencyHz = 80.0f;
     st.voices[0].lpCutoffHz = 250.0f;
-    st.voices[0].amplitude = 0.9f;
+    st.voices[0].amplitude = 0.65f;
     st.voices[0].pan = -1.0f;
     st.voices[1].muted = true;
     st.voices[2].muted = true;
@@ -803,28 +875,31 @@ void testClicklessTransitionsAndMonoPoly() {
         }
     }
 
-    // Settle MONO mode for 30 blocks and verify L == R bit-for-bit + active LPG swell RMS
+    // Settle MONO mode for 14 blocks, then verify L == R bit-for-bit + multi-cycle 80 Hz LPG RMS
+    bool monoBitIdentical = true;
+    double pressureRms = 0.0;
+    size_t rmsSamples = 0u;
     for (int w = 0; w < 30; ++w) {
         engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
         engine.scopeBuffer().popBatch(drain.data(), drain.size());
-    }
-
-    bool monoBitIdentical = true;
-    double pressureRms = 0.0;
-    for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
-        if (outL[i] != outR[i]) {
-            monoBitIdentical = false;
+        if (w >= 14) {
+            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                if (w == 29 && outL[i] != outR[i]) {
+                    monoBitIdentical = false;
+                }
+                pressureRms += static_cast<double>(outL[i]) * static_cast<double>(outL[i]);
+                ++rmsSamples;
+            }
         }
-        pressureRms += static_cast<double>(outL[i]) * static_cast<double>(outL[i]);
     }
-    pressureRms = std::sqrt(pressureRms / static_cast<double>(ruido::kBlockFrames));
+    pressureRms = std::sqrt(pressureRms / static_cast<double>(rmsSamples));
 
     // Verify Keys 5-8 pressure NEVER changes pitch in default Filter/LPG mode (0.000 Hz shift),
-    // and smoothly bends pitch (+6 semitones -> period * 2^-0.5) when SEL selects Pitch Bend mode
+    // and smoothly bends pitch (+24 semitones -> 4.0x frequency) when SEL selects Pitch Bend mode
     auto measureOsc1PeriodSamples = [&](float pressureVal, bool pitchMode) -> double {
         st.global.pitchPressureMode = pitchMode;
         st.voices[0].muted = false;
-        st.voices[0].lpCutoffHz = 20000.0f;
+        st.voices[0].lpCutoffHz = 28000.0f;
         st.voicePressure[0] = pressureVal;
         engine.controlBus().publish(st);
         engine.reset();
@@ -867,8 +942,9 @@ void testClicklessTransitionsAndMonoPoly() {
     EXPECT_TRUE(std::fabs(periodFilterPress - periodNoPress) < 1.0e-9,
                 "Filter-mode pressure altered oscillator frequency (period %.6f vs %.6f)",
                 periodNoPress, periodFilterPress);
-    EXPECT_TRUE(std::fabs(pitchRatio - 1.41421356) < 0.015,
-                "SEL Pitch-Bend mode failed expected +6 st bend ratio (got %.4f)", pitchRatio);
+    EXPECT_TRUE(std::fabs(pitchRatio - 4.0) < 0.04,
+                "SEL Pitch-Bend mode failed expected +24 st (4.0x) bend ratio (got %.4f)",
+                pitchRatio);
 
     // Verify fading a muted high-amplitude (0.90) voice up from 0% via GLO never blips upward
     st = ruido::EngineControlState::makeDefault();
@@ -1039,7 +1115,7 @@ void testDecimatorLinearPhaseCrest() {
     st.global.masterTrim = 1.0f;
     st.global.monoCollapse = true;
     st.voices[0].frequencyHz = 100.0f;
-    st.voices[0].amplitude = 1.0f;
+    st.voices[0].amplitude = ruido::kCleanAmpKnee;
     st.voices[0].pan = 0.0f;
     st.voices[1].muted = true;
     st.voices[2].muted = true;
@@ -1317,55 +1393,71 @@ void testPerVoiceAnalogLfoModels() {
         st.voices[0].lpCutoffHz = 700.0f;
         st.voices[0].lpResonance = 0.45f;
         st.voices[0].hpCutoffHz = 90.0f;
-        st.voices[0].amplitude = 0.85f;
+        st.voices[0].amplitude = ruido::kCleanAmpKnee;
         st.voices[0].pan = 0.0f;
         st.voices[0].lfoRateHz = 11.0f;
-        st.voices[0].lfoShape = 0.0f;
-        st.voices[0].lfoDepth = 1.0f;
-        st.voices[0].lfoTarget = ruido::LfoTarget::LpCutoff;
         for (size_t i = 1u; i < ruido::kNumOscillators; ++i) {
             st.voices[i].muted = true;
         }
-        engine.controlBus().publish(st);
-        engine.snapParametersToLatest();
-
-        for (int w = 0; w < 30; ++w) {
-            engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
-            engine.scopeBuffer().popBatch(drain.data(), drain.size());
-        }
-
-        float prevL = outL[ruido::kBlockFrames - 1u];
-        float prevR = outR[ruido::kBlockFrames - 1u];
-        float maxSwitchDelta = 0.0f;
-        bool finiteOk = true;
-
-        // Sweep SHAPE continuously AND cycle through all 7 LFO targets live every 20 blocks
-        for (int b = 0; b < 160; ++b) {
-            st.voices[0].lfoShape = static_cast<float>(b) / 159.0f;
-            if ((b % 20) == 0) {
-                const uint8_t nextT = static_cast<uint8_t>((b / 20) % 7);
-                st.voices[0].lfoTarget = static_cast<ruido::LfoTarget>(nextT);
-            }
+        auto runLiveSwitchSweep = [&](float depth, float& maxDeltaOut, bool& finiteOut) {
+            st.voices[0].lfoShape = 0.0f;
+            st.voices[0].lfoDepth = depth;
+            st.voices[0].lfoTarget = ruido::LfoTarget::LpCutoff;
             engine.controlBus().publish(st);
-            engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
-            engine.scopeBuffer().popBatch(drain.data(), drain.size());
+            engine.snapParametersToLatest();
 
-            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
-                if (!isFiniteNonSubnormal(outL[i]) || !isFiniteNonSubnormal(outR[i])) {
-                    finiteOk = false;
-                }
-                maxSwitchDelta = std::max(maxSwitchDelta, std::fabs(outL[i] - prevL));
-                maxSwitchDelta = std::max(maxSwitchDelta, std::fabs(outR[i] - prevR));
-                prevL = outL[i];
-                prevR = outR[i];
+            for (int w = 0; w < 30; ++w) {
+                engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+                engine.scopeBuffer().popBatch(drain.data(), drain.size());
             }
-        }
-        std::printf("  Live 7-target + full SHAPE morph max |dSample| = %.5f\n",
-                    static_cast<double>(maxSwitchDelta));
-        EXPECT_TRUE(finiteOk, "Non-finite or subnormal sample during live LFO morph/target switch");
-        EXPECT_TRUE(maxSwitchDelta < 0.14f,
-                    "Discontinuity click during live LFO target/shape switch (delta=%.5f)",
-                    static_cast<double>(maxSwitchDelta));
+
+            float prevL = outL[ruido::kBlockFrames - 1u];
+            float prevR = outR[ruido::kBlockFrames - 1u];
+            maxDeltaOut = 0.0f;
+            finiteOut = true;
+
+            // Sweep SHAPE continuously AND cycle through all 7 LFO targets live every 20 blocks
+            for (int b = 0; b < 160; ++b) {
+                st.voices[0].lfoShape = static_cast<float>(b) / 159.0f;
+                if ((b % 20) == 0) {
+                    const uint8_t nextT = static_cast<uint8_t>((b / 20) % 7);
+                    st.voices[0].lfoTarget = static_cast<ruido::LfoTarget>(nextT);
+                }
+                engine.controlBus().publish(st);
+                engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+                engine.scopeBuffer().popBatch(drain.data(), drain.size());
+
+                for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                    if (!isFiniteNonSubnormal(outL[i]) || !isFiniteNonSubnormal(outR[i])) {
+                        finiteOut = false;
+                    }
+                    maxDeltaOut = std::max(maxDeltaOut, std::fabs(outL[i] - prevL));
+                    maxDeltaOut = std::max(maxDeltaOut, std::fabs(outR[i] - prevR));
+                    prevL = outL[i];
+                    prevR = outR[i];
+                }
+            }
+        };
+
+        float maxSwitchDeltaMod = 0.0f;
+        bool finiteModOk = true;
+        runLiveSwitchSweep(0.45f, maxSwitchDeltaMod, finiteModOk);
+
+        float maxSwitchDeltaFull = 0.0f;
+        bool finiteFullOk = true;
+        runLiveSwitchSweep(1.0f, maxSwitchDeltaFull, finiteFullOk);
+
+        std::printf("  Live 7-target + SHAPE morph max |dSample|: 45%%=%.5f, 100%%=%.5f\n",
+                    static_cast<double>(maxSwitchDeltaMod),
+                    static_cast<double>(maxSwitchDeltaFull));
+        EXPECT_TRUE(finiteModOk && finiteFullOk,
+                    "Non-finite or subnormal sample during live LFO morph/target switch");
+        EXPECT_TRUE(maxSwitchDeltaMod < 0.14f,
+                    "Discontinuity click during 45%% LFO target/shape switch (delta=%.5f)",
+                    static_cast<double>(maxSwitchDeltaMod));
+        EXPECT_TRUE(maxSwitchDeltaFull < 0.45f,
+                    "Discontinuity click during 100%% +/-5-oct LFO switch (delta=%.5f)",
+                    static_cast<double>(maxSwitchDeltaFull));
     }
 
     // 6. Acoustic verification of all 7 per-voice LFO targets:
@@ -1579,7 +1671,7 @@ void testRev2OtaSallenKeyPhysics() {
         ruido::StereoHalfBandDecimator4x decim;
         filter.reset();
         decim.reset();
-        const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(20.0f, 0.0f, 450.0f, 0.0f,
+        const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(2.0f, 0.0f, 450.0f, 0.0f,
                                                                  ruido::kInvOversampledRate);
 
         constexpr double kTestHz = 300.0;
@@ -1717,16 +1809,19 @@ void testRev2OtaSallenKeyPhysics() {
                 bankFilters[v].reset();
                 refFilters[v].reset();
                 if (mode == 0) {
-                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(20.0f, 0.0f, 20000.0f, 0.0f,
+                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(2.0f, 0.0f, 28000.0f, 0.0f,
                                                                      ruido::kInvOversampledRate);
                 } else if (mode == 1) {
                     coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(
                         75.0f + 55.0f * static_cast<float>(v), 0.72f,
-                        600.0f + 450.0f * static_cast<float>(v), 0.88f, ruido::kInvOversampledRate);
+                        600.0f + 450.0f * static_cast<float>(v), 0.88f, ruido::kInvOversampledRate,
+                        2.8f);
                 } else {
-                    const float hp = (v & 1u) != 0u ? 180.0f : 20.0f;
-                    const float lp = (v & 2u) != 0u ? 950.0f : 20000.0f;
-                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(hp, 0.85f, lp, 0.85f,
+                    const float hp = (v & 1u) != 0u ? 180.0f : 2.0f;
+                    const float hpRes = (v & 1u) != 0u ? 0.85f : 0.0f;
+                    const float lp = (v & 2u) != 0u ? 950.0f : 28000.0f;
+                    const float lpRes = (v & 2u) != 0u ? 0.85f : 0.0f;
+                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(hp, hpRes, lp, lpRes,
                                                                      ruido::kInvOversampledRate);
                 }
             }
@@ -1763,15 +1858,15 @@ void testRev2OtaSallenKeyPhysics() {
                     static_cast<double>(maxParityDiff));
     }
 
-    // (d) Hot standalone input (±10.0f) Smart-Park handoff continuity across 18.8..20.0 kHz:
+    // (d) Hot standalone input (±10.0f) bypass handoff continuity across 27.85..28.00 kHz:
     {
         ruido::Ms20DualFilter filter;
         filter.reset();
         float prevY = 0.0f;
         float maxHandoffStep = 0.0f;
         for (size_t n = 0u; n < 4000u; ++n) {
-            const float lpHz = 19850.0f + 0.05f * static_cast<float>(n); // crosses ~19991 Hz
-            const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(20.0f, 0.0f, lpHz, 0.0f,
+            const float lpHz = 27850.0f + 0.05f * static_cast<float>(n); // crosses ~27972 Hz
+            const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(2.0f, 0.0f, lpHz, 0.0f,
                                                                      ruido::kInvOversampledRate);
             const float x = 10.0f * std::sin(ruido::kTwoPi * 3000.0f * static_cast<float>(n) *
                                              ruido::kInvOversampledRate);
@@ -1781,8 +1876,226 @@ void testRev2OtaSallenKeyPhysics() {
             }
             prevY = y;
         }
-        EXPECT_TRUE(maxHandoffStep < 1.25f, "Hot ±10V Smart-Park handoff clicked (max |dy| = %.4f)",
+        EXPECT_TRUE(maxHandoffStep < 1.25f, "Hot ±10V bypass handoff clicked (max |dy| = %.4f)",
                     static_cast<double>(maxHandoffStep));
+    }
+}
+
+// 13. Unbroken Extremes: 15 Hz sub-bass, EDIT 4.5x overdrive, 100% ALGORITHM sync & 2 kHz FM LFO
+void testUnbrokenExtremesSubBassOverdriveSyncAndAudioLfo() {
+    std::printf(
+        "[Test 13] Unbroken 15 Hz sub-bass, 4.5x MS-20 drive, 100%% sync & audio-rate LFO FM...\n");
+
+    // (a) 15 Hz deep sub-bass flatness (< 0.15 dB loss with 1.5 Hz RC coupling capacitor):
+    {
+        ruido::SchmittOscillatorBank flatBank;
+        ruido::SchmittOscillatorBank rcBank;
+        flatBank.reset(ruido::kOversampledRate);
+        rcBank.reset(ruido::kOversampledRate);
+        flatBank.setAnalogCharacterEnabled(false, false);
+        rcBank.setAnalogCharacterEnabled(false, true);
+
+        const std::array<float, ruido::kNumOscillators> subFreqs{15.0f, 55.0f, 55.0f, 55.0f};
+        const size_t settle = static_cast<size_t>(ruido::kOversampledRate * 1.5f);
+        const size_t measure = static_cast<size_t>(ruido::kOversampledRate * 1.0f);
+        double sqFlat = 0.0;
+        double sqRc = 0.0;
+        for (size_t n = 0u; n < settle + measure; ++n) {
+            const auto oFlat = flatBank.processSample(subFreqs, 0.0f);
+            const auto oRc = rcBank.processSample(subFreqs, 0.0f);
+            if (n >= settle) {
+                sqFlat +=
+                    static_cast<double>(oFlat.samples[0]) * static_cast<double>(oFlat.samples[0]);
+                sqRc += static_cast<double>(oRc.samples[0]) * static_cast<double>(oRc.samples[0]);
+            }
+        }
+        const double subLossDb = 10.0 * std::log10(sqRc / sqFlat);
+        std::printf("  15.0 Hz sub-bass RC coupling gain = %+.3f dB\n", subLossDb);
+        EXPECT_TRUE(std::fabs(subLossDb) < 0.15,
+                    "1.5 Hz RC coupling pole attenuated 15 Hz sub-bass (%.3f dB)", subLossDb);
+    }
+
+    // (b) EDIT 70-100% (4.5x) Pre-Filter Overdrive engages on wide-open filter (HP=2, LP=28k)
+    //     generating rich asymmetric 2nd + 3rd harmonics while capacitive HPF strips 100% of DC:
+    {
+        constexpr size_t kFftSize = 16384u;
+        static std::array<double, kFftSize> fftRe{};
+        static std::array<double, kFftSize> fftIm{};
+
+        ruido::Ms20DualFilter filter;
+        ruido::StereoHalfBandDecimator4x decim;
+        filter.reset();
+        decim.reset();
+        const auto cleanCoeffs = ruido::Ms20DualFilter::prepareCoeffs(
+            2.0f, 0.0f, 28000.0f, 0.0f, ruido::kInvOversampledRate, 1.0f);
+        const auto driveCoeffs = ruido::Ms20DualFilter::prepareCoeffs(
+            2.0f, 0.0f, 28000.0f, 0.0f, ruido::kInvOversampledRate, 4.5f);
+        EXPECT_TRUE(cleanCoeffs.hpLinearBypass && cleanCoeffs.lpLinearBypass,
+                    "Expected wide-open preDrive=1.0x filter to bypass cleanly");
+        EXPECT_TRUE(!driveCoeffs.hpLinearBypass,
+                    "Expected preDrive=4.5x to engage capacitive Stage-1 HPF + overdrive");
+
+        constexpr double kTestHz = 220.0;
+        size_t osStep = 0u;
+        std::array<ruido::StereoFrame, 4> in4x{};
+        for (size_t w = 0u; w < 32768u; ++w) {
+            for (size_t s = 0u; s < 4u; ++s) {
+                const float x = static_cast<float>(
+                    0.85 * std::sin(2.0 * 3.14159265358979323846 * kTestHz *
+                                    static_cast<double>(osStep++) * ruido::kInvOversampledRate));
+                const float y = filter.processPrepared(x, driveCoeffs);
+                in4x[s] = {y, y};
+            }
+            (void)decim.process4x(in4x);
+        }
+
+        double dcSum = 0.0;
+        for (size_t n = 0u; n < kFftSize; ++n) {
+            for (size_t s = 0u; s < 4u; ++s) {
+                const float x = static_cast<float>(
+                    0.85 * std::sin(2.0 * 3.14159265358979323846 * kTestHz *
+                                    static_cast<double>(osStep++) * ruido::kInvOversampledRate));
+                const float y = filter.processPrepared(x, driveCoeffs);
+                in4x[s] = {y, y};
+            }
+            const ruido::StereoFrame dec = decim.process4x(in4x);
+            dcSum += static_cast<double>(dec.left);
+            const double ph = (2.0 * 3.14159265358979323846 * static_cast<double>(n)) /
+                              static_cast<double>(kFftSize);
+            const double win = 0.35875 - 0.48829 * std::cos(ph) + 0.14128 * std::cos(2.0 * ph) -
+                               0.01168 * std::cos(3.0 * ph);
+            fftRe[n] = static_cast<double>(dec.left) * win;
+            fftIm[n] = 0.0;
+        }
+        radix2Fft(fftRe.data(), fftIm.data(), kFftSize);
+        const double binHz =
+            static_cast<double>(ruido::kBaseSampleRate) / static_cast<double>(kFftSize);
+        auto peakAt = [&](double hz) -> double {
+            const size_t c = static_cast<size_t>(std::round(hz / binHz));
+            double pk = 0.0;
+            for (size_t b = (c > 4u ? c - 4u : 1u); b <= c + 4u; ++b) {
+                pk = std::max(pk, std::hypot(fftRe[b], fftIm[b]));
+            }
+            return pk;
+        };
+        const double h1 = peakAt(kTestHz);
+        const double h2Db = 20.0 * std::log10(std::max(peakAt(2.0 * kTestHz) / h1, 1.0e-15));
+        const double h3Db = 20.0 * std::log10(std::max(peakAt(3.0 * kTestHz) / h1, 1.0e-15));
+        const double dcMean = dcSum / static_cast<double>(kFftSize);
+        std::printf("  4.5x Overdrive @ 220 Hz -> H2=%.2f dBc, H3=%.2f dBc, DC=%+.5f\n", h2Db, h3Db,
+                    dcMean);
+        EXPECT_TRUE(h2Db > -28.0 && h3Db > -20.0,
+                    "Expected rich asymmetric 2nd+3rd harmonics at 4.5x drive (H2=%.2f, H3=%.2f)",
+                    h2Db, h3Db);
+        EXPECT_TRUE(std::fabs(dcMean) < 0.025,
+                    "Asymmetric 4.5x overdrive leaked excessive standalone DC (%+.5f)", dcMean);
+    }
+
+    // (c) ALGORITHM = 100% starved-rail subharmonic hard-sync (300 Hz master -> 143 Hz locks 2:1):
+    {
+        ruido::SchmittOscillatorBank bank;
+        bank.setAnalogCharacterEnabled(false, false);
+        const std::array<float, ruido::kNumOscillators> syncFreqs{300.0f, 143.0f, 40.0f, 40.0f};
+        auto measureRatio01 = [&](float coupling) -> double {
+            bank.reset(ruido::kOversampledRate);
+            const size_t settle = static_cast<size_t>(ruido::kOversampledRate * 0.25f);
+            const size_t run = static_cast<size_t>(ruido::kOversampledRate * 1.5f);
+            int c0 = 0;
+            int c1 = 0;
+            for (size_t n = 0u; n < settle + run; ++n) {
+                const auto o = bank.processSample(syncFreqs, coupling);
+                if (n >= settle) {
+                    if ((o.risingMask & 1u) != 0u) {
+                        ++c0;
+                    }
+                    if ((o.risingMask & 2u) != 0u) {
+                        ++c1;
+                    }
+                }
+            }
+            return static_cast<double>(c0) / static_cast<double>(std::max(c1, 1));
+        };
+        const double freeRatio = measureRatio01(0.0f);
+        const double gentleRatio = measureRatio01(0.35f);
+        const double syncRatio = measureRatio01(1.0f);
+        std::printf("  300/143 Hz ratio: ALG=0%% -> %.4f, 35%% -> %.4f, 100%% -> %.4f\n", freeRatio,
+                    gentleRatio, syncRatio);
+        EXPECT_TRUE(std::fabs(freeRatio - (300.0 / 143.0)) < 0.02,
+                    "Uncoupled 300/143 ratio inaccurate (%.4f)", freeRatio);
+        EXPECT_TRUE(gentleRatio > 2.04,
+                    "Gentle ALGORITHM=35%% unexpectedly hard-synced 83-cent detune (%.4f)",
+                    gentleRatio);
+        EXPECT_TRUE(std::fabs(syncRatio - 2.0) < 0.02,
+                    "ALGORITHM=100%% failed 2:1 subharmonic hard-sync lock (got %.4f)", syncRatio);
+    }
+
+    // (d) Audio-rate LFO FM (600 Hz LFO -> 440 Hz Voice Pitch, 4x sub-sample interpolated):
+    {
+        constexpr size_t kFftSize = 16384u;
+        static std::array<double, kFftSize> fftRe{};
+        static std::array<double, kFftSize> fftIm{};
+
+        static ruido::DroneEngine engine;
+        engine.init(ruido::kBaseSampleRate);
+        engine.setAnalogCharacterEnabled(false, false);
+
+        ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+        st.global.circuitCoupling = 0.0f;
+        st.global.monoCollapse = true;
+        st.voices[0].frequencyHz = 440.0f;
+        st.voices[0].amplitude = ruido::kCleanAmpKnee;
+        st.voices[0].lfoTarget = ruido::LfoTarget::Pitch;
+        st.voices[0].lfoShape = 0.0f;
+        st.voices[0].lfoRateHz = 600.0f;
+        st.voices[0].lfoDepth = 0.35f;
+        st.voices[1].muted = true;
+        st.voices[2].muted = true;
+        st.voices[3].muted = true;
+        engine.controlBus().publish(st);
+        engine.snapParametersToLatest();
+
+        std::array<float, ruido::kBlockFrames> outL{};
+        std::array<float, ruido::kBlockFrames> outR{};
+        std::array<ruido::ScopeFrame, ruido::kBlockFrames> drain{};
+        for (int w = 0; w < 32; ++w) {
+            engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+            engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        }
+        bool finiteOk = true;
+        for (size_t offset = 0u; offset < kFftSize; offset += ruido::kBlockFrames) {
+            engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+            engine.scopeBuffer().popBatch(drain.data(), drain.size());
+            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                if (!isFiniteNonSubnormal(outL[i])) {
+                    finiteOk = false;
+                }
+                const double ph = (2.0 * 3.14159265358979323846 * static_cast<double>(offset + i)) /
+                                  static_cast<double>(kFftSize);
+                const double win = 0.35875 - 0.48829 * std::cos(ph) + 0.14128 * std::cos(2.0 * ph) -
+                                   0.01168 * std::cos(3.0 * ph);
+                fftRe[offset + i] = static_cast<double>(outL[i]) * win;
+                fftIm[offset + i] = 0.0;
+            }
+        }
+        radix2Fft(fftRe.data(), fftIm.data(), kFftSize);
+        const double binHz =
+            static_cast<double>(ruido::kBaseSampleRate) / static_cast<double>(kFftSize);
+        auto peakAt = [&](double hz) -> double {
+            const size_t c = static_cast<size_t>(std::round(hz / binHz));
+            double pk = 0.0;
+            for (size_t b = (c > 4u ? c - 4u : 1u); b <= c + 4u; ++b) {
+                pk = std::max(pk, std::hypot(fftRe[b], fftIm[b]));
+            }
+            return pk;
+        };
+        const double carrier = peakAt(440.0);
+        const double upperSidebandDb =
+            20.0 * std::log10(std::max(peakAt(1040.0) / carrier, 1.0e-15));
+        std::printf("  600 Hz audio-rate LFO -> 440 Hz FM upper sideband (1040 Hz) = %.2f dBc\n",
+                    upperSidebandDb);
+        EXPECT_TRUE(finiteOk && upperSidebandDb > -18.0,
+                    "Audio-rate 600 Hz LFO FM failed sideband generation (%.2f dBc)",
+                    upperSidebandDb);
     }
 }
 
@@ -1803,6 +2116,7 @@ int main() {
     testThroughputBenchmark();
     testPerVoiceAnalogLfoModels();
     testRev2OtaSallenKeyPhysics();
+    testUnbrokenExtremesSubBassOverdriveSyncAndAudioLfo();
 
     if (gFailures == 0) {
         std::printf("\n[PASS] All Milestone 1 DSP verification gates passed!\n");

@@ -46,6 +46,9 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
     RTEST_CHECK(ctrl.hud().lfoVoiceFocus == 0u);
 
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -4); // LpCutoff(1) - 1 -> Pitch(0) first option!
+    RTEST_CHECK(ctrl.state().voices[0].lfoTarget == ruido::LfoTarget::Pitch);
+
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true); // FINE
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().lfoVoiceFocus == 1u);
@@ -60,8 +63,9 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     RTEST_CHECK(ctrl.state().voices[2].lfoTarget == ruido::LfoTarget::LpResonance);
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
 
-    // 3. Option A Split Top-Bar: holding OCT-/OCT+ overrides top-left to FINE/COARSE across modes
-    //    while updating top-right readout live as knobs turn
+    // 3. Anchored Left Title + Smooth 150 ms Top-Right FINE/COARSE Transition:
+    //    (a) Idle OCT- hold shows "FREQUENCY" on left + "FINE" on right; turning Knob1 keeps
+    //        "FREQUENCY" anchored on left while expanding top-right to "FINE · ... Hz"!
     ctrl.reset();
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true);
     ctrl.tick(0.200f, tel);
@@ -69,8 +73,6 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     RTEST_CHECK(ctrl.hud().knobRate == ruido::KnobRate::Fine);
     RTEST_CHECK(nearF(ctrl.hud().opacity, 1.0f));
 
-    // Render top header strip in pure FINE hold vs FINE + Knob1 turn -> top-left stays identical
-    // ("FINE") while top-right changes to live "OSC 1  ... Hz"!
     std::array<uint16_t, 240u * 24u> hdrRateOnly{};
     std::array<uint16_t, 240u * 24u> hdrRateKnob{};
     ruido::EngineControlState silentSt = ctrl.state();
@@ -89,21 +91,21 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     renderer.prepareFrame(0.016f, silentSt, ctrl.hud(), tel);
     renderer.renderStrip(0u, 24u, hdrRateKnob.data());
 
-    bool leftFineLocked = true;
+    bool leftFreqLocked = true;
     size_t rightReadoutDiffs = 0u;
     for (size_t y = 6u; y <= 19u; ++y) {
-        for (size_t x = 10u; x <= 60u; ++x) {
+        for (size_t x = 10u; x <= 80u; ++x) {
             if (hdrRateOnly[y * 240u + x] != hdrRateKnob[y * 240u + x]) {
-                leftFineLocked = false;
+                leftFreqLocked = false;
             }
         }
-        for (size_t x = 120u; x <= 230u; ++x) {
+        for (size_t x = 140u; x <= 230u; ++x) {
             if (hdrRateOnly[y * 240u + x] != hdrRateKnob[y * 240u + x]) {
                 ++rightReadoutDiffs;
             }
         }
     }
-    RTEST_CHECK(leftFineLocked);
+    RTEST_CHECK(leftFreqLocked);
     RTEST_CHECK(rightReadoutDiffs > 40u);
 
     // Releasing OCT- after turning a knob preserves the remaining 1.5 s toast hold!
@@ -117,6 +119,70 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
         ctrl.tick(0.100f, tel);
     }
     RTEST_CHECK(nearF(ctrl.hud().opacity, 0.0f));
+
+    //    (b) On an open tool page (LFO OSC 1), holding OCT- keeps the entire left title
+    //        ("LFO OSC 1", x = 10..120) 100% stationary while top-right transitions smoothly
+    //        over 150 ms into "FINE" and back!
+    ctrl.reset();
+    renderer.reset();
+    ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
+    ctrl.tick(0.200f, tel);
+    silentSt = ctrl.state();
+    silentSt.global.masterRun = false;
+    silentSt.global.masterTrim = 0.0f;
+
+    std::array<uint16_t, 240u * 24u> hdrPageBase{};
+    std::array<uint16_t, 240u * 24u> hdrPageMid{};
+    std::array<uint16_t, 240u * 24u> hdrPageFine{};
+    std::array<uint16_t, 240u * 24u> hdrPageRestored{};
+    renderer.prepareFrame(0.200f, silentSt, ctrl.hud(), tel);
+    renderer.renderStrip(0u, 24u, hdrPageBase.data());
+
+    ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true);
+    ctrl.tick(0.075f, tel);
+    renderer.prepareFrame(0.075f, silentSt, ctrl.hud(), tel);
+    renderer.renderStrip(0u, 24u, hdrPageMid.data());
+
+    ctrl.tick(0.120f, tel);
+    renderer.prepareFrame(0.120f, silentSt, ctrl.hud(), tel);
+    renderer.renderStrip(0u, 24u, hdrPageFine.data());
+
+    ctrl.onButtonEvent(ruido::ButtonId::OctMinus, false);
+    ctrl.tick(0.200f, tel);
+    renderer.prepareFrame(0.200f, silentSt, ctrl.hud(), tel);
+    renderer.renderStrip(0u, 24u, hdrPageRestored.data());
+
+    bool pageLeftStationary = true;
+    size_t midVsBaseRight = 0u;
+    size_t midVsFineRight = 0u;
+    bool rightRestoredCleanly = true;
+    for (size_t y = 6u; y <= 20u; ++y) {
+        for (size_t x = 10u; x <= 120u; ++x) {
+            const size_t idx = y * 240u + x;
+            if (hdrPageBase[idx] != hdrPageMid[idx] || hdrPageBase[idx] != hdrPageFine[idx]) {
+                pageLeftStationary = false;
+            }
+        }
+        for (size_t x = 155u; x <= 232u; ++x) {
+            const size_t idx = y * 240u + x;
+            if (hdrPageMid[idx] != hdrPageBase[idx]) {
+                ++midVsBaseRight;
+            }
+            if (hdrPageMid[idx] != hdrPageFine[idx]) {
+                ++midVsFineRight;
+            }
+            if (hdrPageRestored[idx] != hdrPageBase[idx]) {
+                rightRestoredCleanly = false;
+            }
+        }
+    }
+    RTEST_CHECK(pageLeftStationary);
+    RTEST_CHECK(midVsBaseRight > 10u && midVsFineRight > 10u);
+    RTEST_CHECK(rightRestoredCleanly);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    ctrl.tick(0.200f, tel);
 
     // Pressing HOME while OCT+ is physically held preserves COARSE hold cleanly
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
@@ -468,6 +534,167 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
         RTEST_CHECK(nearF(ctrl.state().voices[v].lpCutoffHz, preHoldVoices[v].lpCutoffHz));
         RTEST_CHECK(nearF(ctrl.state().voices[v].amplitude, preHoldVoices[v].amplitude));
     }
+#undef RTEST_CHECK
+}
+
+template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(CheckFn checkFn) {
+    std::printf(
+        "[Test 10] Latching EDIT Channel Level/Drive Page, SELECT Gang Fader & HudAmpGraph...\n");
+    const auto nearF = [](float a, float b, float eps = 1.0e-4f) {
+        return std::fabs(a - b) <= eps;
+    };
+#define RTEST_CHECK(expr) checkFn((expr), #expr, __LINE__)
+
+    ruido::DroneEngine engine;
+    ruido::RuidoController ctrl;
+    ruido::ScopeHudRenderer renderer;
+    engine.init(ruido::kBaseSampleRate);
+    ctrl.attachControlBus(&engine.controlBus());
+    engine.snapParametersToLatest();
+
+    // 1. Tap EDIT: opens latched Channel Level & Drive page, mutually exclusive with
+    // LFO/CONFIG/SAVE
+    ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
+    RTEST_CHECK(ctrl.hud().lfoPageOpen);
+
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    RTEST_CHECK(ctrl.hud().editPageOpen);
+    RTEST_CHECK(!ctrl.hud().lfoPageOpen);
+    RTEST_CHECK(!ctrl.hud().configPageOpen);
+    RTEST_CHECK(!ctrl.hud().saveArmed);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Amplitude);
+    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Amplitude);
+    RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+
+    for (int i = 0; i < 30; ++i) {
+        ctrl.tick(0.200f, engine.telemetry());
+    }
+    RTEST_CHECK(nearF(ctrl.hud().opacity, 1.0f));
+    RTEST_CHECK(nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)], 1.0f));
+
+    // 2. KNOB1 -> 100% (4.5x Drive), mute Voice 1 via White Key 2, SELECT 4-voice gang fader
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 200);
+    RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, 1.0f));
+    RTEST_CHECK(nearF(ruido::computeVoiceChannelGain(ctrl.state().voices[0].amplitude).preDrive,
+                      4.5f, 1.0e-3f));
+
+    ctrl.onWhiteKeyGate(1u, true);
+    ctrl.onWhiteKeyGate(1u, false);
+    RTEST_CHECK(ctrl.state().voices[1].muted);
+
+    // Return to EDIT focus via SELECT gang fader (-16 ticks): unmuted voices drop together,
+    // muted Voice 1 stays muted!
+    const float v2Before = ctrl.state().voices[2].amplitude;
+    const float v3Before = ctrl.state().voices[3].amplitude;
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -16);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Amplitude);
+    RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+    RTEST_CHECK(ctrl.state().voices[1].muted);
+    RTEST_CHECK(ctrl.state().voices[2].amplitude < v2Before - 0.04f);
+    RTEST_CHECK(nearF(ctrl.state().voices[2].amplitude, ctrl.state().voices[3].amplitude));
+    (void)v3Before;
+
+    // Crank Knob1 back to 100% (4.5x drive) for visual & LED flare verification
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 200);
+    RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, 1.0f));
+
+    // 3. Momentary OP1 / OP6 / Keybed GLO override EDIT temporarily and return seamlessly on
+    // release
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, true);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFilter);
+    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::VoiceFilter);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
+    RTEST_CHECK(ctrl.hud().editPageOpen);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Amplitude);
+    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Amplitude);
+    RTEST_CHECK(nearF(ctrl.hud().opacity, 1.0f));
+
+    // 4. HudAmpGraph 8/16/24-row strip equivalence, strict monochrome neutrality & drive wings
+    ruido::EngineControlState quietSt = ctrl.state();
+    quietSt.global.masterRun = false;
+    quietSt.global.masterTrim = 0.0f;
+    ruido::EngineTelemetry driveTel{};
+    driveTel.voicePeak[0].store(0.92f, std::memory_order_relaxed);
+    driveTel.voicePeak[2].store(0.45f, std::memory_order_relaxed);
+
+    static std::array<uint16_t, 240u * 240u> amp16{};
+    static std::array<uint16_t, 240u * 240u> amp8{};
+    static std::array<uint16_t, 240u * 240u> amp24{};
+    static std::array<uint16_t, 240u * 240u> clean16{};
+
+    for (int f = 0; f < 12; ++f) {
+        renderer.prepareFrame(0.032f, quietSt, ctrl.hud(), driveTel);
+    }
+    renderer.renderFullScreenStrips(amp16.data());
+    for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 8u)) {
+        renderer.renderStrip(y, 8u, amp8.data() + static_cast<size_t>(y) * 240u);
+    }
+    for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 24u)) {
+        renderer.renderStrip(y, 24u, amp24.data() + static_cast<size_t>(y) * 240u);
+    }
+
+    bool eqStrips = true;
+    bool monoOk = true;
+    for (size_t i = 0u; i < amp16.size(); ++i) {
+        const uint16_t px = amp16[i];
+        if (px != amp8[i] || px != amp24[i]) {
+            eqStrips = false;
+        }
+        const uint16_t r5 = (px >> 11u) & 0x1Fu;
+        const uint16_t g6 = (px >> 5u) & 0x3Fu;
+        const uint16_t b5 = px & 0x1Fu;
+        if (r5 != b5 || g6 != ((r5 << 1u) | (r5 >> 4u))) {
+            monoOk = false;
+        }
+    }
+    RTEST_CHECK(eqStrips);
+    RTEST_CHECK(monoOk);
+
+    // Compare Column 0 upper overdrive zone (y = 36..76, x = 8..52) between 100% (4.5x drive)
+    // and clean 65% VCA: 4.5x drive lights wide saturation wings + "4.5x" micro-callout!
+    ruido::EngineControlState cleanSt = quietSt;
+    cleanSt.voices[0].amplitude = 0.65f;
+    for (int f = 0; f < 12; ++f) {
+        renderer.prepareFrame(0.032f, cleanSt, ctrl.hud(), driveTel);
+    }
+    renderer.renderFullScreenStrips(clean16.data());
+
+    size_t driveZonePxHot = 0u;
+    size_t driveZonePxClean = 0u;
+    for (size_t y = 36u; y <= 76u; ++y) {
+        for (size_t x = 8u; x <= 52u; ++x) {
+            if (((amp16[y * 240u + x] >> 5u) & 0x3Fu) >= 6u) {
+                ++driveZonePxHot;
+            }
+            if (((clean16[y * 240u + x] >> 5u) & 0x3Fu) >= 6u) {
+                ++driveZonePxClean;
+            }
+        }
+    }
+    RTEST_CHECK(driveZonePxHot > driveZonePxClean + 220u);
+
+    // 5. Close EDIT via 2nd EDIT tap -> smooth 150 ms fade-out & live EDIT LED overdrive flare!
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    RTEST_CHECK(!ctrl.hud().editPageOpen);
+    ctrl.tick(0.075f, driveTel);
+    RTEST_CHECK(nearF(ctrl.hud().opacity, 0.50f, 0.03f));
+    ctrl.tick(0.100f, driveTel);
+    RTEST_CHECK(nearF(ctrl.hud().opacity, 0.0f));
+
+    // Closed EDIT LED flares dynamically with live voicePeak when any active voice > 70% knee
+    driveTel.voicePeak[0].store(0.0f, std::memory_order_relaxed);
+    ctrl.tick(0.016f, driveTel);
+    const float editLedQuietDrive =
+        ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)];
+    driveTel.voicePeak[0].store(0.95f, std::memory_order_relaxed);
+    ctrl.tick(0.016f, driveTel);
+    const float editLedHotDrive =
+        ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)];
+    RTEST_CHECK(editLedQuietDrive >= 0.24f && editLedQuietDrive <= 0.28f);
+    RTEST_CHECK(editLedHotDrive > 0.75f && editLedHotDrive <= 0.86f);
 #undef RTEST_CHECK
 }
 

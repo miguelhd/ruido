@@ -72,9 +72,9 @@ enum class GlobalTarget : uint8_t { Freq = 0, Filter = 1, Lfo = 2, Amp = 3, All 
 // Active mapping of top-right KNOB1..KNOB4 (displayed in the 4 bottom HUD columns unless None)
 enum class KnobBankMode : uint8_t {
     Frequency = 0,
-    Amplitude = 1,
-    Panning = 2,
-    VoiceFilter = 3,
+    VoiceFilter = 1,
+    Amplitude = 2,
+    Panning = 3,
     Lfo = 4,
     GlobalFreq = 5,
     GlobalFilter = 6,
@@ -91,9 +91,9 @@ enum class KnobRate : int8_t { Fine = -1, Standard = 0, Coarse = 1 };
 enum class HudMode : uint8_t {
     None = 0,
     VoiceFrequency = 1,
-    Amplitude = 2,
-    Panning = 3,
-    VoiceFilter = 4,
+    VoiceFilter = 2,
+    Amplitude = 3,
+    Panning = 4,
     MasterLevel = 5,
     RailCoupling = 6,
     UnassignedEncoder = 7,
@@ -128,6 +128,7 @@ struct HudState {
     GlobalTarget globalTarget = GlobalTarget::All;
     GlobalConfigState config{};
     ButtonId lastButton = ButtonId::Count;
+    BlackKeyId lastBlackKey = BlackKeyId::Count;
     EncoderId lastEncoder = EncoderId::Select;
     uint8_t focusedVoice = 0u;            // 0..3 oscillator index
     uint8_t focusedKnob = kNoFocusedKnob; // 0..3 active column highlight, or kNoFocusedKnob
@@ -141,6 +142,7 @@ struct HudState {
     bool scopeFrozen = false;    // Momentary waveform freeze on 11th black key
     bool saveArmed = false;
     bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
+    bool editPageOpen = false;   // Latching Channel Level & Drive page (ButtonId::Edit)
     bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
 };
 

@@ -16,23 +16,21 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
                        const std::array<float, kNumOscillators>& lfoOutput) noexcept {
     HudGaugeTargets out{};
 
-    if (!hud.rateHoldActive) {
-        switch (hud.mode) {
-        case HudMode::MasterLevel:
-            out.headerBarNorm = clampf(control.global.masterTrim, 0.0f, 1.0f);
-            out.hasHeaderBar = true;
-            break;
-        case HudMode::RailCoupling:
-            out.headerBarNorm = clampf(control.global.circuitCoupling, 0.0f, 1.0f);
-            out.hasHeaderBar = true;
-            break;
-        case HudMode::VoicePressure:
-            out.headerBarNorm = clampf(control.voicePressure[hud.focusedVoice & 3u], 0.0f, 1.0f);
-            out.hasHeaderBar = true;
-            break;
-        default:
-            break;
-        }
+    switch (hud.mode) {
+    case HudMode::MasterLevel:
+        out.headerBarNorm = clampf(control.global.masterTrim, 0.0f, 1.0f);
+        out.hasHeaderBar = true;
+        break;
+    case HudMode::RailCoupling:
+        out.headerBarNorm = clampf(control.global.circuitCoupling, 0.0f, 1.0f);
+        out.hasHeaderBar = true;
+        break;
+    case HudMode::VoicePressure:
+        out.headerBarNorm = clampf(control.voicePressure[hud.focusedVoice & 3u], 0.0f, 1.0f);
+        out.hasHeaderBar = true;
+        break;
+    default:
+        break;
     }
 
     if (hud.knobBank == KnobBankMode::None) {
@@ -75,6 +73,24 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
             dimmed = vp.muted && (control.voicePressure[k] <= 0.001f);
             break;
         }
+        case KnobBankMode::VoiceFilter: {
+            float norm = 0.0f;
+            if (k == 0u) {
+                norm = clampf((fastLog2(voiceFlt.hpCutoffHz) - kFilterLogMin) *
+                                  (1.0f / kFilterLogSpan),
+                              0.0f, 1.0f);
+            } else if (k == 1u) {
+                norm = clampf(voiceFlt.hpResonance, 0.0f, 1.0f);
+            } else if (k == 2u) {
+                norm = clampf((fastLog2(voiceFlt.lpCutoffHz) - kFilterLogMin) *
+                                  (1.0f / kFilterLogSpan),
+                              0.0f, 1.0f);
+            } else {
+                norm = clampf(voiceFlt.lpResonance, 0.0f, 1.0f);
+            }
+            tgtSigned = 2.0f * norm - 1.0f;
+            break;
+        }
         case KnobBankMode::Amplitude: {
             const VoiceParams& vp = control.voices[k];
             const float liveAmp = (vp.lfoTarget == LfoTarget::Amplitude)
@@ -92,24 +108,6 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
                                       : vp.pan;
             tgtSigned = clampf(livePan * panScale, -1.0f, 1.0f);
             dimmed = vp.muted;
-            break;
-        }
-        case KnobBankMode::VoiceFilter: {
-            float norm = 0.0f;
-            if (k == 0u) {
-                norm = clampf((fastLog2(voiceFlt.hpCutoffHz) - kFilterLogMin) *
-                                  (1.0f / kFilterLogSpan),
-                              0.0f, 1.0f);
-            } else if (k == 1u) {
-                norm = clampf(voiceFlt.hpResonance, 0.0f, 1.0f);
-            } else if (k == 2u) {
-                norm = clampf((fastLog2(voiceFlt.lpCutoffHz) - kFilterLogMin) *
-                                  (1.0f / kFilterLogSpan),
-                              0.0f, 1.0f);
-            } else {
-                norm = clampf(voiceFlt.lpResonance, 0.0f, 1.0f);
-            }
-            tgtSigned = 2.0f * norm - 1.0f;
             break;
         }
         case KnobBankMode::Lfo: {
@@ -167,7 +165,7 @@ void compositeIdlePeakMeters(const MonoStripCanvas& idleCv, float smoothedPeakL,
 void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState& control,
                              const HudState& hud,
                              const std::array<float, kNumOscillators>& lfoOutput,
-                             float headerBarSmooth) noexcept {
+                             float headerBarSmooth, float finePhase, float coarsePhase) noexcept {
     if (cv.y0 >= 26) {
         return;
     }
@@ -178,219 +176,258 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     char rightText[32]{};
     bool showHeaderBar = false;
     float headerBarNorm = 0.0f;
+    float voiceLiveHz = 0.0f;
 
-    if (hud.rateHoldActive) {
-        appendStr(leftMain, 0u, sizeof(leftMain),
-                  (hud.knobRate == KnobRate::Fine) ? "FINE" : "COARSE");
-        formatRateOverrideRightReadout(control, hud, lfoOutput, rightText, sizeof(rightText));
-    } else {
-        switch (hud.mode) {
-        case HudMode::None:
-            break;
-        case HudMode::VoiceFrequency: {
-            appendStr(leftMain, 0u, sizeof(leftMain), "FREQUENCY");
+    switch (hud.mode) {
+    case HudMode::None:
+        break;
+    case HudMode::VoiceFrequency: {
+        appendStr(leftMain, 0u, sizeof(leftMain), "FREQUENCY");
+        size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
+        appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
+        const float pitchMul = computeVoicePitchRatio(
+            control.voicePressure[v], control.global.pitchPressureMode ? 1.0f : 0.0f);
+        const float liveHz = (focVp.lfoTarget == LfoTarget::Pitch)
+                                 ? applyLfoPitchHz(focVp.frequencyHz, focVp.lfoDepth, lfoOutput[v])
+                                 : focVp.frequencyHz;
+        voiceLiveHz = liveHz * pitchMul;
+        appendPrecisionHz(rightText, 0u, sizeof(rightText), voiceLiveHz);
+        break;
+    }
+    case HudMode::VoiceFilter: {
+        appendStr(leftMain, 0u, sizeof(leftMain), "FILTER");
+        size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
+        appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
+        appendStr(rightText, 0u, sizeof(rightText), "12 dB HP -> LP");
+        break;
+    }
+    case HudMode::Amplitude: {
+        appendStr(leftMain, 0u, sizeof(leftMain), "LEVEL");
+        if (hud.focusedKnob < kNumOscillators) {
+            const uint8_t kv = hud.focusedKnob & 3u;
             size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
-            appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
-            const float pitchMul = computeVoicePitchRatio(
-                control.voicePressure[v], control.global.pitchPressureMode ? 1.0f : 0.0f);
-            const float liveHz =
-                (focVp.lfoTarget == LfoTarget::Pitch)
-                    ? applyLfoPitchHz(focVp.frequencyHz, focVp.lfoDepth, lfoOutput[v])
-                    : focVp.frequencyHz;
-            appendPrecisionHz(rightText, 0u, sizeof(rightText), liveHz * pitchMul);
-            break;
-        }
-        case HudMode::Amplitude:
-            appendStr(leftMain, 0u, sizeof(leftMain), "AMPLITUDE");
-            appendStr(rightText, 0u, sizeof(rightText), "POST-FILTER VCA");
-            break;
-        case HudMode::Panning:
-            appendStr(leftMain, 0u, sizeof(leftMain), "PANNING");
-            appendStr(rightText, 0u, sizeof(rightText),
-                      control.global.monoCollapse ? "DUAL MONO" : "STEREO");
-            break;
-        case HudMode::VoiceFilter: {
-            appendStr(leftMain, 0u, sizeof(leftMain), "FILTER");
-            size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
-            appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
-            appendStr(rightText, 0u, sizeof(rightText), "12 dB HP -> LP");
-            break;
-        }
-        case HudMode::MasterLevel:
-            appendStr(leftMain, 0u, sizeof(leftMain), "MASTER LEVEL");
-            headerBarNorm = clampf(control.global.masterTrim, 0.0f, 1.0f);
-            formatPercent(rightText, sizeof(rightText), headerBarNorm);
-            showHeaderBar = true;
-            break;
-        case HudMode::RailCoupling:
-            appendStr(leftMain, 0u, sizeof(leftMain), "RAIL COUPLING");
-            headerBarNorm = clampf(control.global.circuitCoupling, 0.0f, 1.0f);
-            formatPercent(rightText, sizeof(rightText), headerBarNorm);
-            showHeaderBar = true;
-            break;
-        case HudMode::UnassignedEncoder:
-            appendStr(leftMain, 0u, sizeof(leftMain),
-                      (hud.lastEncoder == EncoderId::Presets) ? "PRESETS ENCODER"
-                                                              : "SELECT ENCODER");
-            appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
-            break;
-        case HudMode::KnobRate: {
-            const char* rateStr = (hud.knobRate == KnobRate::Fine)     ? "FINE"
-                                  : (hud.knobRate == KnobRate::Coarse) ? "COARSE"
-                                                                       : "STANDARD";
-            appendStr(leftMain, 0u, sizeof(leftMain), rateStr);
-            break;
-        }
-        case HudMode::VoiceGate: {
-            appendStr(leftMain, 0u, sizeof(leftMain), "GATE");
-            size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
-            appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
-            appendStr(rightText, 0u, sizeof(rightText), focVp.muted ? "MUTED" : "ACTIVE");
-            break;
-        }
-        case HudMode::VoicePressure: {
-            if (control.global.pitchPressureMode) {
-                appendStr(leftMain, 0u, sizeof(leftMain), "PITCH BEND");
+            appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(kv + 1u));
+            const VoiceParams& avp = control.voices[kv];
+            const float liveAmp =
+                (avp.lfoTarget == LfoTarget::Amplitude)
+                    ? applyLfoAmplitude(avp.amplitude, avp.lfoDepth, lfoOutput[kv])
+                    : avp.amplitude;
+            if (avp.muted) {
+                appendStr(rightText, 0u, sizeof(rightText), "MUTED");
+            } else if (liveAmp > kCleanAmpKnee + 0.003f) {
+                const VoiceChannelGain cg = computeVoiceChannelGain(liveAmp);
+                char multBuf[12]{};
+                formatMultiplierX(multBuf, sizeof(multBuf), cg.preDrive);
+                size_t rp = appendStr(rightText, 0u, sizeof(rightText), "DRIVE ");
+                appendStr(rightText, rp, sizeof(rightText), multBuf);
             } else {
-                appendStr(leftMain, 0u, sizeof(leftMain), focVp.muted ? "LPG SWELL" : "FILTER EXP");
+                appendStr(rightText, 0u, sizeof(rightText), "CLEAN VCA");
             }
-            size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
-            appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
-            headerBarNorm = clampf(control.voicePressure[v], 0.0f, 1.0f);
-            formatPercent(rightText, sizeof(rightText), headerBarNorm);
-            showHeaderBar = true;
-            break;
-        }
-        case HudMode::PressureTarget:
-            appendStr(leftMain, 0u, sizeof(leftMain), "PRESSURE TARGET");
-            appendStr(rightText, 0u, sizeof(rightText),
-                      control.global.pitchPressureMode ? "PITCH BEND" : "MS-20 FILTER");
-            break;
-        case HudMode::SnapshotSlot: {
-            size_t p = appendStr(leftMain, 0u, sizeof(leftMain), "SNAPSHOT ");
-            appendUInt(leftMain, p, sizeof(leftMain),
-                       static_cast<uint32_t>((hud.snapshotSlot & 7u) + 1u));
-            appendStr(rightText, 0u, sizeof(rightText), "EMPTY SLOT");
-            break;
-        }
-        case HudMode::UnassignedKey:
-            appendStr(leftMain, 0u, sizeof(leftMain), "PIT KEY");
-            appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
-            break;
-        case HudMode::OutputRouting:
-            appendStr(leftMain, 0u, sizeof(leftMain), "OUTPUT ROUTING");
-            appendStr(rightText, 0u, sizeof(rightText),
-                      control.global.monoCollapse ? "DUAL MONO" : "STEREO");
-            break;
-        case HudMode::AudioOutput:
-            appendStr(leftMain, 0u, sizeof(leftMain), "AUDIO OUTPUT");
-            appendStr(rightText, 0u, sizeof(rightText), control.global.masterRun ? "ON" : "OFF");
-            break;
-        case HudMode::SaveArmed:
-            appendStr(leftMain, 0u, sizeof(leftMain), "STORE SNAPSHOT");
-            appendStr(rightText, 0u, sizeof(rightText),
-                      hud.saveArmed ? "TAP KEY 9-16" : "CANCELLED");
-            break;
-        case HudMode::ScopeFreeze:
-            appendStr(leftMain, 0u, sizeof(leftMain), "SCOPE FREEZE");
-            appendStr(rightText, 0u, sizeof(rightText), "HOLDING");
-            break;
-        case HudMode::VoiceLfo: {
-            const uint8_t lv = hud.lfoVoiceFocus & 3u;
-            const VoiceParams& lvp = control.voices[lv];
-            appendStr(leftMain, 0u, sizeof(leftMain), "LFO");
-            size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
-            appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(lv + 1u));
-            appendStr(rightText, 0u, sizeof(rightText),
-                      (lvp.lfoDepth > 0.002f) ? "ACTIVE" : "BYPASSED");
-            break;
-        }
-        case HudMode::GlobalFreq: {
-            appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " FREQ");
-            const GlobalColumnSummary gs =
-                evaluateGlobalColumn(KnobBankMode::GlobalFreq, 0u, control, lfoOutput);
-            char hzBuf[16]{};
-            formatCompactHz(hzBuf, sizeof(hzBuf), gs.primaryValue);
-            size_t p = appendStr(rightText, 0u, sizeof(rightText), "MEAN ");
-            appendStr(rightText, p, sizeof(rightText), hzBuf);
-            break;
-        }
-        case HudMode::GlobalFilter:
-            appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " FILTER");
-            appendStr(rightText, 0u, sizeof(rightText), "12 dB HP -> LP");
-            break;
-        case HudMode::GlobalLfo: {
-            appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " LFO");
-            uint32_t activeLfos = 0u;
+        } else {
+            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
+            bool anyActive = false;
+            float maxAmp = 0.0f;
             for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
-                if (control.voices[vi].lfoDepth > 0.002f) {
-                    ++activeLfos;
+                const VoiceParams& avp = control.voices[vi];
+                if (!avp.muted) {
+                    anyActive = true;
+                    const float la =
+                        (avp.lfoTarget == LfoTarget::Amplitude)
+                            ? applyLfoAmplitude(avp.amplitude, avp.lfoDepth, lfoOutput[vi])
+                            : avp.amplitude;
+                    if (la > maxAmp) {
+                        maxAmp = la;
+                    }
                 }
             }
-            if (activeLfos == 0u) {
-                appendStr(rightText, 0u, sizeof(rightText), "BYPASSED");
+            if (!anyActive) {
+                appendStr(rightText, 0u, sizeof(rightText), "ALL MUTED");
+            } else if (maxAmp > kCleanAmpKnee + 0.003f) {
+                const VoiceChannelGain cg = computeVoiceChannelGain(maxAmp);
+                char multBuf[12]{};
+                formatMultiplierX(multBuf, sizeof(multBuf), cg.preDrive);
+                size_t rp = appendStr(rightText, 0u, sizeof(rightText), "DRIVE ");
+                appendStr(rightText, rp, sizeof(rightText), multBuf);
             } else {
-                size_t p = appendUInt(rightText, 0u, sizeof(rightText), activeLfos);
-                appendStr(rightText, p, sizeof(rightText), "/4 ACTIVE");
+                appendStr(rightText, 0u, sizeof(rightText), "CLEAN VCA");
             }
-            break;
         }
-        case HudMode::GlobalAmp:
-            appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " AMP");
-            appendStr(rightText, 0u, sizeof(rightText),
-                      control.global.monoCollapse ? "DUAL MONO" : "STEREO");
-            break;
-        case HudMode::GlobalAll:
-            appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
-            appendStr(rightText, 0u, sizeof(rightText),
-                      (hud.config.gloRelease == GloReleaseMode::SnapBack) ? "SNAP BACK" : "LATCH");
-            break;
-        case HudMode::GlobalConfig: {
-            appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " CONFIG");
-            const uint32_t cur = static_cast<uint32_t>(
-                (hud.configCursor < kNumGlobalConfigItems) ? (hud.configCursor + 1u) : 1u);
-            size_t p = appendUInt(rightText, 0u, sizeof(rightText), cur);
-            p = appendStr(rightText, p, sizeof(rightText), " / ");
-            appendUInt(rightText, p, sizeof(rightText),
-                       static_cast<uint32_t>(kNumGlobalConfigItems));
-            break;
+        break;
+    }
+    case HudMode::Panning:
+        appendStr(leftMain, 0u, sizeof(leftMain), "PANNING");
+        appendStr(rightText, 0u, sizeof(rightText),
+                  control.global.monoCollapse ? "DUAL MONO" : "STEREO");
+        break;
+    case HudMode::MasterLevel:
+        appendStr(leftMain, 0u, sizeof(leftMain), "MASTER LEVEL");
+        headerBarNorm = clampf(control.global.masterTrim, 0.0f, 1.0f);
+        formatPercent(rightText, sizeof(rightText), headerBarNorm);
+        showHeaderBar = true;
+        break;
+    case HudMode::RailCoupling:
+        appendStr(leftMain, 0u, sizeof(leftMain), "RAIL COUPLING");
+        headerBarNorm = clampf(control.global.circuitCoupling, 0.0f, 1.0f);
+        formatPercent(rightText, sizeof(rightText), headerBarNorm);
+        showHeaderBar = true;
+        break;
+    case HudMode::UnassignedEncoder:
+        appendStr(leftMain, 0u, sizeof(leftMain),
+                  (hud.lastEncoder == EncoderId::Presets) ? "PRESETS ENCODER" : "SELECT ENCODER");
+        appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
+        break;
+    case HudMode::KnobRate:
+        appendStr(leftMain, 0u, sizeof(leftMain), "FREQUENCY");
+        appendStr(rightText, 0u, sizeof(rightText), "STANDARD");
+        break;
+    case HudMode::VoiceGate: {
+        appendStr(leftMain, 0u, sizeof(leftMain), "GATE");
+        size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
+        appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
+        appendStr(rightText, 0u, sizeof(rightText), focVp.muted ? "MUTED" : "ACTIVE");
+        break;
+    }
+    case HudMode::VoicePressure: {
+        if (control.global.pitchPressureMode) {
+            appendStr(leftMain, 0u, sizeof(leftMain), "PITCH BEND");
+        } else {
+            appendStr(leftMain, 0u, sizeof(leftMain), focVp.muted ? "LPG SWELL" : "FILTER EXP");
         }
-        case HudMode::UnassignedButton: {
-            const char* swName = "PANEL";
-            switch (hud.lastButton) {
-            case ButtonId::Fx:
-                swName = "FX";
-                break;
-            case ButtonId::Env:
-                swName = "ENV";
-                break;
-            case ButtonId::Edit:
-                swName = "EDIT";
-                break;
-            case ButtonId::Arp:
-                swName = "ARP";
-                break;
-            case ButtonId::Seq:
-                swName = "SEQ";
-                break;
-            case ButtonId::Rec:
-                swName = "REC";
-                break;
-            default:
-                break;
+        size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
+        appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
+        headerBarNorm = clampf(control.voicePressure[v], 0.0f, 1.0f);
+        formatPercent(rightText, sizeof(rightText), headerBarNorm);
+        showHeaderBar = true;
+        break;
+    }
+    case HudMode::PressureTarget:
+        appendStr(leftMain, 0u, sizeof(leftMain), "PRESSURE TARGET");
+        appendStr(rightText, 0u, sizeof(rightText),
+                  control.global.pitchPressureMode ? "PITCH BEND" : "MS-20 FILTER");
+        break;
+    case HudMode::SnapshotSlot: {
+        size_t p = appendStr(leftMain, 0u, sizeof(leftMain), "SNAPSHOT ");
+        appendUInt(leftMain, p, sizeof(leftMain),
+                   static_cast<uint32_t>((hud.snapshotSlot & 7u) + 1u));
+        appendStr(rightText, 0u, sizeof(rightText), "EMPTY SLOT");
+        break;
+    }
+    case HudMode::UnassignedKey:
+        appendStr(leftMain, 0u, sizeof(leftMain),
+                  (hud.lastBlackKey == BlackKeyId::Op5) ? "OP5 KEY" : "PIT KEY");
+        appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
+        break;
+    case HudMode::OutputRouting:
+        appendStr(leftMain, 0u, sizeof(leftMain), "OUTPUT ROUTING");
+        appendStr(rightText, 0u, sizeof(rightText),
+                  control.global.monoCollapse ? "DUAL MONO" : "STEREO");
+        break;
+    case HudMode::AudioOutput:
+        appendStr(leftMain, 0u, sizeof(leftMain), "AUDIO OUTPUT");
+        appendStr(rightText, 0u, sizeof(rightText), control.global.masterRun ? "ON" : "OFF");
+        break;
+    case HudMode::SaveArmed:
+        appendStr(leftMain, 0u, sizeof(leftMain), "STORE SNAPSHOT");
+        appendStr(rightText, 0u, sizeof(rightText), hud.saveArmed ? "TAP KEY 9-16" : "CANCELLED");
+        break;
+    case HudMode::ScopeFreeze:
+        appendStr(leftMain, 0u, sizeof(leftMain), "SCOPE FREEZE");
+        appendStr(rightText, 0u, sizeof(rightText), "HOLDING");
+        break;
+    case HudMode::VoiceLfo: {
+        const uint8_t lv = hud.lfoVoiceFocus & 3u;
+        const VoiceParams& lvp = control.voices[lv];
+        appendStr(leftMain, 0u, sizeof(leftMain), "LFO");
+        size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
+        appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(lv + 1u));
+        appendStr(rightText, 0u, sizeof(rightText),
+                  (lvp.lfoDepth > 0.002f) ? "ACTIVE" : "BYPASSED");
+        break;
+    }
+    case HudMode::GlobalFreq: {
+        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
+        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " FREQ");
+        const GlobalColumnSummary gs =
+            evaluateGlobalColumn(KnobBankMode::GlobalFreq, 0u, control, lfoOutput);
+        char hzBuf[16]{};
+        formatCompactHz(hzBuf, sizeof(hzBuf), gs.primaryValue);
+        size_t p = appendStr(rightText, 0u, sizeof(rightText), "MEAN ");
+        appendStr(rightText, p, sizeof(rightText), hzBuf);
+        break;
+    }
+    case HudMode::GlobalFilter:
+        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
+        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " FILTER");
+        appendStr(rightText, 0u, sizeof(rightText), "12 dB HP -> LP");
+        break;
+    case HudMode::GlobalLfo: {
+        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
+        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " LFO");
+        uint32_t activeLfos = 0u;
+        for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
+            if (control.voices[vi].lfoDepth > 0.002f) {
+                ++activeLfos;
             }
-            size_t p = appendStr(leftMain, 0u, sizeof(leftMain), swName);
-            appendStr(leftMain, p, sizeof(leftMain), " SWITCH");
-            appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
+        }
+        if (activeLfos == 0u) {
+            appendStr(rightText, 0u, sizeof(rightText), "BYPASSED");
+        } else {
+            size_t p = appendUInt(rightText, 0u, sizeof(rightText), activeLfos);
+            appendStr(rightText, p, sizeof(rightText), "/4 ACTIVE");
+        }
+        break;
+    }
+    case HudMode::GlobalAmp:
+        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
+        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " AMP");
+        appendStr(rightText, 0u, sizeof(rightText),
+                  control.global.monoCollapse ? "DUAL MONO" : "STEREO");
+        break;
+    case HudMode::GlobalAll:
+        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
+        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
+        appendStr(rightText, 0u, sizeof(rightText),
+                  (hud.config.gloRelease == GloReleaseMode::SnapBack) ? "SNAP BACK" : "LATCH");
+        break;
+    case HudMode::GlobalConfig: {
+        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
+        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " CONFIG");
+        const uint32_t cur = static_cast<uint32_t>(
+            (hud.configCursor < kNumGlobalConfigItems) ? (hud.configCursor + 1u) : 1u);
+        size_t p = appendUInt(rightText, 0u, sizeof(rightText), cur);
+        p = appendStr(rightText, p, sizeof(rightText), " / ");
+        appendUInt(rightText, p, sizeof(rightText), static_cast<uint32_t>(kNumGlobalConfigItems));
+        break;
+    }
+    case HudMode::UnassignedButton: {
+        const char* swName = "PANEL";
+        switch (hud.lastButton) {
+        case ButtonId::Fx:
+            swName = "FX";
+            break;
+        case ButtonId::Env:
+            swName = "ENV";
+            break;
+        case ButtonId::Edit:
+            swName = "EDIT";
+            break;
+        case ButtonId::Arp:
+            swName = "ARP";
+            break;
+        case ButtonId::Seq:
+            swName = "SEQ";
+            break;
+        case ButtonId::Rec:
+            swName = "REC";
+            break;
+        default:
             break;
         }
-        }
+        size_t p = appendStr(leftMain, 0u, sizeof(leftMain), swName);
+        appendStr(leftMain, p, sizeof(leftMain), " SWITCH");
+        appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
+        break;
+    }
     }
 
     if (hud.mode != HudMode::None && !showHeaderBar && rightText[0] == '\0') {
@@ -406,22 +443,90 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         cv.drawSans(kFontSansBold, suffixX, 6, leftSuffix, 118u, 0);
     }
 
-    if (showHeaderBar) {
-        const int txtW = measureSansText(kFontSansMedium, rightText, 0);
-        cv.drawSans(kFontSansMedium, 230 - txtW, 6, rightText, 255u, 0);
+    const auto drawNormalRight = [&](const MonoStripCanvas& dstCv) noexcept {
+        if (showHeaderBar) {
+            const int barTxtW = measureSansText(kFontSansMedium, rightText, 0);
+            dstCv.drawSans(kFontSansMedium, 230 - barTxtW, 6, rightText, 255u, 0);
 
-        const float barWf = 34.0f;
-        const float barXf = static_cast<float>(230 - txtW - 8) - barWf;
-        const float barNorm = clampf(headerBarSmooth, 0.0f, 1.0f);
-        cv.drawHorizontalFilament(barXf, barXf + barWf, 13.5f, 42.0f, 0.58f, true);
-        if (barNorm > 0.008f) {
-            cv.drawHorizontalFilament(barXf, barXf + barNorm * barWf, 13.5f, 225.0f, 0.68f, false);
+            const float barWf = 34.0f;
+            const float barXf = static_cast<float>(230 - barTxtW - 8) - barWf;
+            const float barNorm = clampf(headerBarSmooth, 0.0f, 1.0f);
+            dstCv.drawHorizontalFilament(barXf, barXf + barWf, 13.5f, 42.0f, 0.58f, true);
+            if (barNorm > 0.008f) {
+                dstCv.drawHorizontalFilament(barXf, barXf + barNorm * barWf, 13.5f, 225.0f, 0.68f,
+                                             false);
+            }
+            dstCv.drawOpticalBead(barXf + barNorm * barWf, 13.5f, 0.95f, 2.1f);
+        } else if (rightText[0] != '\0') {
+            dstCv.drawSansRight(kFontSansSmall, 230, 6, rightText, 168u, 1);
         }
-        cv.drawOpticalBead(barXf + barNorm * barWf, 13.5f, 0.95f, 2.1f);
-    } else if (rightText[0] != '\0') {
-        const uint8_t rightGray = hud.rateHoldActive ? 228u : 168u;
-        cv.drawSansRight(kFontSansSmall, 230, 6, rightText, rightGray, 1);
+    };
+
+    const float fLin = clampf(finePhase, 0.0f, 1.0f);
+    const float cLin = clampf(coarsePhase, 0.0f, 1.0f);
+    const float maxRateLin = (fLin > cLin) ? fLin : cLin;
+    if (maxRateLin <= 0.001f) {
+        drawNormalRight(cv);
+        return;
     }
+
+    const auto shapedLayerAlpha8 = [&](float linPhase) noexcept -> uint8_t {
+        const float shaped = smoothstep01(clampf((linPhase - 0.24f) * (1.0f / 0.76f), 0.0f, 1.0f));
+        return static_cast<uint8_t>(static_cast<float>(cv.masterAlpha8) * shaped + 0.5f);
+    };
+
+    const float baseLin = (hud.mode == HudMode::KnobRate) ? 0.0f : (1.0f - maxRateLin);
+    const uint8_t baseAlpha8 = shapedLayerAlpha8(baseLin);
+    if (baseAlpha8 > 0u) {
+        const MonoStripCanvas baseCv{cv.lum, cv.y0, cv.y1, baseAlpha8};
+        drawNormalRight(baseCv);
+    }
+
+    const auto drawRateBadge = [&](const char* badgeStr, bool isCoarse, float linPhase) noexcept {
+        if (linPhase <= 0.001f) {
+            return;
+        }
+        const uint8_t rateAlpha8 = shapedLayerAlpha8(linPhase);
+        const float sweepEnv = smoothstep01(linPhase);
+        int badgeRightX = 230;
+        char rateValBuf[24]{};
+
+        if (hud.mode == HudMode::VoiceFrequency) {
+            if (isCoarse) {
+                formatCompactHz(rateValBuf, sizeof(rateValBuf), voiceLiveHz);
+            } else {
+                appendPrecisionHz(rateValBuf, 0u, sizeof(rateValBuf), voiceLiveHz);
+            }
+        } else if (showHeaderBar && rightText[0] != '\0') {
+            appendStr(rateValBuf, 0u, sizeof(rateValBuf), rightText);
+        }
+
+        if (rateValBuf[0] != '\0') {
+            const int valW = measureSansText(kFontSansSmall, rateValBuf, 0);
+            badgeRightX = 230 - valW - 8;
+            if (rateAlpha8 > 0u) {
+                const MonoStripCanvas rateCv{cv.lum, cv.y0, cv.y1, rateAlpha8};
+                rateCv.drawSans(kFontSansSmall, 230 - valW, 6, rateValBuf, 176u, 0);
+                rateCv.drawOpticalBead(static_cast<float>(230 - valW - 4), 12.2f, 0.52f, 0.95f);
+            }
+        }
+
+        const int badgeTrk = (badgeRightX == 230) ? 1 : 0;
+        const int badgeW = measureSansText(kFontSansSmall, badgeStr, badgeTrk);
+        if (rateAlpha8 > 0u) {
+            const MonoStripCanvas rateCv{cv.lum, cv.y0, cv.y1, rateAlpha8};
+            rateCv.drawSans(kFontSansSmall, badgeRightX - badgeW, 6, badgeStr, 236u, badgeTrk);
+        }
+
+        const float xR = static_cast<float>(badgeRightX);
+        const float xL = xR - static_cast<float>(badgeW) * sweepEnv;
+        if (xR - xL > 0.4f) {
+            cv.drawHorizontalFilament(xL, xR, 18.8f, 132.0f * sweepEnv, 0.50f, false);
+        }
+    };
+
+    drawRateBadge("FINE", false, fLin);
+    drawRateBadge("COARSE", true, cLin);
 }
 
 void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlState& control,

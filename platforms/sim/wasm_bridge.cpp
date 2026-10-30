@@ -53,6 +53,7 @@ size_t strlen(const char* s) {
 #include "dsp/Ms20Filter.cpp"
 #include "dsp/SchmittOscillatorBank.cpp"
 #include "dsp/VoiceLfoBank.cpp"
+#include "ui/HudAmpGraph.cpp"
 #include "ui/HudChrome.cpp"
 #include "ui/HudGlobalViews.cpp"
 #include "ui/HudGraphs.cpp"
@@ -80,7 +81,7 @@ static_assert(kRgbaArenaAddr + (ruido::kDisplayWidth * ruido::kDisplayHeight * 4
 // --- Core 1 (AudioWorklet) Static Storage ---
 ruido::DroneEngine* gDsp = nullptr;
 
-constexpr size_t kTelemetryFloats = 22u;
+constexpr size_t kTelemetryFloats = 26u;
 
 alignas(16) ruido::EngineControlState gDspStagedControl{};
 alignas(16) float gAudioLeft[kMaxWorkletFrames]{};
@@ -99,7 +100,7 @@ alignas(16) ruido::ScopeFrame gScopeBatchIn[kMaxScopeBatch]{};
 alignas(16) float gTelemetryIn[kTelemetryFloats]{};
 alignas(16) uint16_t gScanlineStripRgb565[ruido::kDisplayWidth * ruido::kScanlineStripHeight]{};
 uint8_t* const gScreenRgba = reinterpret_cast<uint8_t*>(kRgbaArenaAddr);
-alignas(16) float gSummaryOut[48]{};
+alignas(16) float gSummaryOut[52]{};
 bool gControlDirty = true;
 
 void refreshSummary() noexcept {
@@ -140,6 +141,7 @@ void refreshSummary() noexcept {
     gSummaryOut[45u] = gCtrl->hud().configPageOpen ? 1.0f : 0.0f;
     gSummaryOut[46u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().globalTarget));
     gSummaryOut[47u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().knobBank));
+    gSummaryOut[48u] = gCtrl->hud().editPageOpen ? 1.0f : 0.0f;
 }
 
 } // namespace
@@ -247,6 +249,7 @@ const float* wasm_dsp_read_telemetry() {
             const uint32_t packed = t.lfoDriftPacked[i].load(std::memory_order_relaxed);
             gTelemetryOut[14u + i * 2u] = static_cast<float>(packed & 0x7FFFu);
             gTelemetryOut[15u + i * 2u] = static_cast<float>((packed >> 15u) & 0x7FFFu);
+            gTelemetryOut[22u + i] = t.voicePeak[i].load(std::memory_order_relaxed);
         }
     }
     return gTelemetryOut;
@@ -362,6 +365,7 @@ void wasm_ui_apply_telemetry() {
         const uint32_t lo15 = static_cast<uint32_t>(gTelemetryIn[14u + i * 2u]) & 0x7FFFu;
         const uint32_t hi15 = static_cast<uint32_t>(gTelemetryIn[15u + i * 2u]) & 0x7FFFu;
         gUiTelemetry->lfoDriftPacked[i].store((hi15 << 15u) | lo15, std::memory_order_relaxed);
+        gUiTelemetry->voicePeak[i].store(gTelemetryIn[22u + i], std::memory_order_relaxed);
     }
 }
 

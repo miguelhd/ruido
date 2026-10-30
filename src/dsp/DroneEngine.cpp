@@ -13,7 +13,7 @@ constexpr float kVactrolSlewSec = 0.0038f;     // 3.8 ms clickless mute/gate vac
 constexpr float kPressureAttackSec = 0.0045f;  // 4.5 ms snappy optocoupler LED turn-on
 constexpr float kPressureReleaseSec = 0.0260f; // 26.0 ms liquid CdS photoconductive decay
 constexpr float kMasterKillSec = 0.0080f;      // 8.0 ms ultra-clean master PLAY/STOP fade
-constexpr float kVoiceSumScale = 0.35f;        // Headroom scaling for 4 hot square voices
+constexpr float kVoiceSumScale = 0.36f;        // Headroom scaling into masterBusSoftClip
 
 } // namespace
 
@@ -45,12 +45,12 @@ void DroneEngine::init(float baseSampleRate) noexcept {
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         VoiceSmoothers& sm = voiceSmoothers_[i];
         sm.freqHz.init(initState.voices[i].frequencyHz, kPotPoleTauSec, baseSampleRate_);
-        sm.amplitude.init(initState.voices[i].amplitude, kPotPoleTauSec, baseSampleRate_);
-        sm.pan.init(initState.voices[i].pan, kPotPoleTauSec, baseSampleRate_);
         sm.hpCutoffHz.init(initState.voices[i].hpCutoffHz, kPotPoleTauSec, baseSampleRate_);
         sm.hpResonance.init(initState.voices[i].hpResonance, kPotPoleTauSec, baseSampleRate_);
         sm.lpCutoffHz.init(initState.voices[i].lpCutoffHz, kPotPoleTauSec, baseSampleRate_);
         sm.lpResonance.init(initState.voices[i].lpResonance, kPotPoleTauSec, baseSampleRate_);
+        sm.amplitude.init(initState.voices[i].amplitude, kPotPoleTauSec, baseSampleRate_);
+        sm.pan.init(initState.voices[i].pan, kPotPoleTauSec, baseSampleRate_);
         sm.vactrolGate.init(initState.voices[i].muted ? 0.0f : 1.0f, kVactrolSlewSec,
                             baseSampleRate_);
         sm.pressure.init(initState.voicePressure[i], kPressureAttackSec, kPressureReleaseSec,
@@ -98,28 +98,34 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
         VoiceSmoothers& sm = voiceSmoothers_[i];
 
         const float clampedBaseHz = clampf(vp.frequencyHz, kAudioFreqMinHz, kAudioFreqMaxHz);
-
-        const float amp = clampf(vp.amplitude, 0.0f, 1.0f);
-        const float pan = clampf(vp.pan, -1.0f, 1.0f);
         const float hpHz = clampf(vp.hpCutoffHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
         const float hpRes = clampf(vp.hpResonance, 0.0f, 1.0f);
         const float lpHz = clampf(vp.lpCutoffHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
         const float lpRes = clampf(vp.lpResonance, 0.0f, 1.0f);
+        const float amp = clampf(vp.amplitude, 0.0f, 1.0f);
+        const float pan = clampf(vp.pan, -1.0f, 1.0f);
         const float press = clampf(state.voicePressure[i], 0.0f, 1.0f);
         const float gateTarget = vp.muted ? 0.0f : 1.0f;
 
         if (snapImmediate) {
             sm.freqHz.snapTo(clampedBaseHz);
-            sm.amplitude.snapTo(amp);
-            sm.pan.snapTo(pan);
             sm.hpCutoffHz.snapTo(hpHz);
             sm.hpResonance.snapTo(hpRes);
             sm.lpCutoffHz.snapTo(lpHz);
             sm.lpResonance.snapTo(lpRes);
+            sm.amplitude.snapTo(amp);
+            sm.pan.snapTo(pan);
             sm.vactrolGate.snapTo(gateTarget);
             sm.pressure.snapTo(press);
+            const float pm = state.global.pitchPressureMode ? 1.0f : 0.0f;
+            prevOscFreqHz_[i] = clampf(clampedBaseHz * computeVoicePitchRatio(press, pm), 0.005f,
+                                       kAudioFreqMaxHz * 4.0f);
         } else {
             sm.freqHz.setTarget(clampedBaseHz);
+            sm.hpCutoffHz.setTarget(hpHz);
+            sm.hpResonance.setTarget(hpRes);
+            sm.lpCutoffHz.setTarget(lpHz);
+            sm.lpResonance.setTarget(lpRes);
             if (sm.vactrolGate.current() <= 1.0e-4f && sm.pressure.current() <= 1.0e-4f &&
                 gateTarget > 0.5f) {
                 // Voice is currently completely silent: snap remembered amplitude to new target
@@ -129,10 +135,6 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
                 sm.amplitude.setTarget(amp);
             }
             sm.pan.setTarget(pan);
-            sm.hpCutoffHz.setTarget(hpHz);
-            sm.hpResonance.setTarget(hpRes);
-            sm.lpCutoffHz.setTarget(lpHz);
-            sm.lpResonance.setTarget(lpRes);
             sm.vactrolGate.setTarget(gateTarget);
             sm.pressure.setTarget(press);
         }
@@ -171,6 +173,7 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
 
     float blockPeakL = 0.0f;
     float blockPeakR = 0.0f;
+    std::array<float, kNumOscillators> blockVoicePeak{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> lastGateHigh{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<VoiceLfoFrame, kNumOscillators> lastLfo{};
 
@@ -188,6 +191,7 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         const float pitchMode = pitchModeSmoother_.next();
 
         std::array<float, kNumOscillators> oscFreqs{};
+        std::array<float, kNumOscillators> vcaGates{};
         std::array<float, kNumOscillators> gainL{};
         std::array<float, kNumOscillators> gainR{};
         std::array<float, kNumOscillators> voiceScopeScale{};
@@ -219,20 +223,25 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             const ModulatedFilterParams mod = computeVoicePressureMacro(
                 hpBase, hpResBase, lpBase, lpResBase, p, baseGate, pitchMode);
 
+            const float modAmp = applyLfoAmplitude(
+                sm.amplitude.next(), td[static_cast<size_t>(LfoTarget::Amplitude)], lfo.raw);
+            const VoiceChannelGain chGain = computeVoiceChannelGain(modAmp);
+
             if (mod.hpCutoffHz != cache.hpHz || mod.hpResonance != cache.hpRes ||
-                mod.lpCutoffHz != cache.lpHz || mod.lpResonance != cache.lpRes) {
+                mod.lpCutoffHz != cache.lpHz || mod.lpResonance != cache.lpRes ||
+                chGain.preDrive != cache.preDrive) {
                 cache.hpHz = mod.hpCutoffHz;
                 cache.hpRes = mod.hpResonance;
                 cache.lpHz = mod.lpCutoffHz;
                 cache.lpRes = mod.lpResonance;
-                filterCoeffs_[i] =
-                    Ms20DualFilter::prepareCoeffs(mod.hpCutoffHz, mod.hpResonance, mod.lpCutoffHz,
-                                                  mod.lpResonance, invOversampledRate_);
+                cache.preDrive = chGain.preDrive;
+                filterCoeffs_[i] = Ms20DualFilter::prepareCoeffs(
+                    mod.hpCutoffHz, mod.hpResonance, mod.lpCutoffHz, mod.lpResonance,
+                    invOversampledRate_, chGain.preDrive);
             }
 
-            const float modAmp = applyLfoAmplitude(
-                sm.amplitude.next(), td[static_cast<size_t>(LfoTarget::Amplitude)], lfo.raw);
-            const float ampGate = modAmp * mod.effectiveGate;
+            const float ampGate = chGain.postVca * mod.effectiveGate;
+            vcaGates[i] = ampGate;
             const float voiceGain = ampGate * kVoiceSumScale;
             voiceScopeScale[i] = ampGate * finalScale * 0.25f;
             const float modPan =
@@ -253,17 +262,27 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         uint8_t voiceRisingInFrame = 0u;
 
         for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
-            const OscillatorBankOutput oscOut = oscBank_.processSample(oscFreqs, coupling);
+            std::array<float, kNumOscillators> subFreqs{};
+            const float subAlpha = 0.25f * static_cast<float>(sub + 1u);
+            for (size_t i = 0u; i < kNumOscillators; ++i) {
+                subFreqs[i] = prevOscFreqHz_[i] + (oscFreqs[i] - prevOscFreqHz_[i]) * subAlpha;
+            }
+            const OscillatorBankOutput oscOut = oscBank_.processSample(subFreqs, coupling);
             voiceRisingInFrame |= oscOut.risingMask;
             lastGateHigh = oscOut.gateHigh;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 voiceSub[i][sub] = oscOut.samples[i];
             }
         }
+        prevOscFreqHz_ = oscFreqs;
 
         Ms20DualFilter::processQuadBank4x(filters_, voiceSub, filterCoeffs_);
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             voiceScopeAccum[i] = voiceSub[i][0] + voiceSub[i][1] + voiceSub[i][2] + voiceSub[i][3];
+            const float vAbs = absf(voiceScopeAccum[i]) * 0.25f * vcaGates[i];
+            if (vAbs > blockVoicePeak[i]) {
+                blockVoicePeak[i] = vAbs;
+            }
         }
 
         if (exactMono) {
@@ -284,10 +303,10 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             }
         }
 
-        // Linear-phase 4x -> 1x decimation to 44.118 kHz
+        // Linear-phase 4x -> 1x decimation to 44.118 kHz + ultrasonic Gibbs DAC seatbelt
         const StereoFrame out = decimator_.process4x(osStereo);
-        const float cleanL = sanitizeState(out.left);
-        const float cleanR = sanitizeState(out.right);
+        const float cleanL = dacSafetyClip(sanitizeState(out.left));
+        const float cleanR = dacSafetyClip(sanitizeState(out.right));
 
         outLeft[frame] = cleanL;
         outRight[frame] = cleanR;
@@ -330,6 +349,7 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         telemetry_.lfoOutput[i].store(lastLfo[i].raw, std::memory_order_relaxed);
         telemetry_.lfoPhase[i].store(lastLfo[i].phase01, std::memory_order_relaxed);
         telemetry_.lfoDriftPacked[i].store(lastLfo[i].driftPacked, std::memory_order_relaxed);
+        telemetry_.voicePeak[i].store(blockVoicePeak[i], std::memory_order_relaxed);
     }
 }
 
