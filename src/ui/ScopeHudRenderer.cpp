@@ -2499,7 +2499,6 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
             break;
         case HudMode::VoiceFrequency:
             appendStr(leftMain, 0u, sizeof(leftMain), "FREQUENCY");
-            appendStr(rightText, 0u, sizeof(rightText), "AUDIO RANGE");
             break;
         case HudMode::Amplitude:
             appendStr(leftMain, 0u, sizeof(leftMain), "AMPLITUDE");
@@ -2664,7 +2663,7 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
                                           false);
             }
             cv.drawOpticalBead(barXf + barNorm * barWf, 13.5f, 0.95f, 2.1f);
-        } else {
+        } else if (rightText[0] != '\0') {
             // Top-aligned with kFontSansBold at ty = 6 (both share yOffset = 3 -> cap top y = 9)
             cv.drawSansRight(kFontSansSmall, 230, 6, rightText, 168u, 1);
         }

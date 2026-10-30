@@ -64,7 +64,7 @@ Reference faceplate photo: [`docs/assets/fm1-front-panel.png`](assets/fm1-front-
 
 | Left-Hand Hold (Black Key) | `KNOB1` | `KNOB2` | `KNOB3` | `KNOB4` | Monochrome HUD Header + Bottom 4-Knob Strip |
 | :--- | :---: | :---: | :---: | :---: | :--- |
-| **None (Idle Default)** | **Osc 1 Freq** | **Osc 2 Freq** | **Osc 3 Freq** | **Osc 4 Freq** | `FREQUENCY` (`AUDIO RANGE`) + 4 `Hz` bars |
+| **None (Idle Default)** | **Osc 1 Freq** | **Osc 2 Freq** | **Osc 3 Freq** | **Osc 4 Freq** | `FREQUENCY` + 4 `Hz` bars |
 | **Hold `OP1`..`OP4`** *(Lit `15%`)* | **HPF Cutoff** | **HP Resonance** | **LPF Cutoff** | **LP Resonance** | `FILTER OSC 1..4` + frameless MS-20 curve + `HPF/HP RES/LPF/LP RES` |
 | **Hold `OP5`** *(Lit `15%`)* | **All HPF** | **All HP Res** | **All LPF** | **All LP Res** | `FILTER GLOBAL` + frameless MS-20 curve + `HPF/HP RES/LPF/LP RES` |
 | **Hold `OP6`** *(Lit `25%`)* | **Osc 1 Pan** | **Osc 2 Pan** | **Osc 3 Pan** | **Osc 4 Pan** | `PANNING` (`EQUAL POWER`) + 4 bipolar `L..C..R` bars |
