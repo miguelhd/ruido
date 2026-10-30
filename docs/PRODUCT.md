@@ -64,10 +64,10 @@ Reference faceplate photo: [`docs/assets/fm1-front-panel.png`](assets/fm1-front-
 
 | Left-Hand Hold (Black Key) | `KNOB1` | `KNOB2` | `KNOB3` | `KNOB4` | Monochrome HUD Header + Bottom 4-Knob Strip |
 | :--- | :---: | :---: | :---: | :---: | :--- |
-| **None (Idle Default)** | **Osc 1 Freq** | **Osc 2 Freq** | **Osc 3 Freq** | **Osc 4 Freq** | `FREQUENCY` + 4 `Hz` bars |
-| **Hold `OP1`..`OP4`** *(Lit `15%`)* | **HPF Cutoff** | **HP Resonance** | **LPF Cutoff** | **LP Resonance** | `FILTER OSC 1..4` + frameless MS-20 curve + `HPF/HP RES/LPF/LP RES` |
-| **Hold `OP5`** *(Lit `15%`)* | **All HPF** | **All HP Res** | **All LPF** | **All LP Res** | `FILTER GLOBAL` + frameless MS-20 curve + `HPF/HP RES/LPF/LP RES` |
-| **Hold `OP6`** *(Lit `25%`)* | **Osc 1 Pan** | **Osc 2 Pan** | **Osc 3 Pan** | **Osc 4 Pan** | `PANNING` (`EQUAL POWER`) + 4 bipolar `L..C..R` bars |
+| **None (Idle Default)** | **Osc 1 Freq** | **Osc 2 Freq** | **Osc 3 Freq** | **Osc 4 Freq** | `FREQUENCY` (`OSC 1..4  XX.XX Hz` exact counter) + 4 `Hz` bars |
+| **Hold `OP1`..`OP4`** *(Lit `15%`)* | **HPF Cutoff** | **HP Resonance** | **LPF Cutoff** | **LP Resonance** | `FILTER OSC 1..4` (`12 dB HP -> LP`) + frameless MS-20 curve + `HPF/HP RES/LPF/LP RES` |
+| **Hold `OP5`** *(Lit `15%`)* | **All HPF** | **All HP Res** | **All LPF** | **All LP Res** | `FILTER GLOBAL` (`12 dB HP -> LP`) + frameless MS-20 curve + `HPF/HP RES/LPF/LP RES` |
+| **Hold `OP6`** *(Lit `25%`)* | **Osc 1 Pan** | **Osc 2 Pan** | **Osc 3 Pan** | **Osc 4 Pan** | `PANNING` (`STEREO` / `DUAL MONO`) + 4 bipolar `L..C..R` bars |
 | **Hold `GLO`** *(Lit `25%`)* | **Osc 1 Amp** | **Osc 2 Amp** | **Osc 3 Amp** | **Osc 4 Amp** | `AMPLITUDE` (`POST-FILTER VCA`) + 4 `%` level bars (`0%` if muted; turning up fades in from `0%` & unmutes) |
 
 ### 3.2 Top-Left Knobs & `OCT-` / `OCT+` (Zero-Modifier Global Controls)
@@ -91,7 +91,7 @@ Reference faceplate photo: [`docs/assets/fm1-front-panel.png`](assets/fm1-front-
 
 ### 3.4 Per-Voice LFO Page (`LFO OSC 1..4` / `LFO GLOBAL` — `ADR-022`)
 Each of the 4 voices (`Osc 1..4`) owns **1 dedicated LFO** matching its dedicated MS-20 filter, VCA, and panner:
-- **Enter / Exit:** Tap **`LFO`** (right-grid switch) to open the LFO Page (`LFO OSC 1..4` / `LFO GLOBAL`); tap **`LFO`** again or **`HOME`** to return to the pure scope while active LFOs continue running.
+- **Enter / Exit:** Tap **`LFO`** (right-grid switch) to open the LFO Page (`LFO OSC 1..4` showing `ACTIVE` / `BYPASSED`, or `LFO GLOBAL` showing `1/4..4/4 ACTIVE` / `BYPASSED`); tap **`LFO`** again or **`HOME`** to return to the pure scope while active LFOs continue running.
 - **`SELECT` Encoder (Left Hand):** Steps across **`OSC 1` · `OSC 2` · `OSC 3` · `OSC 4` · `ALL 4`**.
 - **`KNOB 1–4` (`TARGET | SHAPE | RATE | DEPTH` — Setup Left, Perform Right):**
   - **`KNOB 1` (`TARGET`):** Stepped per-voice parameter selector: **`LPF`** *(default)* · **`LP RES`** · **`HPF`** · **`HP RES`** · **`AMP`** · **`PITCH`** · **`PAN`**.

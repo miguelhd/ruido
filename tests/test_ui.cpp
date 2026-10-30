@@ -1249,7 +1249,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
                 maxG6Suffix = g6;
             }
         }
-        // Check flat-cap "ZDF" word at right edge (x = 208..230) to avoid 'O'/'C' curve overshoot
+        // Check flat-cap "LP" word at right edge (x = 208..230) to avoid 'O'/'C' curve overshoot
         for (int x = 208; x <= 230; ++x) {
             const uint16_t g6 = (img16[rowBase + static_cast<size_t>(x)] >> 5u) & 0x3Fu;
             if (g6 >= 16u && y < rightTopY) {
@@ -1262,6 +1262,33 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     CHECK(maxG6Main == 63u);                         // "FILTER" emphasized first at 100% white
     CHECK(maxG6Suffix >= 24u && maxG6Suffix <= 36u); // Trailing "OSC 1" dimmed (~46% silver)
     CHECK(leftTopY == 9 && rightTopY == 9);          // Pixel-exact top alignment (y = 9)!
+
+    // Verify EVERY active HudMode renders non-empty top-right header feedback (x = 170..230)
+    {
+        ruido::ScopeHudRenderer hdrRend;
+        ruido::EngineControlState hdrCtrl = ruido::EngineControlState::makeDefault();
+        ruido::EngineTelemetry hdrTel{};
+        std::array<uint16_t, 240u * 24u> hdrStrip{};
+        for (uint8_t m = 1u; m <= static_cast<uint8_t>(ruido::HudMode::GlobalLfo); ++m) {
+            ruido::HudState hs{};
+            hs.mode = static_cast<ruido::HudMode>(m);
+            hs.opacity = 1.0f;
+            hdrRend.prepareFrame(0.016f, hdrCtrl, hs, hdrTel);
+            hdrRend.renderStrip(0u, 24u, hdrStrip.data());
+            uint16_t maxRightG6 = 0u;
+            for (int y = 7; y <= 19; ++y) {
+                for (int x = 170; x <= 230; ++x) {
+                    const uint16_t g6 =
+                        (hdrStrip[static_cast<size_t>(y) * 240u + static_cast<size_t>(x)] >> 5u) &
+                        0x3Fu;
+                    if (g6 > maxRightG6) {
+                        maxRightG6 = g6;
+                    }
+                }
+            }
+            CHECK(maxRightG6 >= 24u);
+        }
+    }
 
     // 10. Verify uncompressed CRT deflection: hot resonant MS-20 peaks cross y=0 and y=239 cleanly
     //     without piling up a clamped horizontal rail inside the bezel (y=4 or y=235)

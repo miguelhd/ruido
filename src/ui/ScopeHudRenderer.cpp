@@ -513,6 +513,17 @@ void formatCompactHz(char* buf, size_t cap, float hz) noexcept {
     }
 }
 
+// High-precision 0.01 Hz frequency counter formatter for top-right FREQUENCY header
+size_t appendPrecisionHz(char* buf, size_t pos, size_t cap, float hz) noexcept {
+    const float f = clampf(hz, 0.01f, 99999.99f);
+    const uint32_t centi = static_cast<uint32_t>(f * 100.0f + 0.5f);
+    pos = appendUInt(buf, pos, cap, centi / 100u);
+    pos = appendStr(buf, pos, cap, ".");
+    pos = appendUInt(buf, pos, cap, (centi / 10u) % 10u);
+    pos = appendUInt(buf, pos, cap, centi % 10u);
+    return appendStr(buf, pos, cap, " Hz");
+}
+
 void formatPercent(char* buf, size_t cap, float norm01) noexcept {
     const uint32_t pct = static_cast<uint32_t>(clampf(norm01, 0.0f, 1.0f) * 100.0f + 0.5f);
     size_t p = appendUInt(buf, 0u, cap, pct);
@@ -2489,16 +2500,28 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
         const VoiceParams& focVp = frameControl_.voices[v];
         char leftMain[24]{};
         char leftSuffix[16]{};
-        char rightText[24]{};
+        char rightText[32]{};
         bool showHeaderBar = false;
         float headerBarNorm = 0.0f;
 
         switch (frameHud_.mode) {
         case HudMode::None:
             break;
-        case HudMode::VoiceFrequency:
+        case HudMode::VoiceFrequency: {
             appendStr(leftMain, 0u, sizeof(leftMain), "FREQUENCY");
+            const float pitchMul = computeVoicePitchRatio(
+                frameControl_.voicePressure[v],
+                frameControl_.global.pitchPressureMode ? 1.0f : 0.0f);
+            const float liveHz =
+                (focVp.lfoTarget == LfoTarget::Pitch) ?
+                    applyLfoPitchHz(focVp.frequencyHz, focVp.lfoDepth, frameLfoOutput_[v]) :
+                    focVp.frequencyHz;
+            size_t p = appendStr(rightText, 0u, sizeof(rightText), "OSC ");
+            p = appendUInt(rightText, p, sizeof(rightText), static_cast<uint32_t>(v + 1u));
+            p = appendStr(rightText, p, sizeof(rightText), "  ");
+            appendPrecisionHz(rightText, p, sizeof(rightText), liveHz * pitchMul);
             break;
+        }
         case HudMode::Amplitude:
             appendStr(leftMain, 0u, sizeof(leftMain), "AMPLITUDE");
             appendStr(rightText, 0u, sizeof(rightText), "POST-FILTER VCA");
@@ -2506,19 +2529,19 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
         case HudMode::Panning:
             appendStr(leftMain, 0u, sizeof(leftMain), "PANNING");
             appendStr(rightText, 0u, sizeof(rightText),
-                      frameControl_.global.monoCollapse ? "DUAL MONO" : "EQUAL POWER");
+                      frameControl_.global.monoCollapse ? "DUAL MONO" : "STEREO");
             break;
         case HudMode::VoiceFilter: {
             appendStr(leftMain, 0u, sizeof(leftMain), "FILTER");
             size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
             appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
-            appendStr(rightText, 0u, sizeof(rightText), "24 dB/OCT ZDF");
+            appendStr(rightText, 0u, sizeof(rightText), "12 dB HP -> LP");
             break;
         }
         case HudMode::GlobalFilter:
             appendStr(leftMain, 0u, sizeof(leftMain), "FILTER");
             appendStr(leftSuffix, 0u, sizeof(leftSuffix), " GLOBAL");
-            appendStr(rightText, 0u, sizeof(rightText), "ALL 4 VOICES");
+            appendStr(rightText, 0u, sizeof(rightText), "12 dB HP -> LP");
             break;
         case HudMode::MasterLevel:
             appendStr(leftMain, 0u, sizeof(leftMain), "MASTER LEVEL");
@@ -2616,11 +2639,23 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
                       (lvp.lfoDepth > 0.002f) ? "ACTIVE" : "BYPASSED");
             break;
         }
-        case HudMode::GlobalLfo:
+        case HudMode::GlobalLfo: {
             appendStr(leftMain, 0u, sizeof(leftMain), "LFO");
             appendStr(leftSuffix, 0u, sizeof(leftSuffix), " GLOBAL");
-            appendStr(rightText, 0u, sizeof(rightText), "ALL 4 VOICES");
+            uint32_t activeLfos = 0u;
+            for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
+                if (frameControl_.voices[vi].lfoDepth > 0.002f) {
+                    ++activeLfos;
+                }
+            }
+            if (activeLfos == 0u) {
+                appendStr(rightText, 0u, sizeof(rightText), "BYPASSED");
+            } else {
+                size_t p = appendUInt(rightText, 0u, sizeof(rightText), activeLfos);
+                appendStr(rightText, p, sizeof(rightText), "/4 ACTIVE");
+            }
             break;
+        }
         // Remaining right-grid switches (FX, ENV, EDIT, GloRight, ARP, SEQ, REC)
         case HudMode::UnassignedButton: {
             const char* swName = "PANEL";
@@ -2639,6 +2674,14 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
             appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
             break;
         }
+        }
+
+        // Universal non-empty right-side fallback so the top-right header area is never blank
+        if (frameHud_.mode != HudMode::None && !showHeaderBar && rightText[0] == '\0') {
+            const char* defStatus = !frameControl_.global.masterRun   ? "AUDIO MUTED" :
+                                    frameControl_.global.monoCollapse ? "DUAL MONO" :
+                                                                        "STEREO OUT";
+            appendStr(rightText, 0u, sizeof(rightText), defStatus);
         }
 
         cv.drawSans(kFontSansBold, 10, 6, leftMain, 255u, 0);
