@@ -14,7 +14,7 @@ Each milestone has a strict verification gate before advancing to the next phase
 ## Milestone 1: Core DSP Engine & Headless Audio Verification (`src/dsp/`, `tests/`) *(Complete)*
 - [x] Implement lock-free parameter state & per-sample clickless slew smoothers (`src/core/`).
 - [x] Implement `4x` oversampled **Schmitt-Trigger Oscillator** (PolyBLEP, RC capacitor tilt, `1/f` drift, `ALGORITHM`-scaled shared power-rail threshold coupling, Audio `20-4000 Hz` + LFO `0.02-20 Hz` ranges).
-- [x] Implement per-oscillator **MS-20 (`Korg35`) ZDF `HPF -> LPF`** filter pair with pre-filter `Drive`, internal asymmetric diode clipping, and Smart-Park Shared Resonance.
+- [x] Implement per-oscillator **MS-20 `Rev 2` (`KLM-307` `LM13600` OTA Sallen-Key) ZDF `HPF -> LPF`** filter pair with nonlinear dual-OTA poles, `1S1588` silicon feedback limiters, and Smart-Park Independent `HP` & `LP` Resonance (`ADR-004`, `ADR-019`, `ADR-024`).
 - [x] Implement constant-power stereo panner + `SELECT` stereo spread + `MONO`/`POLY` collapse, clickless mute/pressure modulation, nonlinear master bus sag, and cascaded polyphase half-band `4x -> 1x` stereo decimator.
 - [x] **Verification Gate:** Headless C++ unit tests verifying zero `NaN`/denormals under extreme self-oscillation, alias suppression (`> 70 dB` rejection — achieved `< -108.5 dBc`), zero DC offset runaway, and flat passband when filters are parked.
 
@@ -34,7 +34,8 @@ Each milestone has a strict verification gate before advancing to the next phase
 - [x] Implement dedicated 4-voice LFO engine & `LFO` HUD page (`ADR-022`: `SELECT` = `Osc 1..4 / All`, `KNOB 1–4` = `TARGET | SHAPE | RATE | DEPTH` with continuous `Sine -> Tri -> Saw -> Slewed Square -> Smooth Drift` morphing and `7` voice circuit targets).
 - [ ] Implement focused Configuration Menu behind right-grid `GLO` button (housing `Stereo / Dual Mono` output routing and global hardware settings).
 - [ ] Implement compact binary snapshot struct (`<= 128 bytes` per snapshot) for the 8 snapshot keys (`White Keys 9-16`).
-- [ ] Implement smooth glide on tap, continuous crossfade via the `PRESETS` encoder, and **rubber-band pressure morphing** when leaning into a snapshot key.
+- [ ] Implement smooth glide on tap, continuous macro scrub/crossfade via the `PRESETS` encoder, and **rubber-band pressure morphing** when leaning into a snapshot key (`White Keys 9-16`).
+- [ ] Implement **real-time keybed LED visualization** during `PRESETS` Continuous Macro Scrub (`ADR-025`): smoothly pan/crossfade varibright PWM brightness (`20% <-> 100%` across populated slots, `0%` on empty slots) across `White Keys 9-16` in real time to reflect exact hybrid morph weights (staying parked on intermediate blends even after the HUD dissolves), while `White Keys 1-4` simultaneously track live morphed voice amplitudes and gates.
 
 ---
 

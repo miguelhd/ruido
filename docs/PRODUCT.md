@@ -4,7 +4,7 @@
 
 **Ruido** transforms the pocket **M-VAVE FM-1** hardware into a dedicated, boutique **4-oscillator CMOS Schmitt-trigger stereo drone instrument**.
 
-- **Primary Acoustic Reference:** Classic DIY analog Schmitt-trigger relaxation oscillator synths (`CD40106` / `74HC14` style)—organic capacitor tilt, micro-thermal drift, and shared power-rail phase pulling—paired with aggressive **Korg MS-20 (`Korg35`) dual `HPF -> LPF` diode-clipped resonant filters**.
+- **Primary Acoustic Reference:** Classic DIY analog Schmitt-trigger relaxation oscillator synths (`CD40106` / `74HC14` style)—organic capacitor tilt, micro-thermal drift, and shared power-rail phase pulling—paired with creamy, aggressive **Korg MS-20 `Rev 2` (`KLM-307` `LM13600` OTA Sallen-Key) dual `HPF -> LPF` silicon-limited resonant filters**.
 - **Primary Studio Role:** A pristine, harmonically rich, zero-aliasing stereo sound source designed specifically to feed **external guitar/synth effects pedals** (fuzz, wavefolders, BBD delays, reverbs, granular) and **Eurorack modular rigs**.
 
 ### Core Design Values (In Priority Order)
@@ -31,11 +31,11 @@ Ruido consists of **4 identical mono voices** (`Osc 1..4`) mixed in stereo throu
   - *`FAST` (`Hold OCT+`):* Full end-to-end `20 Hz - 4,000 Hz` sweep in **`~1.33` turns**.
 - **Amplitude:** Continuous post-filter VCA level (`0-100%`).
 - **Panning:** Equal-power (`sin`/`cos`) stereo placement from hard Left (`L100`) through Center (`C`) to hard Right (`R100`), or collapsed to Dual Mono (`L == R`) when `MONO` output routing is active.
-- **Dual MS-20 Filter (`HPF -> LPF` in series with Independent Peak Resonance):**
-  - **HP Cutoff (`KNOB1`):** `20 Hz` (parked flat/transparent) up to `20 kHz`.
-  - **HP Resonance (`KNOB2`):** Independent `Korg35` High-Pass Peak (`0-100%`, `k` up to `3.72`) with **Tight Smart-Park Taper**—rests flat (`Q = 0.7071`) when `HPF` is parked at `20 Hz`, wakes up immediately past `24 Hz`, boosts sub-bass fundamentals cleanly without disturbing the low-pass stage, and enters pitch-tracked self-oscillation by `~35%`.
-  - **LP Cutoff (`KNOB3`):** `20 Hz` up to `20 kHz` (parked flat/wide-open).
-  - **LP Resonance (`KNOB4`):** Independent `Korg35` Low-Pass Peak (`0-100%`, `k` up to `3.72`) with **Tight Smart-Park Taper**—rests flat at `20 kHz`, wakes up below `18.8 kHz`, enters sustained self-oscillation by `~35%`, and pairs with `HP RES` for asymmetrical vocal formants or simultaneous dual-sine self-oscillation on a single voice.
+- **Dual MS-20 `Rev 2` OTA Filter (`HPF -> LPF` in series with Independent Peak Resonance):**
+  - **HP Cutoff (`KNOB1`):** `20 Hz` (parked flat/transparent) up to `20 kHz`, engaging warm `LM13600` OTA saturation across all 4 filter poles even at `0%` resonance.
+  - **HP Resonance (`KNOB2`):** Independent `Rev 2` OTA + `1S1588` silicon High-Pass Peak (`0-100%`, `k` up to `3.68`) with **Tight Smart-Park Taper**—rests flat (`Q = 0.7071`) when `HPF` is parked at `20 Hz`, wakes up immediately past `24 Hz`, boosts sub-bass fundamentals cleanly with organic capacitive `0 Hz` DC rejection, and enters pitch-tracked self-oscillation by `~35%`.
+  - **LP Cutoff (`KNOB3`):** `20 Hz` up to `20 kHz` (parked flat/wide-open), rounding square edges with creamy `LM13600` OTA 2nd/3rd harmonic warmth as soon as engaged.
+  - **LP Resonance (`KNOB4`):** Independent `Rev 2` OTA + `1S1588` silicon Low-Pass Peak (`0-100%`, `k` up to `3.68`) with **Tight Smart-Park Taper**—rests flat at `20 kHz`, wakes up below `18.8 kHz`, enters sustained self-oscillation by `~35%`, and pairs with `HP RES` for asymmetrical vocal formants or quench-free simultaneous dual-sine self-oscillation on a single voice.
 
 ---
 
@@ -74,7 +74,7 @@ Reference faceplate photo: [`docs/assets/fm1-front-panel.png`](assets/fm1-front-
 - **`MASTER` (Analog Pot):** Hardware master output level (`MASTER LEVEL` + `%` bar on HUD).
 - **`ALGORITHM` (Encoder):** **Rail Coupling** (`0%` isolated clean circuits <-> `100%` heavy `CD40106` shared-rail threshold pulling & cross-modulation). *Mnemonic: defines how the 4 oscillators electrically couple, analogous to FM operator algorithms.*
 - **`SELECT` (Encoder):** Unassigned / reserved for focused page & menu navigation (`SELECT ENCODER · UNASSIGNED` on turn).
-- **`PRESETS` (Encoder):** **Snapshot Morph** — smoothly scrubs/crossfades across saved snapshots (`SNAPSHOT MORPH` + `%` bar).
+- **`PRESETS` (Encoder):** **Snapshot Morph (Continuous Macro Scrub)** — smoothly scrubs/crossfades across saved snapshots (`SNAPSHOT MORPH` + `%` bar on HUD) while panning varibright LED brightness across **`White Keys 9–16`** (and morphed voice levels on **`White Keys 1–4`**) in real time so the physical keybed continuously shows the exact hybrid blend between slots.
 - **`OCT-` / `OCT+` (Momentary Rate Modifiers):** **Strictly momentary left-hand encoder rate modifiers (`KNOB RATE`)** governing all 7 endless rotary encoders (`KNOB 1-4`, `ALGORITHM`, `SELECT`, `PRESETS`) with **zero velocity acceleration** (100% deterministic 1:1 angle-to-parameter response at `96` X4 quadrature transitions per `360°` turn), freely chordable alongside `OP1-OP6` and `GLO`:
   - *Released (Idle Default = `STANDARD`):* Both `OCT-` and `OCT+` rest at `15%` dim glow; full parameter sweeps take an exact linear **`2.5-2.8` turns**.
   - *Hold `OCT-` -> `FINE` (`OCT-` LED `100%`):* Surgical fine-tuning while held (`0.66 cents/step` audio frequency, `3.0 cents/step` filter cutoff, `0.09%/step` linear controls).
@@ -97,7 +97,7 @@ Each of the 4 voices (`Osc 1..4`) owns **1 dedicated LFO** matching its dedicate
   - **`KNOB 2` (`SHAPE`):** Continuous `0–100%` seamless wave morph across **`Sine` (`0%`) -> `Triangle` (`25%`) -> `Sawtooth` (`50%`) -> `Slewed Square` (`75%`) -> `Smooth Drift` (`100%`, non-repeating organic wander)**.
   - **`KNOB 3` (`RATE`):** Continuous `0.02 Hz` (`50 s` cycle) to `30 Hz` log-octave sweep.
   - **`KNOB 4` (`DEPTH`):** Unipolar `0–100%` modulation amount with a hard stop at `0%` CCW so any LFO zeros cleanly by feel.
-- **Live LFO Graph:** Displays the morphed LFO contour + live moving phase focal bead inside the `80 px` (`y = 102..182`) graph zone over a `70%`-dimmed scope (overlaying all 4 voices' LFO curves when `SELECT` is on `ALL 4`).
+- **Live Full-Screen LFO Visualization:** Spans edge-to-edge across the entire `240 px` display (`x = 0..239`) and fills the full vertical viewport (`y = 26..188`, `±75 px` / `150 px` peak-to-peak centered on a `y = 107` zero-horizon filament) over a `72%`-dimmed background scope, with clean gradient shading (zero decorative inner contour lines) and a crisp `#FFFFFF` optical phase bead proportioned to match the MS-20 filter cutoff beads (or overlaying all 4 voices' LFO curves & beads when `SELECT` is on `ALL 4`).
 
 ### 3.5 Bottom 27-Key Surface & Carbon-Pill Pressure Expression (`SARADC`)
 
@@ -124,7 +124,8 @@ Using analog `SARADC` sampling of the silicone keybed's carbon-pill contact resi
     - Displays `PITCH BEND OSC 1..4` + live `0-100%` bar while updating the live bent `Hz` readout in the bottom strip; leans bend pitch upward up to `+6` semitones (`4.5 ms` attack / `26 ms` CdS vactrol glide back to the knob frequency on release) and gently open the VCA gate if muted.
 - **Dots 3 & 4 (`White Keys 9-16`): 8 Snapshot Slots (`SNAPSHOT 1..8`)**
   - *Quick Tap:* Glides smoothly to Snapshot `1-8` (`0%` empty, `20%` saved, `100%` active, slow breathing during glide).
-  - *Press, Hold & Lean:* **Rubber-band morphs** all 4 oscillators and filters *toward* that snapshot proportionally to finger pressure—release your finger, and the sound melts smoothly back to your active state.
+  - *Press, Hold & Lean:* **Rubber-band morphs** all 4 oscillators, filters, and LFOs *toward* that snapshot proportionally to finger pressure (`20% -> 100%` proportional LED flare)—release your finger, and the sound melts smoothly back to your active state.
+  - *`PRESETS` Macro Scrub Real-Time Keybed Display (`ADR-025`):* Turning `PRESETS` pans varibright LED intensity smoothly across populated snapshot keys (`led[s] = 20% + 80% * morphWeight[s]`, skipping `0%` empty slots) in real time—leaving both participating keys proportionally lit whenever parked on an intermediate hybrid state, even after the screen HUD fades out.
 
 ---
 
@@ -138,7 +139,7 @@ Using analog `SARADC` sampling of the silicone keybed's carbon-pill contact resi
   - **Open Full-Span Geometry (`x = 0..239`, constant `y = 120` center & `78 px` scale) & Zero Hard-Cut Transitions:** Zero artificial edge pinching to `0 V` at the left/right bezels, **zero vertical compression or shift** when the HUD fades in, and **zero 1-frame visual snaps** anywhere on the instrument—stopping audio (`PLAY/STOP`, `MASTER = 0%`, muting all voices, or pausing audio) smoothly relaxes all 14 strands + bloom into a poised `y = 120` horizon flatline and blooms back out on resume, while per-voice mutes, `1x <-> 2x` bass timebase zoom, filter curves, optical beads, and HUD overlays all transition continuously.
 - **Unified Soft-Transitioning Optical-Filament HUD:**
   - **Top Function Header (`13 pt` Bold Two-Tone Hierarchy & Top-Aligned Metadata):** Reserved top strip (`y = 6..22`) leading with the active function title (`FILTER`, `LFO`, `GATE`, `FILTER EXP`, `LPG SWELL`, `PITCH BEND`) in `100%`-white `13 pt` Bold `Helvetica Neue` (`kFontSansBold`, matching the `13 pt` numeric readout scale), followed by dimmed trailing target qualifiers (`OSC 1..4`, `GLOBAL` at `~46%` silver) alongside pixel-exact top-aligned (`y = 9`) right-hand `10 pt` metadata or `13 pt` `%` + tapered optical-filament gauges (paired with idle top-right `L/R` optical-filament peak meters when the HUD is closed).
-  - **Bottom 4-Knob Strip & `1/3`-Screen (`80 px`) Dual-Resonance Filter Graph:** Reserved bottom strip (`y = 190..235`) **always** showing what `KNOB 1..4` currently control (`OSC 1..4` or `HPF / HP RES / LPF / LP RES`), 4 tapered sub-pixel optical filaments with glowing focal beads (including center-slit bipolar `L..C..R` pan gauges), and tabular sans-serif readouts (`55.0 Hz`, `2.4 kHz`, `65%`, `L35`). Holding `OP1..5` (or pressing `Keys 5..8` in Filter/LPG mode) blooms a `1/3`-screen (`y = 102..182`, `80 px` tall, `x = 10..230`) **Option A3** dual-peak MS-20 transfer graph—combining a `10%` solid passband silhouette down to a `y = 182` horizon filament, a `30%` caustic crest glow, incandescent linear-photon curve + Korg35 companion contours, and independent `HP`/`LP` cutoff focal beads (`0%` artificial voice offset on `OP5`)—while smoothly dimming the background waveform by `70%` (`~110 ms` attack / `~240 ms` release S-curve transition).
+  - **Bottom 4-Knob Strip & `1/3`-Screen (`80 px`) Dual-Resonance Filter Graph:** Reserved bottom strip (`y = 190..235`) **always** showing what `KNOB 1..4` currently control (`OSC 1..4` or `HPF / HP RES / LPF / LP RES`), 4 tapered sub-pixel optical filaments with glowing focal beads (including center-slit bipolar `L..C..R` pan gauges), and tabular sans-serif readouts (`55.0 Hz`, `2.4 kHz`, `65%`, `L35`). Holding `OP1..5` (or pressing `Keys 5..8` in Filter/LPG mode) blooms a `1/3`-screen (`y = 102..182`, `80 px` tall, `x = 10..230`) **Option A3** dual-peak MS-20 transfer graph—combining a `10%` solid passband silhouette down to a `y = 182` horizon filament, a `30%` caustic crest glow, incandescent linear-photon curve + MS-20 companion contours, and independent `HP`/`LP` cutoff focal beads (`0%` artificial voice offset on `OP5`)—while smoothly dimming the background waveform by `70%` (`~110 ms` attack / `~240 ms` release S-curve transition).
   - **Soft S-Curve Envelope, Latched Right-Grid Switches & Outgoing-View Latch:** Right `2x6` switches (`SEL`, `PLAY/STOP`, `SAVE` while armed, `LFO`, `FX`, `GLO` right, etc.) keep their HUD **latched on screen** until `HOME` is pressed (smoothly returning to the latched switch HUD after any momentary hold or standalone knob tweak). Momentary holds (`OP1–OP6`, `GLO` black key, `OCT-/+`, `ScopeFreezeKey`, `Keys 5–8`) stay pinned while held and dissolve immediately on release (latching outgoing labels so `FREQUENCY` never flashes during fade-out), standalone knob turns and keybed taps hold `1.5 s` before a `~850 ms` dissolve, and `HOME` performs a `~150 ms` quick-dissolve back to pure scope.
 
 ---
