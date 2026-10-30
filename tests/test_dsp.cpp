@@ -646,8 +646,13 @@ void testExtremeStabilityAndZeroDenormals() {
     ruido::Ms20DualFilter rawFilter;
     const float filtNanOut = rawFilter.processSample(qNan, 500.0f, 1.0f, 1500.0f, 1.0f,
                                                      ruido::kInvOversampledRate);
-    EXPECT_TRUE(allValid && isFiniteNonSubnormal(filtNanOut),
-                "NaN/Inf poisoned engine or standalone Ms20DualFilter");
+    const float filtBadRateOut =
+        rawFilter.processSample(4.5f, qNan, -pInf, pInf, 0.0f, qNan);
+    const float filtLowRateOut =
+        rawFilter.processSample(4.5f, 20.0f, 0.0f, 19500.0f, 0.0f, 1.0f / 32000.0f);
+    EXPECT_TRUE(allValid && isFiniteNonSubnormal(filtNanOut) &&
+                    isFiniteNonSubnormal(filtBadRateOut) && isFiniteNonSubnormal(filtLowRateOut),
+                "NaN/Inf or low sample rate poisoned engine or standalone Ms20DualFilter");
 }
 
 // 6. Zero DC offset runaway over 10 seconds of asymmetric CMOS + dual resonant filters
@@ -1696,10 +1701,12 @@ void testRev2OtaSallenKeyPhysics() {
                 for (size_t sub = 0u; sub < 4u; ++sub) {
                     const float t = static_cast<float>(frame * 4u + sub) * 0.037f;
                     for (size_t v = 0u; v < 4u; ++v) {
-                        const float sig = (std::sin(t * (1.0f + 0.3f * static_cast<float>(v))) >=
-                                           0.0f) ?
-                                              0.95f :
-                                              -0.95f;
+                        float sig = 0.0f;
+                        if (frame < 512u) {
+                            sig = (std::sin(t * (1.0f + 0.3f * static_cast<float>(v))) >= 0.0f) ?
+                                      0.95f :
+                                      -0.95f;
+                        }
                         voiceSub[v][sub] = sig;
                         refOut[v][sub] = refFilters[v].processPrepared(sig, coeffs[v]);
                     }
@@ -1715,9 +1722,32 @@ void testRev2OtaSallenKeyPhysics() {
         }
         std::printf("  processQuadBank4x vs processPrepared max |diff| = %.3e\n",
                     static_cast<double>(maxParityDiff));
-        EXPECT_TRUE(maxParityDiff < 1.0e-6f,
+        EXPECT_TRUE(maxParityDiff == 0.0f,
                     "SIMD processQuadBank4x diverged from scalar processPrepared (diff=%.3e)",
                     static_cast<double>(maxParityDiff));
+    }
+
+    // (d) Hot standalone input (±10.0f) Smart-Park handoff continuity across 18.8..20.0 kHz:
+    {
+        ruido::Ms20DualFilter filter;
+        filter.reset();
+        float prevY = 0.0f;
+        float maxHandoffStep = 0.0f;
+        for (size_t n = 0u; n < 4000u; ++n) {
+            const float lpHz = 19850.0f + 0.05f * static_cast<float>(n); // crosses ~19991 Hz
+            const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(
+                20.0f, 0.0f, lpHz, 0.0f, ruido::kInvOversampledRate);
+            const float x = 10.0f * std::sin(ruido::kTwoPi * 3000.0f * static_cast<float>(n) *
+                                             ruido::kInvOversampledRate);
+            const float y = filter.processPrepared(x, coeffs);
+            if (n > 64u) {
+                maxHandoffStep = std::max(maxHandoffStep, std::fabs(y - prevY));
+            }
+            prevY = y;
+        }
+        EXPECT_TRUE(maxHandoffStep < 1.25f,
+                    "Hot ±10V Smart-Park handoff clicked (max |dy| = %.4f)",
+                    static_cast<double>(maxHandoffStep));
     }
 }
 

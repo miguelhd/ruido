@@ -21,15 +21,15 @@ public:
         float gHp = 0.0f;
         float kHp = 0.58578644f;
         float otaScaleHp = 20.0f;
-        float invOtaScaleHp = 0.0f;
+        float invOtaScaleHp = 0.05f;
         float invLinDetHp = 1.0f;
         bool hpLinearBypass = true;
 
         float gLp = 0.25f;
         float kLp = 0.58578644f;
         float otaScaleLp = 20.0f;
-        float invOtaScaleLp = 0.0f;
-        float invLinDetLp = 0.7f;
+        float invOtaScaleLp = 0.05f;
+        float invLinDetLp = 0.70618806f;
         bool lpLinearBypass = true;
 
         float hpInScale = 1.0f;

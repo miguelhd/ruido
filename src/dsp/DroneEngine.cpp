@@ -22,7 +22,9 @@ DroneEngine::DroneEngine() noexcept {
 }
 
 void DroneEngine::init(float baseSampleRate) noexcept {
-    baseSampleRate_ = (baseSampleRate > 8000.0f) ? baseSampleRate : kBaseSampleRate;
+    baseSampleRate_ = (baseSampleRate >= 16000.0f && baseSampleRate <= 384000.0f) ?
+                          baseSampleRate :
+                          kBaseSampleRate;
     oversampledRate_ = baseSampleRate_ * static_cast<float>(kOversampleFactor);
     invOversampledRate_ = 1.0f / oversampledRate_;
 

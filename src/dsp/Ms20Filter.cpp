@@ -94,24 +94,12 @@ inline SatResult evalOtaSymmetric(float v, float span, float invSpan) noexcept {
     return {vc * (1.0f - u2 * (0.66666667f - 0.20f * u2)), oneMinusU2 * oneMinusU2};
 }
 
-// Pure-FPU C^4-deadband / C^2-rail 1S1588 anti-parallel silicon PN-junction feedback limiters:
+// Pure-FPU C^4-deadband / C^2-rail 1S1588 anti-parallel silicon PN-junction feedback limiter:
 //   Q(u)  = u * (1 - (3/5)*u^4 + (2/7)*u^6)   (zero u^3 term -> flat small-signal deadband!)
 //   Q'(u) = (1 - u^2)^2 * (1 + 2*u^2) in [0, 1]
-inline SatResult siliconDiodeFeedbackHp(float w) noexcept {
-    const float wc = clampf(w, -kHpDiodeSpan, kHpDiodeSpan);
-    const float u = wc * kInvHpDiodeSpan;
-    const float u2 = u * u;
-    const float u4 = u2 * u2;
-    const float oneMinusU2 = 1.0f - u2;
-    const float dVal = wc * (1.0f - u4 * (0.60f - 0.28571429f * u2));
-    const float dDeriv = (oneMinusU2 * oneMinusU2) * (1.0f + 2.0f * u2);
-    return {kDiodeJunctionWeight * dVal + kDiodeOhmicSlope * w,
-            kDiodeJunctionWeight * dDeriv + kDiodeOhmicSlope};
-}
-
-inline SatResult siliconDiodeFeedbackLp(float w) noexcept {
-    const float wc = clampf(w, -kLpDiodeSpan, kLpDiodeSpan);
-    const float u = wc * kInvLpDiodeSpan;
+inline SatResult evalSiliconDiode(float w, float span, float invSpan) noexcept {
+    const float wc = clampf(w, -span, span);
+    const float u = wc * invSpan;
     const float u2 = u * u;
     const float u4 = u2 * u2;
     const float oneMinusU2 = 1.0f - u2;
@@ -129,6 +117,8 @@ inline float stepHpNonlinear(float x, float& s1, float& s2, float& hist1, float&
     const float invNeg1 = kInvHpOta1Neg * invOtaScale;
     const float rail2 = kHpOta2Rail * otaScale;
     const float invRail2 = kInvHpOta2Rail * invOtaScale;
+    const float dSpan = kHpDiodeSpan * otaScale;
+    const float invDSpan = kInvHpDiodeSpan * invOtaScale;
 
     // Smooth capacitor-sum q = y2 - x = v_C1 + v_C2 never jumps on input steps dx!
     const float xPlusS1 = x + s1;
@@ -139,7 +129,7 @@ inline float stepHpNonlinear(float x, float& s1, float& s2, float& hist1, float&
         const SatResult ota2 = evalOtaSymmetric(-y2, rail2, invRail2);
         const float y1 = y2 - s2 - g * ota2.value;
 
-        const SatResult fb = siliconDiodeFeedbackHp(k * y2);
+        const SatResult fb = evalSiliconDiode(k * y2, dSpan, invDSpan);
         const SatResult ota1 = evalOta(fb.value - y1, pos1, neg1, invPos1, invNeg1);
 
         const float fHp = y1 - xPlusS1 - g * ota1.value;
@@ -174,6 +164,8 @@ inline float stepLpNonlinear(float x, float& s1, float& s2, float& hist1, float&
     const float neg2 = kLpOta2Neg * otaScale;
     const float invPos2 = kInvLpOta2Pos * invOtaScale;
     const float invNeg2 = kInvLpOta2Neg * invOtaScale;
+    const float dSpan = kLpDiodeSpan * otaScale;
+    const float invDSpan = kInvLpDiodeSpan * invOtaScale;
 
     // 2-point extrapolation of continuous Stage-2 differential voltage w = y1 - y2:
     float w = clampf(2.0f * hist1 - hist2, -8.0f, 8.0f);
@@ -185,7 +177,7 @@ inline float stepLpNonlinear(float x, float& s1, float& s2, float& hist1, float&
         const float y1 = w + y2;
 
         const SatResult ota1 = evalOtaSymmetric(x - y1, rail1, invRail1);
-        const SatResult fb = siliconDiodeFeedbackLp(k * w);
+        const SatResult fb = evalSiliconDiode(k * w, dSpan, invDSpan);
 
         const float fLp = y1 - s1 - g * (ota1.value + fb.value);
         const float d1 = g * ota1.deriv;
@@ -370,7 +362,8 @@ void Ms20DualFilter::processQuadBank4x(
                                             filters[2].hpf_.s2, filters[3].hpf_.s2};
         alignas(16) std::array<float, 4> h1{filters[0].hpf_.hist1, filters[1].hpf_.hist1,
                                             filters[2].hpf_.hist1, filters[3].hpf_.hist1};
-        alignas(16) std::array<float, 4> h2{};
+        alignas(16) std::array<float, 4> h2{filters[0].hpf_.hist2, filters[1].hpf_.hist2,
+                                            filters[2].hpf_.hist2, filters[3].hpf_.hist2};
         alignas(16) const std::array<float, 4> g{coeffs[0].gHp, coeffs[1].gHp, coeffs[2].gHp,
                                                  coeffs[3].gHp};
         alignas(16) const std::array<float, 4> k{coeffs[0].kHp, coeffs[1].kHp, coeffs[2].kHp,
@@ -386,18 +379,20 @@ void Ms20DualFilter::processQuadBank4x(
                 const float onePlusG = 1.0f + g[v];
                 const float y2 = (x + s1[v] + onePlusG * s2[v]) * invDet[v];
                 const float y1 = onePlusG * y2 - s2[v];
-                s1[v] += 2.0f * g[v] * (k[v] * y2 - y1);
-                s2[v] -= 2.0f * g[v] * y2;
+                const float ic1 = g[v] * (k[v] * y2 - y1);
+                const float ic2 = -g[v] * y2;
+                s1[v] = scrubFilterState(s1[v] + 2.0f * ic1);
+                s2[v] = scrubFilterState(s2[v] + 2.0f * ic2);
                 h2[v] = h1[v];
-                h1[v] = y2 - x;
+                h1[v] = scrubFilterState(y2 - x);
                 voiceSamples[v][sub] = y2;
             }
         }
         for (size_t v = 0u; v < 4u; ++v) {
-            filters[v].hpf_.s1 = scrubFilterState(s1[v]);
-            filters[v].hpf_.s2 = scrubFilterState(s2[v]);
-            filters[v].hpf_.hist1 = scrubFilterState(h1[v]);
-            filters[v].hpf_.hist2 = scrubFilterState(h2[v]);
+            filters[v].hpf_.s1 = s1[v];
+            filters[v].hpf_.s2 = s2[v];
+            filters[v].hpf_.hist1 = h1[v];
+            filters[v].hpf_.hist2 = h2[v];
         }
     } else if (noneHpBypass) {
         alignas(16) std::array<float, 4> s1{filters[0].hpf_.s1, filters[1].hpf_.s1,
@@ -420,6 +415,8 @@ void Ms20DualFilter::processQuadBank4x(
         alignas(16) std::array<float, 4> invNeg1{};
         alignas(16) std::array<float, 4> rail2{};
         alignas(16) std::array<float, 4> invRail2{};
+        alignas(16) std::array<float, 4> dSpan{};
+        alignas(16) std::array<float, 4> invDSpan{};
         for (size_t v = 0u; v < 4u; ++v) {
             pos1[v] = kHpOta1Pos * coeffs[v].otaScaleHp;
             neg1[v] = kHpOta1Neg * coeffs[v].otaScaleHp;
@@ -427,6 +424,8 @@ void Ms20DualFilter::processQuadBank4x(
             invNeg1[v] = kInvHpOta1Neg * coeffs[v].invOtaScaleHp;
             rail2[v] = kHpOta2Rail * coeffs[v].otaScaleHp;
             invRail2[v] = kInvHpOta2Rail * coeffs[v].invOtaScaleHp;
+            dSpan[v] = kHpDiodeSpan * coeffs[v].otaScaleHp;
+            invDSpan[v] = kInvHpDiodeSpan * coeffs[v].invOtaScaleHp;
         }
 
         for (size_t sub = 0u; sub < 4u; ++sub) {
@@ -441,7 +440,7 @@ void Ms20DualFilter::processQuadBank4x(
                 y2[v] = x[v] + clampf(2.0f * h1[v] - h2[v], -8.0f, 8.0f);
                 const SatResult ota2 = evalOtaSymmetric(-y2[v], rail2[v], invRail2[v]);
                 const float y1 = y2[v] - s2[v] - g[v] * ota2.value;
-                const SatResult fb = siliconDiodeFeedbackHp(k[v] * y2[v]);
+                const SatResult fb = evalSiliconDiode(k[v] * y2[v], dSpan[v], invDSpan[v]);
                 const SatResult ota1 =
                     evalOta(fb.value - y1, pos1[v], neg1[v], invPos1[v], invNeg1[v]);
 
@@ -462,7 +461,8 @@ void Ms20DualFilter::processQuadBank4x(
                             const SatResult ota2 =
                                 evalOtaSymmetric(-y2[v], rail2[v], invRail2[v]);
                             const float y1 = y2[v] - s2[v] - g[v] * ota2.value;
-                            const SatResult fb = siliconDiodeFeedbackHp(k[v] * y2[v]);
+                            const SatResult fb =
+                                evalSiliconDiode(k[v] * y2[v], dSpan[v], invDSpan[v]);
                             const SatResult ota1 = evalOta(fb.value - y1, pos1[v], neg1[v],
                                                            invPos1[v], invNeg1[v]);
                             const float fHp = y1 - (x[v] + s1[v]) - g[v] * ota1.value;
@@ -483,18 +483,18 @@ void Ms20DualFilter::processQuadBank4x(
             for (size_t v = 0u; v < 4u; ++v) {
                 const float ic2 = g[v] * finalOta2[v];
                 const float y1 = y2[v] - s2[v] - ic2;
-                s1[v] = 2.0f * (y1 - x[v]) - s1[v];
-                s2[v] += 2.0f * ic2;
-                h2[v] = h1[v];
-                h1[v] = y2[v] - x[v];
+                s1[v] = scrubFilterState(2.0f * (y1 - x[v]) - s1[v]);
+                s2[v] = scrubFilterState(s2[v] + 2.0f * ic2);
+                h2[v] = scrubFilterState(h1[v]);
+                h1[v] = scrubFilterState(y2[v] - x[v]);
                 voiceSamples[v][sub] = y2[v];
             }
         }
         for (size_t v = 0u; v < 4u; ++v) {
-            filters[v].hpf_.s1 = scrubFilterState(s1[v]);
-            filters[v].hpf_.s2 = scrubFilterState(s2[v]);
-            filters[v].hpf_.hist1 = scrubFilterState(h1[v]);
-            filters[v].hpf_.hist2 = scrubFilterState(h2[v]);
+            filters[v].hpf_.s1 = s1[v];
+            filters[v].hpf_.s2 = s2[v];
+            filters[v].hpf_.hist1 = h1[v];
+            filters[v].hpf_.hist2 = h2[v];
         }
     } else {
         for (size_t v = 0u; v < 4u; ++v) {
@@ -519,7 +519,8 @@ void Ms20DualFilter::processQuadBank4x(
                                             filters[2].lpf_.s2, filters[3].lpf_.s2};
         alignas(16) std::array<float, 4> h1{filters[0].lpf_.hist1, filters[1].lpf_.hist1,
                                             filters[2].lpf_.hist1, filters[3].lpf_.hist1};
-        alignas(16) std::array<float, 4> h2{};
+        alignas(16) std::array<float, 4> h2{filters[0].lpf_.hist2, filters[1].lpf_.hist2,
+                                            filters[2].lpf_.hist2, filters[3].lpf_.hist2};
         alignas(16) const std::array<float, 4> g{coeffs[0].gLp, coeffs[1].gLp, coeffs[2].gLp,
                                                  coeffs[3].gLp};
         alignas(16) const std::array<float, 4> invDet{coeffs[0].invLinDetLp, coeffs[1].invLinDetLp,
@@ -537,18 +538,18 @@ void Ms20DualFilter::processQuadBank4x(
                 const float w = (s1[v] + g[v] * x - (1.0f + g[v]) * s2[v]) * invDet[v];
                 const float ic2 = g[v] * w;
                 const float y2 = s2[v] + ic2;
-                s1[v] = 2.0f * (w + y2) - s1[v];
-                s2[v] += 2.0f * ic2;
+                s1[v] = scrubFilterState(2.0f * (w + y2) - s1[v]);
+                s2[v] = scrubFilterState(s2[v] + 2.0f * ic2);
                 h2[v] = h1[v];
-                h1[v] = w;
+                h1[v] = scrubFilterState(w);
                 voiceSamples[v][sub] = y2 * outScale[v];
             }
         }
         for (size_t v = 0u; v < 4u; ++v) {
-            filters[v].lpf_.s1 = scrubFilterState(s1[v]);
-            filters[v].lpf_.s2 = scrubFilterState(s2[v]);
-            filters[v].lpf_.hist1 = scrubFilterState(h1[v]);
-            filters[v].lpf_.hist2 = scrubFilterState(h2[v]);
+            filters[v].lpf_.s1 = s1[v];
+            filters[v].lpf_.s2 = s2[v];
+            filters[v].lpf_.hist1 = h1[v];
+            filters[v].lpf_.hist2 = h2[v];
         }
     } else if (noneLpBypass) {
         alignas(16) std::array<float, 4> s1{filters[0].lpf_.s1, filters[1].lpf_.s1,
@@ -575,6 +576,8 @@ void Ms20DualFilter::processQuadBank4x(
         alignas(16) std::array<float, 4> neg2{};
         alignas(16) std::array<float, 4> invPos2{};
         alignas(16) std::array<float, 4> invNeg2{};
+        alignas(16) std::array<float, 4> dSpan{};
+        alignas(16) std::array<float, 4> invDSpan{};
         for (size_t v = 0u; v < 4u; ++v) {
             rail1[v] = kLpOta1Rail * coeffs[v].otaScaleLp;
             invRail1[v] = kInvLpOta1Rail * coeffs[v].invOtaScaleLp;
@@ -582,6 +585,8 @@ void Ms20DualFilter::processQuadBank4x(
             neg2[v] = kLpOta2Neg * coeffs[v].otaScaleLp;
             invPos2[v] = kInvLpOta2Pos * coeffs[v].invOtaScaleLp;
             invNeg2[v] = kInvLpOta2Neg * coeffs[v].invOtaScaleLp;
+            dSpan[v] = kLpDiodeSpan * coeffs[v].otaScaleLp;
+            invDSpan[v] = kInvLpDiodeSpan * coeffs[v].invOtaScaleLp;
         }
 
         for (size_t sub = 0u; sub < 4u; ++sub) {
@@ -598,7 +603,7 @@ void Ms20DualFilter::processQuadBank4x(
                 const float y2 = s2[v] + g[v] * ota2.value;
                 const float y1 = w[v] + y2;
                 const SatResult ota1 = evalOtaSymmetric(x[v] - y1, rail1[v], invRail1[v]);
-                const SatResult fb = siliconDiodeFeedbackLp(k[v] * w[v]);
+                const SatResult fb = evalSiliconDiode(k[v] * w[v], dSpan[v], invDSpan[v]);
 
                 const float fLp = y1 - s1[v] - g[v] * (ota1.value + fb.value);
                 const float d1 = g[v] * ota1.deriv;
@@ -620,7 +625,8 @@ void Ms20DualFilter::processQuadBank4x(
                             const float y1 = w[v] + y2;
                             const SatResult ota1 =
                                 evalOtaSymmetric(x[v] - y1, rail1[v], invRail1[v]);
-                            const SatResult fb = siliconDiodeFeedbackLp(k[v] * w[v]);
+                            const SatResult fb =
+                                evalSiliconDiode(k[v] * w[v], dSpan[v], invDSpan[v]);
                             const float fLp = y1 - s1[v] - g[v] * (ota1.value + fb.value);
                             const float d1 = g[v] * ota1.deriv;
                             const float d2 = g[v] * ota2.deriv;
@@ -639,18 +645,18 @@ void Ms20DualFilter::processQuadBank4x(
             for (size_t v = 0u; v < 4u; ++v) {
                 const float ic2 = g[v] * finalOta2[v];
                 const float y2 = s2[v] + ic2;
-                s1[v] = 2.0f * (w[v] + y2) - s1[v];
-                s2[v] += 2.0f * ic2;
-                h2[v] = h1[v];
-                h1[v] = w[v];
+                s1[v] = scrubFilterState(2.0f * (w[v] + y2) - s1[v]);
+                s2[v] = scrubFilterState(s2[v] + 2.0f * ic2);
+                h2[v] = scrubFilterState(h1[v]);
+                h1[v] = scrubFilterState(w[v]);
                 voiceSamples[v][sub] = y2 * outScale[v];
             }
         }
         for (size_t v = 0u; v < 4u; ++v) {
-            filters[v].lpf_.s1 = scrubFilterState(s1[v]);
-            filters[v].lpf_.s2 = scrubFilterState(s2[v]);
-            filters[v].lpf_.hist1 = scrubFilterState(h1[v]);
-            filters[v].lpf_.hist2 = scrubFilterState(h2[v]);
+            filters[v].lpf_.s1 = s1[v];
+            filters[v].lpf_.s2 = s2[v];
+            filters[v].lpf_.hist1 = h1[v];
+            filters[v].lpf_.hist2 = h2[v];
         }
     } else {
         for (size_t v = 0u; v < 4u; ++v) {

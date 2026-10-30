@@ -85,9 +85,10 @@ inline void equalPowerPan(float pan, float& gainL, float& gainR) noexcept {
 
 // Fast 5th-order polynomial approximation for tan(x) on [0, 0.55] (max error < 5e-5).
 // At 176.472 kHz, f_c <= 30 kHz corresponds to pi * fc / fs <= 0.534 rad (< pi/4).
+// Clamps w to [1e-5, 0.55] so extreme/low sample rates or NaN/Inf invSampleRate stay finite.
 inline float fastPrewarpTan(float cutoffHz, float invSampleRate) noexcept {
     const float fc = clampf(cutoffHz, 2.0f, kFilterMaxSafeHz);
-    const float w = kPi * fc * invSampleRate;
+    const float w = clampf(kPi * fc * invSampleRate, 1.0e-5f, 0.55f);
     const float w2 = w * w;
     return w * (1.0f + w2 * (0.33333333f + w2 * (0.13333333f + w2 * 0.05396825f)));
 }
