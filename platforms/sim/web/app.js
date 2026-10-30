@@ -150,7 +150,7 @@ async function ensureAudioRunning() {
       } else if (msg.type === 'telemetry') {
         const t = msg.telemetry;
         if (t && t.length >= 26) {
-          uiF32.set(t.subarray(0, 30), uiPtrs.telemetryIn);
+          uiF32.set(t.subarray(0, Math.min(t.length, 46)), uiPtrs.telemetryIn);
           uiWasm.wasm_ui_apply_telemetry();
         }
         if (msg.scopeBuffer && msg.scopeCount > 0) {

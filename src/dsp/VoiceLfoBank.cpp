@@ -11,26 +11,19 @@ constexpr float kLfoPotPoleTauSec = 0.0140f;      // 2-pole C^1 pot glide (~28 m
 constexpr float kTargetCrossfadeTauSec = 0.0042f; // ~12.5 ms clickless target crossfade
 constexpr float kInv24Bit = 1.0f / 16777216.0f;
 
-// 1% polystyrene timing capacitor tolerances per voice (deterministic 1.0 when drift disabled)
-constexpr std::array<float, kNumOscillators> kCapTolerance = {
-    1.0000f,
-    1.0063f,
-    0.9943f,
-    1.0109f,
+// 1% polystyrene timing capacitor tolerances per LFO ([0..3]=LFO A, [4..7]=LFO B)
+constexpr std::array<float, kNumVoiceLfos> kCapTolerance = {
+    1.0000f, 1.0063f, 0.9943f, 1.0109f, 0.9918f, 1.0087f, 1.0031f, 0.9964f,
 };
 
-constexpr std::array<uint32_t, kNumOscillators> kInitPhases = {
-    0x00000000u,
-    0x40000000u,
-    0x80000000u,
-    0xC0000000u,
+constexpr std::array<uint32_t, kNumVoiceLfos> kInitPhases = {
+    0x00000000u, 0x40000000u, 0x80000000u, 0xC0000000u,
+    0x80000000u, 0xC0000000u, 0x20000000u, 0x60000000u,
 };
 
-constexpr std::array<uint32_t, kNumOscillators> kInitSeeds = {
-    0x9E3779B9u,
-    0x85EBCA6Bu,
-    0xC2B2AE35u,
-    0x27D4EB2Fu,
+constexpr std::array<uint32_t, kNumVoiceLfos> kInitSeeds = {
+    0x9E3779B9u, 0x85EBCA6Bu, 0xC2B2AE35u, 0x27D4EB2Fu,
+    0x165667B1u, 0xD3A2646Cu, 0xFD7046C5u, 0xB55A4F09u,
 };
 
 } // namespace
@@ -74,7 +67,7 @@ void VoiceLfoBank::reset(float sampleRate) noexcept {
     sampleRate_ = (sampleRate > 8000.0f) ? sampleRate : kBaseSampleRate;
     hzToPhaseU32_ = 4294967296.0f / sampleRate_;
 
-    for (size_t i = 0u; i < kNumOscillators; ++i) {
+    for (size_t i = 0u; i < kNumVoiceLfos; ++i) {
         VoiceState& v = voices_[i];
         v.phase = kInitPhases[i];
         v.rngState = kInitSeeds[i];
@@ -87,7 +80,7 @@ void VoiceLfoBank::reset(float sampleRate) noexcept {
         v.packedKnots = packDriftKnots(v.knots);
 
         v.thermalState = 0.0f;
-        v.thermalCounter = static_cast<uint32_t>(i * 64u);
+        v.thermalCounter = static_cast<uint32_t>(i * 32u);
         v.cachedRateScale = enableDrift_ ? kCapTolerance[i] : 1.0f;
 
         v.rateHz.init(0.25f, kLfoPotPoleTauSec, sampleRate_);
@@ -104,103 +97,120 @@ void VoiceLfoBank::reset(float sampleRate) noexcept {
 }
 
 void VoiceLfoBank::updateTargets(const EngineControlState& state, bool snapImmediate) noexcept {
-    for (size_t i = 0u; i < kNumOscillators; ++i) {
-        const VoiceParams& vp = state.voices[i];
-        VoiceState& v = voices_[i];
+    for (size_t sub = 0u; sub < kLfosPerVoice; ++sub) {
+        const size_t maxAllowed = (sub == 0u) ? kNumLfoATargets : kNumLfoBTargets;
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            const VoiceParams& vp = state.voices[i];
+            VoiceState& v = voices_[lfoBankIndex(i, sub)];
 
-        const float rate = clampf(vp.lfoRateHz, kLfoFreqMinHz, kLfoFreqMaxHz);
-        const float shape = clampf(vp.lfoShape, 0.0f, 1.0f);
-        const float depth = clampf(vp.lfoDepth, 0.0f, 1.0f);
-        uint8_t targetIdx = static_cast<uint8_t>(vp.lfoTarget);
-        if (targetIdx >= kNumTargets) {
-            targetIdx = 0u;
-        }
-
-        if (snapImmediate) {
-            v.rateHz.snapTo(rate);
-            v.shape.snapTo(shape);
-            v.depth.snapTo(depth);
-            v.activeTarget = targetIdx;
-            v.crossfading = false;
-            for (size_t t = 0u; t < kNumTargets; ++t) {
-                v.targetWeights[t].snapTo((t == targetIdx) ? 1.0f : 0.0f);
+            const float rate = clampf(lfoSlotRateHz(vp, sub), kLfoFreqMinHz, kLfoFreqMaxHz);
+            const float shape = clampf(lfoSlotShape(vp, sub), 0.0f, 1.0f);
+            const float depth = clampf(lfoSlotDepth(vp, sub), 0.0f, 1.0f);
+            uint8_t targetIdx = static_cast<uint8_t>(lfoSlotTarget(vp, sub));
+            if (targetIdx >= maxAllowed) {
+                targetIdx = static_cast<uint8_t>(LfoTarget::LpCutoff);
             }
-        } else {
-            v.rateHz.setTarget(rate);
-            v.shape.setTarget(shape);
-            v.depth.setTarget(depth);
-            if (targetIdx != v.activeTarget) {
+
+            if (snapImmediate) {
+                v.rateHz.snapTo(rate);
+                v.shape.snapTo(shape);
+                v.depth.snapTo(depth);
                 v.activeTarget = targetIdx;
-                v.crossfading = true;
+                v.crossfading = false;
                 for (size_t t = 0u; t < kNumTargets; ++t) {
-                    v.targetWeights[t].setTarget((t == targetIdx) ? 1.0f : 0.0f);
+                    v.targetWeights[t].snapTo((t == targetIdx) ? 1.0f : 0.0f);
+                }
+            } else {
+                v.rateHz.setTarget(rate);
+                v.shape.setTarget(shape);
+                v.depth.setTarget(depth);
+                if (targetIdx != v.activeTarget) {
+                    v.activeTarget = targetIdx;
+                    v.crossfading = true;
+                    for (size_t t = 0u; t < kNumTargets; ++t) {
+                        v.targetWeights[t].setTarget((t == targetIdx) ? 1.0f : 0.0f);
+                    }
                 }
             }
         }
     }
 }
 
-std::array<VoiceLfoFrame, kNumOscillators> VoiceLfoBank::stepFrame() noexcept {
-    std::array<VoiceLfoFrame, kNumOscillators> frames{};
+void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth, float modBipolar,
+                            VoiceLfoFrame& out) noexcept {
+    VoiceState& v = voices_[idx];
 
+    const float baseRate = v.rateHz.next();
+    const float curShape = v.shape.next();
+    const float baseDepth = v.depth.next();
+
+    const float curRate = applyLfoModRateHz(baseRate, rateModDepth, modBipolar);
+    const float curDepth = applyLfoModDepth(baseDepth, depthModDepth, modBipolar);
+
+    if (enableDrift_) {
+        if ((v.thermalCounter++ & 255u) == 0u) {
+            const float n = nextUniformBipolar(v.thermalRng);
+            v.thermalState = sanitizeState(v.thermalState + 0.002f * (n - v.thermalState));
+            v.cachedRateScale = kCapTolerance[idx] * (1.0f + 0.0025f * v.thermalState);
+        }
+    } else {
+        v.cachedRateScale = 1.0f;
+    }
+
+    const float phase01 = static_cast<float>(v.phase >> 8u) * kInv24Bit;
+    out.phase01 = phase01;
+    out.driftPacked = v.packedKnots;
+    out.raw = evalMorphedLfoWave(phase01, curShape, curRate, v.knots);
+
+    if (v.crossfading) {
+        bool allSettled = true;
+        for (size_t t = 0u; t < kNumTargets; ++t) {
+            const float w = v.targetWeights[t].next();
+            out.targetDepths[t] = curDepth * w;
+            if (w != v.targetWeights[t].target()) {
+                allSettled = false;
+            }
+        }
+        if (allSettled) {
+            v.crossfading = false;
+        }
+    } else {
+        out.targetDepths[v.activeTarget] = curDepth;
+    }
+
+    const float effHz = clampf(curRate * v.cachedRateScale, 0.005f, kLfoFreqMaxHz * 1.1f);
+    const uint32_t inc = static_cast<uint32_t>(effHz * hzToPhaseU32_ + 0.5f);
+    const uint32_t nextPhase = v.phase + inc;
+    if (nextPhase < v.phase) {
+        v.knots[0] = v.knots[2];
+        v.knots[1] = v.knots[3];
+        v.knots[2] = v.knots[4];
+        v.knots[3] = nextDriftKnot(v);
+        v.knots[4] = nextDriftKnot(v);
+        v.packedKnots = packDriftKnots(v.knots);
+    }
+    v.phase = nextPhase;
+}
+
+std::array<VoiceLfoFrame, kNumVoiceLfos> VoiceLfoBank::stepFrame() noexcept {
+    std::array<VoiceLfoFrame, kNumVoiceLfos> frames{};
+
+    // 1. Step LFO B [4..7] first so LFO B -> LFO A Rate/Depth cross-modulation has zero delay
     for (size_t i = 0u; i < kNumOscillators; ++i) {
-        VoiceState& v = voices_[i];
-        VoiceLfoFrame& out = frames[i];
-
-        const float curRate = v.rateHz.next();
-        const float curShape = v.shape.next();
-        const float curDepth = v.depth.next();
-
-        if (enableDrift_) {
-            if ((v.thermalCounter++ & 255u) == 0u) {
-                const float n = nextUniformBipolar(v.thermalRng);
-                v.thermalState = sanitizeState(v.thermalState + 0.002f * (n - v.thermalState));
-                v.cachedRateScale = kCapTolerance[i] * (1.0f + 0.0025f * v.thermalState);
-            }
-        } else {
-            v.cachedRateScale = 1.0f;
-        }
-
-        const float phase01 = static_cast<float>(v.phase >> 8u) * kInv24Bit;
-        out.phase01 = phase01;
-        out.driftPacked = v.packedKnots;
-        out.raw = evalMorphedLfoWave(phase01, curShape, curRate, v.knots);
-
-        if (v.crossfading) {
-            bool allSettled = true;
-            for (size_t t = 0u; t < kNumTargets; ++t) {
-                const float w = v.targetWeights[t].next();
-                out.targetDepths[t] = curDepth * w;
-                if (w != v.targetWeights[t].target()) {
-                    allSettled = false;
-                }
-            }
-            if (allSettled) {
-                v.crossfading = false;
-            }
-        } else {
-            out.targetDepths[v.activeTarget] = curDepth;
-        }
-
-        const float effHz = clampf(curRate * v.cachedRateScale, 0.005f, kLfoFreqMaxHz * 1.1f);
-        const uint32_t inc = static_cast<uint32_t>(effHz * hzToPhaseU32_ + 0.5f);
-        const uint32_t nextPhase = v.phase + inc;
-        if (nextPhase < v.phase) {
-            v.knots[0] = v.knots[2];
-            v.knots[1] = v.knots[3];
-            v.knots[2] = v.knots[4];
-            v.knots[3] = nextDriftKnot(v);
-            v.knots[4] = nextDriftKnot(v);
-            v.packedKnots = packDriftKnots(v.knots);
-        }
-        v.phase = nextPhase;
+        stepSlot(4u + i, 0.0f, 0.0f, 0.0f, frames[4u + i]);
+    }
+    // 2. Step LFO A [0..3] with instantaneous LFO B Rate/Depth cross-modulation
+    for (size_t i = 0u; i < kNumOscillators; ++i) {
+        const VoiceLfoFrame& bOut = frames[4u + i];
+        stepSlot(i, bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoARate)],
+                 bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoADepth)], bOut.raw, frames[i]);
     }
 
     return frames;
 }
 
 void VoiceLfoBank::writeInitialTelemetry(EngineTelemetry& telemetry) const noexcept {
-    for (size_t i = 0u; i < kNumOscillators; ++i) {
+    for (size_t i = 0u; i < kNumVoiceLfos; ++i) {
         const VoiceState& v = voices_[i];
         const float phase01 = static_cast<float>(v.phase >> 8u) * kInv24Bit;
         const float raw =

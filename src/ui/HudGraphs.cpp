@@ -32,6 +32,8 @@ void HudGraphs::reset() noexcept {
         lc.fill(lfoZeroFixed);
     }
     lfoBeadIntensity_ = {0.0f, 0.0f, 0.0f, 0.0f};
+    lfoBeadBankIdx_ = {0u, 1u, 2u, 3u};
+    lfoSiblingWeight_ = 0.0f;
     lfoDivergenceSmooth_ = 0.0f;
     lfoGraphPhase_ = 0.0f;
 }
@@ -160,12 +162,13 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
         snapImmediate ? tgtLpInt : slewScalar(filterLpBeadInt_, tgtLpInt, alphaCurve, 0.002f);
 }
 
-void HudGraphs::updateLfoGraph(
-    float dtClamped, bool snapImmediate, bool showAllVoices, const EngineControlState& control,
-    const HudState& effectiveHud,
-    const std::array<uint32_t, kNumOscillators>& lfoDriftPacked) noexcept {
+void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate, bool showAllVoices,
+                               const EngineControlState& control, const HudState& effectiveHud,
+                               const LfoSignalArray& lfoOutput,
+                               const LfoDriftArray& lfoDriftPacked) noexcept {
     std::array<std::array<int16_t, kTracePoints>, kNumOscillators> tgtCurves{};
     std::array<float, kNumOscillators> tgtBeadInt{0.0f, 0.0f, 0.0f, 0.0f};
+    float tgtSibWeight = 0.0f;
     bool unified = true;
 
     constexpr float kInvPts = 1.0f / static_cast<float>(kTracePoints - 1u);
@@ -175,43 +178,53 @@ void HudGraphs::updateLfoGraph(
         {-24, 16, -26, 21, -15},
         {17, -25, 14, -22, 26},
     }};
-
-    if (!showAllVoices) {
-        const uint8_t v = effectiveHud.lfoVoiceFocus & 3u;
-        const VoiceParams& vp = control.voices[v];
-        const float d = clampf(vp.lfoDepth, 0.0f, 1.0f);
+    const auto buildSlotCurve = [&](size_t voiceIdx, size_t subIdx,
+                                    std::array<int16_t, kTracePoints>& dst,
+                                    float& outLiveDepth) noexcept {
+        const VoiceParams& vp = control.voices[voiceIdx & 3u];
+        const float lfoBRaw = lfoOutput[lfoBankIndex(voiceIdx, 1u)];
+        const float d =
+            clampf((subIdx == 0u) ? computeLiveLfoADepth(vp, lfoBRaw) : vp.lfoBDepth, 0.0f, 1.0f);
+        const float r = (subIdx == 0u) ? computeLiveLfoARateHz(vp, lfoBRaw) : vp.lfoBRateHz;
+        const float sh = lfoSlotShape(vp, subIdx);
         const float shapedDepth = d * (1.35f - 0.35f * d);
         const float ampPx = kLfoMaxAmpPx * (0.46f + 0.54f * shapedDepth);
-        const std::array<int8_t, 5> knots = (lfoDriftPacked[v] != 0u)
-                                                ? unpackDriftKnots(lfoDriftPacked[v])
-                                                : kFallbackDriftKnots[v];
-
+        const size_t bankIdx = lfoBankIndex(voiceIdx, subIdx);
+        const std::array<int8_t, 5> knots = (lfoDriftPacked[bankIdx] != 0u)
+                                                ? unpackDriftKnots(lfoDriftPacked[bankIdx])
+                                                : kFallbackDriftKnots[bankIdx & 3u];
         for (size_t i = 0u; i < kTracePoints; ++i) {
             const float u = static_cast<float>(i) * kInvPts;
-            const float w = evalMorphedLfoWave(u, vp.lfoShape, vp.lfoRateHz, knots);
+            const float w = evalMorphedLfoWave(u, sh, r, knots);
             const float yMain = clampf(kLfoYZero - ampPx * w, kLfoYTop, kLfoYBot);
-            const auto qMain = static_cast<int16_t>(yMain * 64.0f + 0.5f);
-            tgtCurves[0][i] = qMain;
-            tgtCurves[1][i] = qMain;
-            tgtCurves[2][i] = qMain;
-            tgtCurves[3][i] = qMain;
+            dst[i] = static_cast<int16_t>(yMain * 64.0f + 0.5f);
         }
-        tgtBeadInt[v] = 0.88f + 0.12f * smoothstep01(d * 3.0f);
+        outLiveDepth = d;
+    };
+
+    if (!showAllVoices) {
+        const uint8_t slot = effectiveHud.lfoVoiceFocus & 7u;
+        const uint8_t v = lfoFocusVoice(slot);
+        const uint8_t sub = lfoFocusSub(slot);
+        const uint8_t sibSub = static_cast<uint8_t>(sub ^ 1u);
+        float dMain = 0.0f;
+        float dSib = 0.0f;
+        buildSlotCurve(v, sub, tgtCurves[0], dMain);
+        buildSlotCurve(v, sibSub, tgtCurves[1], dSib);
+        tgtCurves[2] = tgtCurves[0];
+        tgtCurves[3] = tgtCurves[0];
+
+        lfoBeadBankIdx_[0] = static_cast<uint8_t>(lfoBankIndex(v, sub));
+        lfoBeadBankIdx_[1] = static_cast<uint8_t>(lfoBankIndex(v, sibSub));
+        tgtBeadInt[0] = 0.88f + 0.12f * smoothstep01(dMain * 3.0f);
+        tgtSibWeight = (lfoSlotDepth(control.voices[v], sibSub) > 0.002f) ? 0.34f : 0.0f;
     } else {
         for (size_t v = 0u; v < kNumOscillators; ++v) {
             const VoiceParams& vp = control.voices[v];
-            const float d = clampf(vp.lfoDepth, 0.0f, 1.0f);
-            const float shapedDepth = d * (1.35f - 0.35f * d);
-            const float ampPx = kLfoMaxAmpPx * (0.46f + 0.54f * shapedDepth);
-            const std::array<int8_t, 5> knots = (lfoDriftPacked[v] != 0u)
-                                                    ? unpackDriftKnots(lfoDriftPacked[v])
-                                                    : kFallbackDriftKnots[v];
-            for (size_t i = 0u; i < kTracePoints; ++i) {
-                const float u = static_cast<float>(i) * kInvPts;
-                const float w = evalMorphedLfoWave(u, vp.lfoShape, vp.lfoRateHz, knots);
-                const float yMain = clampf(kLfoYZero - ampPx * w, kLfoYTop, kLfoYBot);
-                tgtCurves[v][i] = static_cast<int16_t>(yMain * 64.0f + 0.5f);
-            }
+            const size_t sub = (vp.lfoBDepth > vp.lfoDepth && vp.lfoBDepth > 0.002f) ? 1u : 0u;
+            float d = 0.0f;
+            buildSlotCurve(v, sub, tgtCurves[v], d);
+            lfoBeadBankIdx_[v] = static_cast<uint8_t>(lfoBankIndex(v, sub));
             tgtBeadInt[v] = 0.76f + 0.16f * smoothstep01(d * 3.0f);
         }
         for (size_t v = 1u; v < kNumOscillators; ++v) {
@@ -234,6 +247,9 @@ void HudGraphs::updateLfoGraph(
 
     lfoDivergenceSmooth_ =
         slewScalar(lfoDivergenceSmooth_, unified ? 0.0f : 1.0f, alphaDiv, 0.001f);
+    lfoSiblingWeight_ = snapImmediate
+                            ? tgtSibWeight
+                            : slewScalar(lfoSiblingWeight_, tgtSibWeight, alphaCurve, 0.002f);
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         for (size_t i = 0u; i < kTracePoints; ++i) {
@@ -248,8 +264,8 @@ void HudGraphs::updateLfoGraph(
 
 void HudGraphs::update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                        const HudState& effectiveHud, bool extraCenterViewActive,
-                       const std::array<float, kNumOscillators>& lfoOutput,
-                       const std::array<uint32_t, kNumOscillators>& lfoDriftPacked) noexcept {
+                       const LfoSignalArray& lfoOutput,
+                       const LfoDriftArray& lfoDriftPacked) noexcept {
     const bool hudVisible = (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None);
     const bool rawFilterActive =
         hudVisible &&
@@ -276,15 +292,17 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
                     ? (rawHud.focusedVoice & 3u)
                     : (effectiveHud.fxVoiceFocus & 3u);
             const VoiceParams& vp = control.voices[v];
-            const ModulatedFilterParams mod =
-                computeLiveVoiceFilter(vp, control.voicePressure[v], pitchMode, lfoOutput[v]);
+            const ModulatedFilterParams mod = computeLiveVoiceFilter(
+                vp, control.voicePressure[v], pitchMode, lfoOutput[lfoBankIndex(v, 0u)],
+                lfoOutput[lfoBankIndex(v, 1u)]);
             mods = {mod, mod, mod, mod};
             unified = true;
         } else {
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 const VoiceParams& vp = control.voices[i];
-                mods[i] =
-                    computeLiveVoiceFilter(vp, control.voicePressure[i], pitchMode, lfoOutput[i]);
+                mods[i] = computeLiveVoiceFilter(vp, control.voicePressure[i], pitchMode,
+                                                 lfoOutput[lfoBankIndex(i, 0u)],
+                                                 lfoOutput[lfoBankIndex(i, 1u)]);
             }
             for (size_t i = 1u; i < kNumOscillators; ++i) {
                 if (absf(mods[i].hpCutoffHz - mods[0].hpCutoffHz) >
@@ -307,7 +325,8 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
         const bool snapLfo = (lfoGraphPhase_ <= 0.015f);
         lfoGraphPhase_ = stepHudFadeLinear(lfoGraphPhase_, true, dtClamped);
         const bool showAll = (rawHud.knobBank == KnobBankMode::GlobalLfo);
-        updateLfoGraph(dtClamped, snapLfo, showAll, control, effectiveHud, lfoDriftPacked);
+        updateLfoGraph(dtClamped, snapLfo, showAll, control, effectiveHud, lfoOutput,
+                       lfoDriftPacked);
     } else {
         lfoGraphPhase_ = stepHudFadeLinear(lfoGraphPhase_, false, dtClamped);
     }
@@ -316,10 +335,10 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
     filterBackdropDim_ = stepHudFadeLinear(filterBackdropDim_, wantBackdrop, dtClamped);
 }
 
-void HudGraphs::compositeLfoStrip(
-    int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint16_t* linScratch,
-    float effLfoAlpha01, uint8_t lfoAlpha8, const EngineControlState& control, const HudState& hud,
-    const std::array<float, kNumOscillators>& lfoPhase) const noexcept {
+void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
+                                  uint16_t* linScratch, float effLfoAlpha01, uint8_t lfoAlpha8,
+                                  const EngineControlState& control, const HudState& hud,
+                                  const LfoSignalArray& lfoPhase) const noexcept {
     if (lfoAlpha8 == 0u || y1 <= 12 || y0 >= 206) {
         return;
     }
@@ -335,9 +354,13 @@ void HudGraphs::compositeLfoStrip(
             if (control.voices[vi].lfoDepth > maxD) {
                 maxD = control.voices[vi].lfoDepth;
             }
+            if (control.voices[vi].lfoBDepth > maxD) {
+                maxD = control.voices[vi].lfoBDepth;
+            }
         }
     } else {
-        maxD = control.voices[hud.lfoVoiceFocus & 3u].lfoDepth;
+        const uint8_t slot = hud.lfoVoiceFocus & 7u;
+        maxD = lfoSlotDepth(control.voices[lfoFocusVoice(slot)], lfoFocusSub(slot));
     }
     const float lfoEnergy = smoothstep01(clampf(maxD, 0.0f, 1.0f) * 3.0f);
     const float spineModeScale = 0.58f + 0.42f * lfoEnergy;
@@ -450,6 +473,16 @@ void HudGraphs::compositeLfoStrip(
     if (y1 > static_cast<int>(kLfoYTop) - 4 && y0 <= static_cast<int>(kLfoYBot) + 4) {
         std::memset(linScratch, 0,
                     static_cast<size_t>(stripHeight) * kDisplayWidth * sizeof(uint16_t));
+        if (!multiCurves && lfoSiblingWeight_ > 0.005f) {
+            const float sibWgt = lfoSiblingWeight_ * effLfoAlpha01;
+            const auto& sibPts = lfoCurvesFixed_[1];
+            for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                splatPhotonSegment(static_cast<int>(colX),
+                                   static_cast<float>(sibPts[colX]) * kFixedToPx,
+                                   static_cast<float>(sibPts[colX + 1u]) * kFixedToPx, sibWgt,
+                                   0.60f, y0, y1, linScratch);
+            }
+        }
         const float mainCurveWgt =
             (multiCurves ? (0.28f + 0.28f * div) : 1.04f) * spineModeScale * effLfoAlpha01;
         if (mainCurveWgt > 0.004f) {
@@ -466,23 +499,37 @@ void HudGraphs::compositeLfoStrip(
         screenBlendLinearStrip(stripHeight, 0u, kDisplayWidth, linScratch, lumBuf);
     }
 
+    const auto evalCurveBeadPos = [&](size_t curveIdx, float phase01, float& outX,
+                                      float& outY) noexcept {
+        const float ph = clampf(phase01, 0.0f, 0.999999f);
+        const float uIdx = ph * static_cast<float>(kDisplayWidth);
+        const size_t i0 = (static_cast<size_t>(uIdx) < kDisplayWidth) ? static_cast<size_t>(uIdx)
+                                                                      : (kDisplayWidth - 1u);
+        const float frac = uIdx - static_cast<float>(i0);
+        const float y0Px = static_cast<float>(lfoCurvesFixed_[curveIdx][i0]) * kFixedToPx;
+        const float y1Px = static_cast<float>(lfoCurvesFixed_[curveIdx][i0 + 1u]) * kFixedToPx;
+        outX = clampf(uIdx, 0.0f, static_cast<float>(kDisplayWidth - 1u));
+        outY = y0Px + frac * (y1Px - y0Px);
+    };
+
+    if (!multiCurves && lfoSiblingWeight_ > 0.005f) {
+        float sibX = 0.0f;
+        float sibY = 0.0f;
+        evalCurveBeadPos(1u, lfoPhase[lfoBeadBankIdx_[1] & 7u], sibX, sibY);
+        lfoCv.drawOpticalBead(sibX, sibY, clampf(lfoSiblingWeight_ * 1.45f, 0.0f, 0.55f), 1.65f);
+    }
+
     for (size_t bv = 0u; bv < kNumOscillators; ++bv) {
         const float lfoVis = lfoBeadIntensity_[bv];
         if (lfoVis <= 0.005f) {
             continue;
         }
-        const float ph = clampf(lfoPhase[bv], 0.0f, 0.999999f);
-        const float uIdx = ph * static_cast<float>(kDisplayWidth);
-        const size_t i0 = (static_cast<size_t>(uIdx) < kDisplayWidth) ? static_cast<size_t>(uIdx)
-                                                                      : (kDisplayWidth - 1u);
-        const size_t i1 = i0 + 1u;
-        const float frac = uIdx - static_cast<float>(i0);
-        const size_t curveIdx = multiCurves ? bv : 0u;
-        const float y0Px = static_cast<float>(lfoCurvesFixed_[curveIdx][i0]) * kFixedToPx;
-        const float y1Px = static_cast<float>(lfoCurvesFixed_[curveIdx][i1]) * kFixedToPx;
-        const float beadX = clampf(uIdx, 0.0f, static_cast<float>(kDisplayWidth - 1u));
-        const float beadY = y0Px + frac * (y1Px - y0Px);
-        lfoCv.drawLfoPhaseBeacon(beadX, beadY, lfoVis, control.voices[bv].lfoDepth);
+        const size_t bankIdx = lfoBeadBankIdx_[bv] & 7u;
+        float beadX = 0.0f;
+        float beadY = 0.0f;
+        evalCurveBeadPos(multiCurves ? bv : 0u, lfoPhase[bankIdx], beadX, beadY);
+        const float dSlot = lfoSlotDepth(control.voices[bankIdx & 3u], bankIdx >> 2u);
+        lfoCv.drawLfoPhaseBeacon(beadX, beadY, lfoVis, dSlot);
     }
 }
 

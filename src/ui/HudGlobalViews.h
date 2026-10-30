@@ -16,7 +16,7 @@ class HudGlobalViews {
     void clearImmediate() noexcept;
 
     void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
-                const std::array<float, kNumOscillators>& lfoOutput) noexcept;
+                const LfoSignalArray& lfoOutput) noexcept;
 
     float freqPhase() const noexcept { return freqPhase_; }
 

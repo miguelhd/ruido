@@ -61,8 +61,7 @@ bool HudGlobalViews::hasResidualPhase() const noexcept {
 }
 
 void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
-                            const HudState& rawHud,
-                            const std::array<float, kNumOscillators>& lfoOutput) noexcept {
+                            const HudState& rawHud, const LfoSignalArray& lfoOutput) noexcept {
     const bool hudVisible = (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None);
     const bool freqActive = hudVisible && (rawHud.knobBank == KnobBankMode::GlobalFreq);
     const bool ampActive =
@@ -93,21 +92,17 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         const VoiceParams& vp = control.voices[v];
+        const float lfoA = lfoOutput[lfoBankIndex(v, 0u)];
+        const float lfoB = lfoOutput[lfoBankIndex(v, 1u)];
         const VoiceAudibility aud = computeVoiceAudibility(vp, control.voicePressure[v], pitchMode);
         const bool silentMute = aud.muteBlend >= 0.999f;
         const float dim = aud.inaudibleDim;
         const float pMul = computeVoicePitchRatio(control.voicePressure[v], pitchMode);
-        const float lfoHz = (vp.lfoTarget == LfoTarget::Pitch)
-                                ? applyLfoPitchHz(vp.frequencyHz, vp.lfoDepth, lfoOutput[v])
-                                : vp.frequencyHz;
+        const float lfoHz = computeLiveVoicePitchHz(vp, lfoA, lfoB);
         const float liveHz = clampf(lfoHz * pMul, kAudioFreqMinHz, kAudioFreqMaxHz);
-        const float liveAmpRaw = (vp.lfoTarget == LfoTarget::Amplitude)
-                                     ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoOutput[v])
-                                     : vp.amplitude;
+        const float liveAmpRaw = computeLiveVoiceAmplitude(vp, lfoA, lfoB);
         const float liveAmp = silentMute ? 0.0f : clampf(liveAmpRaw, 0.0f, 1.0f);
-        const float livePanRaw = (vp.lfoTarget == LfoTarget::Pan)
-                                     ? applyLfoPan(vp.pan, vp.lfoDepth, lfoOutput[v])
-                                     : vp.pan;
+        const float livePanRaw = computeLiveVoicePan(vp, lfoA, lfoB);
         const float livePan = clampf(livePanRaw * panScale, -1.0f, 1.0f);
 
         if (freqActive) {
@@ -139,7 +134,7 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
                 clampf((fastLog2(liveHz) - kFilterLogMin) * (1.0f / kFilterLogSpan), 0.0f, 1.0f);
             const float tx = filterNormToScreenX(uFlt);
             const ModulatedFilterParams mod =
-                computeLiveVoiceFilter(vp, control.voicePressure[v], pitchMode, lfoOutput[v]);
+                computeLiveVoiceFilter(vp, control.voicePressure[v], pitchMode, lfoA, lfoB);
             const DualMs20Coeffs c = makeDualMs20Coeffs(mod.hpCutoffHz, mod.hpResonance,
                                                         mod.lpCutoffHz, mod.lpResonance);
             const float db = evalDualMs20Db(liveHz, c);

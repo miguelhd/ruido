@@ -10,17 +10,38 @@
 
 namespace ruido {
 
-// Per-voice LFO modulation destinations (1-to-1 with VoiceParams circuit parameters).
+// Per-voice LFO modulation destinations (LFO A: Pitch..Pan; LFO B adds LfoARate & LfoADepth).
 enum class LfoTarget : uint8_t {
     Pitch = 0,       // PITCH
-    LpCutoff = 1,    // LPF (default)
-    LpResonance = 2, // LP RES
-    HpCutoff = 3,    // HPF
-    HpResonance = 4, // HP RES
-    Amplitude = 5,   // AMP
-    Pan = 6,         // PAN
-    Count = 7
+    PulseWidth = 1,  // WIDTH (band-limited 5-95% Schmitt PWM)
+    LpCutoff = 2,    // LPF (default)
+    LpResonance = 3, // LP RES
+    HpCutoff = 4,    // HPF
+    HpResonance = 5, // HP RES
+    Amplitude = 6,   // AMP
+    Pan = 7,         // PAN
+    LfoARate = 8,    // A RATE  (LFO B only: modulates LFO A speed)
+    LfoADepth = 9,   // A DEPTH (LFO B only: swells/fades LFO A strength)
+    Count = 10
 };
+
+inline constexpr size_t kNumLfoATargets = 8u; // Pitch .. Pan
+inline constexpr size_t kNumLfoBTargets = static_cast<size_t>(LfoTarget::Count);
+using LfoSignalArray = std::array<float, kNumVoiceLfos>;
+using LfoDriftArray = std::array<uint32_t, kNumVoiceLfos>;
+
+// Bank index inside LfoSignalArray / EngineTelemetry: [0..3] = Osc 1..4 LFO A, [4..7] = Osc 1..4
+// LFO B
+inline constexpr size_t lfoBankIndex(size_t voiceIdx, size_t subIdx) noexcept {
+    return (subIdx & 1u) * kNumOscillators + (voiceIdx & 3u);
+}
+// Decode SELECT focus slot 0..7 (OSC 1A, 1B, 2A, 2B, 3A, 3B, 4A, 4B)
+inline constexpr uint8_t lfoFocusVoice(uint8_t slotFocus) noexcept {
+    return static_cast<uint8_t>((slotFocus >> 1u) & 3u);
+}
+inline constexpr uint8_t lfoFocusSub(uint8_t slotFocus) noexcept {
+    return static_cast<uint8_t>(slotFocus & 1u);
+}
 
 // User-facing per-oscillator state (serializable into <= 128B quantized snapshots in Milestone 3).
 struct VoiceParams {
@@ -33,12 +54,41 @@ struct VoiceParams {
     float lpResonance = 0.0f;              // [0.0, 1.0] Rev 2 (0-60%) -> Korg35 (60-100%) Peak
     float amplitude = kDefaultVoiceAmp;    // [0.0, 0.70] clean VCA; (0.70, 1.0] MS-20 overdrive
     float pan = 0.0f;                      // [-1.0 (Left), +1.0 (Right)]
-    float lfoRateHz = 0.25f;               // [0.01, 2000.0] Hz ultra-slow -> audio-rate FM/AM
-    float lfoShape = 0.0f;                 // [0.0, 1.0] Sine -> Tri -> Saw -> Square -> Drift
-    float lfoDepth = 0.0f;                 // [0.0, 1.0] LFO modulation amount (0 = off)
-    LfoTarget lfoTarget = LfoTarget::LpCutoff; // KNOB1 LFO destination
-    bool muted = false;                        // White Keys 1-4 latching mute
+    float lfoRateHz = 0.25f;               // [0.01, 2000.0] Hz LFO A rate
+    float lfoShape = 0.0f;                 // [0.0, 1.0] LFO A Sine->Tri->Saw->Square->Drift
+    float lfoDepth = 0.0f;                 // [0.0, 1.0] LFO A modulation amount (0 = off)
+    LfoTarget lfoTarget = LfoTarget::LpCutoff;  // KNOB1 LFO A destination (Pitch..Pan)
+    float lfoBRateHz = 0.25f;                   // [0.01, 2000.0] Hz LFO B rate
+    float lfoBShape = 0.0f;                     // [0.0, 1.0] LFO B shape
+    float lfoBDepth = 0.0f;                     // [0.0, 1.0] LFO B modulation amount (0 = off)
+    LfoTarget lfoBTarget = LfoTarget::LpCutoff; // KNOB1 LFO B destination (Pitch..LfoADepth)
+    bool muted = false;                         // White Keys 1-4 latching mute
 };
+
+inline constexpr float lfoSlotRateHz(const VoiceParams& vp, size_t sub) noexcept {
+    return ((sub & 1u) == 0u) ? vp.lfoRateHz : vp.lfoBRateHz;
+}
+inline constexpr float lfoSlotShape(const VoiceParams& vp, size_t sub) noexcept {
+    return ((sub & 1u) == 0u) ? vp.lfoShape : vp.lfoBShape;
+}
+inline constexpr float lfoSlotDepth(const VoiceParams& vp, size_t sub) noexcept {
+    return ((sub & 1u) == 0u) ? vp.lfoDepth : vp.lfoBDepth;
+}
+inline constexpr LfoTarget lfoSlotTarget(const VoiceParams& vp, size_t sub) noexcept {
+    return ((sub & 1u) == 0u) ? vp.lfoTarget : vp.lfoBTarget;
+}
+inline float& lfoSlotRateHzRef(VoiceParams& vp, size_t sub) noexcept {
+    return ((sub & 1u) == 0u) ? vp.lfoRateHz : vp.lfoBRateHz;
+}
+inline float& lfoSlotShapeRef(VoiceParams& vp, size_t sub) noexcept {
+    return ((sub & 1u) == 0u) ? vp.lfoShape : vp.lfoBShape;
+}
+inline float& lfoSlotDepthRef(VoiceParams& vp, size_t sub) noexcept {
+    return ((sub & 1u) == 0u) ? vp.lfoDepth : vp.lfoBDepth;
+}
+inline LfoTarget& lfoSlotTargetRef(VoiceParams& vp, size_t sub) noexcept {
+    return ((sub & 1u) == 0u) ? vp.lfoTarget : vp.lfoBTarget;
+}
 
 // EDIT page two-zone channel gain law:
 //  - [0.00, 0.70]: clean post-filter VCA attenuation (0.0 -> 0.72x clean ceiling, preDrive = 1.0x)
@@ -165,6 +215,10 @@ struct EngineControlState {
             s.voices[i].lfoShape = 0.0f;
             s.voices[i].lfoDepth = 0.0f;
             s.voices[i].lfoTarget = LfoTarget::LpCutoff;
+            s.voices[i].lfoBRateHz = 0.25f;
+            s.voices[i].lfoBShape = 0.0f;
+            s.voices[i].lfoBDepth = 0.0f;
+            s.voices[i].lfoBTarget = LfoTarget::LpCutoff;
             s.voices[i].muted = false;
         }
         return s;
@@ -313,26 +367,23 @@ struct EngineTelemetry {
         std::atomic<float>{0.0f},
         std::atomic<float>{0.0f},
     };
-    // Instantaneous [-1.0, +1.0] bipolar LFO wave output per voice (HUD animation & LFO LED)
-    std::array<std::atomic<float>, kNumOscillators> lfoOutput{
-        std::atomic<float>{0.0f},
-        std::atomic<float>{0.0f},
-        std::atomic<float>{0.0f},
-        std::atomic<float>{0.0f},
+    // Instantaneous [-1.0, +1.0] bipolar LFO wave output ([0..3]=Osc 1..4 A, [4..7]=Osc 1..4 B)
+    std::array<std::atomic<float>, kNumVoiceLfos> lfoOutput{
+        std::atomic<float>{0.0f}, std::atomic<float>{0.0f}, std::atomic<float>{0.0f},
+        std::atomic<float>{0.0f}, std::atomic<float>{0.0f}, std::atomic<float>{0.0f},
+        std::atomic<float>{0.0f}, std::atomic<float>{0.0f},
     };
-    // Instantaneous [0.0, 1.0) LFO phase per voice (anchors moving optical phase bead on HUD)
-    std::array<std::atomic<float>, kNumOscillators> lfoPhase{
-        std::atomic<float>{0.0f},
-        std::atomic<float>{0.0f},
-        std::atomic<float>{0.0f},
-        std::atomic<float>{0.0f},
+    // Instantaneous [0.0, 1.0) LFO phase ([0..3]=Osc 1..4 A, [4..7]=Osc 1..4 B)
+    std::array<std::atomic<float>, kNumVoiceLfos> lfoPhase{
+        std::atomic<float>{0.0f}, std::atomic<float>{0.0f}, std::atomic<float>{0.0f},
+        std::atomic<float>{0.0f}, std::atomic<float>{0.0f}, std::atomic<float>{0.0f},
+        std::atomic<float>{0.0f}, std::atomic<float>{0.0f},
     };
-    // Packed 5 x 6-bit signed C^2 B-spline drift knots per voice for tear-free HUD drift curve
-    std::array<std::atomic<uint32_t>, kNumOscillators> lfoDriftPacked{
-        std::atomic<uint32_t>{0u},
-        std::atomic<uint32_t>{0u},
-        std::atomic<uint32_t>{0u},
-        std::atomic<uint32_t>{0u},
+    // Packed 5 x 6-bit signed C^2 B-spline drift knots ([0..3]=Osc 1..4 A, [4..7]=Osc 1..4 B)
+    std::array<std::atomic<uint32_t>, kNumVoiceLfos> lfoDriftPacked{
+        std::atomic<uint32_t>{0u}, std::atomic<uint32_t>{0u}, std::atomic<uint32_t>{0u},
+        std::atomic<uint32_t>{0u}, std::atomic<uint32_t>{0u}, std::atomic<uint32_t>{0u},
+        std::atomic<uint32_t>{0u}, std::atomic<uint32_t>{0u},
     };
     // Post-VCA per-voice peak amplitude [0.0, ~2.0] for EDIT page plasma & overdrive LED flare
     std::array<std::atomic<float>, kNumOscillators> voicePeak{

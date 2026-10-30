@@ -86,8 +86,8 @@ void applyGlobalKnobDelta(GlobalTarget target, uint8_t knobIdx, int32_t ticks, K
 
 // Evaluate normalized gauge position, per-voice spread beads, and acoustic readout value
 // for column `knobIdx` (0..3) of any Global* KnobBankMode.
-GlobalColumnSummary
-evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx, const EngineControlState& control,
-                     const std::array<float, kNumOscillators>& lfoOutput) noexcept;
+GlobalColumnSummary evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx,
+                                         const EngineControlState& control,
+                                         const LfoSignalArray& lfoOutput) noexcept;
 
 } // namespace ruido

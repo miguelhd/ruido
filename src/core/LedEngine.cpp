@@ -76,23 +76,26 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
         0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(smooth.animPhase * kSubAudioBreathHz)));
 
     float maxLfoDepth = 0.0f;
-    size_t dominantLfoVoice = 0u;
+    size_t dominantLfoBankIdx = 0u;
     float maxOverdriveNorm = 0.0f;
     float maxOverdrivePeak = 0.0f;
     float maxFilterEngagement = 0.0f;
 
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceParams& vp = ctx.state.voices[i];
-        const float lfoRaw = ctx.telemetry.lfoOutput[i].load(std::memory_order_relaxed);
-        const float effAmp = (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > 0.0f)
-                                 ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoRaw)
-                                 : vp.amplitude;
+        const float lfoARaw = ctx.telemetry.lfoOutput[i].load(std::memory_order_relaxed);
+        const float lfoBRaw = ctx.telemetry.lfoOutput[4u + i].load(std::memory_order_relaxed);
+        const float effAmp = computeLiveVoiceAmplitude(vp, lfoARaw, lfoBRaw);
         const float vPeak = ctx.telemetry.voicePeak[i].load(std::memory_order_relaxed);
         const float p = clampf(ctx.state.voicePressure[i], 0.0f, 1.0f);
 
         if (vp.lfoDepth > maxLfoDepth) {
             maxLfoDepth = vp.lfoDepth;
-            dominantLfoVoice = i;
+            dominantLfoBankIdx = i;
+        }
+        if (vp.lfoBDepth > maxLfoDepth) {
+            maxLfoDepth = vp.lfoBDepth;
+            dominantLfoBankIdx = 4u + i;
         }
         if (!vp.muted && effAmp > kCleanAmpKnee) {
             const float driveNorm =
@@ -105,7 +108,8 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
             }
         }
         if (!vp.muted || p > 0.001f) {
-            const ModulatedFilterParams flt = computeLiveVoiceFilter(vp, p, pitchMode, lfoRaw);
+            const ModulatedFilterParams flt =
+                computeLiveVoiceFilter(vp, p, pitchMode, lfoARaw, lfoBRaw);
             constexpr float kHpMinOct = cxLog2Pos(kFilterCutoffMinHz);
             constexpr float kLpMaxOct = cxLog2Pos(kFilterCutoffMaxHz);
             const float hpEng =
@@ -129,14 +133,23 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
         }
 
         // Taper visual LFO modulation on key LEDs above 2..7 Hz so audio-rate FM/AM never strobes
-        const float lfoVisWeight = 1.0f - smoothstep01((vp.lfoRateHz - 2.0f) * 0.20f);
-        const float visAmp =
-            (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > 0.0f)
-                ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth * lfoVisWeight, lfoRaw)
-                : vp.amplitude;
-        const float visAmpDepth = (vp.lfoTarget == LfoTarget::Amplitude)
-                                      ? clampf(vp.lfoDepth * lfoVisWeight, 0.0f, 1.0f)
-                                      : 0.0f;
+        const float effRateA = computeLiveLfoARateHz(vp, lfoBRaw);
+        const float effDepthA = computeLiveLfoADepth(vp, lfoBRaw);
+        const float lfoVisWeightA = 1.0f - smoothstep01((effRateA - 2.0f) * 0.20f);
+        const float lfoVisWeightB = 1.0f - smoothstep01((vp.lfoBRateHz - 2.0f) * 0.20f);
+        float visAmp = (vp.lfoTarget == LfoTarget::Amplitude && effDepthA > 0.0f)
+                           ? applyLfoAmplitude(vp.amplitude, effDepthA * lfoVisWeightA, lfoARaw)
+                           : vp.amplitude;
+        if (vp.lfoBTarget == LfoTarget::Amplitude && vp.lfoBDepth > 0.0f) {
+            visAmp = applyLfoAmplitude(visAmp, vp.lfoBDepth * lfoVisWeightB, lfoBRaw);
+        }
+        const float visDepthA = (vp.lfoTarget == LfoTarget::Amplitude)
+                                    ? clampf(effDepthA * lfoVisWeightA, 0.0f, 1.0f)
+                                    : 0.0f;
+        const float visDepthB = (vp.lfoBTarget == LfoTarget::Amplitude)
+                                    ? clampf(vp.lfoBDepth * lfoVisWeightB, 0.0f, 1.0f)
+                                    : 0.0f;
+        const float visAmpDepth = (visDepthB > visDepthA) ? visDepthB : visDepthA;
 
         const VoiceAudibility aud = computeVoiceAudibility(vp, p, pitchMode);
         smooth.subAudioBlendSmooth[i] +=
@@ -211,11 +224,13 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     if (ctx.hud.lfoPageOpen) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] = 1.0f;
     } else if (maxLfoDepth > 1.0e-4f) {
-        const size_t focusV = (ctx.hud.lfoVoiceFocus < kNumOscillators &&
-                               ctx.state.voices[ctx.hud.lfoVoiceFocus].lfoDepth > 1.0e-4f)
-                                  ? static_cast<size_t>(ctx.hud.lfoVoiceFocus)
-                                  : dominantLfoVoice;
-        const float raw = ctx.telemetry.lfoOutput[focusV].load(std::memory_order_relaxed);
+        const uint8_t slotFocus = static_cast<uint8_t>(ctx.hud.lfoVoiceFocus & 7u);
+        const size_t focV = lfoFocusVoice(slotFocus);
+        const size_t focSub = lfoFocusSub(slotFocus);
+        const size_t focusBankIdx = (lfoSlotDepth(ctx.state.voices[focV], focSub) > 1.0e-4f)
+                                        ? lfoBankIndex(focV, focSub)
+                                        : dominantLfoBankIdx;
+        const float raw = ctx.telemetry.lfoOutput[focusBankIdx].load(std::memory_order_relaxed);
         const float u = 0.5f * (clampf(raw, -1.0f, 1.0f) + 1.0f);
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] =
             0.15f + (0.08f + 0.37f * clampf(maxLfoDepth, 0.0f, 1.0f)) * u;

@@ -83,7 +83,7 @@ assert.ok(energyL > 1.0 && energyR > 1.0);
 
 const telIdx = ex.wasm_dsp_read_telemetry() >> 2;
 const telInIdx = ex.wasm_ui_get_telemetry_in_ptr() >> 2;
-for (let i = 0; i < 30; i++) {
+for (let i = 0; i < 46; i++) {
   f32[telInIdx + i] = f32[telIdx + i];
 }
 ex.wasm_ui_apply_telemetry();
@@ -125,23 +125,30 @@ assert.equal(f32[summaryIdx + 37], 0.0);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.0) < 1e-6);
 assert.ok(f32[ledsIdx + 27 + 2] > 0.30 && f32[ledsIdx + 27 + 2] <= 0.85);
 
-// Open Per-Voice LFO Page (button 5), step SELECT (encoder 0), edit KNOB1-4,
-// and verify 26-float LFO + 30-bit drift knot telemetry roundtrip & monochrome LFO graph!
+// Open Dual Per-Voice LFO Page (button 5), step SELECT (encoder 0) across 1A -> 1B -> 2A,
+// edit KNOB1-4 (including 1B -> A RATE), and verify 46-float Dual-LFO telemetry roundtrip!
 ex.wasm_ui_button(5, 1);
 ex.wasm_ui_button(5, 0);
 assert.equal(f32[summaryIdx + 39], 1.0); // lfoPageOpen === true
-assert.equal(f32[summaryIdx + 40], 0.0); // lfoVoiceFocus === 0 (OSC 1)
+assert.equal(f32[summaryIdx + 40], 0.0); // lfoVoiceFocus === 0 (OSC 1A)
 
-ex.wasm_ui_encoder(0, 4); // SELECT -> OSC 2
+ex.wasm_ui_encoder(0, 4); // SELECT -> 1 (OSC 1B)
 assert.equal(f32[summaryIdx + 40], 1.0);
-assert.equal(f32[summaryIdx + 41], 1.0); // Default TARGET === LPF (1)
-ex.wasm_ui_encoder(3, -4);  // KNOB1 TARGET -> PITCH (0, first position)
+assert.equal(f32[summaryIdx + 41], 2.0); // Default TARGET === LPF (2)
+ex.wasm_ui_encoder(3, 28);  // KNOB1 TARGET -> A DEPTH (9, exclusive to LFO B!)
+assert.equal(f32[summaryIdx + 41], 9.0);
+ex.wasm_ui_encoder(6, 120); // KNOB4 DEPTH on 1B
+
+ex.wasm_ui_encoder(0, 4); // SELECT -> 2 (OSC 2A)
+assert.equal(f32[summaryIdx + 40], 2.0);
+assert.equal(f32[summaryIdx + 41], 2.0); // Default TARGET === LPF (2)
+ex.wasm_ui_encoder(3, -8);  // KNOB1 TARGET -> PITCH (0, past WIDTH=1)
 assert.equal(f32[summaryIdx + 41], 0.0);
-ex.wasm_ui_encoder(3, 12);  // KNOB1 TARGET -> HPF (3)
+ex.wasm_ui_encoder(3, 16);  // KNOB1 TARGET -> HPF (4)
 ex.wasm_ui_encoder(4, 240); // KNOB2 SHAPE -> 1.0 (Smooth Drift)
 ex.wasm_ui_encoder(5, 60);  // KNOB3 RATE
 ex.wasm_ui_encoder(6, 200); // KNOB4 DEPTH > 0.8
-assert.equal(f32[summaryIdx + 41], 3.0);
+assert.equal(f32[summaryIdx + 41], 4.0);
 assert.ok(f32[summaryIdx + 42] > 0.95);
 assert.ok(f32[summaryIdx + 44] > 0.80);
 
@@ -155,9 +162,9 @@ for (let b = 0; b < 8; b++) {
   ex.wasm_dsp_process_block(128);
 }
 
-const tel30Idx = ex.wasm_dsp_read_telemetry() >> 2;
-for (let i = 0; i < 30; i++) {
-  f32[telInIdx + i] = f32[tel30Idx + i];
+const tel46Idx = ex.wasm_dsp_read_telemetry() >> 2;
+for (let i = 0; i < 46; i++) {
+  f32[telInIdx + i] = f32[tel46Idx + i];
 }
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.1);
@@ -187,8 +194,8 @@ ex.wasm_dsp_publish_control(1);
 for (let b = 0; b < 6; b++) {
   ex.wasm_dsp_process_block(128);
 }
-for (let i = 0; i < 30; i++) {
-  f32[telInIdx + i] = f32[tel30Idx + i];
+for (let i = 0; i < 46; i++) {
+  f32[telInIdx + i] = f32[tel46Idx + i];
 }
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.1);

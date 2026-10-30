@@ -45,27 +45,29 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
 
     // 2. Discrete notched detents (SELECT, TARGET, GLOBAL CONFIG) step 1 item per 4 ticks
-    //    across all 3 gears (Standard, Fine, Coarse)
+    //    across all 3 gears (Standard, Fine, Coarse) across all 8 LFO slots (OSC 1A..4B)
     ctrl.reset();
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
-    RTEST_CHECK(ctrl.hud().lfoVoiceFocus == 0u);
+    RTEST_CHECK(ctrl.hud().lfoVoiceFocus == 0u); // OSC 1A
 
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -4); // LpCutoff(1) - 1 -> Pitch(0) first option!
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -4); // LpCutoff(2) - 1 -> PulseWidth(1)
+    RTEST_CHECK(ctrl.state().voices[0].lfoTarget == ruido::LfoTarget::PulseWidth);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -4); // PulseWidth(1) - 1 -> Pitch(0)
     RTEST_CHECK(ctrl.state().voices[0].lfoTarget == ruido::LfoTarget::Pitch);
 
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true); // FINE
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);    // 0 (1A) -> 1 (1B)
     RTEST_CHECK(ctrl.hud().lfoVoiceFocus == 1u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4);
-    RTEST_CHECK(ctrl.state().voices[1].lfoTarget == ruido::LfoTarget::LpResonance);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4); // 1B: LpCutoff(2) + 1 -> LpResonance(3)
+    RTEST_CHECK(ctrl.state().voices[0].lfoBTarget == ruido::LfoTarget::LpResonance);
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, false);
 
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true); // COARSE
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);   // 1 (1B) -> 2 (2A)
     RTEST_CHECK(ctrl.hud().lfoVoiceFocus == 2u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4);
-    RTEST_CHECK(ctrl.state().voices[2].lfoTarget == ruido::LfoTarget::LpResonance);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4); // 2A: LpCutoff(2) + 1 -> LpResonance(3)
+    RTEST_CHECK(ctrl.state().voices[1].lfoTarget == ruido::LfoTarget::LpResonance);
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
 
     // 3. Anchored Left Title + Smooth 150 ms Top-Right FINE/COARSE Transition:
@@ -304,7 +306,7 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ruido::RuidoController ctrl;
     ruido::ScopeHudRenderer renderer;
     ruido::EngineTelemetry tel{};
-    std::array<float, ruido::kNumOscillators> zeroLfo{0.0f, 0.0f, 0.0f, 0.0f};
+    ruido::LfoSignalArray zeroLfo{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
     // 1. Keybed GLO defaults to GlobalTarget::All on boot, steps 0..4 via SELECT, and remembers
     //    last target across releases

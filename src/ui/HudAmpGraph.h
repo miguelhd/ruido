@@ -41,7 +41,7 @@ class HudAmpGraph {
     }
 
     void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
-                const std::array<float, kNumOscillators>& lfoOutput,
+                const LfoSignalArray& lfoOutput,
                 const std::array<float, kNumOscillators>& voicePeak,
                 const std::array<float, kNumOscillators>& voiceDriftNorm) noexcept;
 

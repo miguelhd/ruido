@@ -43,7 +43,7 @@ void HudAmpGraph::stepFadeOut(float dtClamped) noexcept {
 }
 
 void HudAmpGraph::update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
-                         const std::array<float, kNumOscillators>& lfoOutput,
+                         const LfoSignalArray& lfoOutput,
                          const std::array<float, kNumOscillators>& voicePeak,
                          const std::array<float, kNumOscillators>& voiceDriftNorm) noexcept {
     const bool editVisible = rawHud.opacity > 0.001f && rawHud.editPageOpen;
@@ -72,11 +72,11 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         const VoiceParams& vp = control.voices[v];
+        const float lfoA = lfoOutput[lfoBankIndex(v, 0u)];
+        const float lfoB = lfoOutput[lfoBankIndex(v, 1u)];
         const VoiceAudibility aud = computeVoiceAudibility(vp, control.voicePressure[v], pitchMode);
         const bool silentMute = aud.muteBlend >= 0.999f;
-        const float liveAmp = (vp.lfoTarget == LfoTarget::Amplitude)
-                                  ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoOutput[v])
-                                  : vp.amplitude;
+        const float liveAmp = computeLiveVoiceAmplitude(vp, lfoA, lfoB);
         const float effAmp = silentMute ? 0.0f : clampf(liveAmp, 0.0f, 1.0f);
         const VoiceChannelGain chGain = computeVoiceChannelGain(effAmp);
 
@@ -85,7 +85,8 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
             (effAmp > kCleanAmpKnee)
                 ? clampf((effAmp - kCleanAmpKnee) * (1.0f / (1.0f - kCleanAmpKnee)), 0.0f, 1.0f)
                 : 0.0f;
-        const float tgtPw = clampf(vp.pulseWidth, kPulseWidthMin, kPulseWidthMax);
+        const float tgtPw =
+            clampf(computeLiveVoicePulseWidth(vp, lfoA, lfoB), kPulseWidthMin, kPulseWidthMax);
         const float tgtDrAmt = clampf(vp.drift, 0.0f, 1.0f);
         const float tgtDrLive = silentMute ? 0.0f : clampf(voiceDriftNorm[v], -1.0f, 1.0f);
         const float tgtDim = aud.inaudibleDim;

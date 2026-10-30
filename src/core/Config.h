@@ -13,8 +13,10 @@ inline constexpr float kInvOversampledRate = 1.0f / kOversampledRate;
 inline constexpr size_t kBlockFrames = 64u;
 inline constexpr size_t kOversampledBlockFrames = kBlockFrames * kOversampleFactor;
 
-// Voice & snapshot topology
+// Voice, dual-LFO & snapshot topology
 inline constexpr size_t kNumOscillators = 4u;
+inline constexpr size_t kLfosPerVoice = 2u;
+inline constexpr size_t kNumVoiceLfos = kNumOscillators * kLfosPerVoice; // 8 LFOs (0..3=A, 4..7=B)
 inline constexpr size_t kNumSnapshots = 8u;
 
 // Oscillator & per-voice LFO frequency bounds (unbroken sub-cycle -> ultrasonic continuum)

@@ -212,10 +212,11 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         if (mod == HeldModifier::None && (hud_.fxPageOpen || hud_.lfoPageOpen)) {
             const bool isFx = hud_.fxPageOpen;
             uint8_t& focusRef = isFx ? hud_.fxVoiceFocus : hud_.lfoVoiceFocus;
-            const int32_t maxVoice = static_cast<int32_t>(kNumOscillators) - 1;
+            const int32_t maxFocus =
+                static_cast<int32_t>(isFx ? kNumOscillators : kNumVoiceLfos) - 1;
             focusRef = static_cast<uint8_t>(stepClampedDetent(
-                static_cast<int32_t>(focusRef), maxVoice, ticks, rate, selectTickAccum_));
-            hud_.focusedVoice = focusRef;
+                static_cast<int32_t>(focusRef), maxFocus, ticks, rate, selectTickAccum_));
+            hud_.focusedVoice = isFx ? focusRef : lfoFocusVoice(focusRef);
             targetTickAccum_ = 0;
             hud_.focusedKnob = kNoFocusedKnob;
             hud_.knobBank = isFx ? KnobBankMode::VoiceFilter : KnobBankMode::Lfo;
@@ -274,19 +275,26 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             hud_.mode = HudMode::VoiceFilter;
             env_.latchPage();
         } else if (hud_.lfoPageOpen) {
-            const size_t vIdx = static_cast<size_t>(hud_.lfoVoiceFocus & 3u);
+            const uint8_t slotFocus = static_cast<uint8_t>(hud_.lfoVoiceFocus & 7u);
+            const size_t vIdx = lfoFocusVoice(slotFocus);
+            const size_t subIdx = lfoFocusSub(slotFocus);
             VoiceParams& vp = state_.voices[vIdx];
             if (kIdx == 0u) {
-                const int32_t curTgt = static_cast<int32_t>(vp.lfoTarget);
-                const int32_t maxTgt = static_cast<int32_t>(LfoTarget::Count) - 1;
-                vp.lfoTarget = static_cast<LfoTarget>(
+                LfoTarget& tgtRef = lfoSlotTargetRef(vp, subIdx);
+                const int32_t curTgt = static_cast<int32_t>(tgtRef);
+                const int32_t maxTgt =
+                    static_cast<int32_t>((subIdx == 0u) ? kNumLfoATargets : kNumLfoBTargets) - 1;
+                tgtRef = static_cast<LfoTarget>(
                     stepClampedDetent(curTgt, maxTgt, ticks, rate, targetTickAccum_));
             } else if (kIdx == 1u) {
-                vp.lfoShape = adjustLinear01(vp.lfoShape, ticks, rate, 0.0f, 1.0f);
+                float& shpRef = lfoSlotShapeRef(vp, subIdx);
+                shpRef = adjustLinear01(shpRef, ticks, rate, 0.0f, 1.0f);
             } else if (kIdx == 2u) {
-                vp.lfoRateHz = adjustLfoRate(vp.lfoRateHz, ticks, rate);
+                float& rateRef = lfoSlotRateHzRef(vp, subIdx);
+                rateRef = adjustLfoRate(rateRef, ticks, rate);
             } else {
-                vp.lfoDepth = adjustLinear01(vp.lfoDepth, ticks, rate, 0.0f, 1.0f);
+                float& depRef = lfoSlotDepthRef(vp, subIdx);
+                depRef = adjustLinear01(depRef, ticks, rate, 0.0f, 1.0f);
             }
             hud_.knobBank = KnobBankMode::Lfo;
             hud_.focusedKnob = kIdx;
@@ -407,7 +415,7 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
                 hud_.focusedVoice = static_cast<uint8_t>(hud_.fxVoiceFocus & 3u);
                 latchedHudMode_ = HudMode::VoiceFilter;
             } else if (isLfo) {
-                hud_.focusedVoice = static_cast<uint8_t>(hud_.lfoVoiceFocus & 3u);
+                hud_.focusedVoice = lfoFocusVoice(hud_.lfoVoiceFocus);
                 latchedHudMode_ = HudMode::VoiceLfo;
             } else {
                 latchedHudMode_ =

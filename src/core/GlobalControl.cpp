@@ -228,26 +228,70 @@ void applyGlobalKnobDelta(GlobalTarget target, uint8_t knobIdx, int32_t ticks, K
         break;
     case GlobalTarget::Lfo:
         if (k == 0u) {
-            const int32_t curTgt = static_cast<int32_t>(state.voices[0].lfoTarget);
-            const int32_t maxTgt = static_cast<int32_t>(LfoTarget::Count) - 1;
+            LfoTarget refTgt = state.voices[0].lfoTarget;
+            for (size_t i = 0u; i < kNumOscillators; ++i) {
+                if (state.voices[i].lfoDepth > 1.0e-4f) {
+                    refTgt = state.voices[i].lfoTarget;
+                    break;
+                }
+                if (state.voices[i].lfoBDepth > 1.0e-4f &&
+                    state.voices[i].lfoBTarget < LfoTarget::LfoARate) {
+                    refTgt = state.voices[i].lfoBTarget;
+                    break;
+                }
+            }
+            const int32_t curTgt = static_cast<int32_t>(refTgt);
+            const int32_t maxTgt = static_cast<int32_t>(kNumLfoATargets) - 1;
             const auto nextTgt = static_cast<LfoTarget>(
                 stepClampedDetent(curTgt, maxTgt, ticks, rate, targetTickAccum));
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 state.voices[i].lfoTarget = nextTgt;
+                if (state.voices[i].lfoBTarget < LfoTarget::LfoARate) {
+                    state.voices[i].lfoBTarget = nextTgt;
+                }
             }
         } else if (k == 1u) {
+            bool anyActive = false;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
-                state.voices[i].lfoShape =
-                    adjustLinear01(state.voices[i].lfoShape, ticks, rate, 0.0f, 1.0f);
+                if (state.voices[i].lfoDepth > 1.0e-4f || state.voices[i].lfoBDepth > 1.0e-4f) {
+                    anyActive = true;
+                    break;
+                }
+            }
+            for (size_t i = 0u; i < kNumOscillators; ++i) {
+                VoiceParams& vp = state.voices[i];
+                if (!anyActive || vp.lfoDepth > 1.0e-4f) {
+                    vp.lfoShape = adjustLinear01(vp.lfoShape, ticks, rate, 0.0f, 1.0f);
+                }
+                if (!anyActive || vp.lfoBDepth > 1.0e-4f) {
+                    vp.lfoBShape = adjustLinear01(vp.lfoBShape, ticks, rate, 0.0f, 1.0f);
+                }
             }
         } else if (k == 2u) {
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 state.voices[i].lfoRateHz = adjustLfoRate(state.voices[i].lfoRateHz, ticks, rate);
+                state.voices[i].lfoBRateHz = adjustLfoRate(state.voices[i].lfoBRateHz, ticks, rate);
             }
         } else {
+            bool anyActive = false;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
-                state.voices[i].lfoDepth =
-                    adjustLinear01(state.voices[i].lfoDepth, ticks, rate, 0.0f, 1.0f);
+                if (state.voices[i].lfoDepth > 1.0e-4f || state.voices[i].lfoBDepth > 1.0e-4f) {
+                    anyActive = true;
+                    break;
+                }
+            }
+            for (size_t i = 0u; i < kNumOscillators; ++i) {
+                VoiceParams& vp = state.voices[i];
+                if (anyActive) {
+                    if (vp.lfoDepth > 1.0e-4f) {
+                        vp.lfoDepth = adjustLinear01(vp.lfoDepth, ticks, rate, 0.0f, 1.0f);
+                    }
+                    if (vp.lfoBDepth > 1.0e-4f) {
+                        vp.lfoBDepth = adjustLinear01(vp.lfoBDepth, ticks, rate, 0.0f, 1.0f);
+                    }
+                } else if (ticks > 0) {
+                    vp.lfoDepth = adjustLinear01(vp.lfoDepth, ticks, rate, 0.0f, 1.0f);
+                }
             }
         }
         break;
@@ -264,9 +308,25 @@ void applyGlobalKnobDelta(GlobalTarget target, uint8_t knobIdx, int32_t ticks, K
                     adjustFilterCutoff(state.voices[i].lpCutoffHz, ticks, rate);
             }
         } else if (k == 2u) {
+            bool anyActive = false;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
-                state.voices[i].lfoDepth =
-                    adjustLinear01(state.voices[i].lfoDepth, ticks, rate, 0.0f, 1.0f);
+                if (state.voices[i].lfoDepth > 1.0e-4f || state.voices[i].lfoBDepth > 1.0e-4f) {
+                    anyActive = true;
+                    break;
+                }
+            }
+            for (size_t i = 0u; i < kNumOscillators; ++i) {
+                VoiceParams& vp = state.voices[i];
+                if (anyActive) {
+                    if (vp.lfoDepth > 1.0e-4f) {
+                        vp.lfoDepth = adjustLinear01(vp.lfoDepth, ticks, rate, 0.0f, 1.0f);
+                    }
+                    if (vp.lfoBDepth > 1.0e-4f) {
+                        vp.lfoBDepth = adjustLinear01(vp.lfoBDepth, ticks, rate, 0.0f, 1.0f);
+                    }
+                } else if (ticks > 0) {
+                    vp.lfoDepth = adjustLinear01(vp.lfoDepth, ticks, rate, 0.0f, 1.0f);
+                }
             }
         } else {
             applyGlobalAmpKnob(0u, ticks, rate, state);
@@ -275,9 +335,9 @@ void applyGlobalKnobDelta(GlobalTarget target, uint8_t knobIdx, int32_t ticks, K
     }
 }
 
-GlobalColumnSummary
-evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx, const EngineControlState& control,
-                     const std::array<float, kNumOscillators>& lfoOutput) noexcept {
+GlobalColumnSummary evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx,
+                                         const EngineControlState& control,
+                                         const LfoSignalArray& lfoOutput) noexcept {
     GlobalColumnSummary s{};
     const uint8_t k = knobIdx & 3u;
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
@@ -304,9 +364,7 @@ evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx, const EngineControlStat
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             const VoiceParams& vp = control.voices[i];
             const float pMul = computeVoicePitchRatio(control.voicePressure[i], pitchMode);
-            const float lfoHz = (vp.lfoTarget == LfoTarget::Pitch)
-                                    ? applyLfoPitchHz(vp.frequencyHz, vp.lfoDepth, lfoOutput[i])
-                                    : vp.frequencyHz;
+            const float lfoHz = computeLiveVoicePitchHz(vp, lfoOutput[i], lfoOutput[4u + i]);
             const float liveHz = clampf(lfoHz * pMul, kAudioFreqMinHz, kAudioFreqMaxHz);
             logs[i] = fastLog2(liveHz);
             meanLog += logs[i];
@@ -352,23 +410,8 @@ evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx, const EngineControlStat
         float sumVal = 0.0f;
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             const VoiceParams& vp = control.voices[i];
-            const float hpBase = (vp.lfoTarget == LfoTarget::HpCutoff)
-                                     ? applyLfoCutoffHz(vp.hpCutoffHz, vp.lfoDepth, lfoOutput[i])
-                                     : vp.hpCutoffHz;
-            const float hpResBase =
-                (vp.lfoTarget == LfoTarget::HpResonance)
-                    ? applyLfoResonance(vp.hpResonance, vp.lfoDepth, lfoOutput[i])
-                    : vp.hpResonance;
-            const float lpBase = (vp.lfoTarget == LfoTarget::LpCutoff)
-                                     ? applyLfoCutoffHz(vp.lpCutoffHz, vp.lfoDepth, lfoOutput[i])
-                                     : vp.lpCutoffHz;
-            const float lpResBase =
-                (vp.lfoTarget == LfoTarget::LpResonance)
-                    ? applyLfoResonance(vp.lpResonance, vp.lfoDepth, lfoOutput[i])
-                    : vp.lpResonance;
-            const ModulatedFilterParams mod = computeVoicePressureMacro(
-                hpBase, hpResBase, lpBase, lpResBase, control.voicePressure[i],
-                vp.muted ? 0.0f : 1.0f, pitchMode);
+            const ModulatedFilterParams mod = computeLiveVoiceFilter(
+                vp, control.voicePressure[i], pitchMode, lfoOutput[i], lfoOutput[4u + i]);
             float vNorm = 0.0f;
             if (k == 0u) {
                 const float lg = fastLog2(mod.hpCutoffHz);
@@ -401,60 +444,114 @@ evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx, const EngineControlStat
     }
 
     if (bank == KnobBankMode::GlobalLfo) {
-        if (k == 0u) {
-            const LfoTarget ref = control.voices[0].lfoTarget;
-            for (size_t i = 0u; i < kNumOscillators; ++i) {
-                if (control.voices[i].lfoTarget != ref) {
-                    s.lfoTargetMixed = true;
-                }
-                const float vn =
-                    static_cast<float>(static_cast<uint8_t>(control.voices[i].lfoTarget)) *
-                    (1.0f / 6.0f);
-                s.voiceSigned[i] = 2.0f * vn - 1.0f;
+        constexpr float kInvMaxTgt = 1.0f / static_cast<float>(kNumLfoATargets - 1u);
+        bool anyActive = false;
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            if (control.voices[i].lfoDepth > 0.002f || control.voices[i].lfoBDepth > 0.002f) {
+                anyActive = true;
+                break;
             }
-            const float norm = static_cast<float>(static_cast<uint8_t>(ref)) * (1.0f / 6.0f);
+        }
+
+        if (k == 0u) {
+            bool haveRef = false;
+            LfoTarget ref = control.voices[0].lfoTarget;
+            for (size_t i = 0u; i < kNumOscillators; ++i) {
+                const VoiceParams& vp = control.voices[i];
+                const size_t domSub =
+                    (vp.lfoBDepth > vp.lfoDepth && vp.lfoBDepth > 0.002f) ? 1u : 0u;
+                const LfoTarget domTgt = lfoSlotTarget(vp, domSub);
+                const float vn = clampf(
+                    static_cast<float>(static_cast<uint8_t>(domTgt)) * kInvMaxTgt, 0.0f, 1.0f);
+                s.voiceSigned[i] = 2.0f * vn - 1.0f;
+
+                for (size_t sub = 0u; sub < kLfosPerVoice; ++sub) {
+                    if (anyActive ? (lfoSlotDepth(vp, sub) <= 0.002f) : (sub != 0u)) {
+                        continue;
+                    }
+                    const LfoTarget t = lfoSlotTarget(vp, sub);
+                    if (!haveRef) {
+                        ref = t;
+                        haveRef = true;
+                    } else if (t != ref) {
+                        s.lfoTargetMixed = true;
+                    }
+                }
+            }
+            s.primaryValue = static_cast<float>(static_cast<uint8_t>(ref));
+            const float norm =
+                clampf(static_cast<float>(static_cast<uint8_t>(ref)) * kInvMaxTgt, 0.0f, 1.0f);
             s.posSigned = 2.0f * norm - 1.0f;
             finalizeSpread(s);
         } else if (k == 1u) {
-            float lo = control.voices[0].lfoShape;
-            float hi = lo;
+            float lo = 1.0f;
+            float hi = 0.0f;
             float sum = 0.0f;
+            uint32_t count = 0u;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
-                const float shp = clampf(control.voices[i].lfoShape, 0.0f, 1.0f);
-                sum += shp;
-                if (shp < lo) {
-                    lo = shp;
+                const VoiceParams& vp = control.voices[i];
+                const size_t domSub =
+                    (vp.lfoBDepth > vp.lfoDepth && vp.lfoBDepth > 0.002f) ? 1u : 0u;
+                s.voiceSigned[i] = 2.0f * clampf(lfoSlotShape(vp, domSub), 0.0f, 1.0f) - 1.0f;
+                for (size_t sub = 0u; sub < kLfosPerVoice; ++sub) {
+                    if (anyActive ? (lfoSlotDepth(vp, sub) <= 0.002f) : (sub != 0u)) {
+                        continue;
+                    }
+                    const float shp = clampf(lfoSlotShape(vp, sub), 0.0f, 1.0f);
+                    sum += shp;
+                    ++count;
+                    if (shp < lo) {
+                        lo = shp;
+                    }
+                    if (shp > hi) {
+                        hi = shp;
+                    }
                 }
-                if (shp > hi) {
-                    hi = shp;
-                }
-                s.voiceSigned[i] = 2.0f * shp - 1.0f;
             }
-            s.lfoShapeMixed = (hi - lo) > 0.05f;
-            s.primaryValue = sum * 0.25f;
+            s.lfoShapeMixed = (count > 1u) && ((hi - lo) > 0.05f);
+            s.primaryValue = (count > 0u) ? (sum / static_cast<float>(count)) : 0.0f;
             s.posSigned = 2.0f * s.primaryValue - 1.0f;
             finalizeSpread(s);
         } else if (k == 2u) {
             float sumLog = 0.0f;
+            uint32_t count = 0u;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
-                const float lg = fastLog2(control.voices[i].lfoRateHz);
-                sumLog += lg;
-                const float vn = clampf((lg - kGcLfoLogLo) / kGcLfoLogRange, 0.0f, 1.0f);
+                const VoiceParams& vp = control.voices[i];
+                const size_t domSub =
+                    (vp.lfoBDepth > vp.lfoDepth && vp.lfoBDepth > 0.002f) ? 1u : 0u;
+                const float domLg = fastLog2(lfoSlotRateHz(vp, domSub));
+                const float vn = clampf((domLg - kGcLfoLogLo) / kGcLfoLogRange, 0.0f, 1.0f);
                 s.voiceSigned[i] = 2.0f * vn - 1.0f;
+                for (size_t sub = 0u; sub < kLfosPerVoice; ++sub) {
+                    if (anyActive ? (lfoSlotDepth(vp, sub) <= 0.002f) : (sub != 0u)) {
+                        continue;
+                    }
+                    sumLog += fastLog2(lfoSlotRateHz(vp, sub));
+                    ++count;
+                }
             }
-            sumLog *= 0.25f;
-            s.primaryValue = fastExp2(sumLog);
-            const float norm = clampf((sumLog - kGcLfoLogLo) / kGcLfoLogRange, 0.0f, 1.0f);
+            const float meanLog =
+                (count > 0u) ? (sumLog / static_cast<float>(count)) : fastLog2(0.25f);
+            s.primaryValue = fastExp2(meanLog);
+            const float norm = clampf((meanLog - kGcLfoLogLo) / kGcLfoLogRange, 0.0f, 1.0f);
             s.posSigned = 2.0f * norm - 1.0f;
             finalizeSpread(s);
         } else {
             float sum = 0.0f;
+            uint32_t count = 0u;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
-                const float d = clampf(control.voices[i].lfoDepth, 0.0f, 1.0f);
-                sum += d;
-                s.voiceSigned[i] = 2.0f * d - 1.0f;
+                const VoiceParams& vp = control.voices[i];
+                const float maxV = (vp.lfoBDepth > vp.lfoDepth) ? vp.lfoBDepth : vp.lfoDepth;
+                s.voiceSigned[i] = 2.0f * clampf(maxV, 0.0f, 1.0f) - 1.0f;
+                for (size_t sub = 0u; sub < kLfosPerVoice; ++sub) {
+                    if (anyActive ? (lfoSlotDepth(vp, sub) <= 0.002f) : (sub != 0u)) {
+                        continue;
+                    }
+                    sum += clampf(lfoSlotDepth(vp, sub), 0.0f, 1.0f);
+                    ++count;
+                }
             }
-            s.primaryValue = sum * 0.25f;
+            s.primaryValue = (count > 0u) ? (sum / static_cast<float>(count)) : 0.0f;
             s.posSigned = 2.0f * s.primaryValue - 1.0f;
             finalizeSpread(s);
         }
@@ -466,13 +563,9 @@ evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx, const EngineControlStat
     std::array<float, kNumOscillators> pans{};
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceParams& vp = control.voices[i];
-        const float liveAmp = (vp.lfoTarget == LfoTarget::Amplitude)
-                                  ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoOutput[i])
-                                  : vp.amplitude;
+        const float liveAmp = computeLiveVoiceAmplitude(vp, lfoOutput[i], lfoOutput[4u + i]);
         amps[i] = vp.muted ? 0.0f : clampf(liveAmp, 0.0f, 1.0f);
-        const float livePan = (vp.lfoTarget == LfoTarget::Pan)
-                                  ? applyLfoPan(vp.pan, vp.lfoDepth, lfoOutput[i])
-                                  : vp.pan;
+        const float livePan = computeLiveVoicePan(vp, lfoOutput[i], lfoOutput[4u + i]);
         pans[i] = clampf(livePan * panScale, -1.0f, 1.0f);
     }
 

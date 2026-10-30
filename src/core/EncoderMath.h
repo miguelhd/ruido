@@ -95,7 +95,8 @@ inline void applyEditKnobDelta(EditTarget target, VoiceParams& vp, int32_t ticks
         } else {
             const float nextAmp = adjustLinear01(vp.amplitude, ticks, rate, 0.0f, 1.0f);
             const bool lfoAmpActive =
-                (vp.lfoTarget == LfoTarget::Amplitude) && (vp.lfoDepth > 1.0e-4f);
+                (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > 1.0e-4f) ||
+                (vp.lfoBTarget == LfoTarget::Amplitude && vp.lfoBDepth > 1.0e-4f);
             if (nextAmp <= 1.0e-4f && !lfoAmpActive) {
                 vp.amplitude = 0.0f;
                 vp.muted = true;

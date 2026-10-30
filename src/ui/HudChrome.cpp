@@ -11,9 +11,8 @@
 
 namespace ruido {
 
-HudGaugeTargets
-computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
-                       const std::array<float, kNumOscillators>& lfoOutput) noexcept {
+HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
+                                       const LfoSignalArray& lfoOutput) noexcept {
     HudGaugeTargets out{};
 
     switch (hud.mode) {
@@ -44,7 +43,8 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
         const uint8_t refV = (hud.mode == HudMode::VoicePressure) ? (hud.focusedVoice & 3u)
                                                                   : (hud.fxVoiceFocus & 3u);
         voiceFlt = computeLiveVoiceFilter(control.voices[refV], control.voicePressure[refV],
-                                          pitchMode, lfoOutput[refV]);
+                                          pitchMode, lfoOutput[lfoBankIndex(refV, 0u)],
+                                          lfoOutput[lfoBankIndex(refV, 1u)]);
     }
 
     for (uint8_t k = 0u; k < 4u; ++k) {
@@ -62,14 +62,14 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
             isPerOscKnobBank(hud.knobBank)
                 ? computeVoiceAudibility(control.voices[k], control.voicePressure[k], pitchMode)
                 : VoiceAudibility{0.0f, 0.0f, 0.0f};
+        const float lfoA = lfoOutput[lfoBankIndex(k, 0u)];
+        const float lfoB = lfoOutput[lfoBankIndex(k, 1u)];
         float tgtSigned = 0.0f;
         switch (hud.knobBank) {
         case KnobBankMode::Frequency: {
             const VoiceParams& vp = control.voices[k];
             const float pMul = computeVoicePitchRatio(control.voicePressure[k], pitchMode);
-            const float lfoHz = (vp.lfoTarget == LfoTarget::Pitch)
-                                    ? applyLfoPitchHz(vp.frequencyHz, vp.lfoDepth, lfoOutput[k])
-                                    : vp.frequencyHz;
+            const float lfoHz = computeLiveVoicePitchHz(vp, lfoA, lfoB);
             const float norm = clampf((fastLog2(lfoHz * pMul) - fastLog2(kAudioFreqMinHz)) /
                                           (fastLog2(kAudioFreqMaxHz) - fastLog2(kAudioFreqMinHz)),
                                       0.0f, 1.0f);
@@ -78,7 +78,8 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
         }
         case KnobBankMode::PulseWidth: {
             const VoiceParams& vp = control.voices[k];
-            tgtSigned = clampf((vp.pulseWidth - 0.50f) * (1.0f / 0.45f), -1.0f, 1.0f);
+            const float livePw = computeLiveVoicePulseWidth(vp, lfoA, lfoB);
+            tgtSigned = clampf((livePw - 0.50f) * (1.0f / 0.45f), -1.0f, 1.0f);
             break;
         }
         case KnobBankMode::VoiceDrift: {
@@ -106,33 +107,40 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
         }
         case KnobBankMode::Amplitude: {
             const VoiceParams& vp = control.voices[k];
-            const float liveAmp = (vp.lfoTarget == LfoTarget::Amplitude)
-                                      ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoOutput[k])
-                                      : vp.amplitude;
+            const float liveAmp = computeLiveVoiceAmplitude(vp, lfoA, lfoB);
             const float norm = (aud.muteBlend >= 0.999f) ? 0.0f : clampf(liveAmp, 0.0f, 1.0f);
             tgtSigned = 2.0f * norm - 1.0f;
             break;
         }
         case KnobBankMode::Panning: {
             const VoiceParams& vp = control.voices[k];
-            const float livePan = (vp.lfoTarget == LfoTarget::Pan)
-                                      ? applyLfoPan(vp.pan, vp.lfoDepth, lfoOutput[k])
-                                      : vp.pan;
+            const float livePan = computeLiveVoicePan(vp, lfoA, lfoB);
             tgtSigned = clampf(livePan * panScale, -1.0f, 1.0f);
             break;
         }
         case KnobBankMode::Lfo: {
-            const VoiceParams& vp = control.voices[hud.lfoVoiceFocus & 3u];
+            const uint8_t slot = hud.lfoVoiceFocus & 7u;
+            const uint8_t lv = lfoFocusVoice(slot);
+            const uint8_t sub = lfoFocusSub(slot);
+            const VoiceParams& vp = control.voices[lv];
+            const float lfoBRaw = lfoOutput[lfoBankIndex(lv, 1u)];
+            const float maxTgt =
+                static_cast<float>((sub == 0u ? kNumLfoATargets : kNumLfoBTargets) - 1u);
             float norm = 0.0f;
             if (k == 0u) {
-                norm = static_cast<float>(static_cast<uint8_t>(vp.lfoTarget)) * (1.0f / 6.0f);
+                norm = clampf(static_cast<float>(static_cast<uint8_t>(lfoSlotTarget(vp, sub))) /
+                                  maxTgt,
+                              0.0f, 1.0f);
             } else if (k == 1u) {
-                norm = clampf(vp.lfoShape, 0.0f, 1.0f);
+                norm = clampf(lfoSlotShape(vp, sub), 0.0f, 1.0f);
             } else if (k == 2u) {
-                norm = clampf((fastLog2(vp.lfoRateHz) - kLfoLogMin) * (1.0f / kLfoLogSpan), 0.0f,
-                              1.0f);
+                const float liveRate =
+                    (sub == 0u) ? computeLiveLfoARateHz(vp, lfoBRaw) : vp.lfoBRateHz;
+                norm = clampf((fastLog2(liveRate) - kLfoLogMin) * (1.0f / kLfoLogSpan), 0.0f, 1.0f);
             } else {
-                norm = clampf(vp.lfoDepth, 0.0f, 1.0f);
+                const float liveDepth =
+                    (sub == 0u) ? computeLiveLfoADepth(vp, lfoBRaw) : vp.lfoBDepth;
+                norm = clampf(liveDepth, 0.0f, 1.0f);
             }
             tgtSigned = 2.0f * norm - 1.0f;
             break;
@@ -174,8 +182,7 @@ void compositeIdlePeakMeters(const MonoStripCanvas& idleCv, float smoothedPeakL,
 }
 
 void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState& control,
-                             const HudState& hud,
-                             const std::array<float, kNumOscillators>& lfoOutput,
+                             const HudState& hud, const LfoSignalArray& lfoOutput,
                              float headerBarSmooth, float finePhase, float coarsePhase) noexcept {
     if (cv.y0 >= 26) {
         return;
@@ -193,6 +200,25 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     const auto voiceAud = [&](size_t vi) noexcept {
         return computeVoiceAudibility(control.voices[vi], control.voicePressure[vi], hdrPitchMode);
     };
+    const auto livePwAt = [&](size_t vi) noexcept {
+        return computeLiveVoicePulseWidth(control.voices[vi], lfoOutput[lfoBankIndex(vi, 0u)],
+                                          lfoOutput[lfoBankIndex(vi, 1u)]);
+    };
+    const auto liveAmpAt = [&](size_t vi) noexcept {
+        return computeLiveVoiceAmplitude(control.voices[vi], lfoOutput[lfoBankIndex(vi, 0u)],
+                                         lfoOutput[lfoBankIndex(vi, 1u)]);
+    };
+    const auto formatDriveStatus = [&](float ampVal) noexcept {
+        if (ampVal > kCleanAmpKnee + 0.003f) {
+            const VoiceChannelGain cg = computeVoiceChannelGain(ampVal);
+            char multBuf[12]{};
+            formatMultiplierX(multBuf, sizeof(multBuf), cg.preDrive);
+            size_t rp = appendStr(rightText, 0u, sizeof(rightText), "DRIVE ");
+            appendStr(rightText, rp, sizeof(rightText), multBuf);
+        } else {
+            appendStr(rightText, 0u, sizeof(rightText), "CLEAN VCA");
+        }
+    };
 
     switch (hud.mode) {
     case HudMode::None:
@@ -202,9 +228,8 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
         appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
         const float pitchMul = computeVoicePitchRatio(control.voicePressure[v], hdrPitchMode);
-        const float liveHz = (focVp.lfoTarget == LfoTarget::Pitch)
-                                 ? applyLfoPitchHz(focVp.frequencyHz, focVp.lfoDepth, lfoOutput[v])
-                                 : focVp.frequencyHz;
+        const float liveHz = computeLiveVoicePitchHz(focVp, lfoOutput[lfoBankIndex(v, 0u)],
+                                                     lfoOutput[lfoBankIndex(v, 1u)]);
         voiceLiveHz = liveHz * pitchMul;
         appendPrecisionHz(rightText, 0u, sizeof(rightText), voiceLiveHz);
         break;
@@ -215,12 +240,11 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             const uint8_t kv = hud.focusedKnob & 3u;
             size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
             appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(kv + 1u));
-            const VoiceParams& wvp = control.voices[kv];
             if (voiceAud(kv).muteBlend >= 0.999f) {
                 appendStr(rightText, 0u, sizeof(rightText), "MUTED");
             } else {
                 appendStr(rightText, 0u, sizeof(rightText),
-                          (absf(wvp.pulseWidth - 0.50f) <= 0.015f) ? "SQUARE" : "PULSE");
+                          (absf(livePwAt(kv) - 0.50f) <= 0.015f) ? "SQUARE" : "PULSE");
             }
         } else {
             appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
@@ -229,7 +253,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
                 if (voiceAud(vi).muteBlend < 0.999f) {
                     anyActive = true;
-                    if (absf(control.voices[vi].pulseWidth - 0.50f) > 0.015f) {
+                    if (absf(livePwAt(vi) - 0.50f) > 0.015f) {
                         anyPulse = true;
                     }
                 }
@@ -283,34 +307,19 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             const uint8_t kv = hud.focusedKnob & 3u;
             size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
             appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(kv + 1u));
-            const VoiceParams& avp = control.voices[kv];
-            const float liveAmp =
-                (avp.lfoTarget == LfoTarget::Amplitude)
-                    ? applyLfoAmplitude(avp.amplitude, avp.lfoDepth, lfoOutput[kv])
-                    : avp.amplitude;
             if (voiceAud(kv).muteBlend >= 0.999f) {
                 appendStr(rightText, 0u, sizeof(rightText), "MUTED");
-            } else if (liveAmp > kCleanAmpKnee + 0.003f) {
-                const VoiceChannelGain cg = computeVoiceChannelGain(liveAmp);
-                char multBuf[12]{};
-                formatMultiplierX(multBuf, sizeof(multBuf), cg.preDrive);
-                size_t rp = appendStr(rightText, 0u, sizeof(rightText), "DRIVE ");
-                appendStr(rightText, rp, sizeof(rightText), multBuf);
             } else {
-                appendStr(rightText, 0u, sizeof(rightText), "CLEAN VCA");
+                formatDriveStatus(liveAmpAt(kv));
             }
         } else {
             appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
             bool anyActive = false;
             float maxAmp = 0.0f;
             for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
-                const VoiceParams& avp = control.voices[vi];
                 if (voiceAud(vi).muteBlend < 0.999f) {
                     anyActive = true;
-                    const float la =
-                        (avp.lfoTarget == LfoTarget::Amplitude)
-                            ? applyLfoAmplitude(avp.amplitude, avp.lfoDepth, lfoOutput[vi])
-                            : avp.amplitude;
+                    const float la = liveAmpAt(vi);
                     if (la > maxAmp) {
                         maxAmp = la;
                     }
@@ -318,14 +327,8 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             }
             if (!anyActive) {
                 appendStr(rightText, 0u, sizeof(rightText), "ALL MUTED");
-            } else if (maxAmp > kCleanAmpKnee + 0.003f) {
-                const VoiceChannelGain cg = computeVoiceChannelGain(maxAmp);
-                char multBuf[12]{};
-                formatMultiplierX(multBuf, sizeof(multBuf), cg.preDrive);
-                size_t rp = appendStr(rightText, 0u, sizeof(rightText), "DRIVE ");
-                appendStr(rightText, rp, sizeof(rightText), multBuf);
             } else {
-                appendStr(rightText, 0u, sizeof(rightText), "CLEAN VCA");
+                formatDriveStatus(maxAmp);
             }
         }
         break;
@@ -424,13 +427,16 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         appendStr(rightText, 0u, sizeof(rightText), "HOLDING");
         break;
     case HudMode::VoiceLfo: {
-        const uint8_t lv = hud.lfoVoiceFocus & 3u;
+        const uint8_t slot = hud.lfoVoiceFocus & 7u;
+        const uint8_t lv = lfoFocusVoice(slot);
+        const uint8_t sub = lfoFocusSub(slot);
         const VoiceParams& lvp = control.voices[lv];
         appendStr(leftMain, 0u, sizeof(leftMain), "LFO");
         size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
-        appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(lv + 1u));
+        p = appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(lv + 1u));
+        appendStr(leftSuffix, p, sizeof(leftSuffix), (sub == 0u) ? "A" : "B");
         appendStr(rightText, 0u, sizeof(rightText),
-                  (lvp.lfoDepth > 0.002f) ? "ACTIVE" : "BYPASSED");
+                  (lfoSlotDepth(lvp, sub) > 0.002f) ? "ACTIVE" : "BYPASSED");
         break;
     }
     case HudMode::GlobalFreq: {
@@ -457,12 +463,15 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             if (control.voices[vi].lfoDepth > 0.002f) {
                 ++activeLfos;
             }
+            if (control.voices[vi].lfoBDepth > 0.002f) {
+                ++activeLfos;
+            }
         }
         if (activeLfos == 0u) {
             appendStr(rightText, 0u, sizeof(rightText), "BYPASSED");
         } else {
             size_t p = appendUInt(rightText, 0u, sizeof(rightText), activeLfos);
-            appendStr(rightText, p, sizeof(rightText), "/4 ACTIVE");
+            appendStr(rightText, p, sizeof(rightText), "/8 ACTIVE");
         }
         break;
     }
@@ -609,8 +618,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
 }
 
 void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlState& control,
-                              const HudState& hud,
-                              const std::array<float, kNumOscillators>& lfoOutput,
+                              const HudState& hud, const LfoSignalArray& lfoOutput,
                               const std::array<float, kNumOscillators>& knobPosSignedSmooth,
                               const std::array<float, kNumOscillators>& knobDimSmooth,
                               const std::array<float, kNumOscillators>& knobFocusSmooth) noexcept {

@@ -690,7 +690,11 @@ void testExtremeStabilityAndZeroDenormals() {
             st.voices[i].amplitude = 1.0f; // Full 4.5x pre-filter MS-20 overdrive!
             st.voices[i].lfoRateHz = 2000.0f;
             st.voices[i].lfoDepth = 1.0f;
-            st.voices[i].lfoTarget = static_cast<ruido::LfoTarget>(i % 7u);
+            st.voices[i].lfoTarget = static_cast<ruido::LfoTarget>(i % ruido::kNumLfoATargets);
+            st.voices[i].lfoBRateHz = 1750.0f;
+            st.voices[i].lfoBDepth = 1.0f;
+            st.voices[i].lfoBTarget =
+                static_cast<ruido::LfoTarget>((block + i) % ruido::kNumLfoBTargets);
             st.voices[i].pan = std::sin(ph * 0.5f);
             st.voicePressure[i] = 0.5f + 0.5f * std::sin(ph * 3.1f);
         }
@@ -1416,12 +1420,18 @@ void testPerVoiceAnalogLfoModels() {
             maxDeltaOut = 0.0f;
             finiteOut = true;
 
-            // Sweep SHAPE continuously AND cycle through all 7 LFO targets live every 20 blocks
-            for (int b = 0; b < 160; ++b) {
-                st.voices[0].lfoShape = static_cast<float>(b) / 159.0f;
+            // Sweep SHAPE continuously AND cycle through all 8 LFO A + 10 LFO B targets live
+            st.voices[0].lfoBRateHz = 7.3f;
+            st.voices[0].lfoBDepth = depth * 0.65f;
+            for (int b = 0; b < 200; ++b) {
+                st.voices[0].lfoShape = static_cast<float>(b) / 199.0f;
+                st.voices[0].lfoBShape = 1.0f - st.voices[0].lfoShape;
                 if ((b % 20) == 0) {
-                    const uint8_t nextT = static_cast<uint8_t>((b / 20) % 7);
-                    st.voices[0].lfoTarget = static_cast<ruido::LfoTarget>(nextT);
+                    const uint8_t stepIdx = static_cast<uint8_t>(b / 20);
+                    st.voices[0].lfoTarget =
+                        static_cast<ruido::LfoTarget>(stepIdx % ruido::kNumLfoATargets);
+                    st.voices[0].lfoBTarget =
+                        static_cast<ruido::LfoTarget>(stepIdx % ruido::kNumLfoBTargets);
                 }
                 engine.controlBus().publish(st);
                 engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
@@ -1651,6 +1661,99 @@ void testPerVoiceAnalogLfoModels() {
         const double octRatio = static_cast<double>(maxPeriod) / static_cast<double>(minPeriod);
         EXPECT_TRUE(octRatio > 3.2, "Pitch LFO failed wide log-octave period sweep (max/min=%.3f)",
                     octRatio);
+    }
+
+    // (h) PulseWidth (WIDTH): LFO sweeps Schmitt PWM across 5%-95% with zero DC offset runaway
+    {
+        auto cfg = base;
+        cfg.voices[0].frequencyHz = 110.0f;
+        cfg.voices[0].pulseWidth = 0.50f;
+        cfg.voices[0].lfoTarget = ruido::LfoTarget::PulseWidth;
+        cfg.voices[0].lfoDepth = 1.0f;
+        double mn = 0.0;
+        double mx = 0.0;
+        double pwmDiffRatio = 0.0;
+        measureMinMaxBlockRms(cfg, mn, mx, domL, domR, &pwmDiffRatio);
+        EXPECT_TRUE(mn < mx * 0.72 && mx > 0.18,
+                    "PulseWidth LFO failed 5%%-95%% PWM sweep (min=%.3f, max=%.3f, hf=%.2fx)", mn,
+                    mx, pwmDiffRatio);
+    }
+
+    // (i) Dual-LFO Cross-Modulation: LFO B -> A RATE warps LFO A period, and LFO B -> A DEPTH
+    //     swells LFO A tremolo from near-stillness up to full crest!
+    {
+        ruido::VoiceLfoBank dualBank;
+        dualBank.reset(ruido::kBaseSampleRate);
+        dualBank.setAnalogCharacterEnabled(false);
+
+        auto cfgRate = base;
+        cfgRate.voices[0].lfoRateHz = 8.0f;
+        cfgRate.voices[0].lfoDepth = 1.0f;
+        cfgRate.voices[0].lfoBRateHz = 2.0f;
+        cfgRate.voices[0].lfoBDepth = 0.75f;
+        cfgRate.voices[0].lfoBTarget = ruido::LfoTarget::LfoARate;
+        dualBank.updateTargets(cfgRate, true);
+
+        float prevPhaseA = dualBank.stepFrame()[0].phase01;
+        size_t smpSinceWrap = 0u;
+        size_t minLfoAPeriod = 1000000u;
+        size_t maxLfoAPeriod = 0u;
+        bool seenFirstWrap = false;
+        for (size_t n = 0u; n < 44118u; ++n) {
+            const float phA = dualBank.stepFrame()[0].phase01;
+            ++smpSinceWrap;
+            if (phA + 0.5f < prevPhaseA) {
+                if (seenFirstWrap) {
+                    minLfoAPeriod = std::min(minLfoAPeriod, smpSinceWrap);
+                    maxLfoAPeriod = std::max(maxLfoAPeriod, smpSinceWrap);
+                }
+                seenFirstWrap = true;
+                smpSinceWrap = 0u;
+            }
+            prevPhaseA = phA;
+        }
+        const double lfoARateSpan = static_cast<double>(maxLfoAPeriod) /
+                                    static_cast<double>(std::max<size_t>(minLfoAPeriod, 1u));
+        EXPECT_TRUE(lfoARateSpan > 4.0,
+                    "LFO B -> A RATE failed to warp LFO A cycle speed (max/min=%.3f)",
+                    lfoARateSpan);
+
+        auto cfgDepth = base;
+        cfgDepth.voices[0].lfoTarget = ruido::LfoTarget::Amplitude;
+        cfgDepth.voices[0].lfoRateHz = 24.0f;
+        cfgDepth.voices[0].lfoDepth = 1.0f;
+        cfgDepth.voices[0].lfoBTarget = ruido::LfoTarget::LfoADepth;
+        cfgDepth.voices[0].lfoBRateHz = 2.0f;
+        cfgDepth.voices[0].lfoBDepth = 1.0f;
+        engine.controlBus().publish(cfgDepth);
+        engine.reset();
+        engine.setAnalogCharacterEnabled(false, false);
+
+        double calmWindowSwing = 100.0;
+        double intenseWindowSwing = 0.0;
+        for (int win = 0; win < 16; ++win) {
+            double winMin = 100.0;
+            double winMax = 0.0;
+            for (int b = 0; b < 24; ++b) {
+                engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+                engine.scopeBuffer().popBatch(drain.data(), drain.size());
+                double sq = 0.0;
+                for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                    sq += static_cast<double>(outL[i]) * static_cast<double>(outL[i]);
+                }
+                const double r = std::sqrt(sq / static_cast<double>(ruido::kBlockFrames));
+                winMin = std::min(winMin, r);
+                winMax = std::max(winMax, r);
+            }
+            if (win >= 2) {
+                const double swing = winMax - winMin;
+                calmWindowSwing = std::min(calmWindowSwing, swing);
+                intenseWindowSwing = std::max(intenseWindowSwing, swing);
+            }
+        }
+        EXPECT_TRUE(intenseWindowSwing > calmWindowSwing * 2.5 && intenseWindowSwing > 0.14,
+                    "LFO B -> A DEPTH failed to swell/fade LFO A tremolo (calm=%.4f, peak=%.4f)",
+                    calmWindowSwing, intenseWindowSwing);
     }
 }
 

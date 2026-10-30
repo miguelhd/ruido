@@ -1597,56 +1597,96 @@ void testPerVoiceLfoPageAndHudGraph() {
     CHECK(near(ctrl.hud().opacity, 1.0f));
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)], 1.0f));
 
-    // 2. SELECT encoder steps strictly per-voice OSC 1 (0) -> OSC 2 (1) -> OSC 3 (2) -> OSC 4 (3)
-    //    (4-voice macro LFO lives on Keybed GLO + SELECT -> GLOBAL LFO), clamped with zero windup!
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    // 2. SELECT encoder steps across all 8 Dual-LFO slots:
+    //    OSC 1A(0) · 1B(1) · 2A(2) · 2B(3) · 3A(4) · 3B(5) · 4A(6) · 4B(7), clamped with 0 windup!
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // -> 1 (OSC 1B)
     CHECK(ctrl.hud().lfoVoiceFocus == 1u);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 12);
-    CHECK(ctrl.hud().lfoVoiceFocus == 3u);
+    // Verify LFO B reaches exclusive A RATE (8) & A DEPTH (9) targets while LFO A clamps at Pan (7)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 40);
+    CHECK(ctrl.state().voices[0].lfoBTarget == ruido::LfoTarget::LfoADepth);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -4);
+    CHECK(ctrl.state().voices[0].lfoBTarget == ruido::LfoTarget::LfoARate);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -24); // Back to LpCutoff (2)
+    CHECK(ctrl.state().voices[0].lfoBTarget == ruido::LfoTarget::LpCutoff);
+
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 24); // -> 7 (OSC 4B)
+    CHECK(ctrl.hud().lfoVoiceFocus == 7u);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
 
-    // Wind +200 extra CW ticks at OSC 4 rail -> stays at 3, single -4 CCW detent steps to 2 (OSC 3)
+    // Wind +200 extra CW ticks at OSC 4B rail -> stays at 7, single -4 CCW detent steps to 6 (4A)
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 200);
-    CHECK(ctrl.hud().lfoVoiceFocus == 3u);
+    CHECK(ctrl.hud().lfoVoiceFocus == 7u);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
-    CHECK(ctrl.hud().lfoVoiceFocus == 2u);
+    CHECK(ctrl.hud().lfoVoiceFocus == 6u);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
 
-    // Wind -200 CCW ticks past OSC 1 -> clamps at 0, single +4 CW detent steps to 1 (OSC 2)
+    // Wind -200 CCW ticks past OSC 1A -> clamps at 0, +8 CW steps to 2 (OSC 2A)
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -200);
     CHECK(ctrl.hud().lfoVoiceFocus == 0u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
-    CHECK(ctrl.hud().lfoVoiceFocus == 1u);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1,
+                        40); // LFO A clamps at Pan (7), never A RATE/DEPTH!
+    CHECK(ctrl.state().voices[0].lfoTarget == ruido::LfoTarget::Pan);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -20); // Back to LpCutoff (2)
+    CHECK(ctrl.state().voices[0].lfoTarget == ruido::LfoTarget::LpCutoff);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8);
+    CHECK(ctrl.hud().lfoVoiceFocus == 2u); // OSC 2A
 
-    // 3. Per-voice editing on OSC 2 (KNOB 1-4 = TARGET | SHAPE | RATE | DEPTH) leaves OSC 1/3/4
-    //    untouched, while Keybed GLO -> GLOBAL LFO edits all 4 voices simultaneously!
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16);  // +4 steps from LpCutoff(1) -> Amplitude(5)
+    // 3. Per-slot editing on OSC 2A (KNOB 1-4 = TARGET | SHAPE | RATE | DEPTH) leaves OSC 1/3/4
+    //    and OSC 2B untouched; Keybed GLO -> GLOBAL LFO scales only active LFOs when any > 0%,
+    //    and wakes 1A..4A when all 8 LFOs are at 0%!
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16);  // +4 steps from LpCutoff(2) -> Amplitude(6)
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 60);  // SHAPE
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 40);  // RATE
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 180); // DEPTH
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 100); // DEPTH (~0.45)
     CHECK(ctrl.state().voices[1].lfoTarget == ruido::LfoTarget::Amplitude);
     CHECK(ctrl.state().voices[1].lfoShape > 0.20f);
     CHECK(ctrl.state().voices[1].lfoRateHz > 0.60f);
-    CHECK(ctrl.state().voices[1].lfoDepth > 0.70f);
+    CHECK(ctrl.state().voices[1].lfoDepth > 0.35f);
+    CHECK(near(ctrl.state().voices[1].lfoBDepth, 0.0f));
     CHECK(ctrl.state().voices[0].lfoTarget == ruido::LfoTarget::LpCutoff);
     CHECK(near(ctrl.state().voices[0].lfoDepth, 0.0f));
     CHECK(near(ctrl.state().voices[2].lfoDepth, 0.0f));
 
-    // Hold Keybed GLO, step SELECT to GLOBAL LFO (2), and turn KNOB1 + KNOB4 -> updates all 4!
+    // Also activate OSC 2B at 2x speed so we verify smart GLOBAL LFO scaling + A:B ratio lock!
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // -> 3 (OSC 2B)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 24); // LpCutoff(2) + 6 -> LfoARate(8)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 80); // Faster rate on 2B
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 60); // Active depth on 2B
+    const float ratioBefore = ctrl.state().voices[1].lfoBRateHz / ctrl.state().voices[1].lfoRateHz;
+
+    // Hold Keybed GLO -> GLOBAL LFO: turning RATE scales all 8 proportionally (preserving A:B
+    // ratio), turning DEPTH scales ONLY active 2A & 2B while keeping 0% LFOs (1A/1B/3A/3B/4A/4B) at
+    // 0%!
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -8); // All(4) - 2 = Lfo(2)
     CHECK(ctrl.hud().mode == ruido::HudMode::GlobalLfo);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -16); // Clamps at first option: Pitch (0)
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 150);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 32); // Scale all 8 rates proportionally
+    CHECK(near(ctrl.state().voices[1].lfoBRateHz / ctrl.state().voices[1].lfoRateHz, ratioBefore,
+               1.0e-3f));
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 40); // Boost ONLY active LFOs (2A & 2B)
+    CHECK(ctrl.state().voices[1].lfoDepth > 0.50f);
+    CHECK(ctrl.state().voices[1].lfoBDepth > 0.35f);
+    CHECK(near(ctrl.state().voices[0].lfoDepth, 0.0f));
+    CHECK(near(ctrl.state().voices[0].lfoBDepth, 0.0f));
+
+    // Zero all 8 LFOs via GLOBAL LFO DEPTH CCW, then turn CW -> wakes LFO A (1A..4A), leaves B=0%!
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -300);
+    for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
+        CHECK(near(ctrl.state().voices[v].lfoDepth, 0.0f));
+        CHECK(near(ctrl.state().voices[v].lfoBDepth, 0.0f));
+    }
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -32); // Clamps at Pitch (0)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 150); // Wakes 1A..4A only!
     for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
         CHECK(ctrl.state().voices[v].lfoTarget == ruido::LfoTarget::Pitch);
         CHECK(ctrl.state().voices[v].lfoDepth > 0.60f);
+        CHECK(near(ctrl.state().voices[v].lfoBDepth, 0.0f));
     }
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
 
     // 4. Momentary OP6 Panning hold overrides LFO Page temporarily and returns cleanly on release!
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, -16); // Focus OSC 1
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -32); // Focus OSC 1A (0)
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
     CHECK(ctrl.hud().mode == ruido::HudMode::Panning);
@@ -1797,15 +1837,35 @@ void testPerVoiceLfoPageAndHudGraph() {
     }
     CHECK(monotonicShade);
 
+    // Verify companion sibling trace renders dimmed behind focused OSC 1A when OSC 1B depth > 0!
+    {
+        ruido::EngineControlState sibCtrl = beadCtrl;
+        sibCtrl.voices[0].lfoBDepth = 0.85f;
+        sibCtrl.voices[0].lfoBShape = 0.75f; // Square sibling trace (differs from 1A Sine!)
+        customTel.lfoPhase[4].store(0.62f, std::memory_order_relaxed);
+        for (int f = 0; f < 8; ++f) {
+            beadRenderer.prepareFrame(0.050f, sibCtrl, ctrl.hud(), customTel);
+        }
+        beadRenderer.renderFullScreenStrips(lfo24.data());
+        size_t companionDiffPixels = 0u;
+        for (size_t y = 32u; y <= 182u; ++y) {
+            for (size_t x = 0u; x < 240u; ++x) {
+                if (lfo24[y * 240u + x] != lfo8[y * 240u + x]) {
+                    ++companionDiffPixels;
+                }
+            }
+        }
+        CHECK(companionDiffPixels > 120u);
+    }
+
     // 6. Close LFO Page via LFO tap (or HOME): active LFOs keep running and LFO LED pulses live!
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
     CHECK(!ctrl.hud().lfoPageOpen);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
 
-    customTel.lfoOutput[0].store(-1.0f, std::memory_order_relaxed);
-    for (int v = 1; v < 4; ++v) {
-        customTel.lfoOutput[v].store(-1.0f, std::memory_order_relaxed);
+    for (size_t li = 0u; li < ruido::kNumVoiceLfos; ++li) {
+        customTel.lfoOutput[li].store(-1.0f, std::memory_order_relaxed);
     }
     ctrl.tick(0.016f, customTel);
     const float ledTrough = ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)];

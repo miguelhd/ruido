@@ -25,9 +25,9 @@ void ScopeHudRenderer::reset() noexcept {
     frameHud_ = {};
     prevRawHud_ = {};
     releaseLatchHud_ = {};
-    frameLfoOutput_ = {0.0f, 0.0f, 0.0f, 0.0f};
-    frameLfoPhase_ = {0.0f, 0.25f, 0.50f, 0.75f};
-    frameLfoDriftPacked_ = {0u, 0u, 0u, 0u};
+    frameLfoOutput_ = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    frameLfoPhase_ = {0.0f, 0.25f, 0.50f, 0.75f, 0.50f, 0.75f, 0.125f, 0.375f};
+    frameLfoDriftPacked_ = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
     frameVoicePeak_ = {0.0f, 0.0f, 0.0f, 0.0f};
     frameVoiceDrift_ = {0.0f, 0.0f, 0.0f, 0.0f};
     knobPosSignedSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -94,11 +94,13 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     traceEngine_.advanceWatchdog(dtClamped, hud.scopeFrozen);
     const bool streamStalled = traceEngine_.isStreamStalled(hud.scopeFrozen);
     if (!hud.scopeFrozen) {
+        for (size_t i = 0u; i < kNumVoiceLfos; ++i) {
+            frameLfoOutput_[i] = telemetry.lfoOutput[i].load(std::memory_order_relaxed);
+            frameLfoPhase_[i] =
+                wrapLfoPhase01(telemetry.lfoPhase[i].load(std::memory_order_relaxed));
+            frameLfoDriftPacked_[i] = telemetry.lfoDriftPacked[i].load(std::memory_order_relaxed);
+        }
         for (size_t v = 0u; v < kNumOscillators; ++v) {
-            frameLfoOutput_[v] = telemetry.lfoOutput[v].load(std::memory_order_relaxed);
-            frameLfoPhase_[v] =
-                wrapLfoPhase01(telemetry.lfoPhase[v].load(std::memory_order_relaxed));
-            frameLfoDriftPacked_[v] = telemetry.lfoDriftPacked[v].load(std::memory_order_relaxed);
             frameVoicePeak_[v] =
                 streamStalled ? 0.0f : telemetry.voicePeak[v].load(std::memory_order_relaxed);
             frameVoiceDrift_[v] =

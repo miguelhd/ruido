@@ -243,20 +243,127 @@ inline float applyLfoPan(float basePan, float depth01, float lfoBipolar) noexcep
     return clampf(center + halfSpan * clampf(lfoBipolar, -1.0f, 1.0f), -1.0f, 1.0f);
 }
 
+// Headroom-aware band-limited Schmitt PWM sweep across [kPulseWidthMin, kPulseWidthMax] (5%-95%).
+inline float applyLfoPulseWidth(float basePw, float depth01, float lfoBipolar) noexcept {
+    const float d = clampf(depth01, 0.0f, 1.0f);
+    if (d <= 0.0f) {
+        return basePw;
+    }
+    constexpr float kHalfMax = 0.5f * (kPulseWidthMax - kPulseWidthMin);
+    const float cleanBase = clampf(basePw, kPulseWidthMin, kPulseWidthMax);
+    const float halfSpan = kHalfMax * d;
+    const float center = clampf(cleanBase, kPulseWidthMin + halfSpan, kPulseWidthMax - halfSpan);
+    return clampf(center + halfSpan * clampf(lfoBipolar, -1.0f, 1.0f), kPulseWidthMin,
+                  kPulseWidthMax);
+}
+
+// LFO B -> LFO A Rate cross-modulation (+-6 octaves speed warp across [0.01 Hz, 2,000 Hz]).
+inline float applyLfoModRateHz(float baseRateHz, float modDepth01, float lfoBipolar) noexcept {
+    const float d = clampf(modDepth01, 0.0f, 1.0f);
+    if (d <= 0.0f) {
+        return baseRateHz;
+    }
+    const float octSpan = 6.0f * d * (0.20f + 0.80f * d);
+    return clampf(baseRateHz * fastExp2(octSpan * clampf(lfoBipolar, -1.0f, 1.0f)), kLfoFreqMinHz,
+                  kLfoFreqMaxHz);
+}
+
+// LFO B -> LFO A Depth cross-modulation (swells LFO A strength from stillness up to crest).
+inline float applyLfoModDepth(float baseDepth, float modDepth01, float lfoBipolar) noexcept {
+    const float base = clampf(baseDepth, 0.0f, 1.0f);
+    const float d = clampf(modDepth01, 0.0f, 1.0f);
+    if (d <= 0.0f || base <= 0.0f) {
+        return base;
+    }
+    const float dMin = base * (1.0f - d);
+    const float dMax = clampf(base + (1.0f - base) * 0.35f * d, 0.0f, 1.0f);
+    const float u = 0.5f * (clampf(lfoBipolar, -1.0f, 1.0f) + 1.0f);
+    return clampf(dMin + (dMax - dMin) * u, 0.0f, 1.0f);
+}
+
+inline float computeLiveLfoADepth(const VoiceParams& vp, float lfoBRaw) noexcept {
+    return (vp.lfoBTarget == LfoTarget::LfoADepth)
+               ? applyLfoModDepth(vp.lfoDepth, vp.lfoBDepth, lfoBRaw)
+               : vp.lfoDepth;
+}
+
+inline float computeLiveLfoARateHz(const VoiceParams& vp, float lfoBRaw) noexcept {
+    return (vp.lfoBTarget == LfoTarget::LfoARate)
+               ? applyLfoModRateHz(vp.lfoRateHz, vp.lfoBDepth, lfoBRaw)
+               : vp.lfoRateHz;
+}
+
+inline float computeLiveVoicePitchHz(const VoiceParams& vp, float lfoARaw, float lfoBRaw) noexcept {
+    const float dA = computeLiveLfoADepth(vp, lfoBRaw);
+    float hz = (vp.lfoTarget == LfoTarget::Pitch) ? applyLfoPitchHz(vp.frequencyHz, dA, lfoARaw)
+                                                  : vp.frequencyHz;
+    if (vp.lfoBTarget == LfoTarget::Pitch) {
+        hz = applyLfoPitchHz(hz, vp.lfoBDepth, lfoBRaw);
+    }
+    return hz;
+}
+
+inline float computeLiveVoicePulseWidth(const VoiceParams& vp, float lfoARaw,
+                                        float lfoBRaw) noexcept {
+    const float dA = computeLiveLfoADepth(vp, lfoBRaw);
+    float pw = (vp.lfoTarget == LfoTarget::PulseWidth)
+                   ? applyLfoPulseWidth(vp.pulseWidth, dA, lfoARaw)
+                   : vp.pulseWidth;
+    if (vp.lfoBTarget == LfoTarget::PulseWidth) {
+        pw = applyLfoPulseWidth(pw, vp.lfoBDepth, lfoBRaw);
+    }
+    return pw;
+}
+
+inline float computeLiveVoiceAmplitude(const VoiceParams& vp, float lfoARaw,
+                                       float lfoBRaw) noexcept {
+    const float dA = computeLiveLfoADepth(vp, lfoBRaw);
+    float amp = (vp.lfoTarget == LfoTarget::Amplitude)
+                    ? applyLfoAmplitude(vp.amplitude, dA, lfoARaw)
+                    : vp.amplitude;
+    if (vp.lfoBTarget == LfoTarget::Amplitude) {
+        amp = applyLfoAmplitude(amp, vp.lfoBDepth, lfoBRaw);
+    }
+    return amp;
+}
+
+inline float computeLiveVoicePan(const VoiceParams& vp, float lfoARaw, float lfoBRaw) noexcept {
+    const float dA = computeLiveLfoADepth(vp, lfoBRaw);
+    float pan = (vp.lfoTarget == LfoTarget::Pan) ? applyLfoPan(vp.pan, dA, lfoARaw) : vp.pan;
+    if (vp.lfoBTarget == LfoTarget::Pan) {
+        pan = applyLfoPan(pan, vp.lfoBDepth, lfoBRaw);
+    }
+    return pan;
+}
+
 inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float pressure,
-                                                    float pitchMode, float lfoRaw) noexcept {
-    const float hpBase = (vp.lfoTarget == LfoTarget::HpCutoff)
-                             ? applyLfoCutoffHz(vp.hpCutoffHz, vp.lfoDepth, lfoRaw)
-                             : vp.hpCutoffHz;
-    const float hpResBase = (vp.lfoTarget == LfoTarget::HpResonance)
-                                ? applyLfoResonance(vp.hpResonance, vp.lfoDepth, lfoRaw)
-                                : vp.hpResonance;
-    const float lpBase = (vp.lfoTarget == LfoTarget::LpCutoff)
-                             ? applyLfoCutoffHz(vp.lpCutoffHz, vp.lfoDepth, lfoRaw)
-                             : vp.lpCutoffHz;
-    const float lpResBase = (vp.lfoTarget == LfoTarget::LpResonance)
-                                ? applyLfoResonance(vp.lpResonance, vp.lfoDepth, lfoRaw)
-                                : vp.lpResonance;
+                                                    float pitchMode, float lfoARaw,
+                                                    float lfoBRaw = 0.0f) noexcept {
+    const float dA = computeLiveLfoADepth(vp, lfoBRaw);
+    float hpBase = (vp.lfoTarget == LfoTarget::HpCutoff)
+                       ? applyLfoCutoffHz(vp.hpCutoffHz, dA, lfoARaw)
+                       : vp.hpCutoffHz;
+    if (vp.lfoBTarget == LfoTarget::HpCutoff) {
+        hpBase = applyLfoCutoffHz(hpBase, vp.lfoBDepth, lfoBRaw);
+    }
+    float hpResBase = (vp.lfoTarget == LfoTarget::HpResonance)
+                          ? applyLfoResonance(vp.hpResonance, dA, lfoARaw)
+                          : vp.hpResonance;
+    if (vp.lfoBTarget == LfoTarget::HpResonance) {
+        hpResBase = applyLfoResonance(hpResBase, vp.lfoBDepth, lfoBRaw);
+    }
+    float lpBase = (vp.lfoTarget == LfoTarget::LpCutoff)
+                       ? applyLfoCutoffHz(vp.lpCutoffHz, dA, lfoARaw)
+                       : vp.lpCutoffHz;
+    if (vp.lfoBTarget == LfoTarget::LpCutoff) {
+        lpBase = applyLfoCutoffHz(lpBase, vp.lfoBDepth, lfoBRaw);
+    }
+    float lpResBase = (vp.lfoTarget == LfoTarget::LpResonance)
+                          ? applyLfoResonance(vp.lpResonance, dA, lfoARaw)
+                          : vp.lpResonance;
+    if (vp.lfoBTarget == LfoTarget::LpResonance) {
+        lpResBase = applyLfoResonance(lpResBase, vp.lfoBDepth, lfoBRaw);
+    }
     return computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase, pressure,
                                      vp.muted ? 0.0f : 1.0f, pitchMode);
 }
@@ -283,7 +390,8 @@ inline VoiceAudibility computeVoiceAudibility(const VoiceParams& vp, float voice
 
     const bool hasAudibleAmp =
         (vp.amplitude > kSilentAmpThreshold) ||
-        (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > kSilentAmpThreshold);
+        (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > kSilentAmpThreshold) ||
+        (vp.lfoBTarget == LfoTarget::Amplitude && vp.lfoBDepth > kSilentAmpThreshold);
     float muteBlend = 0.0f;
     if (!hasAudibleAmp) {
         muteBlend = 1.0f;
@@ -299,6 +407,8 @@ inline constexpr const char* lfoTargetName(LfoTarget target) noexcept {
     switch (target) {
     case LfoTarget::Pitch:
         return "PITCH";
+    case LfoTarget::PulseWidth:
+        return "WIDTH";
     case LfoTarget::LpCutoff:
         return "LPF";
     case LfoTarget::LpResonance:
@@ -311,6 +421,10 @@ inline constexpr const char* lfoTargetName(LfoTarget target) noexcept {
         return "AMP";
     case LfoTarget::Pan:
         return "PAN";
+    case LfoTarget::LfoARate:
+        return "A RATE";
+    case LfoTarget::LfoADepth:
+        return "A DEPTH";
     case LfoTarget::Count:
         break;
     }

@@ -184,11 +184,11 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
     std::array<float, kNumOscillators> blockVoicePeak{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> lastGateHigh{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> lastDriftNorm{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<VoiceLfoFrame, kNumOscillators> lastLfo{};
+    std::array<VoiceLfoFrame, kNumVoiceLfos> lastLfo{};
 
     for (size_t frame = 0u; frame < numFrames; ++frame) {
-        // Step audio-rate (44.118 kHz) smoothers, per-voice LFOs & prepare filter/pan coefficients
-        const std::array<VoiceLfoFrame, kNumOscillators> lfoFrames = lfoBank_.stepFrame();
+        // Step audio-rate (44.118 kHz) smoothers, 8x dual voice LFOs & prepare filter/pan coeffs
+        const std::array<VoiceLfoFrame, kNumVoiceLfos> lfoFrames = lfoBank_.stepFrame();
         lastLfo = lfoFrames;
 
         const float coupling = couplingSmoother_.next();
@@ -210,34 +210,51 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             VoiceSmoothers& sm = voiceSmoothers_[i];
             VoiceCoeffCache& cache = coeffCache_[i];
-            const VoiceLfoFrame& lfo = lfoFrames[i];
-            const auto& td = lfo.targetDepths;
+            const VoiceLfoFrame& lfoA = lfoFrames[i];
+            const VoiceLfoFrame& lfoB = lfoFrames[4u + i];
+            const auto& tdA = lfoA.targetDepths;
+            const auto& tdB = lfoB.targetDepths;
 
             const float p = sm.pressure.next();
             const float baseGate = sm.vactrolGate.next();
-            const float baseHz = applyLfoPitchHz(
-                sm.freqHz.next(), td[static_cast<size_t>(LfoTarget::Pitch)], lfo.raw);
+            float baseHz = applyLfoPitchHz(sm.freqHz.next(),
+                                           tdA[static_cast<size_t>(LfoTarget::Pitch)], lfoA.raw);
+            baseHz = applyLfoPitchHz(baseHz, tdB[static_cast<size_t>(LfoTarget::Pitch)], lfoB.raw);
             const float pitchMul = computeVoicePitchRatio(p, pitchMode);
             oscFreqs[i] = (pitchMul != 1.0f)
                               ? clampf(baseHz * pitchMul, 0.005f, kAudioFreqMaxHz * 4.0f)
                               : baseHz;
-            oscPulseWidths[i] = sm.pulseWidth.next();
+
+            float modPw = applyLfoPulseWidth(
+                sm.pulseWidth.next(), tdA[static_cast<size_t>(LfoTarget::PulseWidth)], lfoA.raw);
+            oscPulseWidths[i] = applyLfoPulseWidth(
+                modPw, tdB[static_cast<size_t>(LfoTarget::PulseWidth)], lfoB.raw);
             oscDrifts[i] = sm.drift.next();
 
-            const float hpBase = applyLfoCutoffHz(
-                sm.hpCutoffHz.next(), td[static_cast<size_t>(LfoTarget::HpCutoff)], lfo.raw);
-            const float hpResBase = applyLfoResonance(
-                sm.hpResonance.next(), td[static_cast<size_t>(LfoTarget::HpResonance)], lfo.raw);
-            const float lpBase = applyLfoCutoffHz(
-                sm.lpCutoffHz.next(), td[static_cast<size_t>(LfoTarget::LpCutoff)], lfo.raw);
-            const float lpResBase = applyLfoResonance(
-                sm.lpResonance.next(), td[static_cast<size_t>(LfoTarget::LpResonance)], lfo.raw);
+            float hpBase = applyLfoCutoffHz(
+                sm.hpCutoffHz.next(), tdA[static_cast<size_t>(LfoTarget::HpCutoff)], lfoA.raw);
+            hpBase =
+                applyLfoCutoffHz(hpBase, tdB[static_cast<size_t>(LfoTarget::HpCutoff)], lfoB.raw);
+            float hpResBase = applyLfoResonance(
+                sm.hpResonance.next(), tdA[static_cast<size_t>(LfoTarget::HpResonance)], lfoA.raw);
+            hpResBase = applyLfoResonance(
+                hpResBase, tdB[static_cast<size_t>(LfoTarget::HpResonance)], lfoB.raw);
+            float lpBase = applyLfoCutoffHz(
+                sm.lpCutoffHz.next(), tdA[static_cast<size_t>(LfoTarget::LpCutoff)], lfoA.raw);
+            lpBase =
+                applyLfoCutoffHz(lpBase, tdB[static_cast<size_t>(LfoTarget::LpCutoff)], lfoB.raw);
+            float lpResBase = applyLfoResonance(
+                sm.lpResonance.next(), tdA[static_cast<size_t>(LfoTarget::LpResonance)], lfoA.raw);
+            lpResBase = applyLfoResonance(
+                lpResBase, tdB[static_cast<size_t>(LfoTarget::LpResonance)], lfoB.raw);
 
             const ModulatedFilterParams mod = computeVoicePressureMacro(
                 hpBase, hpResBase, lpBase, lpResBase, p, baseGate, pitchMode);
 
-            const float modAmp = applyLfoAmplitude(
-                sm.amplitude.next(), td[static_cast<size_t>(LfoTarget::Amplitude)], lfo.raw);
+            float modAmp = applyLfoAmplitude(
+                sm.amplitude.next(), tdA[static_cast<size_t>(LfoTarget::Amplitude)], lfoA.raw);
+            modAmp =
+                applyLfoAmplitude(modAmp, tdB[static_cast<size_t>(LfoTarget::Amplitude)], lfoB.raw);
             const VoiceChannelGain chGain = computeVoiceChannelGain(modAmp);
 
             if (mod.hpCutoffHz != cache.hpHz || mod.hpResonance != cache.hpRes ||
@@ -257,8 +274,9 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             vcaGates[i] = ampGate;
             const float voiceGain = ampGate * kVoiceSumScale;
             voiceScopeScale[i] = ampGate * finalScale * 0.25f;
-            const float modPan =
-                applyLfoPan(sm.pan.next(), td[static_cast<size_t>(LfoTarget::Pan)], lfo.raw);
+            float modPan =
+                applyLfoPan(sm.pan.next(), tdA[static_cast<size_t>(LfoTarget::Pan)], lfoA.raw);
+            modPan = applyLfoPan(modPan, tdB[static_cast<size_t>(LfoTarget::Pan)], lfoB.raw);
             const float panEff = modPan * panScale;
             if (panEff != cache.panEff) {
                 cache.panEff = panEff;
@@ -361,11 +379,13 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
     telemetry_.peakRight.store(blockPeakR, std::memory_order_relaxed);
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         telemetry_.oscGateHigh[i].store(lastGateHigh[i], std::memory_order_relaxed);
-        telemetry_.lfoOutput[i].store(lastLfo[i].raw, std::memory_order_relaxed);
-        telemetry_.lfoPhase[i].store(lastLfo[i].phase01, std::memory_order_relaxed);
-        telemetry_.lfoDriftPacked[i].store(lastLfo[i].driftPacked, std::memory_order_relaxed);
         telemetry_.voicePeak[i].store(blockVoicePeak[i], std::memory_order_relaxed);
         telemetry_.voiceDriftNorm[i].store(lastDriftNorm[i], std::memory_order_relaxed);
+    }
+    for (size_t s = 0u; s < kNumVoiceLfos; ++s) {
+        telemetry_.lfoOutput[s].store(lastLfo[s].raw, std::memory_order_relaxed);
+        telemetry_.lfoPhase[s].store(lastLfo[s].phase01, std::memory_order_relaxed);
+        telemetry_.lfoDriftPacked[s].store(lastLfo[s].driftPacked, std::memory_order_relaxed);
     }
 }
 

@@ -131,8 +131,7 @@ class HudGraphs {
 
     void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                 const HudState& effectiveHud, bool extraCenterViewActive,
-                const std::array<float, kNumOscillators>& lfoOutput,
-                const std::array<uint32_t, kNumOscillators>& lfoDriftPacked) noexcept;
+                const LfoSignalArray& lfoOutput, const LfoDriftArray& lfoDriftPacked) noexcept;
 
     float filterGraphPhase() const noexcept { return filterGraphPhase_; }
 
@@ -143,7 +142,7 @@ class HudGraphs {
     void compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                            uint16_t* linScratch, float effLfoAlpha01, uint8_t lfoAlpha8,
                            const EngineControlState& control, const HudState& hud,
-                           const std::array<float, kNumOscillators>& lfoPhase) const noexcept;
+                           const LfoSignalArray& lfoPhase) const noexcept;
 
     void compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                               uint16_t* linScratch, float effFilterAlpha01,
@@ -155,7 +154,8 @@ class HudGraphs {
                            bool unified) noexcept;
     void updateLfoGraph(float dtClamped, bool snapImmediate, bool showAllVoices,
                         const EngineControlState& control, const HudState& effectiveHud,
-                        const std::array<uint32_t, kNumOscillators>& lfoDriftPacked) noexcept;
+                        const LfoSignalArray& lfoOutput,
+                        const LfoDriftArray& lfoDriftPacked) noexcept;
 
     std::array<std::array<int16_t, kFilterSweepPts>, kNumOscillators> filterCurvesFixed_{};
     std::array<std::array<int16_t, kFilterSweepPts>, 2> filterCompCurvesFixed_{};
@@ -174,6 +174,8 @@ class HudGraphs {
 
     std::array<std::array<int16_t, kTracePoints>, kNumOscillators> lfoCurvesFixed_{};
     std::array<float, kNumOscillators> lfoBeadIntensity_{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<uint8_t, kNumOscillators> lfoBeadBankIdx_{0u, 1u, 2u, 3u};
+    float lfoSiblingWeight_ = 0.0f;
     float lfoDivergenceSmooth_ = 0.0f;
     float lfoGraphPhase_ = 0.0f;
 };

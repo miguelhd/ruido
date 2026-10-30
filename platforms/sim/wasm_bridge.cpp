@@ -81,7 +81,7 @@ static_assert(kRgbaArenaAddr + (ruido::kDisplayWidth * ruido::kDisplayHeight * 4
 // --- Core 1 (AudioWorklet) Static Storage ---
 ruido::DroneEngine* gDsp = nullptr;
 
-constexpr size_t kTelemetryFloats = 30u;
+constexpr size_t kTelemetryFloats = 46u;
 
 alignas(16) ruido::EngineControlState gDspStagedControl{};
 alignas(16) float gAudioLeft[kMaxWorkletFrames]{};
@@ -130,14 +130,13 @@ void refreshSummary() noexcept {
     gSummaryOut[39u] = gCtrl->hud().lfoPageOpen ? 1.0f : 0.0f;
     gSummaryOut[40u] = static_cast<float>(gCtrl->hud().lfoVoiceFocus);
 
-    const size_t lfoRefIdx = (gCtrl->hud().lfoVoiceFocus < ruido::kNumOscillators) ?
-                                 static_cast<size_t>(gCtrl->hud().lfoVoiceFocus) :
-                                 0u;
-    const ruido::VoiceParams& lfoVp = st.voices[lfoRefIdx];
-    gSummaryOut[41u] = static_cast<float>(static_cast<uint8_t>(lfoVp.lfoTarget));
-    gSummaryOut[42u] = lfoVp.lfoShape;
-    gSummaryOut[43u] = lfoVp.lfoRateHz;
-    gSummaryOut[44u] = lfoVp.lfoDepth;
+    const uint8_t lfoSlot = gCtrl->hud().lfoVoiceFocus & 7u;
+    const ruido::VoiceParams& lfoVp = st.voices[ruido::lfoFocusVoice(lfoSlot)];
+    const uint8_t lfoSub = ruido::lfoFocusSub(lfoSlot);
+    gSummaryOut[41u] = static_cast<float>(static_cast<uint8_t>(ruido::lfoSlotTarget(lfoVp, lfoSub)));
+    gSummaryOut[42u] = ruido::lfoSlotShape(lfoVp, lfoSub);
+    gSummaryOut[43u] = ruido::lfoSlotRateHz(lfoVp, lfoSub);
+    gSummaryOut[44u] = ruido::lfoSlotDepth(lfoVp, lfoSub);
     gSummaryOut[45u] = gCtrl->hud().configPageOpen ? 1.0f : 0.0f;
     gSummaryOut[46u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().globalTarget));
     gSummaryOut[47u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().knobBank));
@@ -249,11 +248,16 @@ const float* wasm_dsp_read_telemetry() {
             gTelemetryOut[2u + i] = t.oscGateHigh[i].load(std::memory_order_relaxed);
             gTelemetryOut[6u + i] = t.lfoOutput[i].load(std::memory_order_relaxed);
             gTelemetryOut[10u + i] = t.lfoPhase[i].load(std::memory_order_relaxed);
-            const uint32_t packed = t.lfoDriftPacked[i].load(std::memory_order_relaxed);
-            gTelemetryOut[14u + i * 2u] = static_cast<float>(packed & 0x7FFFu);
-            gTelemetryOut[15u + i * 2u] = static_cast<float>((packed >> 15u) & 0x7FFFu);
+            const uint32_t packedA = t.lfoDriftPacked[i].load(std::memory_order_relaxed);
+            gTelemetryOut[14u + i * 2u] = static_cast<float>(packedA & 0x7FFFu);
+            gTelemetryOut[15u + i * 2u] = static_cast<float>((packedA >> 15u) & 0x7FFFu);
             gTelemetryOut[22u + i] = t.voicePeak[i].load(std::memory_order_relaxed);
             gTelemetryOut[26u + i] = t.voiceDriftNorm[i].load(std::memory_order_relaxed);
+            gTelemetryOut[30u + i] = t.lfoOutput[4u + i].load(std::memory_order_relaxed);
+            gTelemetryOut[34u + i] = t.lfoPhase[4u + i].load(std::memory_order_relaxed);
+            const uint32_t packedB = t.lfoDriftPacked[4u + i].load(std::memory_order_relaxed);
+            gTelemetryOut[38u + i * 2u] = static_cast<float>(packedB & 0x7FFFu);
+            gTelemetryOut[39u + i * 2u] = static_cast<float>((packedB >> 15u) & 0x7FFFu);
         }
     }
     return gTelemetryOut;
@@ -366,11 +370,17 @@ void wasm_ui_apply_telemetry() {
         gUiTelemetry->oscGateHigh[i].store(gTelemetryIn[2u + i], std::memory_order_relaxed);
         gUiTelemetry->lfoOutput[i].store(gTelemetryIn[6u + i], std::memory_order_relaxed);
         gUiTelemetry->lfoPhase[i].store(gTelemetryIn[10u + i], std::memory_order_relaxed);
-        const uint32_t lo15 = static_cast<uint32_t>(gTelemetryIn[14u + i * 2u]) & 0x7FFFu;
-        const uint32_t hi15 = static_cast<uint32_t>(gTelemetryIn[15u + i * 2u]) & 0x7FFFu;
-        gUiTelemetry->lfoDriftPacked[i].store((hi15 << 15u) | lo15, std::memory_order_relaxed);
+        const uint32_t lo15A = static_cast<uint32_t>(gTelemetryIn[14u + i * 2u]) & 0x7FFFu;
+        const uint32_t hi15A = static_cast<uint32_t>(gTelemetryIn[15u + i * 2u]) & 0x7FFFu;
+        gUiTelemetry->lfoDriftPacked[i].store((hi15A << 15u) | lo15A, std::memory_order_relaxed);
         gUiTelemetry->voicePeak[i].store(gTelemetryIn[22u + i], std::memory_order_relaxed);
         gUiTelemetry->voiceDriftNorm[i].store(gTelemetryIn[26u + i], std::memory_order_relaxed);
+        gUiTelemetry->lfoOutput[4u + i].store(gTelemetryIn[30u + i], std::memory_order_relaxed);
+        gUiTelemetry->lfoPhase[4u + i].store(gTelemetryIn[34u + i], std::memory_order_relaxed);
+        const uint32_t lo15B = static_cast<uint32_t>(gTelemetryIn[38u + i * 2u]) & 0x7FFFu;
+        const uint32_t hi15B = static_cast<uint32_t>(gTelemetryIn[39u + i * 2u]) & 0x7FFFu;
+        gUiTelemetry->lfoDriftPacked[4u + i].store((hi15B << 15u) | lo15B,
+                                                   std::memory_order_relaxed);
     }
 }
 
