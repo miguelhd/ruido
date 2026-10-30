@@ -535,15 +535,17 @@ void formatPanValue(char* buf, size_t cap, float pan) noexcept {
     }
 }
 
-// Constant-scale waveform projection: NEVER shifts or compresses when HUD fades in!
+// Linear CRT deflection projection: never shifts or compresses when HUD fades in, and lets
+// large resonant peaks deflect naturally past the top/bottom bezel without flat-topping.
 inline float sampleToScreenY(float sample) noexcept {
-    const float clamped = clampf(sample, -1.42f, 1.42f);
-    const float y = 120.0f - clamped * 78.0f;
-    return clampf(y, 4.0f, 235.0f);
+    const float y = 120.0f - sample * 112.0f;
+    return clampf(y, -360.0f, 480.0f);
 }
 
 inline int16_t screenYToFixed(float y) noexcept {
-    return static_cast<int16_t>(clampf(y, 4.0f, 235.0f) * 64.0f + 0.5f);
+    const float clamped = clampf(y, -360.0f, 480.0f);
+    const float scaled = clamped * 64.0f;
+    return static_cast<int16_t>((scaled >= 0.0f) ? (scaled + 0.5f) : (scaled - 0.5f));
 }
 
 // 4-point Catmull-Rom cubic Hermite interpolation for silky sub-sample trigger lock
@@ -892,8 +894,8 @@ void ScopeHudRenderer::rebuildTilesAndBloom() noexcept {
         const auto& yFixed = strandYFixed_[s];
 
         for (size_t tile = 0u; tile < kNumTiles; ++tile) {
-            int tileMin = 239;
-            int tileMax = 0;
+            int tileMin = static_cast<int>(kDisplayHeight);
+            int tileMax = -1;
             const size_t colBase = tile * kTileCols;
 
             for (size_t c = 0u; c < kTileCols; ++c) {
@@ -903,48 +905,55 @@ void ScopeHudRenderer::rebuildTilesAndBloom() noexcept {
                 const float yLo = (yA < yB) ? yA : yB;
                 const float yHi = (yA > yB) ? yA : yB;
 
-                int segTop = static_cast<int>(yLo) - 3;
-                int segBot = static_cast<int>(yHi) + 3;
-                if (segTop < 0) {
-                    segTop = 0;
-                }
-                if (segBot > static_cast<int>(kDisplayHeight) - 1) {
-                    segBot = static_cast<int>(kDisplayHeight) - 1;
-                }
-                if (segTop < tileMin) {
-                    tileMin = segTop;
-                }
-                if (segBot > tileMax) {
-                    tileMax = segBot;
+                const int rawTop = static_cast<int>(yLo + 512.0f) - 512 - 3;
+                const int rawBot = static_cast<int>(yHi + 512.0f) - 512 + 4;
+                if (rawBot >= 0 && rawTop < static_cast<int>(kDisplayHeight)) {
+                    const int segTop = (rawTop < 0) ? 0 : rawTop;
+                    const int segBot = (rawBot >= static_cast<int>(kDisplayHeight)) ?
+                                           (static_cast<int>(kDisplayHeight) - 1) :
+                                           rawBot;
+                    if (segTop < tileMin) {
+                        tileMin = segTop;
+                    }
+                    if (segBot > tileMax) {
+                        tileMax = segBot;
+                    }
                 }
 
-                // Analytical column photon integral stored in Q12.4 (*16) for blur precision
-                const float dy = yB - yA;
-                const float len2 = 1.0f + dy * dy;
-                const float segLen = clampf(len2 * fastInvSqrt(len2), 1.0f, 4.2f);
-                const float dwell = (0.58f + 0.42f * fastInvSqrt(1.0f + 0.14f * dy * dy)) * wgt;
-                const uint32_t energyQ4 = static_cast<uint32_t>(1174.4f * dwell * segLen);
+                // Analytical column photon integral stored in Q12.4 (*16) for blur precision.
+                // Segments deflecting off-screen only deposit photons into visible [0..59] cells.
+                const int byStart = static_cast<int>((yLo + 512.0f) * 0.25f) - 128;
+                const int byEnd = static_cast<int>((yHi + 512.0f) * 0.25f) - 128;
+                if (byEnd >= 0 && byStart < static_cast<int>(kBloomHeight)) {
+                    const float dy = yB - yA;
+                    const float len2 = 1.0f + dy * dy;
+                    const float segLen = clampf(len2 * fastInvSqrt(len2), 1.0f, 4.2f);
+                    const float dwell =
+                        (0.58f + 0.42f * fastInvSqrt(1.0f + 0.14f * dy * dy)) * wgt;
+                    const uint32_t energyQ4 = static_cast<uint32_t>(1174.4f * dwell * segLen);
 
-                const size_t bx = col >> 2u;
-                size_t by0 = static_cast<size_t>(clampf(yLo, 0.0f, 239.0f)) >> 2u;
-                size_t by1 = static_cast<size_t>(clampf(yHi, 0.0f, 239.0f)) >> 2u;
-                if (by0 >= kBloomHeight) {
-                    by0 = kBloomHeight - 1u;
-                }
-                if (by1 >= kBloomHeight) {
-                    by1 = kBloomHeight - 1u;
-                }
-                const uint32_t cellCount = static_cast<uint32_t>(by1 - by0 + 1u);
-                const uint32_t addPerCell = energyQ4 / cellCount;
-                for (size_t by = by0; by <= by1; ++by) {
-                    uint16_t& cell = bloomGrid_[by * kBloomWidth + bx];
-                    const uint32_t next = static_cast<uint32_t>(cell) + addPerCell;
-                    cell = static_cast<uint16_t>((next > 65535u) ? 65535u : next);
+                    const size_t bx = col >> 2u;
+                    const uint32_t cellCount = static_cast<uint32_t>(byEnd - byStart + 1);
+                    const uint32_t addPerCell = energyQ4 / cellCount;
+                    const size_t by0 = (byStart < 0) ? 0u : static_cast<size_t>(byStart);
+                    const size_t by1 = (byEnd >= static_cast<int>(kBloomHeight)) ?
+                                           (kBloomHeight - 1u) :
+                                           static_cast<size_t>(byEnd);
+                    for (size_t by = by0; by <= by1; ++by) {
+                        uint16_t& cell = bloomGrid_[by * kBloomWidth + bx];
+                        const uint32_t next = static_cast<uint32_t>(cell) + addPerCell;
+                        cell = static_cast<uint16_t>((next > 65535u) ? 65535u : next);
+                    }
                 }
             }
 
-            strandTileMinY_[s][tile] = static_cast<uint8_t>(tileMin);
-            strandTileMaxY_[s][tile] = static_cast<uint8_t>(tileMax);
+            if (tileMin <= tileMax) {
+                strandTileMinY_[s][tile] = static_cast<uint8_t>(tileMin);
+                strandTileMaxY_[s][tile] = static_cast<uint8_t>(tileMax);
+            } else {
+                strandTileMinY_[s][tile] = 255u;
+                strandTileMaxY_[s][tile] = 0u;
+            }
         }
     }
 
@@ -1170,12 +1179,12 @@ void ScopeHudRenderer::buildWaveformTrace(float dtSec, const EngineControlState&
                                         unpackQ3_12(history_[i1].leftQ12),
                                         unpackQ3_12(history_[i2].leftQ12),
                                         unpackQ3_12(history_[i3].leftQ12), frac) *
-                             1.34f;
+                             1.50f;
             const float sR = catmullRom(unpackQ3_12(history_[i0].rightQ12),
                                         unpackQ3_12(history_[i1].rightQ12),
                                         unpackQ3_12(history_[i2].rightQ12),
                                         unpackQ3_12(history_[i3].rightQ12), frac) *
-                             1.34f;
+                             1.50f;
             liveL[pt] = sL;
             liveR[pt] = sR;
             const float pkBus = (absf(sL) > absf(sR)) ? absf(sL) : absf(sR);
@@ -1271,7 +1280,7 @@ void ScopeHudRenderer::buildWaveformTrace(float dtSec, const EngineControlState&
     }
 
     const float soloFactor = soloFactorSmooth_;
-    const float voiceVisGain = 0.94f + 0.34f * soloFactor;
+    const float voiceVisGain = 1.12f + 0.24f * soloFactor;
     const float busSympathy = 0.22f * (1.0f - soloFactor);
 
     const float startRelOff = totalShift - static_cast<float>(kTrigPt) * smoothStride_;
@@ -2093,8 +2102,8 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,
                         const size_t colX = colBase + c;
                         const float yA = static_cast<float>(yFixed[colX]) * kFixedToPx;
                         const float yB = static_cast<float>(yFixed[colX + 1u]) * kFixedToPx;
-                        const int segTop = static_cast<int>((yA < yB) ? yA : yB) - 3;
-                        const int segBot = static_cast<int>((yA > yB) ? yA : yB) + 4;
+                        const int segTop = static_cast<int>(((yA < yB) ? yA : yB) + 512.0f) - 515;
+                        const int segBot = static_cast<int>(((yA > yB) ? yA : yB) + 512.0f) - 508;
                         if (segBot <= y0 || segTop >= y1) {
                             continue;
                         }

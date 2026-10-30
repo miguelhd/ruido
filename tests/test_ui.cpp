@@ -809,7 +809,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     std::printf("  Super-period stability |dLum|: locked 3:2 fifth = %.3f, free-beating = %.3f\n",
                 lockedDelta, beatingDelta);
     CHECK(lockedDelta < 0.8);
-    CHECK(beatingDelta < 4.5);
+    CHECK(beatingDelta < 7.0);
 
     // 7. Verify Concept A3 1/3-Screen (y = 102..182, 80 px) Dual-Resonance Filter Graph,
     //    0% Voice Offset on OP5, and smooth 70% BG Wave Dimming transition on OP1 hold/release:
@@ -995,8 +995,8 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     int minAct = 0;
     int maxAct = 0;
     const double rmsYActive = measureWaveMetrics(img24, spanActive, minAct, maxAct);
-    CHECK(spanActive > 70);
-    CHECK(rmsYActive > 20.0);
+    CHECK(spanActive > 125);
+    CHECK(rmsYActive > 35.0);
 
     // (a) Stop audio via PLAY/STOP: after 80 ms (5 frames, past DSP mute + ring window delay),
     //     waveform must smoothly contract toward y=120 rather than snapping in 1 frame!
@@ -1260,6 +1260,42 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     CHECK(maxG6Main == 63u);                         // "FILTER" emphasized first at 100% white
     CHECK(maxG6Suffix >= 24u && maxG6Suffix <= 36u); // Trailing "OSC 1" dimmed (~46% silver)
     CHECK(leftTopY == 9 && rightTopY == 9);          // Pixel-exact top alignment (y = 9)!
+
+    // 10. Verify uncompressed CRT deflection: hot resonant MS-20 peaks cross y=0 and y=239 cleanly
+    //     without piling up a clamped horizontal rail inside the bezel (y=4 or y=235)
+    ruido::DroneEngine hotEngine;
+    ruido::ScopeHudRenderer hotRenderer;
+    hotEngine.init(ruido::kBaseSampleRate);
+    ruido::EngineControlState hotState = ruido::EngineControlState::makeDefault();
+    hotState.global.masterTrim = 1.15f;
+    for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
+        hotState.voices[v].amplitude = 1.0f;
+        hotState.voices[v].muted = (v != 0u);
+        hotState.voices[v].lpCutoffHz = 220.0f;
+        hotState.voices[v].lpResonance = 0.88f;
+    }
+    hotEngine.controlBus().publish(hotState);
+    hotEngine.snapParametersToLatest();
+    for (int f = 0; f < 10; ++f) {
+        for (int b = 0; b < 14; ++b) {
+            hotEngine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+            hotRenderer.ingestScopeRing(hotEngine.scopeBuffer());
+        }
+        hotRenderer.prepareFrame(0.016f, hotState, pureScopeHud, hotEngine.telemetry());
+    }
+    hotRenderer.renderFullScreenStrips(img16.data());
+    size_t topEdgeLit = 0u;
+    size_t botEdgeLit = 0u;
+    for (size_t x = 0u; x < 190u; ++x) { // Exclude idle top-right stereo meter at x >= 200
+        if (((img16[0u * 240u + x] >> 5u) & 0x3Fu) >= 12u) {
+            ++topEdgeLit;
+        }
+        if (((img16[239u * 240u + x] >> 5u) & 0x3Fu) >= 12u) {
+            ++botEdgeLit;
+        }
+    }
+    CHECK(topEdgeLit > 0u);
+    CHECK(botEdgeLit > 0u);
 }
 
 void testPerVoiceLfoPageAndHudGraph() {
