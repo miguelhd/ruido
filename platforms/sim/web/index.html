@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>M-VAVE FM-1 Hardware Simulator | Ruido</title>
+  <link rel="stylesheet" href="style.css?v=20261030b">
+</head>
+<body>
+  <header class="topbar">
+    <a href="#instrument-title" class="skip-link visually-hidden">Skip to instrument</a>
+    <div class="topbar-brand">
+      <h1 id="instrument-title" tabindex="-1">RUIDO <span class="brand-sub">FM-1 Quad CMOS &amp; MS-20 Synthesizer Simulator</span></h1>
+    </div>
+    <div class="topbar-controls">
+      <span id="midi-status" class="status-pill">MIDI: Scanning…</span>
+      <span id="audio-rate" class="status-pill">DSP: Standby (4x OS)</span>
+      <button type="button" id="audio-toggle-btn" class="power-btn" aria-pressed="false">
+        Start Audio Engine
+      </button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="fm1-chassis">
+      <!-- Upper Half: Left Global Controls | Center 240x240 TFT | Right Osc Knobs & 2x6 Grid -->
+      <div class="upper-deck">
+        <!-- Left Hand Global Zone -->
+        <div class="left-cluster">
+          <div class="left-knobs-grid">
+            <div class="knob-cell">
+              <span id="lbl-master" class="panel-label">MASTER</span>
+              <div class="rotary-knob rotary-pot" id="knob-master" role="slider" tabindex="0"
+                   aria-labelledby="lbl-master" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuenow="85" aria-valuetext="85%" data-pot="master">
+                <span class="knob-cap"><span class="pot-pointer" id="master-pointer"></span></span>
+              </div>
+            </div>
+
+            <div class="knob-cell">
+              <span id="lbl-select" class="panel-label">SELECT</span>
+              <div class="rotary-knob rotary-encoder" role="slider" tabindex="0"
+                   aria-labelledby="lbl-select" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuenow="0" aria-valuetext="Unassigned"
+                   data-encoder="0">
+                <span class="knob-cap"><span class="encoder-ring"></span></span>
+              </div>
+            </div>
+
+            <div class="knob-cell">
+              <span id="lbl-presets" class="panel-label">PRESETS</span>
+              <div class="rotary-knob rotary-encoder" role="slider" tabindex="0"
+                   aria-labelledby="lbl-presets" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuenow="0" aria-valuetext="Snapshot Morph 0%"
+                   data-encoder="1">
+                <span class="knob-cap"><span class="encoder-ring"></span></span>
+              </div>
+            </div>
+
+            <div class="knob-cell">
+              <span id="lbl-algorithm" class="panel-label">ALGORITHM</span>
+              <div class="rotary-knob rotary-encoder" role="slider" tabindex="0"
+                   aria-labelledby="lbl-algorithm" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuenow="25" aria-valuetext="Rail Coupling 25%"
+                   data-encoder="2">
+                <span class="knob-cap"><span class="encoder-ring"></span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="oct-well">
+            <button type="button" class="panel-btn oct-btn" data-button="0"
+                    aria-label="OCT- Hold Fine Knob Rate">OCT-</button>
+            <button type="button" class="panel-btn oct-btn" data-button="1"
+                    aria-label="OCT+ Hold Fast Knob Rate">OCT+</button>
+          </div>
+        </div>
+
+        <!-- Center Unobstructed 240x240 IPS TFT Display -->
+        <div class="screen-bezel">
+          <div class="screen-frame">
+            <canvas id="tft-canvas" width="240" height="240" role="img"
+                    aria-label="240 by 240 monochrome analog CRT stereo oscilloscope and sans-serif parameter HUD"></canvas>
+          </div>
+        </div>
+
+        <!-- Right Hand Parameter Encoders & Single-Tap Utility Grid -->
+        <div class="right-cluster">
+          <div class="right-knobs-row">
+            <div class="knob-cell">
+              <span id="lbl-knob1" class="panel-label">KNOB1</span>
+              <div class="rotary-knob rotary-encoder" role="slider" tabindex="0"
+                   aria-labelledby="lbl-knob1" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuenow="50" aria-valuetext="Osc 1 Frequency 55.00 Hz" data-encoder="3">
+                <span class="knob-cap"><span class="encoder-ring"></span></span>
+              </div>
+            </div>
+
+            <div class="knob-cell">
+              <span id="lbl-knob2" class="panel-label">KNOB2</span>
+              <div class="rotary-knob rotary-encoder" role="slider" tabindex="0"
+                   aria-labelledby="lbl-knob2" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuenow="50" aria-valuetext="Osc 2 Frequency 82.41 Hz" data-encoder="4">
+                <span class="knob-cap"><span class="encoder-ring"></span></span>
+              </div>
+            </div>
+
+            <div class="knob-cell">
+              <span id="lbl-knob3" class="panel-label">KNOB3</span>
+              <div class="rotary-knob rotary-encoder" role="slider" tabindex="0"
+                   aria-labelledby="lbl-knob3" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuenow="50" aria-valuetext="Osc 3 Frequency 110.15 Hz" data-encoder="5">
+                <span class="knob-cap"><span class="encoder-ring"></span></span>
+              </div>
+            </div>
+
+            <div class="knob-cell">
+              <span id="lbl-knob4" class="panel-label">KNOB4</span>
+              <div class="rotary-knob rotary-encoder" role="slider" tabindex="0"
+                   aria-labelledby="lbl-knob4" aria-valuemin="0" aria-valuemax="100"
+                   aria-valuenow="50" aria-valuetext="Osc 4 Frequency 164.81 Hz" data-encoder="6">
+                <span class="knob-cap"><span class="encoder-ring"></span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="button-grid-well">
+            <button type="button" class="panel-btn" data-button="2" aria-label="FX (Unassigned in v1)">FX</button>
+            <button type="button" class="panel-btn" data-button="3" aria-pressed="false" aria-label="SEL Pitch Pressure Mode">SEL</button>
+            <button type="button" class="panel-btn" data-button="4" aria-label="ENV (Unassigned in v1)">ENV</button>
+            <button type="button" class="panel-btn" data-button="5" aria-pressed="false" aria-label="LFO Per-Voice Modulation Page">LFO</button>
+            <button type="button" class="panel-btn" data-button="6" aria-label="EDIT (Unassigned in v1)">EDIT</button>
+            <button type="button" class="panel-btn" data-button="7" aria-label="GLO Right Grid (Unassigned in v1)">GLO</button>
+
+            <button type="button" class="panel-btn" data-button="8" aria-label="HOME Clear HUD Overlay">HOME</button>
+            <button type="button" class="panel-btn" data-button="9" aria-pressed="false" aria-label="SAVE Arm Snapshot">SAVE</button>
+            <button type="button" class="panel-btn" data-button="10" aria-label="ARP (Unassigned in v1)">ARP</button>
+            <button type="button" class="panel-btn" data-button="11" aria-label="SEQ (Unassigned in v1)">SEQ</button>
+            <button type="button" class="panel-btn play-stop-btn" data-button="12" aria-pressed="true" aria-label="PLAY/STOP Audio Output">
+              <span>PLAY</span><span class="btn-divider"></span><span>STOP</span>
+            </button>
+            <button type="button" class="panel-btn" data-button="13" aria-label="REC (Unassigned in v1)">REC</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lower Half: 27-Key Silicone Carbon-Pill Keybed (11 Black Keys + 16 White Keys) -->
+      <div class="keybed-well">
+        <!-- Top Row: 11 Raised Black Capsule Keys in 3 - 2 - 3 - 2 - 1 Semitone Layout -->
+        <div class="black-keys-row">
+          <button type="button" class="silicone-key black-key" style="--slot: 2" data-black="0" aria-label="OP1 Hold Osc 1 Filter">
+            <span class="led-slit" aria-hidden="true"></span><span class="key-legend">OP1</span>
+          </button>
+          <button type="button" class="silicone-key black-key" style="--slot: 4" data-black="1" aria-label="OP2 Hold Osc 2 Filter">
+            <span class="led-slit" aria-hidden="true"></span><span class="key-legend">OP2</span>
+          </button>
+          <button type="button" class="silicone-key black-key" style="--slot: 6" data-black="2" aria-label="OP3 Hold Osc 3 Filter">
+            <span class="led-slit" aria-hidden="true"></span><span class="key-legend">OP3</span>
+          </button>
+
+          <button type="button" class="silicone-key black-key" style="--slot: 10" data-black="3" aria-label="OP4 Hold Osc 4 Filter">
+            <span class="led-slit" aria-hidden="true"></span><span class="key-legend">OP4</span>
+          </button>
+          <button type="button" class="silicone-key black-key" style="--slot: 12" data-black="4" aria-label="OP5 Hold Global Filter">
+            <span class="led-slit" aria-hidden="true"></span><span class="key-legend">OP5</span>
+          </button>
+
+          <button type="button" class="silicone-key black-key" style="--slot: 16" data-black="5" aria-label="OP6 Hold Oscillators 1 to 4 Stereo Pan">
+            <span class="led-slit" aria-hidden="true"></span><span class="key-legend">OP6</span>
+          </button>
+          <button type="button" class="silicone-key black-key" style="--slot: 18" data-black="6" aria-label="PIT (Unassigned in v1)">
+            <span class="led-slit" aria-hidden="true"></span><span class="key-legend">PIT</span>
+          </button>
+          <button type="button" class="silicone-key black-key" style="--slot: 20" data-black="7" aria-label="GLO Hold Oscillators 1 to 4 Amplitude">
+            <span class="led-slit" aria-hidden="true"></span><span class="key-legend">GLO</span>
+          </button>
+
+          <button type="button" class="silicone-key black-key" style="--slot: 24" data-black="8" aria-pressed="false" aria-label="MONO Dual-Mono Output">
+            <span class="led-slit" aria-hidden="true"></span><span class="key-legend">MONO</span>
+          </button>
+          <button type="button" class="silicone-key black-key" style="--slot: 26" data-black="9" aria-pressed="true" aria-label="POLY Full Stereo Output">
+            <span class="led-slit" aria-hidden="true"></span><span class="key-legend">POLY</span>
+          </button>
+
+          <button type="button" class="silicone-key black-key black-key-tall" style="--slot: 30" data-black="10" aria-label="Black Key 11: Hold Scope Freeze">
+            <span class="led-slit led-slit-tall" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <!-- Silkscreen Octave Registration Dots (matching FM-1 faceplate) -->
+        <div class="silkscreen-dots" aria-hidden="true">
+          <span class="reg-dot" style="--dot-slot: 8"></span>
+          <span class="reg-dot" style="--dot-slot: 14"></span>
+          <span class="reg-dot" style="--dot-slot: 22"></span>
+          <span class="reg-dot" style="--dot-slot: 28"></span>
+        </div>
+
+        <!-- Bottom Row: 16 White Capsule Keys with Continuous Carbon-Pill Pressure -->
+        <div class="white-keys-row">
+          <button type="button" class="silicone-key white-key" data-white="0" aria-pressed="true" aria-label="White Key 1: Osc 1 Gate Toggle"><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key" data-white="1" aria-pressed="true" aria-label="White Key 2: Osc 2 Gate Toggle"><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key" data-white="2" aria-pressed="true" aria-label="White Key 3: Osc 3 Gate Toggle"><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key" data-white="3" aria-pressed="true" aria-label="White Key 4: Osc 4 Gate Toggle"><span class="led-slit" aria-hidden="true"></span></button>
+
+          <button type="button" class="silicone-key white-key pressure-key" data-white="4" aria-label="White Key 5: Osc 1 Pressure Pad"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key pressure-key" data-white="5" aria-label="White Key 6: Osc 2 Pressure Pad"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key pressure-key" data-white="6" aria-label="White Key 7: Osc 3 Pressure Pad"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key pressure-key" data-white="7" aria-label="White Key 8: Osc 4 Pressure Pad"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+
+          <button type="button" class="silicone-key white-key pressure-key" data-white="8" aria-label="White Key 9: Snapshot Slot 1"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key pressure-key" data-white="9" aria-label="White Key 10: Snapshot Slot 2"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key pressure-key" data-white="10" aria-label="White Key 11: Snapshot Slot 3"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key pressure-key" data-white="11" aria-label="White Key 12: Snapshot Slot 4"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key pressure-key" data-white="12" aria-label="White Key 13: Snapshot Slot 5"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key pressure-key" data-white="13" aria-label="White Key 14: Snapshot Slot 6"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key pressure-key" data-white="14" aria-label="White Key 15: Snapshot Slot 7"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+          <button type="button" class="silicone-key white-key pressure-key" data-white="15" aria-label="White Key 16: Snapshot Slot 8"><span class="pressure-fill" aria-hidden="true"></span><span class="led-slit" aria-hidden="true"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- External Zone Legend (keeps faceplate 100% pure hardware silkscreen) -->
+    <div class="zone-strip">
+      <div class="zone-tag zone-mutes"><strong>Keys 1–4</strong> Osc 1–4 Gates <code>Z X C V</code></div>
+      <div class="zone-tag zone-pressure"><strong>Keys 5–8</strong> Filter / Pitch (<code>SEL</code> <code>Q</code>) <code>A S D F</code></div>
+      <div class="zone-tag zone-snaps"><strong>Keys 9–16</strong> Snapshot Slots 1–8 &nbsp;|&nbsp; <strong>Black 11</strong> Scope Freeze <code>0</code></div>
+    </div>
+  </main>
+
+  <footer class="bottom-guide">
+    <h2>Two-Hand Control Surface &amp; Hardware Auditioning</h2>
+    <ul role="list" class="guide-list">
+      <li><strong>Left-Hand Momentary Holds:</strong> Hold <code>1–4</code> (<code>OP1–4</code> Osc 1–4 Filter), <code>5</code> (<code>OP5</code> Global Filter), <code>6</code> (<code>OP6</code> Panning), <code>G</code> (<code>GLO</code> Amplitude), or <code>0</code> (Scope Freeze) while turning <code>KNOB1–4</code> — all modifier black keys are strictly momentary and return immediately on release.</li>
+      <li><strong>Per-Voice Analog LFOs (<code>LFO</code> / <code>SELECT</code>):</strong> Tap <code>LFO</code> (<code>L</code>) to toggle the per-voice LFO page, step <code>SELECT</code> (<code>,</code> / <code>.</code>) across <code>OSC 1–4</code> and <code>ALL 4</code>, and shape <code>TARGET | SHAPE | RATE | DEPTH</code> on <code>KNOB1–4</code> (<code>H</code> or <code>Esc</code> exits back to the scope while LFOs keep modulating).</li>
+      <li><strong>3-Speed Encoders (<code>OCT-</code> / <code>OCT+</code>):</strong> Hold <code>OCT-</code> (<code>[</code> or <code>-</code>) for <strong>Fine</strong> sub-cent tuning, or hold <code>OCT+</code> (<code>]</code> or <code>=</code>) for <strong>Fast</strong> full-range sweeps in ~1–1.5 turns; release returns immediately to Standard rate.</li>
+      <li><strong>Carbon-Pill Expression (<code>SEL</code> Linked Brightness) &amp; USB-MIDI:</strong> Drag upward on <strong>White Keys 5–8</strong> (or scroll wheel / <code>↑↓</code> while holding <code>A S D F</code>) to sweep MS-20 filter formant &amp; dual resonance (or Vactrol LPG when muted). Tap <strong><code>SEL</code></strong> (<code>Q</code>) to toggle <strong>Keys 5–8</strong> into Pitch Bend — <code>SEL</code> and <strong>Keys 5–8</strong> step their LED brightness in unison so their link is always visible.</li>
+    </ul>
+  </footer>
+
+  <div id="sr-announcer" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="app.js?v=20261030c"></script>
+</body>
+</html>

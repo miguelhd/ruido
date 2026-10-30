@@ -1,0 +1,610 @@
+:root {
+  color-scheme: dark;
+  accent-color: #ffffff;
+  scrollbar-color: #707070 #080808;
+  scrollbar-width: thin;
+
+  --bg-page: #000000;
+  --chassis-top: #262626;
+  --chassis-bot: #171717;
+  --well-bg: #0b0b0b;
+  --silk: #dedede;
+  --silk-dim: #8a8a8a;
+  --focus-ring: #ffffff;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(255, 255, 255, 0.24);
+  color: #ffffff;
+}
+
+body {
+  margin: 0;
+  min-block-size: 100vh;
+  background: var(--bg-page);
+  color: #e8e8e8;
+  font-family: "Helvetica Neue", Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 20px 32px;
+  gap: 18px;
+}
+
+/* Visually hidden utility (preserves skip-link visibility on :focus-within/:active) */
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
+}
+
+.skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: #000000;
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+:where(a:any-link, button, [role="slider"]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+/* Top Instrument Bar */
+.topbar {
+  width: min(1040px, 100%);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 4px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: #ffffff;
+}
+
+.brand-sub {
+  font-weight: 400;
+  font-size: 0.90rem;
+  letter-spacing: 0.01em;
+  color: #8c8c8c;
+  margin-left: 8px;
+}
+
+.topbar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-pill {
+  font-size: 0.76rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #0d0d0d;
+  border: 1px solid #292929;
+  color: #b5b5b5;
+}
+
+.power-btn {
+  min-block-size: 34px;
+  min-inline-size: 156px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid #595959;
+  background: #121212;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.power-btn[aria-pressed="true"] {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #000000;
+}
+
+/* Main Stage & M-VAVE FM-1 Hardware Enclosure */
+.stage {
+  width: min(1040px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.fm1-chassis {
+  /* Restrict user-select: none strictly to hardware chrome & controls */
+  user-select: none;
+  -webkit-user-select: none;
+  width: 100%;
+  background: linear-gradient(180deg, var(--chassis-top) 0%, var(--chassis-bot) 100%);
+  border-radius: 38px;
+  padding: 28px 32px 26px;
+  border: 1px solid #3a3a3a;
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.12),
+    inset 0 -6px 14px rgba(0, 0, 0, 0.72),
+    0 24px 56px rgba(0, 0, 0, 0.9);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Upper Deck: Left Global | Center 240x240 TFT | Right Knobs + 2x6 Grid */
+.upper-deck {
+  display: grid;
+  grid-template-columns: minmax(190px, 225px) auto minmax(340px, 1fr);
+  align-items: start;
+  gap: 26px;
+}
+
+.panel-label {
+  font-size: 0.70rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  color: var(--silk);
+  text-transform: uppercase;
+}
+
+/* Rotary Knobs (MASTER Pot + 7 Endless Quadrature Encoders) */
+.knob-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.rotary-knob {
+  --angle: 0deg;
+  touch-action: pan-x;
+  min-inline-size: 52px;
+  min-block-size: 52px;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #2e2e2e, #0f0f0f 78%);
+  border: 2px solid #080808;
+  box-shadow:
+    0 6px 12px rgba(0, 0, 0, 0.75),
+    inset 0 1px 2px rgba(255, 255, 255, 0.16);
+  display: grid;
+  place-items: center;
+  cursor: ns-resize;
+  position: relative;
+}
+
+.knob-cap {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background:
+    repeating-conic-gradient(
+      from 0deg,
+      rgba(255, 255, 255, 0.05) 0deg 6deg,
+      rgba(0, 0, 0, 0.22) 6deg 12deg
+    ),
+    radial-gradient(circle at 40% 35%, #363636, #191919 75%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  position: relative;
+  transform: rotate(var(--angle));
+}
+
+.pot-pointer {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 3px;
+  height: 12px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: #ffffff;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.55);
+}
+
+.encoder-ring {
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+}
+
+.encoder-ring::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.left-cluster {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.left-knobs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  row-gap: 16px;
+  column-gap: 18px;
+}
+
+.oct-well {
+  background: var(--well-bg);
+  border-radius: 12px;
+  padding: 6px;
+  border: 1px solid #303030;
+  box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.85);
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 7px;
+}
+
+/* Center 240x240 Monochrome TFT Display Bezel */
+.screen-bezel {
+  background: #050505;
+  border-radius: 24px;
+  padding: 20px;
+  border: 1px solid #222222;
+  box-shadow:
+    inset 0 1px 6px rgba(255, 255, 255, 0.04),
+    0 10px 24px rgba(0, 0, 0, 0.75);
+  display: grid;
+  place-items: center;
+}
+
+.screen-frame {
+  width: 240px;
+  height: 240px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #000000;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+#tft-canvas {
+  display: block;
+  width: 240px;
+  height: 240px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Right Cluster: KNOB1..4 + 2x6 Tactile Button Well */
+.right-cluster {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.right-knobs-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.button-grid-well {
+  background: var(--well-bg);
+  border-radius: 14px;
+  padding: 9px;
+  border: 1px solid #303030;
+  box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.88);
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+}
+
+/* Backlit Monochrome White Panel Buttons (matched LED pipe + luminance curve to .led-slit) */
+.panel-btn {
+  --led: 0;
+  min-block-size: 44px;
+  min-inline-size: 44px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, #2a2a2a calc((1 - var(--led)) * 100%), #8c8c8c calc(var(--led) * 100%));
+  background: linear-gradient(180deg, #222222 0%, #171717 100%);
+  color: color-mix(in srgb, #6e6e6e calc((1 - var(--led)) * 100%), #ffffff calc(var(--led) * 100%));
+  text-shadow: 0 0 calc(var(--led) * 9px) rgba(255, 255, 255, calc(var(--led) * 0.78));
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.72),
+    inset 0 1px 1px rgba(255, 255, 255, calc(0.06 + var(--led) * 0.24));
+  font-family: inherit;
+  font-size: 0.70rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  padding: 5px 6px 4px;
+  gap: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel-btn::before {
+  content: "";
+  width: 18px;
+  height: 3.5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #2e2e2e calc((1 - var(--led)) * 100%), #ffffff calc(var(--led) * 100%));
+  box-shadow:
+    0 0 calc(var(--led) * 12px) rgba(255, 255, 255, calc(var(--led) * 0.88)),
+    0 0 calc(var(--led) * 4px) rgba(255, 255, 255, var(--led));
+}
+
+.oct-btn {
+  min-block-size: 38px;
+}
+
+.panel-btn:active,
+.panel-btn.is-held {
+  transform: translateY(1px);
+  background: #131313;
+}
+
+.play-stop-btn {
+  font-size: 0.60rem;
+  line-height: 1.05;
+  gap: 2px;
+}
+
+.btn-divider {
+  width: 24px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.75;
+}
+
+/* Bottom 27-Key Silicone Keybed Well */
+.keybed-well {
+  background: #0d0d0d;
+  border-radius: 30px;
+  padding: 16px 20px 18px;
+  border: 1px solid #292929;
+  box-shadow: inset 0 5px 14px rgba(0, 0, 0, 0.9);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.black-keys-row {
+  display: grid;
+  grid-template-columns: repeat(32, 1fr);
+  column-gap: 4px;
+  min-block-size: 86px;
+}
+
+.silkscreen-dots {
+  display: grid;
+  grid-template-columns: repeat(32, 1fr);
+  column-gap: 4px;
+  height: 8px;
+  align-items: center;
+}
+
+.reg-dot {
+  grid-column: var(--dot-slot) / span 2;
+  justify-self: center;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #5e5e5e;
+}
+
+.white-keys-row {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  column-gap: 8px;
+  min-block-size: 92px;
+}
+
+/* Capsule Silicone Keys & Monochrome White PWM LED Bars */
+.silicone-key {
+  --led: 0.15;
+  --pressure: 0;
+  min-inline-size: 28px;
+  min-block-size: 78px;
+  border-radius: 999px;
+  border: 2px solid #070707;
+  background: linear-gradient(180deg, #252525 0%, #191919 100%);
+  box-shadow:
+    0 5px 9px rgba(0, 0, 0, 0.78),
+    inset 0 1px 2px rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  padding: 10px 4px 8px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.black-key {
+  grid-column: var(--slot) / span 2;
+  height: 86px;
+}
+
+.black-key-tall {
+  justify-content: center;
+}
+
+.white-key {
+  height: 92px;
+  justify-content: center;
+}
+
+.pressure-key {
+  touch-action: pan-x;
+}
+
+.silicone-key:active,
+.silicone-key.is-held {
+  transform: translateY(1.5px);
+  background: linear-gradient(180deg, #1d1d1d 0%, #131313 100%);
+}
+
+.led-slit {
+  width: 5px;
+  height: 28px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #2e2e2e calc((1 - var(--led)) * 100%), #ffffff calc(var(--led) * 100%));
+  box-shadow:
+    0 0 calc(var(--led) * 12px) rgba(255, 255, 255, calc(var(--led) * 0.88)),
+    0 0 calc(var(--led) * 4px) rgba(255, 255, 255, var(--led));
+  position: relative;
+  z-index: 2;
+}
+
+.white-key .led-slit {
+  height: 46px;
+  width: 6px;
+}
+
+.led-slit-tall {
+  height: 46px;
+}
+
+.key-legend {
+  font-size: 0.60rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--silk);
+  position: relative;
+  z-index: 2;
+}
+
+.pressure-fill {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: calc(var(--pressure) * 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.08));
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* External Functional Zone Strip */
+.zone-strip {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr;
+  gap: 10px;
+  padding: 0 18px;
+}
+
+.zone-tag {
+  font-size: 0.77rem;
+  color: #a8a8a8;
+  background: #0a0a0a;
+  border: 1px solid #222222;
+  border-radius: 10px;
+  padding: 7px 12px;
+  text-align: center;
+}
+
+.zone-tag strong {
+  color: #ffffff;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+code {
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #1a1a1a;
+  border: 1px solid #303030;
+  color: #ffffff;
+}
+
+/* Footer Guide (selectable content text) */
+.bottom-guide {
+  width: min(1040px, 100%);
+  background: #090909;
+  border: 1px solid #1f1f1f;
+  border-radius: 16px;
+  padding: 16px 22px;
+}
+
+.bottom-guide h2 {
+  margin: 0 0 10px;
+  font-size: 0.90rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #ffffff;
+}
+
+.guide-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.83rem;
+  line-height: 1.5;
+  color: #b5b5b5;
+}
+
+@media (max-width: 920px) {
+  .upper-deck {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .left-cluster,
+  .right-cluster {
+    width: 100%;
+  }
+
+  .zone-strip {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (pointer: coarse) {
+  .panel-btn {
+    min-block-size: 48px;
+  }
+}
