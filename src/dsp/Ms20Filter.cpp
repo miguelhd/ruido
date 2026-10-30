@@ -3,21 +3,20 @@
 #include "core/Config.h"
 #include "core/DspMath.h"
 
-#include <cmath>
-
 namespace ruido {
 
 namespace {
 
 // Exact Butterworth maximally-flat Sallen-Key gain: k = 2 - sqrt(2) => Q = 0.70710678
 constexpr float kButterworthK = 2.0f - kSqrt2; // 0.58578644f
-// Self-oscillation threshold occurs at k = 2.0f; kMax = 3.20f sustains rich diode howl
-// while keeping alpha * k < 0.25 * 3.20 = 0.80 < 1.0 (strictly monotonic root!).
-constexpr float kMaxResonanceK = 3.20f;
+// Self-oscillation begins at k = 2.0f; kMax = 3.72f drives aggressive screaming Korg35 limit
+// cycles while keeping alpha * k <= 0.25 * 3.72 = 0.93 < 1.0 (strictly monotonic unique root).
+constexpr float kMaxResonanceK = 3.72f;
 
 inline float mapResonanceToK(float resonance) noexcept {
     const float r = clampf(resonance, 0.0f, 1.0f);
-    const float shaped = r * (0.75f + 0.25f * r);
+    // Concave taper: thick vocal Q by 25%, self-oscillation by ~35%, screaming howl above 65%
+    const float shaped = r * (1.42f - 0.42f * r);
     return kButterworthK + shaped * (kMaxResonanceK - kButterworthK);
 }
 
@@ -28,18 +27,14 @@ inline float compensateSelfOscPitch(float hz, float k) noexcept {
         return hz;
     }
     const float excess = k - 2.0f;
-    return hz * (1.0f + 0.0365f * excess);
+    return hz * (1.0f + excess * (0.0255f + 0.0130f * excess));
 }
 
 // Exact fused single-division Newton-Raphson step for F(w) = w - b - alpha * phi(k * w) = 0.
-// By placing phi(y) = y*(27 + z^2)/D and phi'(y) = (Nd/D)^2 over common denominator D^2 - ak*Nd^2,
-// evaluating phi, phi', solving the Jacobian f/f', and updating phi_lin = phi - k*phi'*dw
-// collapses identically into ONE division:
-//   phi_next = (y * (27 + z^2) * D - ak * Nd^2 * phi_prev) / (D^2 - ak * Nd^2)
 inline float newtonStepKorg35(float b, float alpha, float k, float ak, float phiPrev) noexcept {
-    constexpr float kPosLim = 0.92f;
+    constexpr float kPosLim = 0.90f;
     constexpr float kInvPosLim = 1.0f / kPosLim;
-    constexpr float kNegLim = 1.08f;
+    constexpr float kNegLim = 1.12f;
     constexpr float kInvNegLim = 1.0f / kNegLim;
 
     const float y = k * (b + alpha * phiPrev);
@@ -62,8 +57,12 @@ inline float newtonStepKorg35(float b, float alpha, float k, float ak, float phi
 
 inline float solveDiodeFeedback(float b, float alpha, float k, float ak, float lastPhi) noexcept {
     const float phi1 = newtonStepKorg35(b, alpha, k, ak, lastPhi);
-    if (::fabsf(phi1 - lastPhi) > 1.0e-3f) {
-        return newtonStepKorg35(b, alpha, k, ak, phi1);
+    if (absf(phi1 - lastPhi) > 1.2e-2f) {
+        const float phi2 = newtonStepKorg35(b, alpha, k, ak, phi1);
+        if (absf(phi2 - phi1) > 2.5e-2f) {
+            return newtonStepKorg35(b, alpha, k, ak, phi2);
+        }
+        return phi2;
     }
     return phi1;
 }
@@ -73,34 +72,38 @@ inline float solveDiodeFeedback(float b, float alpha, float k, float ak, float l
 void Ms20DualFilter::reset() noexcept {
     hpf_.reset();
     lpf_.reset();
+    dcMean_ = 0.0f;
 }
 
-Ms20DualFilter::Coeffs Ms20DualFilter::prepareCoeffs(float hpCutoffHz, float lpCutoffHz,
-                                                     float resonance, float drive,
+Ms20DualFilter::Coeffs Ms20DualFilter::prepareCoeffs(float hpCutoffHz, float hpResonance,
+                                                     float lpCutoffHz, float lpResonance,
                                                      float invSampleRate) noexcept {
     Coeffs c{};
     const float hpHz = clampf(hpCutoffHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
     const float lpHz = clampf(lpCutoffHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
-    const float drv = clampf(drive, 0.0f, 1.0f);
+    const float hpRes = clampf(hpResonance, 0.0f, 1.0f);
+    const float lpRes = clampf(lpResonance, 0.0f, 1.0f);
 
-    if (drv > 1.0e-5f) {
-        const float preGain = 1.0f + drv * drv * 5.5f;
-        c.preDriveGain = preGain * (1.0f / 1.8f);
-        c.postDriveScale = (1.8f * fastInvSqrt(preGain)) * (1.0f + 0.35f * drv);
-        c.hasDrive = true;
-    }
+    // Tight Smart-Park Independent HP & LP Resonance:
+    // Flat phase-true bypass when parked right at 20 Hz / 20 kHz, waking up immediately within
+    // a few encoder ticks (HP > 24 Hz or LP < 18.8 kHz) so each filter's peak grabs right away.
+    const float targetKHp = mapResonanceToK(hpRes);
+    const float targetKLp = mapResonanceToK(lpRes);
+    const float hpActive = smoothstep01((hpHz - 20.0f) * (1.0f / 4.0f));
+    const float lpActive = smoothstep01((20000.0f - lpHz) * (1.0f / 1200.0f));
 
-    // Smart-Park Shared Resonance & Phase-Transparent Parking:
-    //  - When HP is parked near 20 Hz (20..36 Hz), Q tapers to Butterworth 0.7071 AND internal
-    //    pole glides down to 2.5 Hz so 55-100 Hz bass square waves keep flat phase-true roofs!
-    //  - When LP is parked near 20 kHz (16.5k..20k Hz), Q tapers to Butterworth 0.7071 AND
-    //    internal pole opens to 28 kHz for zero top-octave phase droop.
-    const float targetK = mapResonanceToK(resonance);
-    const float hpActive = smoothstep01((hpHz - 20.0f) * (1.0f / 16.0f));
-    const float lpActive = smoothstep01((20000.0f - lpHz) * (1.0f / 3500.0f));
+    c.kHp = kButterworthK + hpActive * (targetKHp - kButterworthK);
+    c.kLp = kButterworthK + lpActive * (targetKLp - kButterworthK);
 
-    c.kHp = kButterworthK + hpActive * (targetK - kButterworthK);
-    c.kLp = kButterworthK + lpActive * (targetK - kButterworthK);
+    // Independent Korg35 per-stage passband-vs-resonance dividers: lets each stage's diode peak
+    // tower prominently above the passband and prevents a self-oscillating HPF from swamping LPF.
+    const float hpFocus = hpRes * hpActive;
+    const float lpFocus = lpRes * lpActive;
+    c.hpInScale = 1.0f / (1.0f + 0.70f * hpFocus);
+    c.interStageScale = (1.0f + 0.52f * hpFocus) / (1.0f + 0.70f * lpFocus);
+    c.lpOutScale = 1.0f + 0.52f * lpFocus;
+    c.dcTrackG = clampf(kTwoPi * 8.0f * invSampleRate, 1.0e-5f, 0.05f);
+    c.dcCancelMix = smoothstep01(lpFocus * 8.0f);
 
     const float effectiveHpHz =
         compensateSelfOscPitch(2.5f + hpActive * (hpHz - 2.5f), c.kHp);
@@ -161,13 +164,11 @@ float Ms20DualFilter::processLowPass(Korg35Stage& st, float x, const Coeffs& c) 
 }
 
 float Ms20DualFilter::processPrepared(float input, const Coeffs& c) noexcept {
-    float driven = clampf(sanitizeState(input), -16.0f, 16.0f);
-    if (c.hasDrive) {
-        driven = padeClip(driven * c.preDriveGain) * c.postDriveScale;
-    }
-    const float afterHp = processHighPass(hpf_, driven, c);
-    const float afterLp = processLowPass(lpf_, afterHp, c);
-    return sanitizeState(afterLp);
+    const float cleanIn = clampf(input, -16.0f, 16.0f);
+    const float afterHp = processHighPass(hpf_, cleanIn * c.hpInScale, c);
+    const float afterLp = processLowPass(lpf_, afterHp * c.interStageScale, c);
+    dcMean_ = sanitizeState(dcMean_ + c.dcTrackG * (afterLp - dcMean_));
+    return (afterLp - c.dcCancelMix * dcMean_) * c.lpOutScale;
 }
 
 } // namespace ruido

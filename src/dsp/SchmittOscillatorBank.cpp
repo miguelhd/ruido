@@ -2,8 +2,6 @@
 
 #include "core/DspMath.h"
 
-#include <cmath>
-
 namespace ruido {
 
 namespace {
@@ -45,9 +43,9 @@ void SchmittOscillatorBank::reset(float sampleRate) noexcept {
     hzToPhaseU32_ = 4294967296.0f / sampleRate_;
 
     // ~11.5 Hz AC coupling / capacitor roof-tilt corner (classic CMOS coupling cap feel)
-    rcHighpassPole_ = ::expf(-kTwoPi * 11.5f / sampleRate_);
+    rcHighpassPole_ = fastExp(-kTwoPi * 11.5f / sampleRate_);
     // ~0.45 ms shared Vdd rail decoupling recovery time constant
-    railDecayCoeff_ = ::expf(-1.0f / (0.00045f * sampleRate_));
+    railDecayCoeff_ = fastExp(-1.0f / (0.00045f * sampleRate_));
 
     for (size_t i = 0; i < kNumOscillators; ++i) {
         VoiceState& v = voices_[i];
@@ -142,7 +140,7 @@ OscillatorBankOutput SchmittOscillatorBank::processSample(
             const float neighborSag = totalRailSag - voiceRailSag_[i];
             const float phaseNorm = static_cast<float>(v.phase) * kUint32ToNormFloat;
             // Fast C1 cosine-like PRC on [0, 1): +1 at 0 & 1, -1 at 0.5, 0 at 0.25 & 0.75
-            const float dHalf = ::fabsf(2.0f * phaseNorm - 1.0f); // [0 at 0.5, 1 at 0/1]
+            const float dHalf = absf(2.0f * phaseNorm - 1.0f); // [0 at 0.5, 1 at 0/1]
             const float signedPrc = dHalf * dHalf * (3.0f - 2.0f * dHalf) * 2.0f - 1.0f;
             railPullRatio = clampf(1.0f - couplingGain * neighborSag * signedPrc,
                                    0.55f, 1.75f);

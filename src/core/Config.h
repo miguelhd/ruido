@@ -17,11 +17,11 @@ inline constexpr size_t kOversampledBlockFrames = kBlockFrames * kOversampleFact
 inline constexpr size_t kNumOscillators = 4u;
 inline constexpr size_t kNumSnapshots = 8u;
 
-// Oscillator frequency bounds
+// Oscillator & per-voice LFO frequency bounds
 inline constexpr float kAudioFreqMinHz = 20.0f;
 inline constexpr float kAudioFreqMaxHz = 4000.0f;
 inline constexpr float kLfoFreqMinHz = 0.02f;
-inline constexpr float kLfoFreqMaxHz = 20.0f;
+inline constexpr float kLfoFreqMaxHz = 30.0f;
 
 // MS-20 dual filter bounds
 inline constexpr float kFilterCutoffMinHz = 20.0f;

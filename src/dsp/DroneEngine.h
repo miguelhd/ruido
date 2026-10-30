@@ -6,6 +6,7 @@
 #include "dsp/HalfBandDecimator.h"
 #include "dsp/Ms20Filter.h"
 #include "dsp/SchmittOscillatorBank.h"
+#include "dsp/VoiceLfoBank.h"
 
 #include <array>
 #include <cstddef>
@@ -42,6 +43,7 @@ public:
     // Toggle internal analog drift / RC roof tilt (default: both enabled).
     void setAnalogCharacterEnabled(bool enableDrift, bool enableRcTilt) noexcept {
         oscBank_.setAnalogCharacterEnabled(enableDrift, enableRcTilt);
+        lfoBank_.setAnalogCharacterEnabled(enableDrift);
     }
 
     // Snap all parameter smoothers immediately to the latest published control state
@@ -53,22 +55,22 @@ public:
 
 private:
     struct VoiceSmoothers {
-        OnePoleSmoother freqHz;
-        OnePoleSmoother amplitude;
-        OnePoleSmoother pan;
-        OnePoleSmoother hpCutoffHz;
-        OnePoleSmoother lpCutoffHz;
-        OnePoleSmoother resonance;
-        OnePoleSmoother drive;
+        LogFreqSmoother freqHz;
+        CriticallyDampedSmoother amplitude;
+        CriticallyDampedSmoother pan;
+        LogFreqSmoother hpCutoffHz;
+        CriticallyDampedSmoother hpResonance;
+        LogFreqSmoother lpCutoffHz;
+        CriticallyDampedSmoother lpResonance;
         OnePoleSmoother vactrolGate;
-        OnePoleSmoother pressure;
+        VactrolSmoother pressure;
     };
 
     struct VoiceCoeffCache {
         float hpHz = -1.0f;
+        float hpRes = -1.0f;
         float lpHz = -1.0f;
-        float reso = -1.0f;
-        float drv = -1.0f;
+        float lpRes = -1.0f;
         Ms20DualFilter::Coeffs filter{};
         float panEff = -99.0f;
         float panL = 0.70710678f;
@@ -86,20 +88,23 @@ private:
     EngineTelemetry telemetry_{};
 
     SchmittOscillatorBank oscBank_{};
+    VoiceLfoBank lfoBank_{};
     std::array<Ms20DualFilter, kNumOscillators> filters_{};
     StereoHalfBandDecimator4x decimator_{};
 
     std::array<VoiceSmoothers, kNumOscillators> voiceSmoothers_{};
     std::array<VoiceCoeffCache, kNumOscillators> coeffCache_{};
-    OnePoleSmoother couplingSmoother_{};
-    OnePoleSmoother spreadSmoother_{};
-    OnePoleSmoother masterTrimSmoother_{};
+    CriticallyDampedSmoother couplingSmoother_{};
+    CriticallyDampedSmoother masterTrimSmoother_{};
     OnePoleSmoother monoMixSmoother_{};   // 0.0 = Stereo (POLY), 1.0 = Dual-Mono (MONO)
     OnePoleSmoother masterRunSmoother_{}; // 0.0 = Muted (STOP), 1.0 = Active (PLAY)
-    OnePoleSmoother pitchModeSmoother_{}; // 0.0 = Filter Pressure, 1.0 = Pitch Pressure (PIT)
+    OnePoleSmoother pitchModeSmoother_{}; // 0.0 = MS-20 Filter/LPG, 1.0 = Pitch Bend (SEL)
 
-    // 36-frame delay aligning Osc-1 scope trigger with PolyBLEP + FIR group delay
-    uint64_t osc1EdgeDelayLine_ = 0u;
+    // 36-frame delay aligning 4-voice rising edges & scope taps with PolyBLEP + FIR delay
+    std::array<float, kNumOscillators> prevOscGateHigh_{1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<uint64_t, kNumOscillators> voiceEdgeDelayLines_{0u, 0u, 0u, 0u};
+    std::array<std::array<int16_t, kNumOscillators>, 64> voiceScopeDelay_{};
+    uint32_t voiceScopeDelayWrite_ = 0u;
 };
 
 } // namespace ruido

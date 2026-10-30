@@ -2,7 +2,6 @@
 
 #include "core/Config.h"
 
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 
@@ -12,6 +11,11 @@ namespace ruido {
 inline constexpr float clampf(float x, float lo, float hi) noexcept {
     const float t = (x >= lo) ? x : lo;
     return (t <= hi) ? t : hi;
+}
+
+// Branchless single-instruction float32 absolute value (zero libm dependency).
+inline float absf(float x) noexcept {
+    return __builtin_fabsf(x);
 }
 
 // Bit-level finite + denormal sanitizer for feedback states (zero libm overhead).
@@ -138,11 +142,11 @@ inline float fastInvSqrt(float x) noexcept {
     return y;
 }
 
-// Fast IEEE-754 + 4th-order minimax 2^octaves for octaves in [-8, +8].
+// Fast IEEE-754 + 4th-order minimax 2^octaves for octaves in [-64, +64].
 // Exact at all integer octaves (-3..+3) and < 0.16 cents max error, zero libm calls.
 inline float fastExp2(float octaves) noexcept {
-    const float x = clampf(octaves, -8.0f, 8.0f);
-    const int32_t xi = static_cast<int32_t>(x + 32.0f) - 32;
+    const float x = clampf(octaves, -64.0f, 64.0f);
+    const int32_t xi = static_cast<int32_t>(x + 128.0f) - 128;
     const float f = x - static_cast<float>(xi);
     const float p = 1.0f + f * (0.69315308f +
                                 f * (0.24015362f + f * (0.05582821f + f * 0.01086509f)));
@@ -150,6 +154,26 @@ inline float fastExp2(float octaves) noexcept {
     float scale = 1.0f;
     std::memcpy(&scale, &expBits, sizeof(scale));
     return p * scale;
+}
+
+// Fast natural exponential e^x via 2^(x * log2(e)), zero libm calls.
+inline float fastExp(float x) noexcept {
+    return fastExp2(x * 1.44269504f);
+}
+
+// Fast IEEE-754 + 4th-order minimax log2(x) for positive x (< 4e-4 octave error, zero libm calls).
+inline float fastLog2(float x) noexcept {
+    const float safeX = clampf(x, 1.0e-12f, 1.0e12f);
+    uint32_t bits = 0u;
+    std::memcpy(&bits, &safeX, sizeof(bits));
+    const int32_t expInt = static_cast<int32_t>((bits >> 23u) & 0xFFu) - 127;
+    const uint32_t mantBits = (bits & 0x007FFFFFu) | 0x3F800000u;
+    float m = 1.0f;
+    std::memcpy(&m, &mantBits, sizeof(m));
+    const float t = m - 1.0f;
+    const float frac = t * (1.44254494f +
+                            t * (-0.71814525f + t * (0.45754919f - 0.18194888f * t)));
+    return static_cast<float>(expInt) + frac;
 }
 
 } // namespace ruido
