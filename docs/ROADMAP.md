@@ -20,17 +20,19 @@ Each milestone has a strict verification gate before advancing to the next phase
 
 ---
 
-## Milestone 2: Interactive macOS / WebAssembly Simulator (`platforms/sim/`, `src/ui/`)
-- [ ] Implement the portable `240x16` RGB565 scanline strip compositor (`src/ui/`):
+## Milestone 2: Interactive macOS / WebAssembly Simulator (`platforms/sim/`, `src/ui/`) *(Complete)*
+- [x] Implement the portable `240x16` RGB565 scanline strip compositor (`src/ui/`):
   - Osc-1 rising-edge-triggered anti-aliased CRT stereo waveform renderer.
   - Alpha-blended translucent HUD (`120 ms` bloom, `1.5 s` hold, `800 ms` dissolve) including `[ HP |══════| LP ]` filter passband curve and headroom indicator.
-- [ ] Implement stateless two-hand controller (`OP1-4` filter holds, `OP5` Amp, `OP6` Pan, `GLO` global filter, `PIT` pitch pressure, left encoders, right single-taps) + encoder velocity ballistics + 27-key / 14-button varibright white LED engine (`src/core/`, `src/ui/`).
-- [ ] Wrap portable engine in `platforms/sim/` (WebAssembly + WebAudio + faithful FM-1 front-panel UI matching `docs/assets/fm1-front-panel.png`, including simulated finger-pressure expression on keys `5-16` & MIDI Aftertouch).
-- [ ] **Verification Gate:** Real-time auditioning from macOS audio interface directly into external pedals / Eurorack.
+- [x] Implement stateless two-hand controller (`OP1-4` filter holds, `OP5` Amp, `OP6` Pan, `GLO` global filter, `PIT` pitch pressure, left encoders, right single-taps) + encoder velocity ballistics + 27-key / 14-button varibright white LED engine (`src/core/`, `src/ui/`).
+- [x] Wrap portable engine in `platforms/sim/` (WebAssembly + WebAudio + faithful FM-1 front-panel UI matching `docs/assets/fm1-front-panel.png`, including simulated finger-pressure expression on keys `5-16` & MIDI Aftertouch, plus native macOS `CoreAudio` live runner).
+- [x] **Verification Gate:** Automated unit + UBSan + Node V8 Wasm tests and real-time auditioning (`make serve` WebAudio & `./build/ruido_sim_macos` CoreAudio) from macOS audio interface directly into external pedals / Eurorack.
 
 ---
 
-## Milestone 3: Drone Snapshots & Rubber-Band Pressure Morphing
+## Milestone 3: Per-Voice LFO, Config Menu & Drone Snapshots
+- [x] Implement dedicated 4-voice LFO engine & `LFO` HUD page (`ADR-022`: `SELECT` = `Osc 1..4 / All`, `KNOB 1–4` = `TARGET | SHAPE | RATE | DEPTH` with continuous `Sine -> Tri -> Saw -> Slewed Square -> Smooth Drift` morphing and `7` voice circuit targets).
+- [ ] Implement focused Configuration Menu behind right-grid `GLO` button (housing `Stereo / Dual Mono` output routing and global hardware settings).
 - [ ] Implement compact binary snapshot struct (`<= 128 bytes` per snapshot) for the 8 snapshot keys (`White Keys 9-16`).
 - [ ] Implement smooth glide on tap, continuous crossfade via the `PRESETS` encoder, and **rubber-band pressure morphing** when leaning into a snapshot key.
 

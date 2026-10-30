@@ -10,7 +10,7 @@
 | **Flash** | **1 MB XIP NOR Flash** (`0x02000000`) | Code executes in-place; **~600 KB strict ceiling** for our compiled `.fwsc` application + assets |
 | **Audio I/O** | **44,118 Hz** stereo, **64-frame blocks** | `~1.45 ms` block callback budget. Stereo 3.5mm TRS headphone/line out (AC-coupled, ~1-2 Vpp), auto-muting internal speaker, plus USB-C digital stereo audio |
 | **Display** | **1.54" `240x240` RGB565 TFT LCD** | Driven over high-speed SPI with DMA |
-| **Rotary Controls** | **1x `MASTER` analog pot + 7x endless encoders** | Left: `SELECT` (push-click), `PRESETS`, `ALGORITHM`; Right: `KNOB1`-`KNOB4` |
+| **Rotary Controls** | **1x `MASTER` analog pot + 7x endless encoders** | Left: `SELECT`, `PRESETS`, `ALGORITHM` (no push switches); Right: `KNOB1`-`KNOB4` |
 | **Buttons & Keys** | **14 tactile buttons + 27 silicone keys (`F3-G5`)** | Left `OCT-`/`OCT+`, right `2x6` button matrix, 11 labeled black keys + 16 white keys |
 | **Keybed Pressure** | **Carbon-pill `SARADC` resistance sensing** | Matrix rows tied to `AC791N` SARADC pins (`PA7`/`PA8` technique) yield continuous per-key analog pressure without hardware mods |
 | **LEDs** | **27 key LEDs + 14 button LEDs** | Monochrome white; per-LED software PWM brightness |
@@ -28,13 +28,13 @@ Ruido pins real-time DSP and UI/control scanning to separate `pi32v2` cores comm
 ┌─────────────────────────────────────────────┐       Lock-Free        ┌─────────────────────────────────────────────┐
 │             CORE 0 (UI & I/O)               │    Control Snapshot    │          CORE 1 (Hard Real-Time DSP)        │
 │                                             │ ─────────────────────> │                                             │
-│ • GPIO + SARADC Key Matrix (Gate + Pressure)│                        │ • 4x Oversampled Domain (176,472 Hz):       │
-│ • 7x Encoder Quadrature + Velocity Ballistic│    Lock-Free SPSC      │   - 4x Schmitt PolyBLEP Oscillators         │
-│ • Varibright White LED PWM Refresh          │   Scope Trace + Peak   │   - Shared Power-Rail Coupling (`ALGORITHM`)│
-│ • 240x16 Ping-Pong Scanline Strip Renderer  │ <───────────────────── │   - 4x Series ZDF MS-20 (Drive + HPF -> LPF)│
-│ • SPI DMA Display Transfer (~45-55 FPS)     │                        │   - Clickless Mute/Pressure + Sin/Cos Pan   │
-│ • Snapshot Rubber-Band / Slew & Flash NVS   │                        │   - Nonlinear Master Summing Stage          │
-└─────────────────────────────────────────────┘                        │ • Stereo Polyphase 4x -> 1x Decimator       │
+│ • GPIO + SARADC Key Matrix (Gate + Pressure)│                        │ • 44.118 kHz Modulation: 4x Analog Voice LFO│
+│ • 7x Encoder Quadrature + 3-Gear Rate Scale │    Lock-Free SPSC +    │ • 4x Oversampled Domain (176,472 Hz):       │
+│ • Varibright White LED PWM Refresh          │  LFO/Gate Telemetry    │   - 4x Schmitt PolyBLEP Oscillators         │
+│ • 240x16 Ping-Pong Scanline Strip Renderer  │ <───────────────────── │   - Shared Power-Rail Coupling (`ALGORITHM`)│
+│ • SPI DMA Display Transfer (~45-55 FPS)     │                        │   - 4x Series ZDF MS-20 (HPF -> LPF)        │
+│ • Snapshot Rubber-Band / Slew & Flash NVS   │                        │   - Clickless Mute/Pressure + Sin/Cos Pan   │
+└─────────────────────────────────────────────┘                        │ • Nonlinear Sum + 4x -> 1x FIR Decimator    │
                                                                        └─────────────────────────────────────────────┘
 ```
 
@@ -50,23 +50,30 @@ All synthesis and filtering run inside a unified **`4x` oversampled domain (`176
 3. **1/f Thermal Drift:** Independent slow filtered random walk (`±2.2 cents`) per oscillator so unison/octaves breathe organically.
 4. **Shared Power-Rail Threshold Coupling (`ALGORITHM` Knob):** Each oscillator's transition feeds a transient crowbar/shoot-through pulse scaled by the `ALGORITHM` parameter (`0..100%`) into a virtual `Vdd` sag bus, nudging neighbor hysteresis thresholds (`Vt+`/`Vt-`) via a signed phase-response curve to reproduce analog `CD40106` Adler injection locking (`~1.6%` max capture range).
 
-### 3.2 Per-Oscillator MS-20 (`Korg35`) Dual Filter (`8x` ZDF Stages Total)
-Each oscillator feeds **Pre-Filter Drive (`KNOB4`)** into its dedicated **2-pole Sallen-Key High-Pass Filter -> 2-pole Sallen-Key Low-Pass Filter**:
-- **Topology-Preserving Transform (TPT / ZDF):** Trapezoidal integrators with Picard warm-started, **fused single-division Newton-Raphson** resolution of the delay-free nonlinear feedback loop (`ADR-010`) and Van der Pol period elongation compensation above `k = 2.0`—zero `z^-1` unit-delay cramping, `< 0.6%` self-oscillation pitch accuracy to `8 kHz`, and unconditional stability (`F'(w) >= 0.20 > 0`).
-- **Asymmetric Diode Clipper in Feedback:** `C^2`-at-origin asymmetric Padé diode clipper (`+0.92 / -1.08`) inside both `HPF` and `LPF` Sallen-Key feedback paths so small-signal Butterworth passband stays `100%` linear while hot resonance generates rich even + odd harmonics decoupled from post-filter mix `Amplitude`.
-- **Smart-Park Shared Resonance:** Smooth `smoothstep` edge taper (`Q -> 0.7071`, internal poles gliding to `2.5 Hz` / `28 kHz`) as `HP Cutoff -> 20 Hz` or `LP Cutoff -> 20 kHz`, preventing sub-sonic rumble, bass square-wave roof tilt, or ultrasonic self-oscillation on parked stages.
+### 3.2 Per-Oscillator MS-20 (`Korg35`) Dual Filter with Independent HP & LP Resonance (`8x` ZDF Stages)
+Each oscillator feeds its dedicated **2-pole Sallen-Key High-Pass Filter -> 2-pole Sallen-Key Low-Pass Filter** controlled in classic MS-20 pairing by `HPF` (`KNOB1`), `HP RES` (`KNOB2`), `LPF` (`KNOB3`), and `LP RES` (`KNOB4`):
+- **Topology-Preserving Transform (TPT / ZDF):** Trapezoidal integrators with Picard warm-started, **adaptive fused single-division Newton-Raphson** resolution of the delay-free nonlinear feedback loop (`kMax = 3.72`, `alpha * k <= 0.93 < 1.0`, unique strictly monotonic root) and calibrated Van der Pol period elongation compensation above `k = 2.0`—zero `z^-1` unit-delay cramping, `< 0.5%` self-oscillation pitch accuracy on both `HPF` and `LPF` across `200 Hz – 8 kHz`, and unconditional stability (`sizeof(Ms20DualFilter) = 28 B`).
+- **Asymmetric `Korg35` Diode Loops & Per-Stage Passband Dividers (`ADR-019`):** Asymmetric Padé silicon diode clippers (`+0.90 / -1.12`) inside both `HPF` and `LPF` feedback paths paired with independent per-stage input/inter-stage/output resonance dividers (`hpInScale`, `interStageScale`, `lpOutScale`) and concave resonance tapers (`mapResonanceToK`). Either filter enters self-oscillation independently around `~35%` without forcing resonance onto the companion stage, and both can self-oscillate simultaneously without the `HPF` peak swamping the `LPF` diode loop.
+- **Tight Smart-Park Independent Resonance:** Smooth `smoothstep01` edge tapers (`20..24 Hz` on `HPF`, `18.8..20 kHz` on `LPF`, internal poles gliding to `2.5 Hz` / `28 kHz`) keep parked stages phase-flat regardless of `HP RES` / `LP RES` position while engaging each stage's peak within the first few encoder transitions.
 
-### 3.3 Mixing, Stereo Spread, Master Bus Sag & Polyphase Decimation
-- **Clickless Vactrol Mute, Pressure Swell & Pan:** Per-sample one-pole slews (`3.8-5.0 ms` time constants with ULP-safe target snap) on mutes, continuous `SARADC` key-pressure modulation, post-filter amplitudes, and minimax constant-power (`sin`/`cos`) stereo pan weights (scaled by `SELECT` stereo spread or collapsed bit-identically in `MONO` mode).
+### 3.3 Per-Voice Analog-Modeled LFO Bank (`4x` Independent Voice LFOs)
+Each voice (`Osc 1..4`) owns a dedicated analog-modeled modulation LFO (`VoiceLfoBank` + shared zero-`libm` `LfoMath.h`, `ADR-022`) stepped once per `44,118 Hz` output frame:
+- **32-Bit Phase Accumulator & Capacitor Drift:** `uint32_t` phase accumulators (`~10.3 uHz` resolution, exact `50.0 s` cycles at `0.02 Hz` up to `30.0 Hz` audio-edge flutter/FM) initialized in `{0°, 90°, 180°, 270°}` quadrature with per-voice `1%` polystyrene timing-capacitor tolerances and slow thermal random walk.
+- **Stepless Analog Waveform Morph (`SHAPE` `0..100%`):** Continuous morph across `C^2` folded polynomial `Sine` + JFET Padé crest warmth (`0.00`), MS-20 variable-symmetry `Triangle -> Sawtooth` (`0.25 -> 0.50`) with `C^1` quadratic vertex fillets, exact analytical `1 - k*r*(1-r)` peak normalization, rate-adaptive capacitor flyback, and exact `0.0` DC integral, vactrol-rounded `C^1` cubic `Slewed Square` (`0.75`), and non-repeating 2-segment **`C^2` Uniform Cubic B-Spline `Smooth Drift`** (`1.00`) driven by a phase-clocked 5-knot Sloth anti-clump zero-mean feedback generator (`packDriftKnots` packs 5 signed 6-bit knots into a single `30-bit` atomic `uint32_t` in `EngineTelemetry` so Core 0 renders the exact live spline terrain).
+- **Clickless 7-Target Crossfade & Headroom-Aware Modulation Laws:** Switching `KNOB 1` (`TARGET`) live crossfades per-destination weights (`~12.5 ms` tau) across **`LPF`**, **`LP RES`**, **`HPF`**, **`HP RES`**, **`AMP`**, **`PITCH`**, and **`PAN`**, while headroom-aware octave/resonance/pan windowing shifts parked centers inward (`20 Hz` HPF, `20 kHz` LPF, `0%` RES, hard `L/R` PAN) so sweeps never flat-top against rails.
+
+### 3.4 Mixing, Equal-Power Pan, Master Bus Sag & Polyphase Decimation
+- **Stepless `C^1` Log-Potentiometer Smoothing, Vactrol Mute, `SEL`-Routed Pressure & Pan:** Continuous rotary controls (`freqHz`, `hpCutoffHz`, `lpCutoffHz`, `lfoRateHz` in `log2(Hz)` octave space via `LogFreqSmoother`; `amplitude`, `pan`, `hpResonance`, `lpResonance`, `lfoShape`, `lfoDepth`, `circuitCoupling`, `masterTrim` via `CriticallyDampedSmoother`) use 2-pole critically-damped cascades (`14 ms/pole`, `~28 ms` mean S-curve glide, `0%` overshoot, zero stationary FPU cost) to fuse discrete encoder transitions into stepless analog sweeps; gates/modes use `3.8-5.0 ms` one-pole slews, paired with an asymmetric `VactrolSmoother` (`4.5 ms` optical LED attack / `26.0 ms` CdS photoconductive release) driving White Keys `5-8`.
 - **Master Bus Sag:** High-headroom (`0.75` linear knee, `±1.25` soft ceiling) transformer/op-amp summing bus restoring subtle intermodulation glue when multiple hot voices collide.
 - **Stereo Decimation (`176.472 kHz -> 44.118 kHz`):** Two cascaded 2x **Linear-Phase Symmetric Polyphase Half-Band FIR** stages (`Stage 1`: 31-tap `P=8`, `Stage 2`: 127-tap `P=32`, Kaiser-windowed) using double-mirrored unit-stride odd rings and 4-way unrolled stereo accumulators (`> 87 dB` stopband rejection to `20 kHz`, `< 0.0005 dB` passband ripple, `0°` phase dispersion).
 
-### 3.4 Cycle Budget Estimate (Core 1 @ 240-320 MHz)
+### 3.5 Cycle Budget Estimate (Core 1 @ 240-320 MHz)
 Available cycles per `44.118 kHz` stereo frame: **`~5,440 - 7,250` cycles**.
 - `4x` Schmitt PolyBLEP + drift + rail coupling (@ `4x` OS): `~650` cycles
 - `8x` Nonlinear ZDF Sallen-Key stages (`4 voices x [HPF + LPF]` @ `4x` OS): `~1,450` cycles
+- `4x` Per-voice analog LFOs + `C^2` B-spline drift + 7-target modulation laws (@ `1x` base rate): `~180` cycles
 - Slews, pressure routing, stereo pan, master bus saturation & cascaded half-band stereo decimator: `~450` cycles
-- **Estimated Total:** **`~2,550` cycles/frame (`~35-47%` of Core 1)**, leaving >50% safety margin.
+- **Estimated Total:** **`~2,730` cycles/frame (`~38-50%` of Core 1)**, leaving >=50% safety margin (`sizeof(DroneEngine) = 45.50 KB`).
 
 ---
 
@@ -75,10 +82,10 @@ Available cycles per `44.118 kHz` stereo frame: **`~5,440 - 7,250` cycles**.
 ### 4.1 Carbon-Pill Polyphonic Pressure Scanner (`Core 0`)
 - Between digital matrix scans, Core 0 pulses weak GPIO pull-ups and reads the `AC791N` `SARADC` channels tied to the silicone key matrix rows, mapping nonlinear carbon-pill resistance drop through a calibrated curve + low-pass slew into continuous `[0.0f .. 1.0f]` per-key pressure values (mirrored in `platforms/sim/` via mouse drag/wheel pressure + MIDI Poly/Channel Aftertouch).
 
-### 4.2 `240x16` Scanline Strip Scope & HUD Compositor
-- **Ping-Pong Strip Buffers:** Two `240 x 16` pixel RGB565 buffers (`7,680 bytes` each = **`15.36 KB` total SRAM**), fitting inside Core 0's `24 KB` L1 D-Cache while SPI DMA streams at ~45-55 FPS.
-- **Osc-1 Triggered CRT Scope:** Rising-edge synced on Oscillator 1 with vertical min/max phosphor intensity columns and `L`/`R` stereo trace layering.
-- **Alpha-Blended Quasimode HUD:** Fixed-point 5-bit alpha blending (`0..32`) composites active typography, level/pan bars, or `[ HP |══════| LP ]` curves over a ~30%-dimmed waveform backdrop (`~120 ms` bloom, `1.5 s` hold, `~800 ms` dissolve).
+### 4.2 `240x16` Coupled 4-Voice Caustic Ribbon Scope & Optical-Filament HUD Compositor
+- **Ping-Pong Strip Buffers & Compact Zero-Framebuffer State:** Two `240 x 16` pixel RGB565 buffers (`7,680 bytes` each = **`15.36 KB`**) plus `81.77 KB` (`83,736 B`) static `ScopeHudRenderer` state (`4096`-sample compact `12 B` `Q3.12` stereo + 4-voice/rising-edge scope history covering down to `20 Hz` and multi-cycle super-periods, continuous phosphor persistence states, `14` `Q8.6` strands with `8`-column `[minY, maxY]` tile-culling bounds, a `60x60` `uint16_t` quarter-resolution bloom grid, and shared slewed `4 x 221` + `2 x 221` `Q8.6` MS-20 filter / per-voice LFO curves), avoiding any `115.2 KB` `240x240` framebuffer while streaming at ~50-60 FPS over SPI DMA (`~19-22%` of `Core 0`).
+- **Coupled 14-Strand Circuit Mesh, Super-Period Lock & Zero-Hard-Cut Galvanometer Relaxation (`ADR-018`, `ADR-023`):** Core 1 delays 4x-averaged `int16` (`Q2.13`, `0.0095 px` precision) per-voice post-MS-20 taps and 4-voice rising-edge flags by `36` base frames to align sample-accurately with the linear-phase FIR decimated stereo bus. On Core 0, `prepareFrame` scans up to `8` rising-edge candidates across `4096` samples (`~93 ms`), refines each to its continuous sub-sample post-MS-20 zero-crossing (immune to filter group delay), locks onto the multi-cycle harmonic super-period via a `48`-tap per-voice similarity signature across a continuous Catmull-Rom `smoothStride_` (`[1.0f, 2.0f]`, eliminating `1x <-> 2x` bass-zoom snaps), applies continuous `38–190 ms` phosphor/galvanometer slewing (smoothly relaxing all `14` strands into the `y = 120` silent horizon when `PLAY/STOP` stops, `MASTER = 0%`, all voices mute, or the audio stream pauses, and smoothly expanding back on resume), splats analytical column photon energy into the `60x60` grid, and runs a 2-pass in-place separable `[1, 3, 4, 3, 1] / 12` blur calibrated at `25%` bloom intensity.
+- **Tile-Culled Linear Photon Rasterizer, Slewed Concept A3 Filter / LFO Graph & `4x4` Bayer Neutral RGB565 (`ADR-020`, `ADR-022`, `ADR-023`):** `renderStrip` processes stateless `<= 8`-row sub-chunks (`5.76 KB` stack), accumulates `64`-entry LUT Gaussian strand capsules in linear photon space (`uint16_t`), adds exact eighth-step integer bilinearly upsampled `60x60` bloom, maps through a `1024`-entry `constexpr` soft-knee Reinhard + `0.82` gamma LUT (`1.12 KB` XIP Flash), applies a smooth `70%` background waveform dimming envelope (`~110 ms` attack / `~240 ms` release S-curve, `~65 ms` tau quick-dissolve on `HOME`) strictly behind active filter and LFO center-graph views, composites the `80 px` (`y = 102..182`, `x = 10..230`) Option A3 graph—either the dual-resonance MS-20 passband (`y = 182` floor baseline + slewed `HP`/`LP` cutoff beads breathing live with active filter LFOs) or the bipolar per-voice LFO wave (`y = 142` zero-line horizon + symmetric crest glow + live moving Optical Phase Bead(s) across `OSC 1..4` or `ALL 4`)—alongside live LFO-animated optical-filament gauges, outgoing-view latch on momentary key release, and `10 / 13 pt` Medium + `13 pt` Bold `HelveticaNeue` ROM tables (`7.70 KB` XIP Flash, `0 B` SRAM), and packs strictly neutral monochrome RGB565 (`R5 == B5`, `G6 == (R5 << 1) | (R5 >> 4)`) with `4x4` ordered Bayer dithering (`~496` effective monochrome shades, zero contour banding).
 
 ---
 
@@ -87,9 +94,9 @@ Available cycles per `44.118 kHz` stereo frame: **`~5,440 - 7,250` cycles**.
 ```text
           ┌──────────────────────────────────────────┐
           │        Portable Engine (src/)            │
-          │  • RuidoEngine::processAudioBlock(...)   │
-          │  • RuidoUI::renderStrip(y0, h, rgb565*)  │
-          │  • RuidoController::onInputEvent(...)    │
+          │  • DroneEngine::processBlock(...)        │
+          │  • ScopeHudRenderer::renderStrip(...)    │
+          │  • RuidoController::onEncoderDelta(...)  │
           └────────────────────┬─────────────────────┘
                                │  Pure C++17 Structs (PlatformHAL)
              ┌─────────────────┴─────────────────┐
