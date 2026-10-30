@@ -114,8 +114,8 @@ inline float fastExp2(float octaves) noexcept {
     const float x = clampf(octaves, -64.0f, 64.0f);
     const int32_t xi = static_cast<int32_t>(x + 128.0f) - 128;
     const float f = x - static_cast<float>(xi);
-    const float p = 1.0f + f * (0.69315308f +
-                                f * (0.24015362f + f * (0.05582821f + f * 0.01086509f)));
+    const float p =
+        1.0f + f * (0.69315308f + f * (0.24015362f + f * (0.05582821f + f * 0.01086509f)));
     const uint32_t expBits = static_cast<uint32_t>(xi + 127) << 23u;
     float scale = 1.0f;
     std::memcpy(&scale, &expBits, sizeof(scale));
@@ -137,8 +137,7 @@ inline float fastLog2(float x) noexcept {
     float m = 1.0f;
     std::memcpy(&m, &mantBits, sizeof(m));
     const float t = m - 1.0f;
-    const float frac = t * (1.44254494f +
-                            t * (-0.71814525f + t * (0.45754919f - 0.18194888f * t)));
+    const float frac = t * (1.44254494f + t * (-0.71814525f + t * (0.45754919f - 0.18194888f * t)));
     return static_cast<float>(expInt) + frac;
 }
 

@@ -13,6 +13,8 @@ inline constexpr size_t kNumEncoders = 7u;
 inline constexpr size_t kNumPanelButtons = 14u;
 inline constexpr size_t kNumBlackKeys = 11u;
 inline constexpr size_t kNumWhiteKeys = 16u;
+inline constexpr size_t kNumLedChannels =
+    kNumBlackKeys + kNumWhiteKeys + kNumPanelButtons + 1u; // 42 physical LED channels
 
 // 7 endless quadrature encoders on the M-VAVE FM-1 front panel
 enum class EncoderId : uint8_t {
@@ -72,11 +74,7 @@ enum class KnobBankMode : uint8_t {
 };
 
 // Encoder sweep rate selected via OCT- (Fine) and OCT+ (Fast: 1-1.5 turns full sweep)
-enum class KnobRate : int8_t {
-    Fine = -1,
-    Standard = 0,
-    Fast = 1
-};
+enum class KnobRate : int8_t { Fine = -1, Standard = 0, Fast = 1 };
 
 // Active function displayed in the top HUD header whenever any control or key is touched
 enum class HudMode : uint8_t {
@@ -114,23 +112,31 @@ struct HudState {
     KnobBankMode knobBank = KnobBankMode::Frequency;
     KnobRate knobRate = KnobRate::Standard;
     ButtonId lastButton = ButtonId::Count;
-    uint8_t focusedVoice = 0u;   // 0..3 oscillator or knob index
-    uint8_t focusedKnob = 0u;    // 0..3 active column highlight
-    uint8_t lfoVoiceFocus = 0u;  // 0..3 = OSC 1..4, 4 = ALL 4 (SELECT encoder on LFO Page)
-    uint8_t snapshotSlot = 0u;   // 0..7 for White Keys 9..16
-    float morphPosition = 0.0f;  // [0.0f, 1.0f] PRESETS scrub position
-    float opacity = 0.0f;        // [0.0f, 1.0f] smooth S-curve alpha envelope
+    uint8_t focusedVoice = 0u;  // 0..3 oscillator or knob index
+    uint8_t focusedKnob = 0u;   // 0..3 active column highlight
+    uint8_t lfoVoiceFocus = 0u; // 0..3 = OSC 1..4, 4 = ALL 4 (SELECT encoder on LFO Page)
+    uint8_t snapshotSlot = 0u;  // 0..7 for White Keys 9..16
+    float morphPosition = 0.0f; // [0.0f, 1.0f] PRESETS scrub position
+    float opacity = 0.0f;       // [0.0f, 1.0f] smooth S-curve alpha envelope
     bool modifierHeld = false;
-    bool scopeFrozen = false;    // Momentary waveform freeze on 11th black key
+    bool scopeFrozen = false; // Momentary waveform freeze on 11th black key
     bool saveArmed = false;
-    bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
+    bool lfoPageOpen = false; // Latching LFO page state (ButtonId::Lfo)
 };
 
-// Monochrome white software-PWM brightness [0.0f, 1.0f] for all 27 keys + 14 panel buttons
+// Software-PWM brightness [0.0f, 1.0f] across all 42 physical LED channels on the M-VAVE FM-1:
+// - blackKeyLeds[0..10] & whiteKeyLeds[0..15]: 27 monochrome white silicone key LEDs
+// - buttonLeds[0..11]: 12 monochrome white function/octave button LEDs (OCT-/+, FX..SEQ)
+// - buttonLeds[12] (PlayStop): Green PLAY LED under the split PLAY/STOP cap
+// - buttonLeds[13] (Rec): Red LED under the REC button
+// - stopLed: Red/Amber-Orange STOP LED under the split PLAY/STOP cap (mixes to Yellow with PLAY)
 struct LedState {
     std::array<float, kNumBlackKeys> blackKeyLeds{};
     std::array<float, kNumWhiteKeys> whiteKeyLeds{};
     std::array<float, kNumPanelButtons> buttonLeds{};
+    float stopLed = 0.0f;
 };
+static_assert(sizeof(LedState) == kNumLedChannels * sizeof(float),
+              "LedState must pack contiguously as 42 floats for Wasm/DMA transport");
 
 } // namespace ruido

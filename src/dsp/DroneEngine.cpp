@@ -7,13 +7,13 @@ namespace ruido {
 
 namespace {
 
-constexpr float kPotPoleTauSec = 0.0140f;    // 2-pole C^1 pot glide (~28 ms mean, 0% overshoot)
-constexpr float kControlSlewSec = 0.0050f;   // 5.0 ms mode/switch crossfade
-constexpr float kVactrolSlewSec = 0.0038f;   // 3.8 ms clickless mute/gate vactrol feel
+constexpr float kPotPoleTauSec = 0.0140f;      // 2-pole C^1 pot glide (~28 ms mean, 0% overshoot)
+constexpr float kControlSlewSec = 0.0050f;     // 5.0 ms mode/switch crossfade
+constexpr float kVactrolSlewSec = 0.0038f;     // 3.8 ms clickless mute/gate vactrol feel
 constexpr float kPressureAttackSec = 0.0045f;  // 4.5 ms snappy optocoupler LED turn-on
 constexpr float kPressureReleaseSec = 0.0260f; // 26.0 ms liquid CdS photoconductive decay
-constexpr float kMasterKillSec = 0.0080f;    // 8.0 ms ultra-clean master PLAY/STOP fade
-constexpr float kVoiceSumScale = 0.35f;      // Headroom scaling for 4 hot square voices
+constexpr float kMasterKillSec = 0.0080f;      // 8.0 ms ultra-clean master PLAY/STOP fade
+constexpr float kVoiceSumScale = 0.35f;        // Headroom scaling for 4 hot square voices
 
 } // namespace
 
@@ -22,9 +22,8 @@ DroneEngine::DroneEngine() noexcept {
 }
 
 void DroneEngine::init(float baseSampleRate) noexcept {
-    baseSampleRate_ = (baseSampleRate >= 16000.0f && baseSampleRate <= 384000.0f) ?
-                          baseSampleRate :
-                          kBaseSampleRate;
+    baseSampleRate_ = (baseSampleRate >= 16000.0f && baseSampleRate <= 384000.0f) ? baseSampleRate
+                                                                                  : kBaseSampleRate;
     oversampledRate_ = baseSampleRate_ * static_cast<float>(kOversampleFactor);
     invOversampledRate_ = 1.0f / oversampledRate_;
 
@@ -204,9 +203,9 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             const float baseHz = applyLfoPitchHz(
                 sm.freqHz.next(), td[static_cast<size_t>(LfoTarget::Pitch)], lfo.raw);
             const float pitchMul = computeVoicePitchRatio(p, pitchMode);
-            oscFreqs[i] = (pitchMul != 1.0f) ?
-                              clampf(baseHz * pitchMul, 0.005f, kAudioFreqMaxHz * 4.0f) :
-                              baseHz;
+            oscFreqs[i] = (pitchMul != 1.0f)
+                              ? clampf(baseHz * pitchMul, 0.005f, kAudioFreqMaxHz * 4.0f)
+                              : baseHz;
 
             const float hpBase = applyLfoCutoffHz(
                 sm.hpCutoffHz.next(), td[static_cast<size_t>(LfoTarget::HpCutoff)], lfo.raw);
@@ -226,9 +225,9 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
                 cache.hpRes = mod.hpResonance;
                 cache.lpHz = mod.lpCutoffHz;
                 cache.lpRes = mod.lpResonance;
-                filterCoeffs_[i] = Ms20DualFilter::prepareCoeffs(
-                    mod.hpCutoffHz, mod.hpResonance, mod.lpCutoffHz, mod.lpResonance,
-                    invOversampledRate_);
+                filterCoeffs_[i] =
+                    Ms20DualFilter::prepareCoeffs(mod.hpCutoffHz, mod.hpResonance, mod.lpCutoffHz,
+                                                  mod.lpResonance, invOversampledRate_);
             }
 
             const float modAmp = applyLfoAmplitude(
@@ -264,8 +263,7 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
 
         Ms20DualFilter::processQuadBank4x(filters_, voiceSub, filterCoeffs_);
         for (size_t i = 0u; i < kNumOscillators; ++i) {
-            voiceScopeAccum[i] =
-                voiceSub[i][0] + voiceSub[i][1] + voiceSub[i][2] + voiceSub[i][3];
+            voiceScopeAccum[i] = voiceSub[i][0] + voiceSub[i][1] + voiceSub[i][2] + voiceSub[i][3];
         }
 
         if (exactMono) {

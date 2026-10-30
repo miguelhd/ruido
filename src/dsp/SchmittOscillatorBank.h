@@ -22,7 +22,7 @@ struct OscillatorBankOutput {
 //  - Shared Vdd power-rail threshold coupling (`ALGORITHM` knob) for weak injection locking
 //  - Subtle RC coupling capacitor roof tilt + DC blocking
 class SchmittOscillatorBank {
-public:
+  public:
     SchmittOscillatorBank() noexcept;
 
     void reset(float sampleRate = kOversampledRate) noexcept;
@@ -36,7 +36,7 @@ public:
     OscillatorBankOutput processSample(const std::array<float, kNumOscillators>& freqHz,
                                        float circuitCoupling) noexcept;
 
-private:
+  private:
     struct VoiceState {
         uint32_t phase = 0u;
         uint32_t dutyThreshold = 0x80000000u;

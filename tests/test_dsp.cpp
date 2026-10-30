@@ -113,8 +113,8 @@ void testMemoryFootprintAndLockFreeBus() {
         bus.publish(st);
         if ((i % 7) == 0) {
             const auto& readSt = bus.consumeLatest();
-            EXPECT_TRUE(std::fabs(readSt.voices[0].frequencyHz -
-                                  (100.0f + static_cast<float>(i))) < 1e-4f,
+            EXPECT_TRUE(std::fabs(readSt.voices[0].frequencyHz - (100.0f + static_cast<float>(i))) <
+                            1e-4f,
                         "ControlBus lost latest state at iter %d", i);
         }
     }
@@ -122,8 +122,8 @@ void testMemoryFootprintAndLockFreeBus() {
     // Verify ScopeRingBuffer FIFO order & overflow resilience
     ruido::ScopeRingBuffer ring;
     for (size_t i = 0; i < ruido::kScopeRingCapacity + 64u; ++i) {
-        const bool ok = ring.push({static_cast<float>(i), -static_cast<float>(i),
-                                   static_cast<uint8_t>(i & 1u)});
+        const bool ok = ring.push(
+            {static_cast<float>(i), -static_cast<float>(i), static_cast<uint8_t>(i & 1u)});
         if (i < ruido::kScopeRingCapacity) {
             EXPECT_TRUE(ok, "ScopeRingBuffer failed push before full at %zu", i);
         } else {
@@ -195,7 +195,7 @@ void testUltraSlowLfoPrecision() {
     st.voices[0].frequencyHz = 0.50f; // Out-of-bounds (< 20 Hz): must clamp cleanly to 20.0 Hz
     st.voices[0].lfoRateHz = 0.50f;   // 2.000 s period = 88,236 base frames
     st.voices[0].lfoDepth = 1.0f;
-    st.voices[0].lfoShape = 0.75f;    // Slewed Square
+    st.voices[0].lfoShape = 0.75f; // Slewed Square
     st.voices[1].muted = true;
     st.voices[2].muted = true;
     st.voices[3].muted = true;
@@ -252,13 +252,12 @@ void testUltraSlowLfoPrecision() {
     EXPECT_TRUE(firstWrapFrame > 0 && secondWrapFrame > firstWrapFrame,
                 "0.50 Hz VoiceLfoBank did not complete two phase wraps");
     if (firstWrapFrame > 0 && secondWrapFrame > firstWrapFrame) {
-        const double measuredPeriodSec =
-            static_cast<double>(secondWrapFrame - firstWrapFrame) /
-            static_cast<double>(ruido::kBaseSampleRate);
+        const double measuredPeriodSec = static_cast<double>(secondWrapFrame - firstWrapFrame) /
+                                         static_cast<double>(ruido::kBaseSampleRate);
         std::printf("  0.50 Hz LFO measured period = %.5f s (expected 2.00000 s)\n",
                     measuredPeriodSec);
-        EXPECT_TRUE(std::fabs(measuredPeriodSec - 2.0) < 0.005,
-                    "0.50 Hz period inaccurate: %.5f s", measuredPeriodSec);
+        EXPECT_TRUE(std::fabs(measuredPeriodSec - 2.0) < 0.005, "0.50 Hz period inaccurate: %.5f s",
+                    measuredPeriodSec);
     }
     EXPECT_TRUE(firstVoiceEdge > 0 && secondVoiceEdge > firstVoiceEdge,
                 "Clamped 20 Hz Osc 1 did not emit rising edges");
@@ -266,8 +265,7 @@ void testUltraSlowLfoPrecision() {
         const double voiceHz = static_cast<double>(ruido::kBaseSampleRate) /
                                static_cast<double>(secondVoiceEdge - firstVoiceEdge);
         EXPECT_TRUE(std::fabs(voiceHz - 20.0) < 0.15,
-                    "Out-of-bounds base voice frequency failed 20 Hz clamp (got %.3f Hz)",
-                    voiceHz);
+                    "Out-of-bounds base voice frequency failed 20 Hz clamp (got %.3f Hz)", voiceHz);
     }
 
     // Verify extreme minimum 0.02 Hz (50.0 s period) over 55 s on both VoiceLfoBank and
@@ -297,8 +295,8 @@ void testUltraSlowLfoPrecision() {
     }
     const double firstWrapSec =
         static_cast<double>(lastWrap002) / static_cast<double>(ruido::kBaseSampleRate);
-    std::printf("  0.02 Hz LFO wrapped at t = %.3f s (expected ~50.0 s, wraps=%d)\n",
-                firstWrapSec, wrapCount002Hz);
+    std::printf("  0.02 Hz LFO wrapped at t = %.3f s (expected ~50.0 s, wraps=%d)\n", firstWrapSec,
+                wrapCount002Hz);
     EXPECT_TRUE(wrapCount002Hz == 1 && std::fabs(firstWrapSec - 50.0) < 0.25,
                 "0.02 Hz VoiceLfoBank phase accumulator stalled or drifted (wraps=%d, t=%.3f s)",
                 wrapCount002Hz, firstWrapSec);
@@ -378,9 +376,8 @@ void testSpectralAliasSuppression() {
 
         // Apply 4-term Nuttall / Blackman-Harris window (-98 dB sidelobe floor)
         for (size_t n = 0u; n < kFftSize; ++n) {
-            const double ph =
-                (2.0 * 3.14159265358979323846 * static_cast<double>(n)) /
-                static_cast<double>(kFftSize);
+            const double ph = (2.0 * 3.14159265358979323846 * static_cast<double>(n)) /
+                              static_cast<double>(kFftSize);
             const double w = 0.35875 - 0.48829 * std::cos(ph) + 0.14128 * std::cos(2.0 * ph) -
                              0.01168 * std::cos(3.0 * ph);
             fftRe[n] *= w;
@@ -691,10 +688,9 @@ void testExtremeStabilityAndZeroDenormals() {
         }
     }
     ruido::Ms20DualFilter rawFilter;
-    const float filtNanOut = rawFilter.processSample(qNan, 500.0f, 1.0f, 1500.0f, 1.0f,
-                                                     ruido::kInvOversampledRate);
-    const float filtBadRateOut =
-        rawFilter.processSample(4.5f, qNan, -pInf, pInf, 0.0f, qNan);
+    const float filtNanOut =
+        rawFilter.processSample(qNan, 500.0f, 1.0f, 1500.0f, 1.0f, ruido::kInvOversampledRate);
+    const float filtBadRateOut = rawFilter.processSample(4.5f, qNan, -pInf, pInf, 0.0f, qNan);
     const float filtLowRateOut =
         rawFilter.processSample(4.5f, 20.0f, 0.0f, 19500.0f, 0.0f, 1.0f / 32000.0f);
     EXPECT_TRUE(allValid && isFiniteNonSubnormal(filtNanOut) &&
@@ -1081,8 +1077,7 @@ void testDecimatorLinearPhaseCrest() {
                 decimCrest, crestRatio);
     EXPECT_TRUE(decimCrest < 1.19,
                 "Excessive phase-dispersion overshoot in FIR decimator (crest=%.3f)", decimCrest);
-    EXPECT_TRUE(crestRatio < 1.26,
-                "Excessive full-engine crest factor (crest=%.3f)", crestRatio);
+    EXPECT_TRUE(crestRatio < 1.26, "Excessive full-engine crest factor (crest=%.3f)", crestRatio);
 }
 
 // 10. Real-Time Throughput Benchmark
@@ -1125,9 +1120,8 @@ void testThroughputBenchmark() {
     const auto t1 = std::chrono::steady_clock::now();
 
     const double elapsedSec = std::chrono::duration<double>(t1 - t0).count();
-    const double audioSec =
-        static_cast<double>(kBenchBlocks * ruido::kBlockFrames) /
-        static_cast<double>(ruido::kBaseSampleRate);
+    const double audioSec = static_cast<double>(kBenchBlocks * ruido::kBlockFrames) /
+                            static_cast<double>(ruido::kBaseSampleRate);
     const double nsPerFrame =
         (elapsedSec * 1.0e9) / static_cast<double>(kBenchBlocks * ruido::kBlockFrames);
 
@@ -1171,13 +1165,12 @@ void testPerVoiceAnalogLfoModels() {
         }
         const double dcMean = sum / static_cast<double>(kPhaseSamples);
         EXPECT_TRUE(maxV > 0.995f && maxV <= 1.00001f,
-                    "LFO shape %.2f positive peak out of spec (%.5f)",
-                    static_cast<double>(shape), static_cast<double>(maxV));
+                    "LFO shape %.2f positive peak out of spec (%.5f)", static_cast<double>(shape),
+                    static_cast<double>(maxV));
         EXPECT_TRUE(minV < -0.995f && minV >= -1.00001f,
-                    "LFO shape %.2f negative peak out of spec (%.5f)",
-                    static_cast<double>(shape), static_cast<double>(minV));
-        EXPECT_TRUE(std::fabs(dcMean) < 1.0e-5,
-                    "LFO shape %.2f non-zero DC integral (%+.7f)",
+                    "LFO shape %.2f negative peak out of spec (%.5f)", static_cast<double>(shape),
+                    static_cast<double>(minV));
+        EXPECT_TRUE(std::fabs(dcMean) < 1.0e-5, "LFO shape %.2f non-zero DC integral (%+.7f)",
                     static_cast<double>(shape), dcMean);
         if (shape == 0.25f) {
             EXPECT_TRUE(std::fabs(peakPhase - 0.25f) < 0.01f,
@@ -1226,9 +1219,9 @@ void testPerVoiceAnalogLfoModels() {
             }
             prevRaw0 = fr[0].raw;
         }
-        const double measuredHz =
-            static_cast<double>(crossCount - 1u) * static_cast<double>(ruido::kBaseSampleRate) /
-            static_cast<double>(lastCross - firstCross);
+        const double measuredHz = static_cast<double>(crossCount - 1u) *
+                                  static_cast<double>(ruido::kBaseSampleRate) /
+                                  static_cast<double>(lastCross - firstCross);
         std::printf("  10.00 Hz LFO measured = %.5f Hz (%zu cycles)\n", measuredHz, crossCount);
         EXPECT_TRUE(std::fabs(measuredHz - 10.0) < 0.005,
                     "10 Hz LFO period error too large (got %.5f Hz)", measuredHz);
@@ -1465,8 +1458,8 @@ void testPerVoiceAnalogLfoModels() {
         double mx = 0.0;
         measureMinMaxBlockRms(cfg, mn, mx, domL, domR);
         EXPECT_TRUE(mn < mx * 0.50,
-                    "HpCutoff LFO failed to sweep parked 20 Hz HPF upward (min=%.3f, max=%.3f)",
-                    mn, mx);
+                    "HpCutoff LFO failed to sweep parked 20 Hz HPF upward (min=%.3f, max=%.3f)", mn,
+                    mx);
     }
 
     // (c) LpResonance & (d) HpResonance: sweep 0% resonance up into singing MS-20 self-oscillation
@@ -1564,8 +1557,8 @@ void testPerVoiceAnalogLfoModels() {
             }
         }
         const double octRatio = static_cast<double>(maxPeriod) / static_cast<double>(minPeriod);
-        EXPECT_TRUE(octRatio > 3.2,
-                    "Pitch LFO failed wide log-octave period sweep (max/min=%.3f)", octRatio);
+        EXPECT_TRUE(octRatio > 3.2, "Pitch LFO failed wide log-octave period sweep (max/min=%.3f)",
+                    octRatio);
     }
 }
 
@@ -1586,8 +1579,8 @@ void testRev2OtaSallenKeyPhysics() {
         ruido::StereoHalfBandDecimator4x decim;
         filter.reset();
         decim.reset();
-        const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(
-            20.0f, 0.0f, 450.0f, 0.0f, ruido::kInvOversampledRate);
+        const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(20.0f, 0.0f, 450.0f, 0.0f,
+                                                                 ruido::kInvOversampledRate);
 
         constexpr double kTestHz = 300.0;
         size_t osStep = 0u;
@@ -1595,10 +1588,9 @@ void testRev2OtaSallenKeyPhysics() {
 
         for (size_t w = 0u; w < 4096u; ++w) {
             for (size_t s = 0u; s < 4u; ++s) {
-                const float x = static_cast<float>(
-                    std::sin(2.0 * 3.14159265358979323846 * kTestHz *
-                             static_cast<double>(osStep++) *
-                             static_cast<double>(ruido::kInvOversampledRate)));
+                const float x = static_cast<float>(std::sin(
+                    2.0 * 3.14159265358979323846 * kTestHz * static_cast<double>(osStep++) *
+                    static_cast<double>(ruido::kInvOversampledRate)));
                 const float y = filter.processPrepared(x, coeffs);
                 in4x[s] = {y, y};
             }
@@ -1607,10 +1599,9 @@ void testRev2OtaSallenKeyPhysics() {
 
         for (size_t n = 0u; n < kFftSize; ++n) {
             for (size_t s = 0u; s < 4u; ++s) {
-                const float x = static_cast<float>(
-                    std::sin(2.0 * 3.14159265358979323846 * kTestHz *
-                             static_cast<double>(osStep++) *
-                             static_cast<double>(ruido::kInvOversampledRate)));
+                const float x = static_cast<float>(std::sin(
+                    2.0 * 3.14159265358979323846 * kTestHz * static_cast<double>(osStep++) *
+                    static_cast<double>(ruido::kInvOversampledRate)));
                 const float y = filter.processPrepared(x, coeffs);
                 in4x[s] = {y, y};
             }
@@ -1670,8 +1661,7 @@ void testRev2OtaSallenKeyPhysics() {
                     "Expected warm 3rd-harmonic LM13600 OTA saturation at RES=0%% (got %.2f dBc)",
                     h3Db);
         EXPECT_TRUE(h2Db > -70.0 && h2Db < -24.0,
-                    "Expected LM13600 Wilson-mirror 2nd harmonic at RES=0%% (got %.2f dBc)",
-                    h2Db);
+                    "Expected LM13600 Wilson-mirror 2nd harmonic at RES=0%% (got %.2f dBc)", h2Db);
         EXPECT_TRUE(worstAliasDb < -85.0,
                     "C^2 LM13600 OTA exceeded -85 dBc alias floor (got %.2f dBc)", worstAliasDb);
     }
@@ -1681,23 +1671,22 @@ void testRev2OtaSallenKeyPhysics() {
         auto measureSteadyMean = [](float dcBias) -> double {
             ruido::Ms20DualFilter filter;
             filter.reset();
-            const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(
-                90.0f, 0.65f, 1200.0f, 0.85f, ruido::kInvOversampledRate);
+            const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(90.0f, 0.65f, 1200.0f, 0.85f,
+                                                                     ruido::kInvOversampledRate);
             const size_t totalSamples = static_cast<size_t>(ruido::kOversampledRate * 2.0f);
             const size_t halfSamples = totalSamples / 2u;
             const size_t winLen = totalSamples - halfSamples;
             double sumOut = 0.0;
             double sumWin = 0.0;
             for (size_t n = 0u; n < totalSamples; ++n) {
-                const float x = dcBias + 0.65f * std::sin(ruido::kTwoPi * 240.0f *
-                                                          static_cast<float>(n) *
-                                                          ruido::kInvOversampledRate);
+                const float x =
+                    dcBias + 0.65f * std::sin(ruido::kTwoPi * 240.0f * static_cast<float>(n) *
+                                              ruido::kInvOversampledRate);
                 const float y = filter.processPrepared(x, coeffs);
                 if (n >= halfSamples) {
-                    const double w =
-                        1.0 - std::cos((2.0 * 3.14159265358979323846 *
-                                        static_cast<double>(n - halfSamples)) /
-                                       static_cast<double>(winLen));
+                    const double w = 1.0 - std::cos((2.0 * 3.14159265358979323846 *
+                                                     static_cast<double>(n - halfSamples)) /
+                                                    static_cast<double>(winLen));
                     sumOut += static_cast<double>(y) * w;
                     sumWin += w;
                 }
@@ -1728,8 +1717,8 @@ void testRev2OtaSallenKeyPhysics() {
                 bankFilters[v].reset();
                 refFilters[v].reset();
                 if (mode == 0) {
-                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(
-                        20.0f, 0.0f, 20000.0f, 0.0f, ruido::kInvOversampledRate);
+                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(20.0f, 0.0f, 20000.0f, 0.0f,
+                                                                     ruido::kInvOversampledRate);
                 } else if (mode == 1) {
                     coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(
                         75.0f + 55.0f * static_cast<float>(v), 0.72f,
@@ -1737,8 +1726,8 @@ void testRev2OtaSallenKeyPhysics() {
                 } else {
                     const float hp = (v & 1u) != 0u ? 180.0f : 20.0f;
                     const float lp = (v & 2u) != 0u ? 950.0f : 20000.0f;
-                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(
-                        hp, 0.85f, lp, 0.85f, ruido::kInvOversampledRate);
+                    coeffs[v] = ruido::Ms20DualFilter::prepareCoeffs(hp, 0.85f, lp, 0.85f,
+                                                                     ruido::kInvOversampledRate);
                 }
             }
 
@@ -1750,9 +1739,9 @@ void testRev2OtaSallenKeyPhysics() {
                     for (size_t v = 0u; v < 4u; ++v) {
                         float sig = 0.0f;
                         if (frame < 512u) {
-                            sig = (std::sin(t * (1.0f + 0.3f * static_cast<float>(v))) >= 0.0f) ?
-                                      0.95f :
-                                      -0.95f;
+                            sig = (std::sin(t * (1.0f + 0.3f * static_cast<float>(v))) >= 0.0f)
+                                      ? 0.95f
+                                      : -0.95f;
                         }
                         voiceSub[v][sub] = sig;
                         refOut[v][sub] = refFilters[v].processPrepared(sig, coeffs[v]);
@@ -1782,8 +1771,8 @@ void testRev2OtaSallenKeyPhysics() {
         float maxHandoffStep = 0.0f;
         for (size_t n = 0u; n < 4000u; ++n) {
             const float lpHz = 19850.0f + 0.05f * static_cast<float>(n); // crosses ~19991 Hz
-            const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(
-                20.0f, 0.0f, lpHz, 0.0f, ruido::kInvOversampledRate);
+            const auto coeffs = ruido::Ms20DualFilter::prepareCoeffs(20.0f, 0.0f, lpHz, 0.0f,
+                                                                     ruido::kInvOversampledRate);
             const float x = 10.0f * std::sin(ruido::kTwoPi * 3000.0f * static_cast<float>(n) *
                                              ruido::kInvOversampledRate);
             const float y = filter.processPrepared(x, coeffs);
@@ -1792,8 +1781,7 @@ void testRev2OtaSallenKeyPhysics() {
             }
             prevY = y;
         }
-        EXPECT_TRUE(maxHandoffStep < 1.25f,
-                    "Hot ±10V Smart-Park handoff clicked (max |dy| = %.4f)",
+        EXPECT_TRUE(maxHandoffStep < 1.25f, "Hot ±10V Smart-Park handoff clicked (max |dy| = %.4f)",
                     static_cast<double>(maxHandoffStep));
     }
 }

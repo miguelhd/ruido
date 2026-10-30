@@ -16,7 +16,7 @@ struct StereoFrame {
 //    all the way to 20.0 kHz, <0.0005 dB passband ripple)
 //  - Exact linear phase (0 deg dispersion): preserves flat square-wave tops & peak crest factor.
 class StereoHalfBandDecimator4x {
-public:
+  public:
     StereoHalfBandDecimator4x() noexcept = default;
 
     void reset() noexcept;
@@ -24,7 +24,7 @@ public:
     // Consumes 4 consecutive oversampled stereo frames and returns 1 decimated 44.118 kHz frame.
     StereoFrame process4x(const std::array<StereoFrame, 4>& in4x) noexcept;
 
-private:
+  private:
     static constexpr size_t kStage1Pairs = 8u;
     static constexpr size_t kStage1OddPeriod = 2u * kStage1Pairs; // 16
 
@@ -57,10 +57,10 @@ private:
         }
     };
 
-    static StereoFrame decimate2xStage1Stereo(ChannelState& chL, ChannelState& chR,
-                                              StereoFrame s0, StereoFrame s1) noexcept;
-    static StereoFrame decimate2xStage2Stereo(ChannelState& chL, ChannelState& chR,
-                                              StereoFrame s0, StereoFrame s1) noexcept;
+    static StereoFrame decimate2xStage1Stereo(ChannelState& chL, ChannelState& chR, StereoFrame s0,
+                                              StereoFrame s1) noexcept;
+    static StereoFrame decimate2xStage2Stereo(ChannelState& chL, ChannelState& chR, StereoFrame s0,
+                                              StereoFrame s1) noexcept;
 
     ChannelState left_{};
     ChannelState right_{};

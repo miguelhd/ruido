@@ -45,13 +45,17 @@ size_t strlen(const char* s) {
 } // extern "C"
 
 // Unity-include the 100% platform-independent Ruido C++17 sources
+#include "core/LedEngine.cpp"
 #include "core/RuidoController.cpp"
 #include "dsp/DroneEngine.cpp"
 #include "dsp/HalfBandDecimator.cpp"
 #include "dsp/Ms20Filter.cpp"
 #include "dsp/SchmittOscillatorBank.cpp"
 #include "dsp/VoiceLfoBank.cpp"
+#include "ui/HudChrome.cpp"
+#include "ui/HudGraphs.cpp"
 #include "ui/ScopeHudRenderer.cpp"
+#include "ui/ScopeTraceEngine.cpp"
 
 namespace {
 

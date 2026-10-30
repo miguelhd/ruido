@@ -251,8 +251,7 @@ Ms20DualFilter::Coeffs Ms20DualFilter::prepareCoeffs(float hpCutoffHz, float hpR
     c.interStageScale = (1.0f + 0.64f * hpFocus) / (1.0f + 0.70f * lpFocus);
     c.lpOutScale = 1.0f + 0.58f * lpFocus;
 
-    const float effectiveHpHz =
-        compensateHpSelfOscPitch(2.5f + hpActive * (hpHz - 2.5f), c.kHp);
+    const float effectiveHpHz = compensateHpSelfOscPitch(2.5f + hpActive * (hpHz - 2.5f), c.kHp);
     const float effectiveLpHz =
         compensateLpSelfOscPitch(28000.0f + lpActive * (lpHz - 28000.0f), c.kLp);
 
@@ -453,18 +452,17 @@ void Ms20DualFilter::processQuadBank4x(
                 finalOta2[v] = ota2.value + ota2.deriv * dy2[v];
             }
 
-            if (!(absf(dy2[0]) < 1.0e-2f && absf(dy2[1]) < 1.0e-2f &&
-                  absf(dy2[2]) < 1.0e-2f && absf(dy2[3]) < 1.0e-2f)) {
+            if (!(absf(dy2[0]) < 1.0e-2f && absf(dy2[1]) < 1.0e-2f && absf(dy2[2]) < 1.0e-2f &&
+                  absf(dy2[3]) < 1.0e-2f)) {
                 for (size_t v = 0u; v < 4u; ++v) {
                     if (!(absf(dy2[v]) < 1.0e-2f)) {
                         for (int iter = 1; iter < 3; ++iter) {
-                            const SatResult ota2 =
-                                evalOtaSymmetric(-y2[v], rail2[v], invRail2[v]);
+                            const SatResult ota2 = evalOtaSymmetric(-y2[v], rail2[v], invRail2[v]);
                             const float y1 = y2[v] - s2[v] - g[v] * ota2.value;
                             const SatResult fb =
                                 evalSiliconDiode(k[v] * y2[v], dSpan[v], invDSpan[v]);
-                            const SatResult ota1 = evalOta(fb.value - y1, pos1[v], neg1[v],
-                                                           invPos1[v], invNeg1[v]);
+                            const SatResult ota1 =
+                                evalOta(fb.value - y1, pos1[v], neg1[v], invPos1[v], invNeg1[v]);
                             const float fHp = y1 - (x[v] + s1[v]) - g[v] * ota1.value;
                             const float d1 = g[v] * ota1.deriv;
                             const float d2 = g[v] * ota2.deriv;
@@ -528,9 +526,8 @@ void Ms20DualFilter::processQuadBank4x(
         alignas(16) const std::array<float, 4> interScale{
             coeffs[0].interStageScale, coeffs[1].interStageScale, coeffs[2].interStageScale,
             coeffs[3].interStageScale};
-        alignas(16) const std::array<float, 4> outScale{
-            coeffs[0].lpOutScale, coeffs[1].lpOutScale, coeffs[2].lpOutScale,
-            coeffs[3].lpOutScale};
+        alignas(16) const std::array<float, 4> outScale{coeffs[0].lpOutScale, coeffs[1].lpOutScale,
+                                                        coeffs[2].lpOutScale, coeffs[3].lpOutScale};
 
         for (size_t sub = 0u; sub < 4u; ++sub) {
             for (size_t v = 0u; v < 4u; ++v) {
@@ -567,9 +564,8 @@ void Ms20DualFilter::processQuadBank4x(
         alignas(16) const std::array<float, 4> interScale{
             coeffs[0].interStageScale, coeffs[1].interStageScale, coeffs[2].interStageScale,
             coeffs[3].interStageScale};
-        alignas(16) const std::array<float, 4> outScale{
-            coeffs[0].lpOutScale, coeffs[1].lpOutScale, coeffs[2].lpOutScale,
-            coeffs[3].lpOutScale};
+        alignas(16) const std::array<float, 4> outScale{coeffs[0].lpOutScale, coeffs[1].lpOutScale,
+                                                        coeffs[2].lpOutScale, coeffs[3].lpOutScale};
         alignas(16) std::array<float, 4> rail1{};
         alignas(16) std::array<float, 4> invRail1{};
         alignas(16) std::array<float, 4> pos2{};
@@ -614,8 +610,8 @@ void Ms20DualFilter::processQuadBank4x(
                 finalOta2[v] = ota2.value - ota2.deriv * dw[v];
             }
 
-            if (!(absf(dw[0]) < 1.0e-2f && absf(dw[1]) < 1.0e-2f &&
-                  absf(dw[2]) < 1.0e-2f && absf(dw[3]) < 1.0e-2f)) {
+            if (!(absf(dw[0]) < 1.0e-2f && absf(dw[1]) < 1.0e-2f && absf(dw[2]) < 1.0e-2f &&
+                  absf(dw[3]) < 1.0e-2f)) {
                 for (size_t v = 0u; v < 4u; ++v) {
                     if (!(absf(dw[v]) < 1.0e-2f)) {
                         for (int iter = 1; iter < 3; ++iter) {

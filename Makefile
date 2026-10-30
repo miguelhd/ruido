@@ -1,4 +1,5 @@
 CXX ?= clang++
+CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null || xcrun --find clang-format 2>/dev/null)
 NODE ?= $(shell command -v node 2>/dev/null || ls -1 $$HOME/.nvm/versions/node/*/bin/node 2>/dev/null | tail -n 1)
 
 # Mandatory embedded C++17 hygiene flags (AGENTS.md & src/dsp/AGENTS.md):
@@ -39,7 +40,11 @@ DSP_SRCS := \
 	src/dsp/DroneEngine.cpp
 
 UI_SRCS := \
+	src/core/LedEngine.cpp \
 	src/core/RuidoController.cpp \
+	src/ui/ScopeTraceEngine.cpp \
+	src/ui/HudGraphs.cpp \
+	src/ui/HudChrome.cpp \
 	src/ui/ScopeHudRenderer.cpp
 
 ALL_ENGINE_SRCS := $(DSP_SRCS) $(UI_SRCS)
@@ -52,9 +57,15 @@ TEST_UI_BIN := $(BUILD_DIR)/test_ui
 WASM_OUT := platforms/sim/web/ruido.wasm
 MACOS_SIM_BIN := $(BUILD_DIR)/ruido_sim_macos
 
-.PHONY: all test wasm sim-macos serve tsan ubsan clean
+.PHONY: all check format test wasm sim-macos serve tsan ubsan clean
 
 all: $(TEST_DSP_BIN) $(TEST_UI_BIN) $(WASM_OUT) $(MACOS_SIM_BIN)
+
+check:
+	python3 tools/check_hygiene.py
+
+format:
+	"$(CLANG_FORMAT)" -i $(wildcard src/core/*.h src/core/*.cpp src/dsp/*.h src/dsp/*.cpp src/ui/*.h src/ui/*.cpp tests/*.h tests/*.cpp)
 
 $(BUILD_DIR)/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
@@ -70,7 +81,7 @@ $(TEST_DSP_BIN): $(DSP_OBJS) $(BUILD_DIR)/tests/test_dsp.o
 $(TEST_UI_BIN): $(DSP_OBJS) $(UI_OBJS) $(BUILD_DIR)/tests/test_ui.o
 	$(CXX) $(TEST_CXXFLAGS) -pthread $^ -o $@
 
-test: $(TEST_DSP_BIN) $(TEST_UI_BIN) $(WASM_OUT) $(MACOS_SIM_BIN)
+test: check $(TEST_DSP_BIN) $(TEST_UI_BIN) $(WASM_OUT) $(MACOS_SIM_BIN)
 	./$(TEST_DSP_BIN)
 	./$(TEST_UI_BIN)
 	./$(MACOS_SIM_BIN) --headless-check

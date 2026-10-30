@@ -1,15 +1,12 @@
 #include "core/RuidoController.h"
 
 #include "core/DspMath.h"
-#include "core/LfoMath.h"
+#include "core/EncoderMath.h"
+#include "core/LedEngine.h"
 
 namespace ruido {
 
 namespace {
-
-constexpr float kHudBloomSec = 0.200f;    // Soft 200 ms S-curve fade-in on touch
-constexpr float kHudHoldSec = 1.500f;     // 1.5 s hold after standalone tweaks
-constexpr float kHudDissolveTau = 0.250f; // Smooth ~850 ms dissolve back to black
 
 constexpr bool isModifierBlackKey(BlackKeyId k) noexcept {
     return k == BlackKeyId::Op1 || k == BlackKeyId::Op2 || k == BlackKeyId::Op3 ||
@@ -36,15 +33,13 @@ void RuidoController::reset() noexcept {
     octPlusHeld_ = false;
     octMinusOrder_ = 0u;
     octPlusOrder_ = 0u;
-    hudRawLevel_ = 0.0f;
-    holdRemainingSec_ = 0.0f;
+    env_.reset();
     animPhase_ = 0.0f;
     playStopRunSmooth_ = state_.global.masterRun ? 1.0f : 0.0f;
     latchedHudMode_ = HudMode::None;
     latchedButton_ = ButtonId::Count;
     selectTickAccum_ = 0;
     targetTickAccum_ = 0;
-    hudActive_ = false;
 
     EngineTelemetry zeroTel{};
     updateLeds(zeroTel);
@@ -58,7 +53,6 @@ void RuidoController::publishState() noexcept {
 }
 
 RuidoController::HeldModifier RuidoController::activeModifier() const noexcept {
-    // Most recently pressed still-held left/center black key wins deterministically
     uint32_t bestOrder = 0u;
     HeldModifier best = HeldModifier::None;
 
@@ -114,8 +108,7 @@ void RuidoController::triggerHud(HudMode mode, uint8_t voiceIndex, uint8_t knobI
     hud_.mode = mode;
     hud_.focusedVoice = static_cast<uint8_t>(voiceIndex & 3u);
     hud_.focusedKnob = static_cast<uint8_t>(knobIndex & 3u);
-    hudActive_ = true;
-    holdRemainingSec_ = kHudHoldSec;
+    env_.triggerToast();
 }
 
 void RuidoController::latchSwitchHud(HudMode mode, ButtonId button) noexcept {
@@ -125,8 +118,7 @@ void RuidoController::latchSwitchHud(HudMode mode, ButtonId button) noexcept {
         hud_.lastButton = button;
     }
     hud_.mode = mode;
-    hudActive_ = true;
-    holdRemainingSec_ = 0.0f;
+    env_.latchPage();
 }
 
 void RuidoController::restoreOrDissolveHud() noexcept {
@@ -153,11 +145,9 @@ void RuidoController::restoreOrDissolveHud() noexcept {
         if (latchedButton_ != ButtonId::Count) {
             hud_.lastButton = latchedButton_;
         }
-        hudActive_ = true;
-        holdRemainingSec_ = 0.0f;
+        env_.latchPage();
         return;
     }
-    // Momentary function released with no right-grid switch latched: start smooth dissolve
     if (hud_.mode == HudMode::VoiceFilter || hud_.mode == HudMode::GlobalFilter ||
         hud_.mode == HudMode::Amplitude || hud_.mode == HudMode::Panning ||
         hud_.mode == HudMode::ScopeFreeze || hud_.mode == HudMode::KnobRate ||
@@ -165,7 +155,7 @@ void RuidoController::restoreOrDissolveHud() noexcept {
         hud_.mode == HudMode::GlobalLfo) {
         hud_.mode = HudMode::VoiceFrequency;
     }
-    holdRemainingSec_ = 0.0f;
+    env_.holdRemainingSec = 0.0f;
 }
 
 void RuidoController::syncModifierHud() noexcept {
@@ -208,77 +198,6 @@ void RuidoController::syncModifierHud() noexcept {
     }
 }
 
-void RuidoController::adjustVoiceFrequency(VoiceParams& vp, int32_t ticks,
-                                           KnobRate rate) noexcept {
-    // Strictly linear X4 quadrature scaling (96 steps = 360 deg; zero velocity acceleration):
-    //   Fine (Hold OCT-) : ~63 cents/turn audio (~0.66 cents/step)
-    //   Standard         : ~2.8 turns full sweep
-    //   Fast (Hold OCT+) : ~1.3 turns full sweep
-    const float steps = static_cast<float>(ticks);
-    const float octPerStep = (rate == KnobRate::Fine) ? 0.00055f :
-                             (rate == KnobRate::Fast) ? 0.06000f :
-                                                        0.02850f;
-    const float nextHz = vp.frequencyHz * fastExp2(steps * octPerStep);
-    vp.frequencyHz = clampf(nextHz, kAudioFreqMinHz, kAudioFreqMaxHz);
-}
-
-float RuidoController::adjustFilterCutoff(float currentHz, int32_t ticks,
-                                          KnobRate rate) noexcept {
-    const float octPerStep = (rate == KnobRate::Fine) ? 0.00250f :
-                             (rate == KnobRate::Fast) ? 0.07800f :
-                                                        0.03650f;
-    const float octDelta = static_cast<float>(ticks) * octPerStep;
-    return clampf(currentHz * fastExp2(octDelta), kFilterCutoffMinHz, kFilterCutoffMaxHz);
-}
-
-float RuidoController::adjustLfoRate(float currentHz, int32_t ticks, KnobRate rate) noexcept {
-    const float octPerStep = (rate == KnobRate::Fine) ? 0.00250f :
-                             (rate == KnobRate::Fast) ? 0.08200f :
-                                                        0.03800f;
-    const float octDelta = static_cast<float>(ticks) * octPerStep;
-    return clampf(currentHz * fastExp2(octDelta), kLfoFreqMinHz, kLfoFreqMaxHz);
-}
-
-int32_t RuidoController::stepClampedDetent(int32_t currentVal, int32_t maxVal, int32_t ticks,
-                                           KnobRate rate, int32_t& accum) noexcept {
-    const int32_t threshold = (rate == KnobRate::Fine) ? 8 : (rate == KnobRate::Fast) ? 2 : 4;
-    if ((ticks > 0 && accum < 0) || (ticks < 0 && accum > 0)) {
-        accum = 0;
-    }
-    accum += ticks;
-    const int32_t steps = accum / threshold;
-    if (steps == 0) {
-        if ((currentVal <= 0 && accum < 0) || (currentVal >= maxVal && accum > 0)) {
-            accum = 0;
-        }
-        return currentVal;
-    }
-    accum -= steps * threshold;
-    int32_t next = currentVal + steps;
-    if (next <= 0) {
-        next = 0;
-        if (accum < 0) {
-            accum = 0;
-        }
-    } else if (next >= maxVal) {
-        next = maxVal;
-        if (accum > 0) {
-            accum = 0;
-        }
-    }
-    return next;
-}
-
-float RuidoController::adjustLinear01(float current, int32_t ticks, KnobRate rate, float lo,
-                                      float hi) noexcept {
-    const float stepFrac = (rate == KnobRate::Fine) ? 0.00090f :
-                           (rate == KnobRate::Fast) ? 0.00800f :
-                                                      0.00420f;
-    const float span = hi - lo;
-    const float delta = static_cast<float>(ticks) * stepFrac * span;
-    return clampf(current + delta, lo, hi);
-}
-
 void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept {
     if (ticks == 0) {
         return;
@@ -295,10 +214,9 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
 
     if (encoder == EncoderId::Select) {
         if (hud_.lfoPageOpen) {
-            const int32_t nextFocus =
-                stepClampedDetent(static_cast<int32_t>(hud_.lfoVoiceFocus),
-                                  static_cast<int32_t>(kNumOscillators), ticks, rate,
-                                  selectTickAccum_);
+            const int32_t nextFocus = stepClampedDetent(static_cast<int32_t>(hud_.lfoVoiceFocus),
+                                                        static_cast<int32_t>(kNumOscillators),
+                                                        ticks, rate, selectTickAccum_);
             hud_.lfoVoiceFocus = static_cast<uint8_t>(nextFocus);
             if (hud_.lfoVoiceFocus < kNumOscillators) {
                 hud_.focusedVoice = hud_.lfoVoiceFocus;
@@ -307,8 +225,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             if (activeModifier() == HeldModifier::None) {
                 hud_.knobBank = KnobBankMode::Lfo;
                 hud_.mode = latchedHudMode_;
-                hudActive_ = true;
-                holdRemainingSec_ = 0.0f;
+                env_.latchPage();
             }
         } else {
             triggerHud(HudMode::UnassignedEncoder, hud_.focusedVoice, hud_.focusedKnob);
@@ -322,7 +239,6 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         return;
     }
 
-    // Right-hand KNOB1..KNOB4 (always mapped according to left-hand black-key hold)
     const int knobIdx = static_cast<int>(encoder) - static_cast<int>(EncoderId::Knob1);
     if (knobIdx < 0 || knobIdx >= static_cast<int>(kNumOscillators)) {
         return;
@@ -369,8 +285,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             }
             latchedHudMode_ = currentLfoHudMode();
             hud_.mode = latchedHudMode_;
-            hudActive_ = true;
-            holdRemainingSec_ = 0.0f;
+            env_.latchPage();
         } else {
             adjustVoiceFrequency(state_.voices[kIdx], ticks, rate);
             hud_.knobBank = KnobBankMode::Frequency;
@@ -393,8 +308,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         break;
     }
     case HeldModifier::Panning: {
-        state_.voices[kIdx].pan =
-            adjustLinear01(state_.voices[kIdx].pan, ticks, rate, -1.0f, 1.0f);
+        state_.voices[kIdx].pan = adjustLinear01(state_.voices[kIdx].pan, ticks, rate, -1.0f, 1.0f);
         hud_.knobBank = KnobBankMode::Panning;
         triggerHud(HudMode::Panning, kIdx, kIdx);
         break;
@@ -403,9 +317,8 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
     case HeldModifier::FilterVoice1:
     case HeldModifier::FilterVoice2:
     case HeldModifier::FilterVoice3: {
-        const uint8_t vIdx =
-            static_cast<uint8_t>(static_cast<uint8_t>(mod) -
-                                 static_cast<uint8_t>(HeldModifier::FilterVoice0));
+        const uint8_t vIdx = static_cast<uint8_t>(static_cast<uint8_t>(mod) -
+                                                  static_cast<uint8_t>(HeldModifier::FilterVoice0));
         VoiceParams& vp = state_.voices[vIdx];
         if (kIdx == 0u) {
             vp.hpCutoffHz = adjustFilterCutoff(vp.hpCutoffHz, ticks, rate);
@@ -454,7 +367,6 @@ void RuidoController::onMasterPot(float normalizedLevel) noexcept {
 }
 
 void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
-    // OCT- (Fine) and OCT+ (Fast) are strictly momentary left-hand rate modifiers
     if (button == ButtonId::OctMinus || button == ButtonId::OctPlus) {
         if (button == ButtonId::OctMinus) {
             octMinusHeld_ = pressed;
@@ -523,11 +435,9 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
         }
         latchedHudMode_ = HudMode::None;
         latchedButton_ = ButtonId::Count;
-        hudRawLevel_ = 0.0f;
+        env_.reset();
         hud_.opacity = 0.0f;
         hud_.mode = HudMode::None;
-        hudActive_ = false;
-        holdRemainingSec_ = 0.0f;
         hud_.saveArmed = false;
         return;
     }
@@ -543,7 +453,7 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
         } else {
             latchedHudMode_ = HudMode::None;
             latchedButton_ = ButtonId::Count;
-            holdRemainingSec_ = 0.0f;
+            env_.holdRemainingSec = 0.0f;
         }
         return;
     }
@@ -560,7 +470,6 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
         return;
     }
 
-    // Remaining right-grid switches (FX, ENV, EDIT, GloRight, ARP, SEQ, REC)
     hud_.lfoPageOpen = false;
     if (activeModifier() == HeldModifier::None) {
         hud_.knobBank = KnobBankMode::Frequency;
@@ -618,7 +527,6 @@ void RuidoController::onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexce
     const bool wasPressed = whiteKeyHeld_[whiteKeyIndex];
     whiteKeyHeld_[whiteKeyIndex] = pressed;
 
-    // White Keys 0..3 (Dot 1): Osc 1-4 Latching Gates / Mutes
     if (whiteKeyIndex < 4u) {
         if (pressed && !wasPressed) {
             state_.voices[whiteKeyIndex].muted = !state_.voices[whiteKeyIndex].muted;
@@ -628,7 +536,6 @@ void RuidoController::onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexce
         return;
     }
 
-    // White Keys 4..7 (Dot 2): Osc 1-4 Pressure Expression Pads (momentary)
     if (whiteKeyIndex < 8u) {
         const uint8_t vIdx = static_cast<uint8_t>(whiteKeyIndex - 4u);
         if (!pressed) {
@@ -645,7 +552,6 @@ void RuidoController::onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexce
         return;
     }
 
-    // White Keys 8..15 (Dots 3 & 4): 8 Drone Snapshot Slots
     const uint8_t slot = static_cast<uint8_t>(whiteKeyIndex - 8u);
     if (pressed) {
         hud_.snapshotSlot = slot;
@@ -661,7 +567,7 @@ void RuidoController::onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexce
                octPlusHeld_) {
         syncModifierHud();
     } else {
-        holdRemainingSec_ = kHudHoldSec;
+        env_.holdRemainingSec = kHudHoldSec;
     }
 }
 
@@ -687,7 +593,7 @@ void RuidoController::onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) 
             hud_.morphPosition = clamped;
             triggerHud(HudMode::SnapshotSlot, hud_.focusedVoice, hud_.focusedKnob);
         } else if (wasHeld) {
-            holdRemainingSec_ = kHudHoldSec;
+            env_.holdRemainingSec = kHudHoldSec;
         }
     }
 }
@@ -699,70 +605,29 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
         animPhase_ -= 1000.0f;
     }
 
-    // Soft S-curve HUD opacity envelope:
-    // - Right 2x6 buttons stay latched until HOME (returning after any momentary hold or tweak)
-    // - Momentary holds stay pinned while held and dissolve immediately on release
-    // - Standalone knob turns & keybed taps hold readable for 1.5 s, then dissolve smoothly
     const bool modPinned =
         (activeModifier() != HeldModifier::None) || octMinusHeld_ || octPlusHeld_;
     const bool momentaryPinned = isAnyMomentaryHudHoldActive();
     const bool switchLatched = (latchedHudMode_ != HudMode::None);
     hud_.modifierHeld = modPinned;
 
-    if (momentaryPinned) {
-        holdRemainingSec_ = kHudHoldSec;
-        hudActive_ = true;
-    } else if (switchLatched) {
-        hudActive_ = true;
-    }
-
-    if (hudActive_) {
-        if (momentaryPinned) {
-            hudRawLevel_ = clampf(hudRawLevel_ + dt * (1.0f / kHudBloomSec), 0.0f, 1.0f);
-        } else if (switchLatched) {
-            hudRawLevel_ = clampf(hudRawLevel_ + dt * (1.0f / kHudBloomSec), 0.0f, 1.0f);
-            if (holdRemainingSec_ > 0.0f) {
-                holdRemainingSec_ -= dt;
-                if (holdRemainingSec_ <= 0.0f) {
-                    holdRemainingSec_ = 0.0f;
-                    hud_.mode = latchedHudMode_;
-                    if (hud_.lfoPageOpen && activeModifier() == HeldModifier::None) {
-                        hud_.knobBank = KnobBankMode::Lfo;
-                        if (hud_.lfoVoiceFocus < kNumOscillators) {
-                            hud_.focusedVoice = hud_.lfoVoiceFocus;
-                        }
-                    }
-                    if (latchedButton_ != ButtonId::Count) {
-                        hud_.lastButton = latchedButton_;
-                    }
-                }
-            }
-        } else {
-            float remDt = dt;
-            if (holdRemainingSec_ > 0.0f && hudRawLevel_ < 1.0f) {
-                const float needBloom = (1.0f - hudRawLevel_) * kHudBloomSec;
-                const float bloomDt = (remDt < needBloom) ? remDt : needBloom;
-                hudRawLevel_ = clampf(hudRawLevel_ + bloomDt * (1.0f / kHudBloomSec), 0.0f, 1.0f);
-                remDt -= bloomDt;
-            }
-            if (remDt > 0.0f && holdRemainingSec_ > 0.0f) {
-                const float holdDt = (remDt < holdRemainingSec_) ? remDt : holdRemainingSec_;
-                holdRemainingSec_ -= holdDt;
-                remDt -= holdDt;
-            }
-            if (remDt > 0.0f && holdRemainingSec_ <= 0.0f) {
-                const float decay = fastExp(-remDt * (1.0f / kHudDissolveTau));
-                hudRawLevel_ = hudRawLevel_ * decay - 0.035f * remDt;
-                if (hudRawLevel_ <= 0.005f) {
-                    hudRawLevel_ = 0.0f;
-                    hud_.mode = HudMode::None;
-                    hudActive_ = false;
-                }
+    bool toastExpired = false;
+    bool dissolvedToIdle = false;
+    env_.step(dt, momentaryPinned, switchLatched, toastExpired, dissolvedToIdle, hud_.opacity);
+    if (toastExpired) {
+        hud_.mode = latchedHudMode_;
+        if (hud_.lfoPageOpen && activeModifier() == HeldModifier::None) {
+            hud_.knobBank = KnobBankMode::Lfo;
+            if (hud_.lfoVoiceFocus < kNumOscillators) {
+                hud_.focusedVoice = hud_.lfoVoiceFocus;
             }
         }
-        hud_.opacity = smoothstep01(hudRawLevel_);
-    } else {
-        hud_.opacity = 0.0f;
+        if (latchedButton_ != ButtonId::Count) {
+            hud_.lastButton = latchedButton_;
+        }
+    }
+    if (dissolvedToIdle) {
+        hud_.mode = HudMode::None;
     }
 
     const float runTarget = state_.global.masterRun ? 1.0f : 0.0f;
@@ -775,112 +640,10 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
 }
 
 void RuidoController::updateLeds(const EngineTelemetry& telemetry) noexcept {
-    // 1. Raised Black Keys (11 monochrome white LEDs)
-    // Contiguous 5-key filter family (OP1..OP4 per-voice + OP5 Global Filter): 15% rest, 100% held
-    for (size_t i = 0u; i < 5u; ++i) {
-        leds_.blackKeyLeds[i] = blackKeyHeld_[i] ? 1.0f : 0.15f;
-    }
-    // Mix / Spatial pair (OP6 Panning + GLO Amplitude): 25% landmark rest, 100% held
-    leds_.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op6)] =
-        blackKeyHeld_[static_cast<size_t>(BlackKeyId::Op6)] ? 1.0f : 0.25f;
-    leds_.blackKeyLeds[static_cast<size_t>(BlackKeyId::Pit)] = 0.0f;
-    leds_.blackKeyLeds[static_cast<size_t>(BlackKeyId::Glo)] =
-        blackKeyHeld_[static_cast<size_t>(BlackKeyId::Glo)] ? 1.0f : 0.25f;
-    leds_.blackKeyLeds[static_cast<size_t>(BlackKeyId::Mono)] =
-        state_.global.monoCollapse ? 1.0f : 0.15f;
-    leds_.blackKeyLeds[static_cast<size_t>(BlackKeyId::Poly)] =
-        state_.global.monoCollapse ? 0.15f : 1.0f;
-    // 11th black key (Scope Freeze): 0% at rest, 100% while freezing waveform
-    leds_.blackKeyLeds[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)] =
-        hud_.scopeFrozen ? 1.0f : 0.0f;
-
-    // 2. Bottom White Keys (16 monochrome white LEDs)
-    const float padBaseLed =
-        state_.global.pitchPressureMode ? kPadPitchBaseLed : kPadFilterBaseLed;
-    float maxPadPressure = 0.0f;
-
-    float maxLfoDepth = 0.0f;
-    size_t dominantLfoVoice = 0u;
-
-    for (size_t i = 0u; i < kNumOscillators; ++i) {
-        const VoiceParams& vp = state_.voices[i];
-        const float lfoRaw = telemetry.lfoOutput[i].load(std::memory_order_relaxed);
-        const float effHz = (vp.lfoTarget == LfoTarget::Pitch && vp.lfoDepth > 0.0f) ?
-                                applyLfoPitchHz(vp.frequencyHz, vp.lfoDepth, lfoRaw) :
-                                vp.frequencyHz;
-        const float effAmp = (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > 0.0f) ?
-                                 applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoRaw) :
-                                 vp.amplitude;
-        const float ampDepth =
-            (vp.lfoTarget == LfoTarget::Amplitude) ? clampf(vp.lfoDepth, 0.0f, 1.0f) : 0.0f;
-        const float gate = telemetry.oscGateHigh[i].load(std::memory_order_relaxed);
-
-        if (vp.lfoDepth > maxLfoDepth) {
-            maxLfoDepth = vp.lfoDepth;
-            dominantLfoVoice = i;
-        }
-
-        if (vp.muted) {
-            leds_.whiteKeyLeds[i] = 0.10f;
-        } else if (effHz < 20.0f) {
-            const float peakBright = 0.60f + 0.40f * effAmp;
-            leds_.whiteKeyLeds[i] = 0.12f + (peakBright - 0.12f) * clampf(gate, 0.0f, 1.0f);
-        } else {
-            const float restFloor = 0.60f - 0.42f * ampDepth;
-            leds_.whiteKeyLeds[i] = restFloor + (1.0f - restFloor) * effAmp;
-        }
-
-        const float p = clampf(state_.voicePressure[i], 0.0f, 1.0f);
-        if (p > maxPadPressure) {
-            maxPadPressure = p;
-        }
-        leds_.whiteKeyLeds[4u + i] = padBaseLed + (1.0f - padBaseLed) * p;
-    }
-
-    float savePulse = 0.0f;
-    if (hud_.saveArmed) {
-        const float cyc =
-            animPhase_ * 2.5f - static_cast<float>(static_cast<int32_t>(animPhase_ * 2.5f));
-        const float tri = 1.0f - absf(2.0f * cyc - 1.0f);
-        savePulse = 0.12f + 0.48f * smoothstep01(tri);
-    }
-    for (size_t s = 8u; s < 16u; ++s) {
-        leds_.whiteKeyLeds[s] = whiteKeyHeld_[s] ? 0.75f : savePulse;
-    }
-
-    // 3. Panel Tactile Buttons (unused FM/seq buttons strictly 0% dark)
-    leds_.buttonLeds.fill(0.0f);
-    // Visually couple SEL to White Keys 5-8 via identical rest brightness & live touch flare
-    leds_.buttonLeds[static_cast<size_t>(ButtonId::Sel)] =
-        padBaseLed + (1.0f - padBaseLed) * maxPadPressure;
-    leds_.buttonLeds[static_cast<size_t>(ButtonId::OctMinus)] =
-        (hud_.knobRate == KnobRate::Fine) ? 1.0f : 0.15f;
-    leds_.buttonLeds[static_cast<size_t>(ButtonId::OctPlus)] =
-        (hud_.knobRate == KnobRate::Fast) ? 1.0f : 0.15f;
-
-    leds_.buttonLeds[static_cast<size_t>(ButtonId::Home)] = 0.12f + 0.23f * hud_.opacity;
-    leds_.buttonLeds[static_cast<size_t>(ButtonId::Save)] = hud_.saveArmed ? 1.0f : 0.15f;
-
-    if (hud_.lfoPageOpen) {
-        leds_.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] = 1.0f;
-    } else if (maxLfoDepth > 1.0e-4f) {
-        const size_t focusV =
-            (hud_.lfoVoiceFocus < kNumOscillators &&
-             state_.voices[hud_.lfoVoiceFocus].lfoDepth > 1.0e-4f) ?
-                static_cast<size_t>(hud_.lfoVoiceFocus) :
-                dominantLfoVoice;
-        const float raw = telemetry.lfoOutput[focusV].load(std::memory_order_relaxed);
-        const float u = 0.5f * (clampf(raw, -1.0f, 1.0f) + 1.0f);
-        leds_.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] =
-            0.12f + (0.10f + 0.38f * clampf(maxLfoDepth, 0.0f, 1.0f)) * u;
-    }
-
-    const float cyc =
-        animPhase_ * 1.2f - static_cast<float>(static_cast<int32_t>(animPhase_ * 1.2f));
-    const float tri = 1.0f - absf(2.0f * cyc - 1.0f);
-    const float standbyBreath = 0.15f + 0.55f * smoothstep01(tri);
-    leds_.buttonLeds[static_cast<size_t>(ButtonId::PlayStop)] =
-        standbyBreath + (1.0f - standbyBreath) * playStopRunSmooth_;
+    const LedInputContext ctx{
+        state_, hud_, telemetry, blackKeyHeld_, whiteKeyHeld_, animPhase_, playStopRunSmooth_,
+    };
+    computePanelAndKeybedLeds(ctx, leds_);
 }
 
 } // namespace ruido

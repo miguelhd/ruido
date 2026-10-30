@@ -59,11 +59,9 @@ inline float evalAnalogSine(float phase01) noexcept {
     const float u = 1.0f - 4.0f * absf(q - 0.5f);
     const float u2 = u * u;
     // 7th-order odd polynomial matching sin(pi/2 * u) with exact f(+-1) = +-1 and f'(+-1) = 0
-    const float s =
-        u * (1.57079633f + u2 * (-0.64596410f + u2 * (0.07953921f - 0.00437144f * u2)));
+    const float s = u * (1.57079633f + u2 * (-0.64596410f + u2 * (0.07953921f - 0.00437144f * u2)));
     constexpr float kDrive = 0.55f;
-    constexpr float kNorm =
-        (27.0f + 9.0f * kDrive * kDrive) / (kDrive * (27.0f + kDrive * kDrive));
+    constexpr float kNorm = (27.0f + 9.0f * kDrive * kDrive) / (kDrive * (27.0f + kDrive * kDrive));
     return clampf(padeClip(kDrive * s) * kNorm, -1.0f, 1.0f);
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/ControlSurface.h"
+#include "core/HudEnvelope.h"
 #include "core/Parameters.h"
 
 #include <array>
@@ -11,7 +12,7 @@ namespace ruido {
 // Stateless two-hand instrument controller, 3-gear linear X4 quadrature encoder scaling,
 // soft S-curve HUD envelope generator, and 27-key + 14-button varibright white LED engine.
 class RuidoController {
-public:
+  public:
     RuidoController() noexcept;
 
     void reset() noexcept;
@@ -42,19 +43,13 @@ public:
     // Advance HUD bloom/hold/dissolve timers & refresh all 41 varibright PWM LED levels.
     void tick(float dtSec, const EngineTelemetry& telemetry) noexcept;
 
-    const EngineControlState& state() const noexcept {
-        return state_;
-    }
+    const EngineControlState& state() const noexcept { return state_; }
 
-    const HudState& hud() const noexcept {
-        return hud_;
-    }
+    const HudState& hud() const noexcept { return hud_; }
 
-    const LedState& leds() const noexcept {
-        return leds_;
-    }
+    const LedState& leds() const noexcept { return leds_; }
 
-private:
+  private:
     enum class HeldModifier : uint8_t {
         None = 0,
         FilterVoice0 = 1,
@@ -77,14 +72,6 @@ private:
     void publishState() noexcept;
     void updateLeds(const EngineTelemetry& telemetry) noexcept;
 
-    static void adjustVoiceFrequency(VoiceParams& vp, int32_t ticks, KnobRate rate) noexcept;
-    static float adjustFilterCutoff(float currentHz, int32_t ticks, KnobRate rate) noexcept;
-    static float adjustLfoRate(float currentHz, int32_t ticks, KnobRate rate) noexcept;
-    static float adjustLinear01(float current, int32_t ticks, KnobRate rate, float lo = 0.0f,
-                                float hi = 1.0f) noexcept;
-    static int32_t stepClampedDetent(int32_t currentVal, int32_t maxVal, int32_t ticks,
-                                     KnobRate rate, int32_t& accum) noexcept;
-
     LockFreeControlBus* controlBus_ = nullptr;
     EngineControlState state_{};
     HudState hud_{};
@@ -100,8 +87,7 @@ private:
     uint32_t octMinusOrder_ = 0u;
     uint32_t octPlusOrder_ = 0u;
 
-    float hudRawLevel_ = 0.0f;
-    float holdRemainingSec_ = 0.0f;
+    HudEnvelopeTracker env_{};
     float animPhase_ = 0.0f;
     float masterPot_ = 0.85f;
     float playStopRunSmooth_ = 1.0f;
@@ -109,7 +95,6 @@ private:
     ButtonId latchedButton_ = ButtonId::Count;
     int32_t selectTickAccum_ = 0;
     int32_t targetTickAccum_ = 0;
-    bool hudActive_ = false;
 };
 
 } // namespace ruido

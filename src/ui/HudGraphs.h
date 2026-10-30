@@ -1,0 +1,182 @@
+#pragma once
+
+#include "core/ControlSurface.h"
+#include "core/DspMath.h"
+#include "core/LfoMath.h"
+#include "core/Parameters.h"
+#include "ui/MonoCanvas.h"
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+namespace ruido {
+
+// Concept A3 1/3-screen (80 px: y = 102..182, x = 10..230) filter graph & backdrop dim constants
+inline constexpr int kFilterXStart = 10;
+inline constexpr size_t kFilterSweepPts = 221u;
+inline constexpr float kFilterLogMin = 4.32192809f;  // log2(20 Hz)
+inline constexpr float kFilterLogSpan = 9.96578428f; // log2(20000 / 20)
+inline constexpr float kFilterYTop = 102.0f;
+inline constexpr float kFilterYZeroDb = 132.0f;
+inline constexpr float kFilterYBot = 182.0f;
+inline constexpr float kFilterDbToPx = 1.68f;
+inline constexpr float kFilterBgDimDepth = 0.72f; // 72% BG waveform dimming behind active graphs
+
+// Full-screen (x = 0..239 edge-to-edge, y = 26..188) bipolar per-voice LFO visualization
+inline constexpr float kLfoYTop = 26.0f;
+inline constexpr float kLfoYZero = 107.0f; // Midpoint between top header and bottom strip
+inline constexpr float kLfoYBot = 188.0f;
+inline constexpr float kLfoMaxAmpPx = 75.0f;       // +-75 px (150 px peak-to-peak) excursion
+inline constexpr float kLfoLogMin = -5.64385619f;  // log2(0.02 Hz)
+inline constexpr float kLfoLogSpan = 10.55074679f; // log2(30.0 / 0.02)
+
+constexpr std::array<float, kFilterSweepPts> makeFilterSweepFreqs() noexcept {
+    std::array<float, kFilterSweepPts> freqs{};
+    for (size_t i = 0u; i < kFilterSweepPts; ++i) {
+        const float u = static_cast<float>(i) * (1.0f / static_cast<float>(kFilterSweepPts - 1u));
+        const float log2Freq = kFilterLogMin + u * kFilterLogSpan;
+        freqs[i] = cxExpPos(log2Freq * 0.69314718f);
+    }
+    return freqs;
+}
+
+inline constexpr std::array<float, kFilterSweepPts> kFilterSweepFreqs = makeFilterSweepFreqs();
+
+struct DualMs20Coeffs {
+    float invEffHp;
+    float dampHp2;
+    float invEffLp;
+    float dampLp2;
+    float hpAct;
+    float lpAct;
+    float clampedHp;
+    float clampedLp;
+    float rHp;
+    float rLp;
+};
+
+inline DualMs20Coeffs makeDualMs20Coeffs(float hpHz, float hpRes, float lpHz,
+                                         float lpRes) noexcept {
+    const float clampedHp = clampf(hpHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
+    const float clampedLp = clampf(lpHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
+    const float rHp = clampf(hpRes, 0.0f, 1.0f);
+    const float rLp = clampf(lpRes, 0.0f, 1.0f);
+
+    constexpr float kButterK = 2.0f - kSqrt2;
+    const float targetKHp = kButterK + rHp * (1.42f - 0.42f * rHp) * (2.82f - kButterK);
+    const float targetKLp = kButterK + rLp * (1.42f - 0.42f * rLp) * (2.82f - kButterK);
+    const float hpAct = smoothstep01((clampedHp - 20.0f) * 0.25f);
+    const float lpAct = smoothstep01((20000.0f - clampedLp) * (1.0f / 1200.0f));
+
+    const float dampHp = clampf(2.0f - (kButterK + hpAct * (targetKHp - kButterK)), 0.14f, 1.42f);
+    const float dampLp = clampf(2.0f - (kButterK + lpAct * (targetKLp - kButterK)), 0.14f, 1.42f);
+    const float effHp = 2.5f + hpAct * (clampedHp - 2.5f);
+    const float effLp = 28000.0f + lpAct * (clampedLp - 28000.0f);
+
+    return {
+        1.0f / effHp, dampHp * dampHp,
+        1.0f / effLp, dampLp * dampLp,
+        hpAct,        lpAct,
+        clampedHp,    clampedLp,
+        rHp,          rLp,
+    };
+}
+
+inline float evalDualMs20Db(float freq, const DualMs20Coeffs& c) noexcept {
+    const float rHp = freq * c.invEffHp;
+    const float rHp2 = rHp * rHp;
+    const float oneMinusHp2 = 1.0f - rHp2;
+    const float denHp = oneMinusHp2 * oneMinusHp2 + c.dampHp2 * rHp2;
+    const float mag2Hp = (rHp2 * rHp2) / (denHp + 1.0e-9f);
+
+    const float rLp = freq * c.invEffLp;
+    const float rLp2 = rLp * rLp;
+    const float oneMinusLp2 = 1.0f - rLp2;
+    const float denLp = oneMinusLp2 * oneMinusLp2 + c.dampLp2 * rLp2;
+    const float mag2Lp = 1.0f / (denLp + 1.0e-9f);
+
+    return 3.0103f * fastLog2(clampf(mag2Hp * mag2Lp, 1.0e-6f, 64.0f));
+}
+
+inline int16_t dbToFilterYFixed(float db) noexcept {
+    const float yPx = clampf(kFilterYZeroDb - db * kFilterDbToPx, kFilterYTop, kFilterYBot);
+    return static_cast<int16_t>(yPx * 64.0f + 0.5f);
+}
+
+inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float pressure,
+                                                    float pitchMode, float lfoRaw) noexcept {
+    const float hpBase = (vp.lfoTarget == LfoTarget::HpCutoff)
+                             ? applyLfoCutoffHz(vp.hpCutoffHz, vp.lfoDepth, lfoRaw)
+                             : vp.hpCutoffHz;
+    const float hpResBase = (vp.lfoTarget == LfoTarget::HpResonance)
+                                ? applyLfoResonance(vp.hpResonance, vp.lfoDepth, lfoRaw)
+                                : vp.hpResonance;
+    const float lpBase = (vp.lfoTarget == LfoTarget::LpCutoff)
+                             ? applyLfoCutoffHz(vp.lpCutoffHz, vp.lfoDepth, lfoRaw)
+                             : vp.lpCutoffHz;
+    const float lpResBase = (vp.lfoTarget == LfoTarget::LpResonance)
+                                ? applyLfoResonance(vp.lpResonance, vp.lfoDepth, lfoRaw)
+                                : vp.lpResonance;
+    return computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase, pressure,
+                                     vp.muted ? 0.0f : 1.0f, pitchMode);
+}
+
+// Analytical MS-20 dual-filter passband graph + full-screen morphed LFO graph state & compositors.
+class HudGraphs {
+  public:
+    static constexpr size_t kTracePoints = kDisplayWidth + 1u;
+
+    void reset() noexcept;
+    void clearImmediate() noexcept;
+    void decayOnHome(float homeDecay) noexcept;
+
+    void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
+                const HudState& effectiveHud, const std::array<float, kNumOscillators>& lfoOutput,
+                const std::array<uint32_t, kNumOscillators>& lfoDriftPacked) noexcept;
+
+    float filterGraphPhase() const noexcept { return filterGraphPhase_; }
+
+    float lfoGraphPhase() const noexcept { return lfoGraphPhase_; }
+
+    float backdropDim() const noexcept { return filterBackdropDim_; }
+
+    void compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
+                           uint16_t* linScratch, float effLfoAlpha01, uint8_t lfoAlpha8,
+                           const EngineControlState& control, const HudState& hud,
+                           const std::array<float, kNumOscillators>& lfoPhase) const noexcept;
+
+    void compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
+                              uint16_t* linScratch, float effFilterAlpha01,
+                              uint8_t filterAlpha8) const noexcept;
+
+  private:
+    void updateFilterGraph(float dtClamped, bool snapImmediate,
+                           const std::array<ModulatedFilterParams, kNumOscillators>& mods,
+                           bool unified) noexcept;
+    void updateLfoGraph(float dtClamped, bool snapImmediate, bool showAllVoices,
+                        const EngineControlState& control, const HudState& effectiveHud,
+                        const std::array<uint32_t, kNumOscillators>& lfoDriftPacked) noexcept;
+
+    std::array<std::array<int16_t, kFilterSweepPts>, kNumOscillators> filterCurvesFixed_{};
+    std::array<std::array<int16_t, kFilterSweepPts>, 2> filterCompCurvesFixed_{};
+    std::array<float, 2> filterCompWeights_{0.0f, 0.0f};
+    float filterDivergenceSmooth_ = 0.0f;
+    float filterHpBeadX_ = 10.0f;
+    float filterHpBeadY_ = 132.0f;
+    float filterHpBeadInt_ = 0.0f;
+    float filterHpBeadRad_ = 2.0f;
+    float filterLpBeadX_ = 230.0f;
+    float filterLpBeadY_ = 132.0f;
+    float filterLpBeadInt_ = 0.0f;
+    float filterLpBeadRad_ = 2.0f;
+    float filterGraphPhase_ = 0.0f;
+    float filterBackdropDim_ = 0.0f;
+
+    std::array<std::array<int16_t, kTracePoints>, kNumOscillators> lfoCurvesFixed_{};
+    std::array<float, kNumOscillators> lfoBeadIntensity_{0.0f, 0.0f, 0.0f, 0.0f};
+    float lfoDivergenceSmooth_ = 0.0f;
+    float lfoGraphPhase_ = 0.0f;
+};
+
+} // namespace ruido

@@ -55,8 +55,8 @@ int8_t VoiceLfoBank::nextDriftKnot(VoiceState& v) noexcept {
     const float tri = 0.70f * u1 + 0.30f * u2;
 
     // Sloth-inspired anti-clump + DC-centering feedback for wide, organic zero-mean excursions
-    const float driven = clampf((tri - 0.28f * v.prevKnotNorm - 0.24f * v.knotMean) * 1.18f, -1.0f,
-                                1.0f);
+    const float driven =
+        clampf((tri - 0.28f * v.prevKnotNorm - 0.24f * v.knotMean) * 1.18f, -1.0f, 1.0f);
     v.prevKnotNorm = driven;
     v.knotMean = sanitizeState(v.knotMean + 0.18f * (driven - v.knotMean));
 

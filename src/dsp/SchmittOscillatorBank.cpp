@@ -98,8 +98,9 @@ float SchmittOscillatorBank::nextWhiteNoise(uint32_t& state) noexcept {
     return static_cast<float>(static_cast<int32_t>(x)) * 4.65661287e-10f;
 }
 
-OscillatorBankOutput SchmittOscillatorBank::processSample(
-    const std::array<float, kNumOscillators>& freqHz, float circuitCoupling) noexcept {
+OscillatorBankOutput
+SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& freqHz,
+                                     float circuitCoupling) noexcept {
     OscillatorBankOutput out{};
     const float coupling = clampf(circuitCoupling, 0.0f, 1.0f);
     // Quadratic taper on ALGORITHM encoder: 0% = isolated, 25% = subtle shimmer,
@@ -109,8 +110,8 @@ OscillatorBankOutput SchmittOscillatorBank::processSample(
     // Update per-voice rail sag states from previous sample's switching crowbar transients
     float totalRailSag = 0.0f;
     for (size_t i = 0; i < kNumOscillators; ++i) {
-        voiceRailSag_[i] = sanitizeState(voiceRailSag_[i] * railDecayCoeff_ +
-                                         voices_[i].lastEdgePulse);
+        voiceRailSag_[i] =
+            sanitizeState(voiceRailSag_[i] * railDecayCoeff_ + voices_[i].lastEdgePulse);
         voices_[i].lastEdgePulse = 0.0f;
         totalRailSag += voiceRailSag_[i];
     }
@@ -142,12 +143,11 @@ OscillatorBankOutput SchmittOscillatorBank::processSample(
             // Fast C1 cosine-like PRC on [0, 1): +1 at 0 & 1, -1 at 0.5, 0 at 0.25 & 0.75
             const float dHalf = absf(2.0f * phaseNorm - 1.0f); // [0 at 0.5, 1 at 0/1]
             const float signedPrc = dHalf * dHalf * (3.0f - 2.0f * dHalf) * 2.0f - 1.0f;
-            railPullRatio = clampf(1.0f - couplingGain * neighborSag * signedPrc,
-                                   0.55f, 1.75f);
+            railPullRatio = clampf(1.0f - couplingGain * neighborSag * signedPrc, 0.55f, 1.75f);
         }
 
-        const float targetHz = clampf(freqHz[i] * v.cachedDriftRatio * railPullRatio,
-                                      0.005f, 16000.0f);
+        const float targetHz =
+            clampf(freqHz[i] * v.cachedDriftRatio * railPullRatio, 0.005f, 16000.0f);
         const float incFloat = targetHz * hzToPhaseU32_;
         uint32_t incU32 = (incFloat >= 1.0f) ? static_cast<uint32_t>(incFloat) : 1u;
         if (incU32 > kMaxPhaseInc) {
@@ -192,8 +192,8 @@ OscillatorBankOutput SchmittOscillatorBank::processSample(
         // y[n] = pole * (y[n-1] + x[n] - x[n-1])
         float voiceSample = bandLimitedSquare;
         if (enableRcTilt_) {
-            const float rcOut = rcHighpassPole_ *
-                                (v.rcCapState + bandLimitedSquare - v.rcPrevInput);
+            const float rcOut =
+                rcHighpassPole_ * (v.rcCapState + bandLimitedSquare - v.rcPrevInput);
             v.rcPrevInput = bandLimitedSquare;
             v.rcCapState = sanitizeState(rcOut);
             voiceSample = v.rcCapState;

@@ -16,7 +16,7 @@ namespace ruido {
 //  - C^4-deadband / C^2-rail 1S1588 anti-parallel silicon PN-junction feedback limiter
 //  - Exact coupled analytical Newton-Raphson ZDF solver with proven global uniqueness (df > 0.12)
 class Ms20DualFilter {
-public:
+  public:
     struct Coeffs {
         float gHp = 0.0f;
         float kHp = 0.58578644f;
@@ -56,11 +56,10 @@ public:
     float processSample(float input, float hpCutoffHz, float hpResonance, float lpCutoffHz,
                         float lpResonance, float invSampleRate) noexcept {
         return processPrepared(
-            input,
-            prepareCoeffs(hpCutoffHz, hpResonance, lpCutoffHz, lpResonance, invSampleRate));
+            input, prepareCoeffs(hpCutoffHz, hpResonance, lpCutoffHz, lpResonance, invSampleRate));
     }
 
-private:
+  private:
     struct OtaSallenKeyStage {
         float s1 = 0.0f;
         float s2 = 0.0f;

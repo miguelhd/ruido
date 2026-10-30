@@ -65,9 +65,9 @@ inline float computeVoicePitchRatio(float pressure, float pitchMode) noexcept {
     return (pp > 0.0f) ? fastExp2(0.50f * pp * pp) : 1.0f;
 }
 
-inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpResBase,
-                                                       float lpBase, float lpResBase,
-                                                       float pressure, float activeGate,
+inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpResBase, float lpBase,
+                                                       float lpResBase, float pressure,
+                                                       float activeGate,
                                                        float pitchMode = 0.0f) noexcept {
     const float p = clampf(pressure, 0.0f, 1.0f);
     const float g = clampf(activeGate, 0.0f, 1.0f);
@@ -101,8 +101,7 @@ inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpRes
 
     // 2. Muted Voice: Vactrol Low-Pass Gate (warm 95 Hz sub murmur -> full open harmonics)
     const float invFp = 1.0f - fp;
-    const float lpLpg =
-        clampf(lpBase * fastExp2(-7.0f * invFp * invFp), 95.0f, kFilterCutoffMaxHz);
+    const float lpLpg = clampf(lpBase * fastExp2(-7.0f * invFp * invFp), 95.0f, kFilterCutoffMaxHz);
     const float hpLpg = hpBase;
     const float hpResLpg = hpResBase;
     const float lpResLpg = clampf(lpResBase + 0.38f * fp * fp, 0.0f, 0.90f);
@@ -126,10 +125,8 @@ struct EngineControlState {
     static EngineControlState makeDefault() noexcept {
         EngineControlState s{};
         // Musical open-fifth / octave starting chord with gentle stereo spread
-        constexpr std::array<float, kNumOscillators> kInitFreqs = {
-            55.0f, 82.41f, 110.15f, 164.81f};
-        constexpr std::array<float, kNumOscillators> kInitPans = {
-            -0.35f, 0.35f, -0.65f, 0.65f};
+        constexpr std::array<float, kNumOscillators> kInitFreqs = {55.0f, 82.41f, 110.15f, 164.81f};
+        constexpr std::array<float, kNumOscillators> kInitPans = {-0.35f, 0.35f, -0.65f, 0.65f};
         for (size_t i = 0; i < kNumOscillators; ++i) {
             s.voices[i].frequencyHz = kInitFreqs[i];
             s.voices[i].amplitude = 0.65f;
@@ -159,7 +156,7 @@ static_assert(std::atomic<float>::is_always_lock_free,
 // Lock-free triple-buffered control bus (Core 0 writer -> Core 1 audio reader).
 // Never blocks either core and guarantees tear-free multi-parameter reads.
 class LockFreeControlBus {
-public:
+  public:
     LockFreeControlBus() noexcept {
         const EngineControlState init = EngineControlState::makeDefault();
         buffers_[0] = init;
@@ -177,8 +174,8 @@ public:
         do {
             const uint32_t readyIdx = prevReady & 0x3u;
             nextState = (writeIdx_ & 0x3u) | kNewDataBit;
-            if (sharedState_.compare_exchange_weak(
-                    prevReady, nextState, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+            if (sharedState_.compare_exchange_weak(prevReady, nextState, std::memory_order_acq_rel,
+                                                   std::memory_order_relaxed)) {
                 writeIdx_ = readyIdx;
                 break;
             }
@@ -204,7 +201,7 @@ public:
         return buffers_[readIdx_];
     }
 
-private:
+  private:
     static constexpr uint32_t kNewDataBit = 0x4u;
 
     std::array<EngineControlState, 3> buffers_{};
@@ -240,7 +237,7 @@ struct ScopeFrame {
 
 // Lock-free SPSC ring buffer feeding the 240x240 CRT scope on Core 0.
 class ScopeRingBuffer {
-public:
+  public:
     bool push(const ScopeFrame& frame) noexcept {
         const size_t w = writePos_.load(std::memory_order_relaxed);
         const size_t r = readPos_.load(std::memory_order_acquire);
@@ -273,7 +270,7 @@ public:
         return (diff <= kScopeRingCapacity) ? diff : 0u;
     }
 
-private:
+  private:
     std::array<ScopeFrame, kScopeRingCapacity> buffer_{};
     alignas(64) std::atomic<size_t> writePos_{0u};
     alignas(64) std::atomic<size_t> readPos_{0u};

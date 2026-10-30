@@ -265,7 +265,8 @@ void testButtonsOctavesKeybedAndPressure() {
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)], 1.0f));
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctPlus)], 0.15f));
 
-    //LIFO chording: pressing OCT+ while OCT- is held promotes to Fast; releasing OCT+ restores Fine
+    // LIFO chording: pressing OCT+ while OCT- is held promotes to Fast; releasing OCT+ restores
+    // Fine
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);
     ctrl.tick(0.016f, tel);
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Fast);
@@ -487,8 +488,8 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Rec)], 0.0f));
 
     // Filter/LPG mode: SEL == Keys 5..8 == kPadFilterBaseLed (0.24)
-    CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Sel)],
-               ruido::kPadFilterBaseLed));
+    CHECK(
+        near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Sel)], ruido::kPadFilterBaseLed));
     for (size_t i = 0u; i < 4u; ++i) {
         CHECK(near(leds.whiteKeyLeds[4u + i], ruido::kPadFilterBaseLed));
     }
@@ -1375,9 +1376,9 @@ void testPerVoiceLfoPageAndHudGraph() {
 
     // 3. Per-voice editing on OSC 2 (KNOB 1-4 = TARGET | SHAPE | RATE | DEPTH) leaves OSC 1/3/4
     //    untouched, while ALL 4 edits all 4 voices simultaneously!
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16); // +4 steps -> Amplitude (index 4)
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 60); // SHAPE
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 40); // RATE
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16);  // +4 steps -> Amplitude (index 4)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 60);  // SHAPE
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 40);  // RATE
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 180); // DEPTH
     CHECK(ctrl.state().voices[1].lfoTarget == ruido::LfoTarget::Amplitude);
     CHECK(ctrl.state().voices[1].lfoShape > 0.20f);
@@ -1524,7 +1525,7 @@ void testPerVoiceLfoPageAndHudGraph() {
                 static_cast<double>(static_cast<int>(g6B) - static_cast<int>(g6A)) * 4.0;
         }
     }
-    CHECK(leftBeadMaxG6 == 63u);  // Crisp #FFFFFF pure-white pinpoint core
+    CHECK(leftBeadMaxG6 == 63u); // Crisp #FFFFFF pure-white pinpoint core
     CHECK(rightBeadMaxG6 == 63u);
     CHECK(leftBeadDiff > 250.0 && leftBeadDiff < 2600.0); // Compact, non-bloated optical halo
     CHECK(rightBeadDiff > 250.0 && rightBeadDiff < 2600.0);

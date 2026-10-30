@@ -7,7 +7,7 @@ namespace ruido {
 // Clickless one-pole exponential smoother with automatic snap-to-target to prevent
 // denormal creep and save FPU work when controls are stationary.
 class OnePoleSmoother {
-public:
+  public:
     constexpr OnePoleSmoother() noexcept = default;
 
     void init(float initialValue, float timeConstantSec, float sampleRate) noexcept {
@@ -32,17 +32,11 @@ public:
         target_ = clean;
     }
 
-    void setTarget(float target) noexcept {
-        target_ = sanitizeState(target);
-    }
+    void setTarget(float target) noexcept { target_ = sanitizeState(target); }
 
-    float target() const noexcept {
-        return target_;
-    }
+    float target() const noexcept { return target_; }
 
-    float current() const noexcept {
-        return state_;
-    }
+    float current() const noexcept { return state_; }
 
     float next() noexcept {
         if (state_ == target_) {
@@ -60,7 +54,7 @@ public:
         return state_;
     }
 
-private:
+  private:
     float state_ = 0.0f;
     float target_ = 0.0f;
     float coeff_ = 1.0f;
@@ -69,7 +63,7 @@ private:
 // Asymmetric optocoupler (CdS vactrol) smoother: fast LED attack on finger press,
 // organic photoconductive release tail on finger lift, with denormal-safe target snap.
 class VactrolSmoother {
-public:
+  public:
     constexpr VactrolSmoother() noexcept = default;
 
     void init(float initialValue, float attackSec, float releaseSec, float sampleRate) noexcept {
@@ -86,13 +80,9 @@ public:
         target_ = clean;
     }
 
-    void setTarget(float target) noexcept {
-        target_ = sanitizeState(target);
-    }
+    void setTarget(float target) noexcept { target_ = sanitizeState(target); }
 
-    float current() const noexcept {
-        return state_;
-    }
+    float current() const noexcept { return state_; }
 
     float next() noexcept {
         if (state_ == target_) {
@@ -111,7 +101,7 @@ public:
         return state_;
     }
 
-private:
+  private:
     static float computeCoeff(float tauSec, float sampleRate) noexcept {
         if (!(tauSec > 0.0f) || !(sampleRate > 0.0f)) {
             return 1.0f;
@@ -129,7 +119,7 @@ private:
 // analog potentiometer smoother. Eliminates t=0 slope kinks and zipper plateaus between
 // discrete rotary encoder steps while snapping cleanly at rest to prevent denormals.
 class CriticallyDampedSmoother {
-public:
+  public:
     constexpr CriticallyDampedSmoother() noexcept = default;
 
     void init(float initialValue, float poleTimeConstantSec, float sampleRate) noexcept {
@@ -155,21 +145,13 @@ public:
         target_ = clean;
     }
 
-    void setTarget(float target) noexcept {
-        target_ = sanitizeState(target);
-    }
+    void setTarget(float target) noexcept { target_ = sanitizeState(target); }
 
-    float target() const noexcept {
-        return target_;
-    }
+    float target() const noexcept { return target_; }
 
-    float current() const noexcept {
-        return s2_;
-    }
+    float current() const noexcept { return s2_; }
 
-    bool isSettled() const noexcept {
-        return s2_ == target_ && s1_ == target_;
-    }
+    bool isSettled() const noexcept { return s2_ == target_ && s1_ == target_; }
 
     float next() noexcept {
         if (s2_ == target_ && s1_ == target_) {
@@ -189,7 +171,7 @@ public:
         return s2_;
     }
 
-private:
+  private:
     float s1_ = 0.0f;
     float s2_ = 0.0f;
     float target_ = 0.0f;
@@ -200,7 +182,7 @@ private:
 // Slews at uniform musical cents/ms across 0.02 Hz - 20 kHz (never rushing bass octaves) and
 // preserves exact bit-identical targetHz when settled at zero stationary CPU cost.
 class LogFreqSmoother {
-public:
+  public:
     constexpr LogFreqSmoother() noexcept = default;
 
     void init(float initialHz, float poleTimeConstantSec, float sampleRate) noexcept {
@@ -226,9 +208,7 @@ public:
         octSmoother_.setTarget(fastLog2(cleanHz));
     }
 
-    float current() const noexcept {
-        return currentHz_;
-    }
+    float current() const noexcept { return currentHz_; }
 
     float next() noexcept {
         if (octSmoother_.isSettled()) {
@@ -239,7 +219,7 @@ public:
         return currentHz_;
     }
 
-private:
+  private:
     CriticallyDampedSmoother octSmoother_{};
     float targetHz_ = 440.0f;
     float currentHz_ = 440.0f;

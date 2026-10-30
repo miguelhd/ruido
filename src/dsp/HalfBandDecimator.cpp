@@ -59,8 +59,7 @@ void StereoHalfBandDecimator4x::reset() noexcept {
     right_.reset();
 }
 
-StereoFrame StereoHalfBandDecimator4x::decimate2xStage1Stereo(ChannelState& chL,
-                                                              ChannelState& chR,
+StereoFrame StereoHalfBandDecimator4x::decimate2xStage1Stereo(ChannelState& chL, ChannelState& chR,
                                                               StereoFrame s0,
                                                               StereoFrame s1) noexcept {
     constexpr size_t kEvenMask = kStage1Pairs - 1u;    // 7
@@ -112,8 +111,7 @@ StereoFrame StereoHalfBandDecimator4x::decimate2xStage1Stereo(ChannelState& chL,
     return {accL0 + accL1, accR0 + accR1};
 }
 
-StereoFrame StereoHalfBandDecimator4x::decimate2xStage2Stereo(ChannelState& chL,
-                                                              ChannelState& chR,
+StereoFrame StereoHalfBandDecimator4x::decimate2xStage2Stereo(ChannelState& chL, ChannelState& chR,
                                                               StereoFrame s0,
                                                               StereoFrame s1) noexcept {
     constexpr size_t kEvenMask = kStage2Pairs - 1u;    // 31
@@ -181,8 +179,7 @@ StereoFrame StereoHalfBandDecimator4x::decimate2xStage2Stereo(ChannelState& chL,
     return {(accL0 + accL1) + (accL2 + accL3), (accR0 + accR1) + (accR2 + accR3)};
 }
 
-StereoFrame StereoHalfBandDecimator4x::process4x(
-    const std::array<StereoFrame, 4>& in4x) noexcept {
+StereoFrame StereoHalfBandDecimator4x::process4x(const std::array<StereoFrame, 4>& in4x) noexcept {
     const StereoFrame mid0 = decimate2xStage1Stereo(left_, right_, in4x[0], in4x[1]);
     const StereoFrame mid1 = decimate2xStage1Stereo(left_, right_, in4x[2], in4x[3]);
     return decimate2xStage2Stereo(left_, right_, mid0, mid1);

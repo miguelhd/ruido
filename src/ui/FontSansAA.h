@@ -23,6 +23,7 @@ struct SansFont {
     const uint8_t* bitmaps;
 };
 
+// clang-format off
 inline constexpr uint8_t kFontSansSmallBitmaps[1774] = {
     0x4Fu, 0x4Fu, 0x4Fu, 0x2Du, 0x0Bu, 0x25u, 0x5Fu, 0x3Du, 0x7Au, 0x3Du, 0x7Au, 0x3Cu,
     0x79u, 0x02u, 0xA3u, 0x90u, 0x04u, 0xA6u, 0x80u, 0x4Cu, 0xDCu, 0xC3u, 0x19u, 0x6Au,
@@ -987,11 +988,11 @@ inline constexpr GlyphMetrics kFontSansBoldMetrics[95] = {
     { 5u, 13u,   0,   3,  4u,  3084u}, // '}'
     { 7u,  3u,   0,   7,  8u,  3117u}, // '~'
 };
+// clang-format on
 
 inline constexpr SansFont kFontSansBold = {16u, kFontSansBoldMetrics, kFontSansBoldBitmaps};
 
-inline constexpr int measureSansText(const SansFont& font,
-                                     const char* str,
+inline constexpr int measureSansText(const SansFont& font, const char* str,
                                      int tracking = 0) noexcept {
     if (str == nullptr || str[0] == '\0') {
         return 0;

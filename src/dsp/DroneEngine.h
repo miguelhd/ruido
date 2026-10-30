@@ -19,26 +19,20 @@ namespace ruido {
 //  - Clickless per-sample parameter & vactrol mute/pressure slewing
 //  - Lock-free Core 0 -> Core 1 control consumption & Core 1 -> Core 0 scope/LED telemetry
 class DroneEngine {
-public:
+  public:
     DroneEngine() noexcept;
 
     void init(float baseSampleRate = kBaseSampleRate) noexcept;
     void reset() noexcept;
 
     // Control bus (Core 0 calls controlBus().publish(state))
-    LockFreeControlBus& controlBus() noexcept {
-        return controlBus_;
-    }
+    LockFreeControlBus& controlBus() noexcept { return controlBus_; }
 
     // Scope SPSC ring buffer (Core 0 calls scopeBuffer().popBatch(...))
-    ScopeRingBuffer& scopeBuffer() noexcept {
-        return scopeBuffer_;
-    }
+    ScopeRingBuffer& scopeBuffer() noexcept { return scopeBuffer_; }
 
     // Atomic LED & peak telemetry (Core 0 reads without locking)
-    const EngineTelemetry& telemetry() const noexcept {
-        return telemetry_;
-    }
+    const EngineTelemetry& telemetry() const noexcept { return telemetry_; }
 
     // Toggle internal analog drift / RC roof tilt (default: both enabled).
     void setAnalogCharacterEnabled(bool enableDrift, bool enableRcTilt) noexcept {
@@ -53,7 +47,7 @@ public:
     // Render `numFrames` stereo samples at baseSampleRate (64 frames per block on FM-1).
     void processBlock(float* outLeft, float* outRight, size_t numFrames) noexcept;
 
-private:
+  private:
     struct VoiceSmoothers {
         LogFreqSmoother freqHz;
         CriticallyDampedSmoother amplitude;

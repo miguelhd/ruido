@@ -1,0 +1,123 @@
+#include "core/LedEngine.h"
+
+#include "core/DspMath.h"
+#include "core/LfoMath.h"
+
+#include <cstddef>
+#include <cstdint>
+
+namespace ruido {
+
+void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) noexcept {
+    // 1. Raised Black Keys (11 monochrome white LEDs)
+    // Contiguous 5-key filter family (OP1..OP4 per-voice + OP5 Global Filter): 15% rest, 100% held
+    for (size_t i = 0u; i < 5u; ++i) {
+        outLeds.blackKeyLeds[i] = ctx.blackKeyHeld[i] ? 1.0f : 0.15f;
+    }
+    // Mix / Spatial pair (OP6 Panning + GLO Amplitude): 25% landmark rest, 100% held
+    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op6)] =
+        ctx.blackKeyHeld[static_cast<size_t>(BlackKeyId::Op6)] ? 1.0f : 0.25f;
+    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Pit)] = 0.0f;
+    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Glo)] =
+        ctx.blackKeyHeld[static_cast<size_t>(BlackKeyId::Glo)] ? 1.0f : 0.25f;
+    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Mono)] =
+        ctx.state.global.monoCollapse ? 1.0f : 0.15f;
+    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Poly)] =
+        ctx.state.global.monoCollapse ? 0.15f : 1.0f;
+    // 11th black key (Scope Freeze): 0% at rest, 100% while freezing waveform
+    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)] =
+        ctx.hud.scopeFrozen ? 1.0f : 0.0f;
+
+    // 2. Bottom White Keys (16 monochrome white LEDs)
+    const float padBaseLed =
+        ctx.state.global.pitchPressureMode ? kPadPitchBaseLed : kPadFilterBaseLed;
+    float maxPadPressure = 0.0f;
+
+    float maxLfoDepth = 0.0f;
+    size_t dominantLfoVoice = 0u;
+
+    for (size_t i = 0u; i < kNumOscillators; ++i) {
+        const VoiceParams& vp = ctx.state.voices[i];
+        const float lfoRaw = ctx.telemetry.lfoOutput[i].load(std::memory_order_relaxed);
+        const float effHz = (vp.lfoTarget == LfoTarget::Pitch && vp.lfoDepth > 0.0f)
+                                ? applyLfoPitchHz(vp.frequencyHz, vp.lfoDepth, lfoRaw)
+                                : vp.frequencyHz;
+        const float effAmp = (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > 0.0f)
+                                 ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoRaw)
+                                 : vp.amplitude;
+        const float ampDepth =
+            (vp.lfoTarget == LfoTarget::Amplitude) ? clampf(vp.lfoDepth, 0.0f, 1.0f) : 0.0f;
+        const float gate = ctx.telemetry.oscGateHigh[i].load(std::memory_order_relaxed);
+
+        if (vp.lfoDepth > maxLfoDepth) {
+            maxLfoDepth = vp.lfoDepth;
+            dominantLfoVoice = i;
+        }
+
+        if (vp.muted) {
+            outLeds.whiteKeyLeds[i] = 0.10f;
+        } else if (effHz < 20.0f) {
+            const float peakBright = 0.60f + 0.40f * effAmp;
+            outLeds.whiteKeyLeds[i] = 0.12f + (peakBright - 0.12f) * clampf(gate, 0.0f, 1.0f);
+        } else {
+            const float restFloor = 0.60f - 0.42f * ampDepth;
+            outLeds.whiteKeyLeds[i] = restFloor + (1.0f - restFloor) * effAmp;
+        }
+
+        const float p = clampf(ctx.state.voicePressure[i], 0.0f, 1.0f);
+        if (p > maxPadPressure) {
+            maxPadPressure = p;
+        }
+        outLeds.whiteKeyLeds[4u + i] = padBaseLed + (1.0f - padBaseLed) * p;
+    }
+
+    float savePulse = 0.0f;
+    if (ctx.hud.saveArmed) {
+        const float cyc =
+            ctx.animPhase * 2.5f - static_cast<float>(static_cast<int32_t>(ctx.animPhase * 2.5f));
+        const float tri = 1.0f - absf(2.0f * cyc - 1.0f);
+        savePulse = 0.12f + 0.48f * smoothstep01(tri);
+    }
+    for (size_t s = 8u; s < 16u; ++s) {
+        outLeds.whiteKeyLeds[s] = ctx.whiteKeyHeld[s] ? 0.75f : savePulse;
+    }
+
+    // 3. Panel Tactile Buttons (unused FM/seq buttons strictly 0% dark)
+    outLeds.buttonLeds.fill(0.0f);
+    outLeds.stopLed = 0.0f;
+    // Visually couple SEL to White Keys 5-8 via identical rest brightness & live touch flare
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::Sel)] =
+        padBaseLed + (1.0f - padBaseLed) * maxPadPressure;
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctMinus)] =
+        (ctx.hud.knobRate == KnobRate::Fine) ? 1.0f : 0.15f;
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctPlus)] =
+        (ctx.hud.knobRate == KnobRate::Fast) ? 1.0f : 0.15f;
+
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::Home)] = 0.12f + 0.23f * ctx.hud.opacity;
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] = ctx.hud.saveArmed ? 1.0f : 0.15f;
+
+    if (ctx.hud.lfoPageOpen) {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] = 1.0f;
+    } else if (maxLfoDepth > 1.0e-4f) {
+        const size_t focusV = (ctx.hud.lfoVoiceFocus < kNumOscillators &&
+                               ctx.state.voices[ctx.hud.lfoVoiceFocus].lfoDepth > 1.0e-4f)
+                                  ? static_cast<size_t>(ctx.hud.lfoVoiceFocus)
+                                  : dominantLfoVoice;
+        const float raw = ctx.telemetry.lfoOutput[focusV].load(std::memory_order_relaxed);
+        const float u = 0.5f * (clampf(raw, -1.0f, 1.0f) + 1.0f);
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] =
+            0.12f + (0.10f + 0.38f * clampf(maxLfoDepth, 0.0f, 1.0f)) * u;
+    }
+
+    // Dual-channel PLAY/STOP split cap: steady Green PLAY when AUDIO OUTPUT = ON,
+    // breathing Red/Amber-Orange STOP when OFF, crossfading smoothly through Yellow/Amber
+    const float cyc =
+        ctx.animPhase * 1.2f - static_cast<float>(static_cast<int32_t>(ctx.animPhase * 1.2f));
+    const float tri = 1.0f - absf(2.0f * cyc - 1.0f);
+    const float standbyBreath = 0.15f + 0.55f * smoothstep01(tri);
+    const float runSmooth = clampf(ctx.playStopRunSmooth, 0.0f, 1.0f);
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::PlayStop)] = runSmooth;
+    outLeds.stopLed = (1.0f - runSmooth) * standbyBreath;
+}
+
+} // namespace ruido

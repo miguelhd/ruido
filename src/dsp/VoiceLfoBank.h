@@ -25,16 +25,14 @@ struct VoiceLfoFrame {
 //  - Clickless 12 ms 7-destination crossfade weights when switching KNOB1 TARGET live
 //  - Subtle polystyrene timing-capacitor tolerance & slow thermal drift per voice
 class VoiceLfoBank {
-public:
+  public:
     static constexpr size_t kNumTargets = static_cast<size_t>(LfoTarget::Count);
 
     VoiceLfoBank() noexcept;
 
     void reset(float sampleRate = kBaseSampleRate) noexcept;
 
-    void setAnalogCharacterEnabled(bool enableDrift) noexcept {
-        enableDrift_ = enableDrift;
-    }
+    void setAnalogCharacterEnabled(bool enableDrift) noexcept { enableDrift_ = enableDrift; }
 
     void updateTargets(const EngineControlState& state, bool snapImmediate) noexcept;
 
@@ -42,7 +40,7 @@ public:
 
     void writeInitialTelemetry(EngineTelemetry& telemetry) const noexcept;
 
-private:
+  private:
     struct VoiceState {
         uint32_t phase = 0u;
         uint32_t rngState = 1u;
