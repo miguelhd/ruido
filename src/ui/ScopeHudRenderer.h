@@ -111,7 +111,7 @@ private:
 
     // Concept A3 1/3-screen (80 px: y = 102..182, x = 10..230) dual-resonance MS-20 filter graph:
     // - filterCurvesFixed_[0..3] = slewed Voice 1-4 spines (identical when unified)
-    // - filterCompCurvesFixed_[0..1] = slewed Korg35 companion harmonic contours
+    // - filterCompCurvesFixed_[0..1] = slewed MS-20 companion harmonic contours
     std::array<std::array<int16_t, kFilterPoints>, kNumOscillators> filterCurvesFixed_{};
     std::array<std::array<int16_t, kFilterPoints>, 2> filterCompCurvesFixed_{};
     std::array<float, 2> filterCompWeights_{0.0f, 0.0f};
@@ -128,11 +128,8 @@ private:
     float filterBackdropDim_ = 0.0f;
 
     // Full-screen (x = 0..239 edge-to-edge, y = 26..188 centered at y = 107) per-voice LFO graph:
-    // - lfoCurvesFixed_[0..3] = slewed 241-pt Voice 1-4 LFO waveforms
-    // - lfoCompCurvesFixed_[0..1] = slewed inner harmonic caustic contours
+    // - lfoCurvesFixed_[0..3] = slewed 241-pt Voice 1-4 LFO waveforms (zero fake inner contours)
     std::array<std::array<int16_t, kTracePoints>, kNumOscillators> lfoCurvesFixed_{};
-    std::array<std::array<int16_t, kTracePoints>, 2> lfoCompCurvesFixed_{};
-    std::array<float, 2> lfoCompWeights_{0.0f, 0.0f};
     float lfoDivergenceSmooth_ = 0.0f;
     float lfoGraphPhase_ = 0.0f;
     std::array<float, kNumOscillators> frameLfoOutput_{0.0f, 0.0f, 0.0f, 0.0f};

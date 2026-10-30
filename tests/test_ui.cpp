@@ -31,8 +31,8 @@ void testMemoryFootprint() {
     std::printf("  sizeof(ScopeHudRenderer) = %zu bytes\n", sizeof(ruido::ScopeHudRenderer));
     CHECK(sizeof(ruido::RuidoController) < 2048u);
     // Full 240x240 RGB565 framebuffer would be 115,200 B; 4096-sample super-period history +
-    // continuous phosphor persistence + 60x60 bloom stays < 82 KB without any 240x240 framebuffer.
-    CHECK(sizeof(ruido::ScopeHudRenderer) < 83968u);
+    // continuous phosphor persistence + 60x60 bloom + full-screen LFO stays < 86 KB without FB.
+    CHECK(sizeof(ruido::ScopeHudRenderer) < 88064u);
 }
 
 void testTwoHandErgonomicsAndBallistics() {
@@ -1386,11 +1386,13 @@ void testPerVoiceLfoPageAndHudGraph() {
     CHECK(monoGray);
 
     // Use a silent scope-free renderer and move lfoPhase[0] from 0.15 (left) to 0.80 (right)
-    // to verify the live Optical Phase Bead tracks instantaneous LFO phase across x = 10..230!
+    // to verify full-screen LFO geometry (x = 0..239, y = 26..188) and radiant Phase Beacon!
     ruido::ScopeHudRenderer beadRenderer;
     ruido::EngineControlState beadCtrl = ctrl.state();
     beadCtrl.global.masterRun = false;
     beadCtrl.global.masterTrim = 0.0f;
+    beadCtrl.voices[0].lfoDepth = 1.0f;
+    beadCtrl.voices[0].lfoShape = 0.0f; // Full-amplitude Sine spanning upper & lower viewport
     ruido::EngineTelemetry customTel{};
     customTel.lfoPhase[0].store(0.15f, std::memory_order_relaxed);
     customTel.lfoOutput[0].store(0.8f, std::memory_order_relaxed);
@@ -1403,22 +1405,84 @@ void testPerVoiceLfoPageAndHudGraph() {
     beadRenderer.prepareFrame(0.016f, beadCtrl, ctrl.hud(), customTel);
     beadRenderer.renderFullScreenStrips(lfo8.data());
 
-    double leftBeadDiff = 0.0;
-    double rightBeadDiff = 0.0;
-    for (size_t y = 102u; y <= 182u; ++y) {
-        for (size_t x = 35u; x <= 52u; ++x) {
-            const int gA = static_cast<int>((lfo16[y * 240u + x] >> 5u) & 0x3Fu) * 4;
-            const int gB = static_cast<int>((lfo8[y * 240u + x] >> 5u) & 0x3Fu) * 4;
-            leftBeadDiff += static_cast<double>(gA - gB);
-        }
-        for (size_t x = 178u; x <= 195u; ++x) {
-            const int gA = static_cast<int>((lfo16[y * 240u + x] >> 5u) & 0x3Fu) * 4;
-            const int gB = static_cast<int>((lfo8[y * 240u + x] >> 5u) & 0x3Fu) * 4;
-            rightBeadDiff += static_cast<double>(gB - gA);
+    // Verify LFO wave spans upper viewport (y = 32..80), lower viewport (y = 135..182),
+    // and both left/right screen edges (x = 0..3 and x = 236..239)
+    size_t upperHalfLit = 0u;
+    size_t lowerHalfLit = 0u;
+    size_t leftEdgeLit = 0u;
+    size_t rightEdgeLit = 0u;
+    for (size_t y = 30u; y <= 184u; ++y) {
+        for (size_t x = 0u; x < 240u; ++x) {
+            const uint16_t g6 = (lfo16[y * 240u + x] >> 5u) & 0x3Fu;
+            if (g6 >= 12u) {
+                if (y <= 80u) {
+                    ++upperHalfLit;
+                }
+                if (y >= 135u) {
+                    ++lowerHalfLit;
+                }
+                if (x <= 3u) {
+                    ++leftEdgeLit;
+                }
+                if (x >= 236u) {
+                    ++rightEdgeLit;
+                }
+            }
         }
     }
-    CHECK(leftBeadDiff > 80.0);
-    CHECK(rightBeadDiff > 80.0);
+    CHECK(upperHalfLit > 150u);
+    CHECK(lowerHalfLit > 150u);
+    CHECK(leftEdgeLit > 4u);
+    CHECK(rightEdgeLit > 4u);
+
+    double leftBeadDiff = 0.0;
+    double rightBeadDiff = 0.0;
+    uint16_t leftBeadMaxG6 = 0u;
+    uint16_t rightBeadMaxG6 = 0u;
+    for (size_t y = 24u; y <= 190u; ++y) {
+        for (size_t x = 24u; x <= 48u; ++x) {
+            const uint16_t g6A = (lfo16[y * 240u + x] >> 5u) & 0x3Fu;
+            const uint16_t g6B = (lfo8[y * 240u + x] >> 5u) & 0x3Fu;
+            if (g6A > leftBeadMaxG6) {
+                leftBeadMaxG6 = g6A;
+            }
+            leftBeadDiff +=
+                static_cast<double>(static_cast<int>(g6A) - static_cast<int>(g6B)) * 4.0;
+        }
+        for (size_t x = 180u; x <= 204u; ++x) {
+            const uint16_t g6A = (lfo16[y * 240u + x] >> 5u) & 0x3Fu;
+            const uint16_t g6B = (lfo8[y * 240u + x] >> 5u) & 0x3Fu;
+            if (g6B > rightBeadMaxG6) {
+                rightBeadMaxG6 = g6B;
+            }
+            rightBeadDiff +=
+                static_cast<double>(static_cast<int>(g6B) - static_cast<int>(g6A)) * 4.0;
+        }
+    }
+    CHECK(leftBeadMaxG6 == 63u);  // Crisp #FFFFFF pure-white pinpoint core
+    CHECK(rightBeadMaxG6 == 63u);
+    CHECK(leftBeadDiff > 250.0 && leftBeadDiff < 2600.0); // Compact, non-bloated optical halo
+    CHECK(rightBeadDiff > 250.0 && rightBeadDiff < 2600.0);
+
+    // Verify shaded LFO interior (around positive Sine crest x = 60..63 in lfo16, y = 40..96)
+    // decays smoothly with zero decorative inner contour lines!
+    bool monotonicShade = true;
+    bool firstTile = true;
+    uint32_t prevTileSum = 0u;
+    for (size_t ty = 40u; ty <= 96u; ty += 4u) {
+        uint32_t tileSum = 0u;
+        for (size_t dy = 0u; dy < 4u; ++dy) {
+            for (size_t x = 60u; x < 64u; ++x) {
+                tileSum += (lfo16[(ty + dy) * 240u + x] >> 5u) & 0x3Fu;
+            }
+        }
+        if (!firstTile && tileSum > prevTileSum + 2u) {
+            monotonicShade = false;
+        }
+        prevTileSum = tileSum;
+        firstTile = false;
+    }
+    CHECK(monotonicShade);
 
     // 6. Close LFO Page via LFO tap (or HOME): active LFOs keep running and LFO LED pulses live!
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);

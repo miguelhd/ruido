@@ -200,8 +200,8 @@ struct MonoStripCanvas {
         }
     }
 
-    // High-visibility CRT phosphor phase beacon with overdriven pure-white core,
-    // hot inner corona, and wide atmospheric caustic bloom (screen-blended photonically).
+    // Crisp optical phase bead with pure-white pinpoint core and tight phosphor halo
+    // (proportioned to match the MS-20 filter cutoff beads on the 240x240 display).
     void drawLfoPhaseBeacon(float cx, float cy, float intensity, float depth01) const noexcept {
         const float effIntensity =
             intensity * (static_cast<float>(masterAlpha8) * (1.0f / 255.0f));
@@ -209,12 +209,12 @@ struct MonoStripCanvas {
             return;
         }
         const float d = clampf(depth01, 0.0f, 1.0f);
-        const float coreR = 2.35f + 0.45f * d;
-        const float coronaR = 4.9f + 1.2f * d;
-        const float bloomR = 9.8f + 2.6f * d;
-        const float reach = bloomR + 4.5f;
+        const float coreR = 0.95f + 0.15f * d;
+        const float coronaR = 1.85f + 0.40f * d;
+        const float bloomR = 3.10f + 0.65f * d;
+        const float reach = bloomR + 1.6f;
         const float reach2 = reach * reach;
-        const float fadeStart2 = (bloomR * 0.84f) * (bloomR * 0.84f);
+        const float fadeStart2 = (bloomR * 0.78f) * (bloomR * 0.78f);
         const float invFadeSpan2 = 1.0f / (reach2 - fadeStart2 + 1.0e-4f);
 
         int pxStart = static_cast<int>(cx - reach);
@@ -255,9 +255,9 @@ struct MonoStripCanvas {
                     (r2 <= fadeStart2) ?
                         1.0f :
                         (1.0f - smoothstep01((r2 - fadeStart2) * invFadeSpan2));
-                const float core = clampf(1.60f * fastExpNeg(r2 * invCore2 * 1.15f), 0.0f, 1.0f);
-                const float corona = 0.80f * fastExpNeg(r2 * invCorona2 * 1.12f);
-                const float bloom = 0.38f * fastExpNeg(r2 * invBloom2 * 1.18f);
+                const float core = clampf(1.28f * fastExpNeg(r2 * invCore2 * 1.40f), 0.0f, 1.0f);
+                const float corona = 0.40f * fastExpNeg(r2 * invCorona2 * 1.35f);
+                const float bloom = 0.12f * fastExpNeg(r2 * invBloom2 * 1.40f);
                 const float glow =
                     clampf((core + corona + bloom) * outerWin * effIntensity, 0.0f, 1.0f);
                 const uint32_t add8 = static_cast<uint32_t>(glow * 255.0f + 0.5f);
@@ -815,10 +815,6 @@ void ScopeHudRenderer::reset() noexcept {
     for (auto& lc : lfoCurvesFixed_) {
         lc.fill(lfoZeroFixed);
     }
-    for (auto& lcc : lfoCompCurvesFixed_) {
-        lcc.fill(lfoZeroFixed);
-    }
-    lfoCompWeights_ = {0.0f, 0.0f};
     lfoDivergenceSmooth_ = 0.0f;
     lfoGraphPhase_ = 0.0f;
     frameLfoOutput_ = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -1573,25 +1569,15 @@ void ScopeHudRenderer::updateFilterGraph(
     }
     filterLpBeadInt_ =
         snapImmediate ? tgtLpInt : slewScalar(filterLpBeadInt_, tgtLpInt, alphaCurve, 0.002f);
-
-    graphBaselineY_ =
-        snapImmediate ? kFilterYBot : slewScalar(graphBaselineY_, kFilterYBot, alphaCurve, 0.02f);
-    for (size_t v = 0u; v < kNumOscillators; ++v) {
-        lfoBeadIntensity_[v] =
-            snapImmediate ? 0.0f : slewScalar(lfoBeadIntensity_[v], 0.0f, alphaCurve, 0.002f);
-    }
-    centerGraphIsLfo_ = false;
 }
 
 void ScopeHudRenderer::updateLfoGraph(float dtClamped, bool snapImmediate,
                                       bool showAllVoices) noexcept {
-    std::array<std::array<int16_t, kFilterPoints>, kNumOscillators> tgtCurves{};
-    std::array<std::array<int16_t, kFilterPoints>, 2> tgtComp{};
-    std::array<float, 2> tgtCompWeights{0.0f, 0.0f};
+    std::array<std::array<int16_t, kTracePoints>, kNumOscillators> tgtCurves{};
     std::array<float, kNumOscillators> tgtBeadInt{0.0f, 0.0f, 0.0f, 0.0f};
     bool unified = true;
 
-    constexpr float kInvPts = 1.0f / static_cast<float>(kFilterPoints - 1u);
+    constexpr float kInvPts = 1.0f / static_cast<float>(kTracePoints - 1u);
     static constexpr std::array<std::array<int8_t, 5>, kNumOscillators> kFallbackDriftKnots = {{
         {-18, 24, -12, 27, -21},
         {22, -19, 25, -14, 19},
@@ -1603,47 +1589,42 @@ void ScopeHudRenderer::updateLfoGraph(float dtClamped, bool snapImmediate,
         const uint8_t v = frameHud_.lfoVoiceFocus & 3u;
         const VoiceParams& vp = frameControl_.voices[v];
         const float d = clampf(vp.lfoDepth, 0.0f, 1.0f);
-        const float ampPx = kLfoMaxAmpPx * (0.28f + 0.72f * d);
+        const float shapedDepth = d * (1.35f - 0.35f * d);
+        const float ampPx = kLfoMaxAmpPx * (0.46f + 0.54f * shapedDepth);
         const std::array<int8_t, 5> knots = (frameLfoDriftPacked_[v] != 0u) ?
                                                 unpackDriftKnots(frameLfoDriftPacked_[v]) :
                                                 kFallbackDriftKnots[v];
 
-        for (size_t i = 0u; i < kFilterPoints; ++i) {
+        for (size_t i = 0u; i < kTracePoints; ++i) {
             const float u = static_cast<float>(i) * kInvPts;
             const float w = evalMorphedLfoWave(u, vp.lfoShape, vp.lfoRateHz, knots);
-            const float yMain = clampf(kLfoYZero - ampPx * w, kFilterYTop, kFilterYBot);
+            const float yMain = clampf(kLfoYZero - ampPx * w, kLfoYTop, kLfoYBot);
             const auto qMain = static_cast<int16_t>(yMain * 64.0f + 0.5f);
             tgtCurves[0][i] = qMain;
             tgtCurves[1][i] = qMain;
             tgtCurves[2][i] = qMain;
             tgtCurves[3][i] = qMain;
-
-            const float yComp0 = clampf(kLfoYZero - ampPx * 0.68f * w, kFilterYTop, kFilterYBot);
-            const float yComp1 = clampf(kLfoYZero - ampPx * 0.38f * w, kFilterYTop, kFilterYBot);
-            tgtComp[0][i] = static_cast<int16_t>(yComp0 * 64.0f + 0.5f);
-            tgtComp[1][i] = static_cast<int16_t>(yComp1 * 64.0f + 0.5f);
         }
-        tgtCompWeights[0] = 0.24f * d;
-        tgtCompWeights[1] = 0.14f * d;
-        tgtBeadInt[v] = 0.58f + 0.42f * smoothstep01(d * 3.0f);
+        tgtBeadInt[v] = 0.88f + 0.12f * smoothstep01(d * 3.0f);
     } else {
         for (size_t v = 0u; v < kNumOscillators; ++v) {
             const VoiceParams& vp = frameControl_.voices[v];
             const float d = clampf(vp.lfoDepth, 0.0f, 1.0f);
-            const float ampPx = kLfoMaxAmpPx * (0.28f + 0.72f * d);
+            const float shapedDepth = d * (1.35f - 0.35f * d);
+            const float ampPx = kLfoMaxAmpPx * (0.46f + 0.54f * shapedDepth);
             const std::array<int8_t, 5> knots = (frameLfoDriftPacked_[v] != 0u) ?
                                                     unpackDriftKnots(frameLfoDriftPacked_[v]) :
                                                     kFallbackDriftKnots[v];
-            for (size_t i = 0u; i < kFilterPoints; ++i) {
+            for (size_t i = 0u; i < kTracePoints; ++i) {
                 const float u = static_cast<float>(i) * kInvPts;
                 const float w = evalMorphedLfoWave(u, vp.lfoShape, vp.lfoRateHz, knots);
-                const float yMain = clampf(kLfoYZero - ampPx * w, kFilterYTop, kFilterYBot);
+                const float yMain = clampf(kLfoYZero - ampPx * w, kLfoYTop, kLfoYBot);
                 tgtCurves[v][i] = static_cast<int16_t>(yMain * 64.0f + 0.5f);
             }
-            tgtBeadInt[v] = 0.52f + 0.44f * smoothstep01(d * 3.0f);
+            tgtBeadInt[v] = 0.76f + 0.16f * smoothstep01(d * 3.0f);
         }
         for (size_t v = 1u; v < kNumOscillators; ++v) {
-            for (size_t i = 0u; i < kFilterPoints; i += 8u) {
+            for (size_t i = 0u; i < kTracePoints; i += 8u) {
                 if (tgtCurves[v][i] - tgtCurves[0][i] > 16 ||
                     tgtCurves[0][i] - tgtCurves[v][i] > 16) {
                     unified = false;
@@ -1654,8 +1635,6 @@ void ScopeHudRenderer::updateLfoGraph(float dtClamped, bool snapImmediate,
                 break;
             }
         }
-        tgtComp[0] = tgtCurves[0];
-        tgtComp[1] = tgtCurves[0];
     }
 
     const float alphaCurve =
@@ -1663,35 +1642,19 @@ void ScopeHudRenderer::updateLfoGraph(float dtClamped, bool snapImmediate,
     const float alphaDiv =
         snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.055f)));
 
-    filterDivergenceSmooth_ =
-        slewScalar(filterDivergenceSmooth_, unified ? 0.0f : 1.0f, alphaDiv, 0.001f);
-    filterCompWeights_[0] = slewScalar(filterCompWeights_[0], tgtCompWeights[0], alphaCurve);
-    filterCompWeights_[1] = slewScalar(filterCompWeights_[1], tgtCompWeights[1], alphaCurve);
+    lfoDivergenceSmooth_ =
+        slewScalar(lfoDivergenceSmooth_, unified ? 0.0f : 1.0f, alphaDiv, 0.001f);
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        for (size_t i = 0u; i < kFilterPoints; ++i) {
-            filterCurvesFixed_[v][i] =
-                slewQ8_6(filterCurvesFixed_[v][i], tgtCurves[v][i], alphaCurve, snapImmediate);
+        for (size_t i = 0u; i < kTracePoints; ++i) {
+            lfoCurvesFixed_[v][i] =
+                slewQ8_6(lfoCurvesFixed_[v][i], tgtCurves[v][i], alphaCurve, snapImmediate);
         }
         lfoBeadIntensity_[v] = snapImmediate ?
                                    tgtBeadInt[v] :
                                    slewScalar(lfoBeadIntensity_[v], tgtBeadInt[v], alphaCurve,
                                               0.002f);
     }
-    for (size_t c = 0u; c < 2u; ++c) {
-        for (size_t i = 0u; i < kFilterPoints; ++i) {
-            filterCompCurvesFixed_[c][i] =
-                slewQ8_6(filterCompCurvesFixed_[c][i], tgtComp[c][i], alphaCurve, snapImmediate);
-        }
-    }
-
-    filterHpBeadInt_ =
-        snapImmediate ? 0.0f : slewScalar(filterHpBeadInt_, 0.0f, alphaCurve, 0.002f);
-    filterLpBeadInt_ =
-        snapImmediate ? 0.0f : slewScalar(filterLpBeadInt_, 0.0f, alphaCurve, 0.002f);
-    graphBaselineY_ =
-        snapImmediate ? kLfoYZero : slewScalar(graphBaselineY_, kLfoYZero, alphaCurve, 0.02f);
-    centerGraphIsLfo_ = true;
 }
 
 void ScopeHudRenderer::updateHudGauges(float dtClamped, bool snapImmediate) noexcept {
@@ -2013,8 +1976,6 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         const bool snapFilter = (filterGraphPhase_ <= 0.015f);
         filterGraphPhase_ +=
             (1.0f - filterGraphPhase_) * (1.0f - fastExpNeg(dtClamped * (1.0f / 0.090f)));
-        filterBackdropDim_ +=
-            (1.0f - filterBackdropDim_) * (1.0f - fastExpNeg(dtClamped * (1.0f / 0.110f)));
 
         const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
         std::array<ModulatedFilterParams, kNumOscillators> mods{};
@@ -2047,18 +2008,29 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
             }
         }
         updateFilterGraph(dtClamped, snapFilter, mods, unified);
-    } else if (rawLfoGraphActive) {
-        const bool snapLfo = (filterGraphPhase_ <= 0.015f);
-        filterGraphPhase_ +=
-            (1.0f - filterGraphPhase_) * (1.0f - fastExpNeg(dtClamped * (1.0f / 0.090f)));
-        filterBackdropDim_ +=
-            (1.0f - filterBackdropDim_) * (1.0f - fastExpNeg(dtClamped * (1.0f / 0.110f)));
-        updateLfoGraph(dtClamped, snapLfo, hud.lfoVoiceFocus >= kNumOscillators);
     } else {
         filterGraphPhase_ *= fastExpNeg(dtClamped * (1.0f / 0.180f));
         if (filterGraphPhase_ < 0.003f) {
             filterGraphPhase_ = 0.0f;
         }
+    }
+
+    if (rawLfoGraphActive) {
+        const bool snapLfo = (lfoGraphPhase_ <= 0.015f);
+        lfoGraphPhase_ +=
+            (1.0f - lfoGraphPhase_) * (1.0f - fastExpNeg(dtClamped * (1.0f / 0.090f)));
+        updateLfoGraph(dtClamped, snapLfo, hud.lfoVoiceFocus >= kNumOscillators);
+    } else {
+        lfoGraphPhase_ *= fastExpNeg(dtClamped * (1.0f / 0.180f));
+        if (lfoGraphPhase_ < 0.003f) {
+            lfoGraphPhase_ = 0.0f;
+        }
+    }
+
+    if (rawFilterActive || rawLfoGraphActive) {
+        filterBackdropDim_ +=
+            (1.0f - filterBackdropDim_) * (1.0f - fastExpNeg(dtClamped * (1.0f / 0.110f)));
+    } else {
         filterBackdropDim_ *= fastExpNeg(dtClamped * (1.0f / 0.240f));
         if (filterBackdropDim_ < 0.003f) {
             filterBackdropDim_ = 0.0f;
@@ -2270,11 +2242,236 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     const float filterEnv01 = smoothstep01(clampf(filterGraphPhase_, 0.0f, 1.0f));
     const float effFilterAlpha01 = filterEnv01 * hudAlpha01;
     const auto filterAlpha8 = static_cast<uint8_t>(effFilterAlpha01 * 255.0f + 0.5f);
+    const float lfoEnv01 = smoothstep01(clampf(lfoGraphPhase_, 0.0f, 1.0f));
+    const float effLfoAlpha01 = lfoEnv01 * hudAlpha01;
+    const auto lfoAlpha8 = static_cast<uint8_t>(effLfoAlpha01 * 255.0f + 0.5f);
 
     // Soft feathered black vignettes (zero hard borders, zero divider lines, wave never compressed)
     cv.applyVerticalScrim(0, 34, 0.80f, true);
-    const int botScrimTop = 178 - static_cast<int>(8.0f * filterEnv01 + 0.5f);
+    const float graphEnvMax = (filterEnv01 > lfoEnv01) ? filterEnv01 : lfoEnv01;
+    const int botScrimTop = 178 - static_cast<int>(8.0f * graphEnvMax + 0.5f);
     cv.applyVerticalScrim(botScrimTop, 240, 0.90f, false);
+
+    // ========================================================================
+    // LFO. Full-Screen Edge-to-Edge Bipolar Wave (x = 0..239, y = 26..188) + Phase Beacon
+    // ========================================================================
+    if (lfoAlpha8 > 0u && y1 > 12 && y0 < 206) {
+        constexpr float kFixedToPx = 1.0f / 64.0f;
+        const MonoStripCanvas lfoCv{lumBuf, y0, y1, lfoAlpha8};
+        const float div = clampf(lfoDivergenceSmooth_, 0.0f, 1.0f);
+        const bool multiCurves = (div > 0.001f);
+        const size_t curveCount = multiCurves ? kNumOscillators : 1u;
+
+        float maxD = 0.0f;
+        if (frameHud_.lfoVoiceFocus >= kNumOscillators) {
+            for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
+                if (frameControl_.voices[vi].lfoDepth > maxD) {
+                    maxD = frameControl_.voices[vi].lfoDepth;
+                }
+            }
+        } else {
+            maxD = frameControl_.voices[frameHud_.lfoVoiceFocus & 3u].lfoDepth;
+        }
+        const float lfoEnergy = smoothstep01(clampf(maxD, 0.0f, 1.0f) * 3.0f);
+        const float spineModeScale = 0.58f + 0.42f * lfoEnergy;
+        const float fillModeScale = 0.34f + 0.66f * lfoEnergy;
+
+        // 1. Edge-to-edge bipolar zero-crossing horizon filament (y = 107.0)
+        lfoCv.drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kLfoYZero,
+                                     38.0f, 0.50f, false);
+
+        // 2. Full-height bipolar caustic veil between LFO spine and zero-line (zero ghost contours,
+        //    4x sub-column box-integrated on steep Sawtooth/Square edges + 2D crest glow)
+        const float fillScale = (multiCurves ? (0.24f + 0.05f * div) : 1.0f) * fillModeScale;
+        if (y1 > static_cast<int>(kLfoYTop) - 1 && y0 <= static_cast<int>(kLfoYBot) + 1) {
+            for (size_t vc = 0u; vc < curveCount; ++vc) {
+                const auto& pts = lfoCurvesFixed_[vc];
+                for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                    const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
+                    const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
+                    const float dy = yB - yA;
+                    const float absDy = absf(dy);
+                    const float yMid = 0.5f * (yA + yB);
+
+                    float envLo = (yA < yB) ? yA : yB;
+                    if (kLfoYZero < envLo) {
+                        envLo = kLfoYZero;
+                    }
+                    float envHi = (yA > yB) ? yA : yB;
+                    if (kLfoYZero > envHi) {
+                        envHi = kLfoYZero;
+                    }
+                    if (envHi - envLo <= 0.08f) {
+                        continue;
+                    }
+
+                    int pyStart = static_cast<int>(envLo - 0.5f);
+                    if (pyStart < static_cast<int>(kLfoYTop) - 1) {
+                        pyStart = static_cast<int>(kLfoYTop) - 1;
+                    }
+                    if (pyStart < y0) {
+                        pyStart = y0;
+                    }
+                    int pyEnd = static_cast<int>(envHi + 0.5f) + 1;
+                    if (pyEnd > static_cast<int>(kLfoYBot) + 1) {
+                        pyEnd = static_cast<int>(kLfoYBot) + 1;
+                    }
+                    if (pyEnd > y1 - 1) {
+                        pyEnd = y1 - 1;
+                    }
+                    if (pyStart > pyEnd) {
+                        continue;
+                    }
+
+                    const float spanA = absf(kLfoYZero - yA);
+                    const float spanB = absf(kLfoYZero - yB);
+                    const float maxSpan = (spanA > spanB) ? spanA : spanB;
+                    const float crestBoost =
+                        1.0f + 0.34f * clampf(maxSpan * (1.0f / kLfoMaxAmpPx), 0.0f, 1.0f);
+                    const float colScale = fillScale * effLfoAlpha01;
+                    const float glowAmp = 68.0f * crestBoost;
+                    const float invL2 = 1.0f / (1.0f + dy * dy);
+                    const bool steepSeg = (absDy > 1.5f);
+
+                    for (int py = pyStart; py <= pyEnd; ++py) {
+                        const float pyF = static_cast<float>(py);
+                        const float boxLo = pyF - 0.5f;
+                        const float boxHi = pyF + 0.5f;
+
+                        float subEdge = 0.0f;
+                        if (!steepSeg) {
+                            const float segLo = (yMid < kLfoYZero) ? yMid : kLfoYZero;
+                            const float segHi = (yMid > kLfoYZero) ? yMid : kLfoYZero;
+                            const float ovLo = (boxLo > segLo) ? boxLo : segLo;
+                            const float ovHi = (boxHi < segHi) ? boxHi : segHi;
+                            if (ovHi > ovLo) {
+                                subEdge = ovHi - ovLo;
+                            }
+                        } else {
+                            for (int s = 0; s < 4; ++s) {
+                                const float u = (static_cast<float>(s) + 0.5f) * 0.25f;
+                                const float ySub = yA + u * dy;
+                                const float segLo = (ySub < kLfoYZero) ? ySub : kLfoYZero;
+                                const float segHi = (ySub > kLfoYZero) ? ySub : kLfoYZero;
+                                const float ovLo = (boxLo > segLo) ? boxLo : segLo;
+                                const float ovHi = (boxHi < segHi) ? boxHi : segHi;
+                                if (ovHi > ovLo) {
+                                    subEdge += (ovHi - ovLo) * 0.25f;
+                                }
+                            }
+                        }
+                        if (subEdge <= 0.004f) {
+                            continue;
+                        }
+
+                        const float vy = pyF - yMid;
+                        const float segT = clampf(vy * dy * invL2, -0.5f, 0.5f);
+                        const float ey = vy - dy * segT;
+                        const float d2 = segT * segT + ey * ey;
+                        const float perpDist = d2 * fastInvSqrt(d2 + 0.25f);
+                        const float crestGlow = glowAmp * fastExpNeg(perpDist * 0.052f);
+                        int alpha =
+                            static_cast<int>((18.0f + crestGlow) * colScale * subEdge + 0.5f);
+                        if (alpha > 215) {
+                            alpha = 215;
+                        }
+                        if (alpha > 0) {
+                            uint8_t& dst =
+                                lumBuf[static_cast<size_t>(py - y0) * kDisplayWidth + colX];
+                            dst = blendLum8(dst, 240u, static_cast<uint8_t>(alpha));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Linear-photon incandescent LFO wave spine (x = 0..239, zero decorative inner lines)
+        if (y1 > static_cast<int>(kLfoYTop) - 4 && y0 <= static_cast<int>(kLfoYBot) + 4) {
+            std::memset(linScratch, 0,
+                        static_cast<size_t>(stripHeight) * kDisplayWidth * sizeof(uint16_t));
+            auto addLfoPhoton = [&](const std::array<int16_t, kTracePoints>& pts,
+                                    float weight) noexcept {
+                if (weight <= 0.004f) {
+                    return;
+                }
+                for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                    const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
+                    const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
+                    const float yLo = (yA < yB) ? yA : yB;
+                    const float yHi = (yA > yB) ? yA : yB;
+                    const int segTop = static_cast<int>(yLo) - 3;
+                    const int segBot = static_cast<int>(yHi) + 4;
+                    if (segBot <= y0 || segTop >= y1) {
+                        continue;
+                    }
+                    const float dy = yB - yA;
+                    const float invL2 = 1.0f / (1.0f + dy * dy);
+                    const float dwell =
+                        (0.64f + 0.36f * fastInvSqrt(1.0f + 0.14f * dy * dy)) * weight;
+                    const float yMid = 0.5f * (yA + yB);
+                    const int pyS = (segTop < y0) ? y0 : segTop;
+                    const int pyE = (segBot > y1) ? y1 : segBot;
+                    for (int py = pyS; py < pyE; ++py) {
+                        const float vy = static_cast<float>(py) - yMid;
+                        const float segT = clampf(vy * dy * invL2, -0.5f, 0.5f);
+                        const float ey = vy - dy * segT;
+                        const float d2 = segT * segT + ey * ey;
+                        if (d2 < 3.95f) {
+                            const size_t lutIdx = static_cast<size_t>(d2 * 16.0f);
+                            const uint32_t add =
+                                static_cast<uint32_t>(static_cast<float>(kGaussLut[lutIdx]) *
+                                                      dwell);
+                            uint16_t& cell =
+                                linScratch[static_cast<size_t>(py - y0) * kDisplayWidth + colX];
+                            const uint32_t next = static_cast<uint32_t>(cell) + add;
+                            cell = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
+                        }
+                    }
+                }
+            };
+
+            const float mainCurveWgt =
+                (multiCurves ? (0.28f + 0.28f * div) : 1.04f) * spineModeScale * effLfoAlpha01;
+            for (size_t vc = 0u; vc < curveCount; ++vc) {
+                addLfoPhoton(lfoCurvesFixed_[vc], mainCurveWgt);
+            }
+
+            for (uint16_t r = 0u; r < stripHeight; ++r) {
+                const uint16_t* linRow = linScratch + static_cast<size_t>(r) * kDisplayWidth;
+                uint8_t* lumRow = lumBuf + static_cast<size_t>(r) * kDisplayWidth;
+                for (size_t x = 0u; x < kDisplayWidth; ++x) {
+                    const uint16_t e = linRow[x];
+                    if (e > 0u) {
+                        const uint32_t addLum = kTonemapLut[e >> 2u];
+                        const uint32_t bg = lumRow[x];
+                        lumRow[x] =
+                            static_cast<uint8_t>(255u - (((255u - bg) * (255u - addLum)) >> 8u));
+                    }
+                }
+            }
+        }
+
+        // 4. Radiant CRT phosphor phase beacon(s) tracking live LFO period across x = 0..239
+        for (size_t bv = 0u; bv < kNumOscillators; ++bv) {
+            const float lfoVis = lfoBeadIntensity_[bv];
+            if (lfoVis <= 0.005f) {
+                continue;
+            }
+            const float ph = clampf(frameLfoPhase_[bv], 0.0f, 0.999999f);
+            const float uIdx = ph * static_cast<float>(kDisplayWidth);
+            const size_t i0 =
+                (static_cast<size_t>(uIdx) < kDisplayWidth) ? static_cast<size_t>(uIdx) :
+                                                              (kDisplayWidth - 1u);
+            const size_t i1 = i0 + 1u;
+            const float frac = uIdx - static_cast<float>(i0);
+            const size_t curveIdx = multiCurves ? bv : 0u;
+            const float y0Px = static_cast<float>(lfoCurvesFixed_[curveIdx][i0]) * kFixedToPx;
+            const float y1Px = static_cast<float>(lfoCurvesFixed_[curveIdx][i1]) * kFixedToPx;
+            const float beadX = clampf(uIdx, 0.0f, static_cast<float>(kDisplayWidth - 1u));
+            const float beadY = y0Px + frac * (y1Px - y0Px);
+            lfoCv.drawLfoPhaseBeacon(beadX, beadY, lfoVis, frameControl_.voices[bv].lfoDepth);
+        }
+    }
 
     // ========================================================================
     // A. Top Function Header (y = 6..22): 13pt Bold Two-Tone Title + Top-Aligned Right Info
@@ -2473,36 +2670,15 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
         const float div = clampf(filterDivergenceSmooth_, 0.0f, 1.0f);
         const bool multiCurves = (div > 0.001f);
         const size_t curveCount = multiCurves ? kNumOscillators : 1u;
-        const float baseLineY = clampf(graphBaselineY_, kFilterYTop, kFilterYBot);
 
-        float lfoEnergy = 1.0f;
-        if (centerGraphIsLfo_) {
-            if (frameHud_.lfoVoiceFocus >= kNumOscillators) {
-                float maxD = 0.0f;
-                for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
-                    if (frameControl_.voices[vi].lfoDepth > maxD) {
-                        maxD = frameControl_.voices[vi].lfoDepth;
-                    }
-                }
-                lfoEnergy = smoothstep01(clampf(maxD, 0.0f, 1.0f) * 3.0f);
-            } else {
-                const float d =
-                    frameControl_.voices[frameHud_.lfoVoiceFocus & 3u].lfoDepth;
-                lfoEnergy = smoothstep01(clampf(d, 0.0f, 1.0f) * 3.0f);
-            }
-        }
-        const float spineModeScale = centerGraphIsLfo_ ? (0.44f + 0.56f * lfoEnergy) : 1.0f;
-        const float fillModeScale = centerGraphIsLfo_ ? (0.32f + 0.68f * lfoEnergy) : 1.0f;
-
-        // 1. Subtle horizon filament (y = 182 floor for Filter, y = 142 zero-crossing for LFO)
+        // 1. Subtle floor horizon filament (y = 182)
         filterCv.drawHorizontalFilament(
             static_cast<float>(kFilterXStart),
-            static_cast<float>(kFilterXStart + static_cast<int>(kFilterPoints) - 1), baseLineY,
-            centerGraphIsLfo_ ? 36.0f : 28.0f, 0.48f, true);
+            static_cast<float>(kFilterXStart + static_cast<int>(kFilterPoints) - 1), kFilterYBot,
+            28.0f, 0.48f, true);
 
-        // 2. Option A3 Silhouette + Caustic Crest Glow (unipolar to floor or bipolar to zero-line)
-        const float fillScale =
-            (multiCurves ? (0.25f + 0.05f * div) : 1.0f) * fillModeScale;
+        // 2. Option A3 Passband Silhouette + Caustic Crest Glow
+        const float fillScale = multiCurves ? (0.25f + 0.05f * div) : 1.0f;
         if (y1 > static_cast<int>(kFilterYTop) && y0 <= static_cast<int>(kFilterYBot)) {
             for (size_t vc = 0u; vc < curveCount; ++vc) {
                 const auto& pts = filterCurvesFixed_[vc];
@@ -2512,23 +2688,17 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
                     const float yCurve =
                         0.5f * (static_cast<float>(pts[i]) + static_cast<float>(pts[iNext])) *
                         kFixedToPx;
-                    const float ySpan = absf(baseLineY - yCurve);
-                    if (ySpan <= 0.35f) {
+                    if (kFilterYBot - yCurve <= 0.35f) {
                         continue;
                     }
-                    const float segLo = (yCurve < baseLineY) ? yCurve : baseLineY;
-                    const float segHi = (yCurve > baseLineY) ? yCurve : baseLineY;
-                    int pyStart = static_cast<int>(segLo);
+                    int pyStart = static_cast<int>(yCurve);
                     if (pyStart < static_cast<int>(kFilterYTop)) {
                         pyStart = static_cast<int>(kFilterYTop);
                     }
                     if (pyStart < y0) {
                         pyStart = y0;
                     }
-                    int pyEnd = static_cast<int>(segHi);
-                    if (pyEnd > static_cast<int>(kFilterYBot)) {
-                        pyEnd = static_cast<int>(kFilterYBot);
-                    }
+                    int pyEnd = static_cast<int>(kFilterYBot);
                     if (pyEnd > y1 - 1) {
                         pyEnd = y1 - 1;
                     }
@@ -2542,22 +2712,19 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
                     const float edgeTaper =
                         0.65f +
                         0.35f * smoothstep01(static_cast<float>(edgeDist) * (1.0f / 6.0f));
-                    const float excRef = centerGraphIsLfo_ ? ySpan : (kFilterYZeroDb - yCurve);
                     const float hornBoost =
-                        1.0f + 0.40f * clampf(excRef * (1.0f / 28.0f), 0.0f, 1.0f);
+                        1.0f + 0.40f * clampf((kFilterYZeroDb - yCurve) * (1.0f / 28.0f), 0.0f,
+                                              1.0f);
                     const float colScale = fillScale * edgeTaper * effFilterAlpha01;
                     const float glowAmp = 76.0f * hornBoost;
 
                     for (int py = pyStart; py <= pyEnd; ++py) {
                         const float pyF = static_cast<float>(py);
-                        float subEdge = 1.0f;
-                        if (pyF < segLo) {
-                            subEdge = clampf(1.0f - (segLo - pyF), 0.0f, 1.0f);
-                        } else if (pyF > segHi) {
-                            subEdge = clampf(1.0f - (pyF - segHi), 0.0f, 1.0f);
-                        }
-                        const float dist = absf(pyF - yCurve);
-                        const float crestGlow = glowAmp * fastExpNeg(dist * 0.095f);
+                        const float subEdge =
+                            (pyF < yCurve) ? clampf(1.0f - (yCurve - pyF), 0.0f, 1.0f) : 1.0f;
+                        const float dist = pyF - yCurve;
+                        const float crestGlow =
+                            glowAmp * fastExpNeg(((dist > 0.0f) ? dist : 0.0f) * 0.095f);
                         int alpha =
                             static_cast<int>((26.0f + crestGlow) * colScale * subEdge + 0.5f);
                         if (alpha > 220) {
@@ -2573,7 +2740,7 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
             }
         }
 
-        // 3. Linear-photon incandescent passband spine + Korg35 companion contours
+        // 3. Linear-photon incandescent passband spine + MS-20 companion contours
         std::memset(linScratch, 0,
                     static_cast<size_t>(stripHeight) * kDisplayWidth * sizeof(uint16_t));
         auto addCurvePhoton = [&](const std::array<int16_t, kFilterPoints>& pts,
@@ -2626,7 +2793,7 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
                            filterCompWeights_[0] * compVis * effFilterAlpha01);
         }
         const float mainCurveWgt =
-            (multiCurves ? (0.245f + 0.275f * div) : 0.98f) * spineModeScale * effFilterAlpha01;
+            (multiCurves ? (0.245f + 0.275f * div) : 0.98f) * effFilterAlpha01;
         for (size_t vc = 0u; vc < curveCount; ++vc) {
             addCurvePhoton(filterCurvesFixed_[vc], mainCurveWgt);
         }
@@ -2646,7 +2813,7 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
             }
         }
 
-        // 4. Focal beads: dual HP/LP cutoff beads (Filter) + live phase beads (LFO)
+        // 4. Dual HP/LP cutoff focal beads
         const float hpBeadVis = filterHpBeadInt_ * compVis;
         if (hpBeadVis > 0.005f) {
             filterCv.drawOpticalBead(filterHpBeadX_, filterHpBeadY_, hpBeadVis, filterHpBeadRad_);
@@ -2654,27 +2821,6 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
         const float lpBeadVis = filterLpBeadInt_ * compVis;
         if (lpBeadVis > 0.005f) {
             filterCv.drawOpticalBead(filterLpBeadX_, filterLpBeadY_, lpBeadVis, filterLpBeadRad_);
-        }
-        for (size_t bv = 0u; bv < kNumOscillators; ++bv) {
-            const float lfoVis = lfoBeadIntensity_[bv];
-            if (lfoVis <= 0.005f) {
-                continue;
-            }
-            const float ph = clampf(frameLfoPhase_[bv], 0.0f, 0.999999f);
-            const float uIdx = ph * static_cast<float>(kFilterPoints - 1u);
-            const size_t i0 = static_cast<size_t>(uIdx);
-            const size_t i1 = (i0 + 1u < kFilterPoints) ? (i0 + 1u) : i0;
-            const float frac = uIdx - static_cast<float>(i0);
-            const size_t curveIdx = multiCurves ? bv : 0u;
-            const float y0Px = static_cast<float>(filterCurvesFixed_[curveIdx][i0]) * kFixedToPx;
-            const float y1Px = static_cast<float>(filterCurvesFixed_[curveIdx][i1]) * kFixedToPx;
-            const float beadX = static_cast<float>(kFilterXStart) + uIdx;
-            const float beadY = y0Px + frac * (y1Px - y0Px);
-            const float edgeDist = (ph < 0.5f) ? ph : (1.0f - ph);
-            const float edgeWin = 0.62f + 0.38f * smoothstep01(edgeDist * 28.0f);
-            const float beadRad =
-                2.05f + 0.95f * clampf(frameControl_.voices[bv].lfoDepth, 0.0f, 1.0f);
-            filterCv.drawOpticalBead(beadX, beadY, lfoVis * edgeWin, beadRad);
         }
     }
 
