@@ -44,8 +44,9 @@ const scopeOut = ex.wasm_dsp_get_scope_ptr();
 const scopeIn = ex.wasm_ui_get_scope_in_ptr();
 const scopeFrameBytes = ex.wasm_dsp_get_scope_frame_size();
 
-// Exercise OP1 dual-resonant MS-20 filter hold + controller -> DSP control bus transfer
-ex.wasm_ui_black_key(0, 1);
+// Exercise latching FX Filter Page (button 2) + SELECT voice focus + controller -> DSP bus transfer
+ex.wasm_ui_button(2, 1);
+ex.wasm_ui_button(2, 0);
 ex.wasm_ui_encoder(3, 30);  // HPF
 ex.wasm_ui_encoder(4, 45);  // HP RES
 ex.wasm_ui_encoder(5, -30); // LPF
@@ -88,39 +89,46 @@ for (let i = 0; i < 26; i++) {
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.2);
 
-// Verify 42 hardware LED channels (unassigned buttons 0.0, SEL === White Keys 5-8, Green PLAY / Red STOP)
+// Verify 42 hardware LED channels (OP1..OP5 & SEL strictly 0.0, FX 100% open -> engaged glow when closed)
 const ledsIdx = ex.wasm_ui_get_leds_ptr() >> 2;
-assert.ok(Math.abs(f32[ledsIdx + 0] - 1.0) < 1e-4);   // OP1 held -> 100%
-assert.ok(Math.abs(f32[ledsIdx + 4] - 0.0) < 1e-6);   // OP5 black key -> 0% (unassigned)
-assert.ok(Math.abs(f32[ledsIdx + 5] - 0.25) < 1e-4);  // OP6 Panning landmark -> 25%
-assert.ok(Math.abs(f32[ledsIdx + 7] - 0.25) < 1e-4);  // GLO Global landmark -> 25%
-assert.ok(Math.abs(f32[ledsIdx + 6] - 0.0) < 1e-6);   // PIT black key -> 0%
-assert.ok(Math.abs(f32[ledsIdx + 10] - 0.0) < 1e-6);  // 11th black key -> 0%
-assert.ok(Math.abs(f32[ledsIdx + 27 + 2] - 0.0) < 1e-6); // FX button -> 0%
+const summaryIdx = ex.wasm_ui_get_summary_ptr() >> 2;
+assert.equal(f32[summaryIdx + 49], 1.0);               // fxPageOpen === true
+assert.equal(f32[summaryIdx + 50], 0.0);               // fxVoiceFocus === 0 (OSC 1)
+ex.wasm_ui_encoder(0, 4);                              // SELECT -> OSC 2 on FX page
+assert.equal(f32[summaryIdx + 50], 1.0);
+for (let op = 0; op <= 4; op++) {
+  assert.ok(Math.abs(f32[ledsIdx + op] - 0.0) < 1e-6); // OP1..OP5 black keys -> 0% (unassigned)
+}
+assert.ok(Math.abs(f32[ledsIdx + 5] - 0.25) < 1e-4);   // OP6 Panning landmark -> 25%
+assert.ok(Math.abs(f32[ledsIdx + 7] - 0.25) < 1e-4);   // GLO Global landmark -> 25%
+assert.ok(Math.abs(f32[ledsIdx + 6] - 0.0) < 1e-6);    // PIT black key -> 0%
+assert.ok(Math.abs(f32[ledsIdx + 10] - 0.0) < 1e-6);   // 11th black key -> 0%
+assert.ok(Math.abs(f32[ledsIdx + 27 + 2] - 1.0) < 1e-4);  // FX button -> 100% while open
+assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.0) < 1e-6);  // SEL button -> 0% (unassigned)
 assert.ok(Math.abs(f32[ledsIdx + 27 + 5] - 0.15) < 1e-4); // LFO button -> 15% rest when closed & depth==0
 assert.ok(Math.abs(f32[ledsIdx + 27 + 6] - 0.15) < 1e-4); // EDIT button -> 15% rest when closed & clean
 assert.ok(Math.abs(f32[ledsIdx + 27 + 7] - 0.15) < 1e-4); // GLO right button -> 15% rest when closed
 assert.ok(Math.abs(f32[ledsIdx + 27 + 12] - 0.0) < 1e-6); // PLAY Green LED -> 0% while sound ON
 assert.ok(Math.abs(f32[ledsIdx + 27 + 13] - 0.0) < 1e-6); // REC Red LED -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 41] - 1.0) < 1e-4);      // STOP Red LED -> 100% while sound ON
-assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.24) < 1e-4); // SEL Filter/LPG mode -> 24%
 for (let i = 0; i < 4; i++) {
-  assert.equal(f32[ledsIdx + 11 + 4 + i], f32[ledsIdx + 27 + 3]); // Keys 5-8 === SEL
+  assert.ok(Math.abs(f32[ledsIdx + 11 + 4 + i] - 0.24) < 1e-4); // Keys 5-8 -> 24% rest
 }
+
+// Tapping unassigned SEL (button 3) closes FX page, keeps pitchPressureMode === false & SEL LED === 0%,
+// and FX LED shows engaged filter glow (> 15%) because Osc 1 filter resonance/cutoffs are engaged!
 ex.wasm_ui_button(3, 1);
 ex.wasm_ui_button(3, 0);
 ex.wasm_ui_tick_and_render(0.016);
-assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.72) < 1e-4); // SEL Pitch mode -> 72%
-for (let i = 0; i < 4; i++) {
-  assert.equal(f32[ledsIdx + 11 + 4 + i], f32[ledsIdx + 27 + 3]); // Keys 5-8 === SEL
-}
+assert.equal(f32[summaryIdx + 49], 0.0);
+assert.equal(f32[summaryIdx + 37], 0.0);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.0) < 1e-6);
+assert.ok(f32[ledsIdx + 27 + 2] > 0.30 && f32[ledsIdx + 27 + 2] <= 0.85);
 
-// Release OP1, open Per-Voice LFO Page (button 5), step SELECT (encoder 0), edit KNOB1-4,
-// and verify 22-float LFO + 30-bit drift knot telemetry roundtrip & monochrome LFO graph!
-ex.wasm_ui_black_key(0, 0);
+// Open Per-Voice LFO Page (button 5), step SELECT (encoder 0), edit KNOB1-4,
+// and verify 26-float LFO + 30-bit drift knot telemetry roundtrip & monochrome LFO graph!
 ex.wasm_ui_button(5, 1);
 ex.wasm_ui_button(5, 0);
-const summaryIdx = ex.wasm_ui_get_summary_ptr() >> 2;
 assert.equal(f32[summaryIdx + 39], 1.0); // lfoPageOpen === true
 assert.equal(f32[summaryIdx + 40], 0.0); // lfoVoiceFocus === 0 (OSC 1)
 

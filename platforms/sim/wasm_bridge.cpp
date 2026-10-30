@@ -142,6 +142,8 @@ void refreshSummary() noexcept {
     gSummaryOut[46u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().globalTarget));
     gSummaryOut[47u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().knobBank));
     gSummaryOut[48u] = gCtrl->hud().editPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[49u] = gCtrl->hud().fxPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[50u] = static_cast<float>(gCtrl->hud().fxVoiceFocus);
 }
 
 } // namespace

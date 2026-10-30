@@ -651,7 +651,7 @@ function bindComputerKeyboard() {
     Minus: 0,        // OCT- (momentary Fine knob rate)
     BracketRight: 1, // OCT+ (momentary Coarse knob rate)
     Equal: 1,        // OCT+ (momentary Coarse knob rate)
-    KeyQ: 3,         // SEL (Pad Pressure Target: MS-20 Filter/LPG <-> Pitch Bend)
+    KeyQ: 2,         // FX (Per-Voice MS-20 Dual Filter Page toggle)
     KeyL: 5,         // LFO (Per-Voice LFO Page toggle)
     KeyE: 6,         // EDIT (Channel Level & MS-20 Overdrive Page toggle)
     Semicolon: 7,    // GLO right grid (GLOBAL CONFIG menu toggle)

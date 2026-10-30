@@ -149,13 +149,12 @@ int main(int argc, char** argv) {
     }
 
     std::printf("=== Ruido Native macOS CoreAudio Auditioner (44,118 Hz / 4x OS) ===\n");
-    std::printf("  [1-4] OP1-4 Filter | [6] OP6 Pan   | [g] GLO Global | [k] EDIT Level/Drive\n");
+    std::printf("  [j] FX Filter  | [k] EDIT Level | [l] LFO Page   | [;] GLOBAL CONFIG\n");
+    std::printf("  [6] OP6 Pan    | [g] GLO Global | [,/.] SELECT   | [h] HOME | [m] MONO\n");
     std::printf("  [q/w/e/r] KNOB 1-4 +            | [u/i/o/p] KNOB 1-4 -\n");
     std::printf("  [z/x/c/v] Osc 1-4 Mutes         | [a/s/d/f] Pulse Pad Pressure\n");
     std::printf("  [ [ / ] ] ALGORITHM Coupling    | [ - / = ] Knob Rate (Fine/Coarse)\n");
-    std::printf(
-        "  [l] LFO Page | [;] Config | [,/.] SELECT | [h] HOME | [m] MONO | [Space] PLAY/STOP\n");
-    std::printf("  [ESC] or [Q] Quit\n\n");
+    std::printf("  [Space] PLAY/STOP               | [ESC] or [Q] Quit\n\n");
 
     RawTerminalGuard termGuard{};
     int latchedMod = -1;
@@ -218,6 +217,10 @@ int main(int argc, char** argv) {
             case ']': controller.onEncoderDelta(ruido::EncoderId::Algorithm, 8); break;
             case '-': toggleRateHold(ruido::ButtonId::OctMinus); break;
             case '=': toggleRateHold(ruido::ButtonId::OctPlus); break;
+            case 'j':
+                controller.onButtonEvent(ruido::ButtonId::Fx, true);
+                controller.onButtonEvent(ruido::ButtonId::Fx, false);
+                break;
             case 'k':
                 controller.onButtonEvent(ruido::ButtonId::Edit, true);
                 controller.onButtonEvent(ruido::ButtonId::Edit, false);
