@@ -41,7 +41,8 @@ computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
     ModulatedFilterParams voiceFlt{};
     if (hud.knobBank == KnobBankMode::VoiceFilter) {
-        const uint8_t refV = hud.focusedVoice & 3u;
+        const uint8_t refV = (hud.mode == HudMode::VoicePressure) ? (hud.focusedVoice & 3u)
+                                                                  : (hud.fxVoiceFocus & 3u);
         voiceFlt = computeLiveVoiceFilter(control.voices[refV], control.voicePressure[refV],
                                           pitchMode, lfoOutput[refV]);
     }
@@ -195,9 +196,10 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     }
     case HudMode::VoiceFilter: {
+        const uint8_t fv = hud.fxVoiceFocus & 3u;
         appendStr(leftMain, 0u, sizeof(leftMain), "FILTER");
         size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
-        appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
+        appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(fv + 1u));
         appendStr(rightText, 0u, sizeof(rightText), "12 dB HP -> LP");
         break;
     }
@@ -300,11 +302,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         showHeaderBar = true;
         break;
     }
-    case HudMode::PressureTarget:
-        appendStr(leftMain, 0u, sizeof(leftMain), "PRESSURE TARGET");
-        appendStr(rightText, 0u, sizeof(rightText),
-                  control.global.pitchPressureMode ? "PITCH BEND" : "MS-20 FILTER");
-        break;
     case HudMode::SnapshotSlot: {
         size_t p = appendStr(leftMain, 0u, sizeof(leftMain), "SNAPSHOT ");
         appendUInt(leftMain, p, sizeof(leftMain),
@@ -312,11 +309,18 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         appendStr(rightText, 0u, sizeof(rightText), "EMPTY SLOT");
         break;
     }
-    case HudMode::UnassignedKey:
-        appendStr(leftMain, 0u, sizeof(leftMain),
-                  (hud.lastBlackKey == BlackKeyId::Op5) ? "OP5 KEY" : "PIT KEY");
+    case HudMode::UnassignedKey: {
+        if (hud.lastBlackKey <= BlackKeyId::Op5) {
+            size_t p = appendStr(leftMain, 0u, sizeof(leftMain), "OP");
+            p = appendUInt(leftMain, p, sizeof(leftMain),
+                           static_cast<uint32_t>(hud.lastBlackKey) + 1u);
+            appendStr(leftMain, p, sizeof(leftMain), " KEY");
+        } else {
+            appendStr(leftMain, 0u, sizeof(leftMain), "PIT KEY");
+        }
         appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
         break;
+    }
     case HudMode::OutputRouting:
         appendStr(leftMain, 0u, sizeof(leftMain), "OUTPUT ROUTING");
         appendStr(rightText, 0u, sizeof(rightText),
@@ -402,14 +406,11 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     case HudMode::UnassignedButton: {
         const char* swName = "PANEL";
         switch (hud.lastButton) {
-        case ButtonId::Fx:
-            swName = "FX";
+        case ButtonId::Sel:
+            swName = "SEL";
             break;
         case ButtonId::Env:
             swName = "ENV";
-            break;
-        case ButtonId::Edit:
-            swName = "EDIT";
             break;
         case ButtonId::Arp:
             swName = "ARP";
@@ -487,7 +488,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             return;
         }
         const uint8_t rateAlpha8 = shapedLayerAlpha8(linPhase);
-        const float sweepEnv = smoothstep01(linPhase);
         int badgeRightX = 230;
         char rateValBuf[24]{};
 
@@ -516,12 +516,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         if (rateAlpha8 > 0u) {
             const MonoStripCanvas rateCv{cv.lum, cv.y0, cv.y1, rateAlpha8};
             rateCv.drawSans(kFontSansSmall, badgeRightX - badgeW, 6, badgeStr, 236u, badgeTrk);
-        }
-
-        const float xR = static_cast<float>(badgeRightX);
-        const float xL = xR - static_cast<float>(badgeW) * sweepEnv;
-        if (xR - xL > 0.4f) {
-            cv.drawHorizontalFilament(xL, xR, 18.8f, 132.0f * sweepEnv, 0.50f, false);
         }
     };
 

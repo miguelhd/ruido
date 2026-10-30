@@ -112,24 +112,6 @@ inline int16_t dbToFilterYFixed(float db) noexcept {
     return static_cast<int16_t>(yPx * 64.0f + 0.5f);
 }
 
-inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float pressure,
-                                                    float pitchMode, float lfoRaw) noexcept {
-    const float hpBase = (vp.lfoTarget == LfoTarget::HpCutoff)
-                             ? applyLfoCutoffHz(vp.hpCutoffHz, vp.lfoDepth, lfoRaw)
-                             : vp.hpCutoffHz;
-    const float hpResBase = (vp.lfoTarget == LfoTarget::HpResonance)
-                                ? applyLfoResonance(vp.hpResonance, vp.lfoDepth, lfoRaw)
-                                : vp.hpResonance;
-    const float lpBase = (vp.lfoTarget == LfoTarget::LpCutoff)
-                             ? applyLfoCutoffHz(vp.lpCutoffHz, vp.lfoDepth, lfoRaw)
-                             : vp.lpCutoffHz;
-    const float lpResBase = (vp.lfoTarget == LfoTarget::LpResonance)
-                                ? applyLfoResonance(vp.lpResonance, vp.lfoDepth, lfoRaw)
-                                : vp.lpResonance;
-    return computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase, pressure,
-                                     vp.muted ? 0.0f : 1.0f, pitchMode);
-}
-
 // Analytical MS-20 dual-filter passband graph + full-screen morphed LFO graph state & compositors.
 class HudGraphs {
   public:

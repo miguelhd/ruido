@@ -272,7 +272,10 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
 
         if (rawHud.knobBank == KnobBankMode::VoiceFilter ||
             (rawHud.mode == HudMode::VoicePressure && !control.global.pitchPressureMode)) {
-            const uint8_t v = rawHud.focusedVoice & 3u;
+            const uint8_t v =
+                (rawHud.mode == HudMode::VoicePressure && !control.global.pitchPressureMode)
+                    ? (rawHud.focusedVoice & 3u)
+                    : (effectiveHud.fxVoiceFocus & 3u);
             const VoiceParams& vp = control.voices[v];
             const ModulatedFilterParams mod =
                 computeLiveVoiceFilter(vp, control.voicePressure[v], pitchMode, lfoOutput[v]);

@@ -8,19 +8,10 @@
 
 namespace ruido {
 
-enum class HeldModifier : uint8_t {
-    None = 0,
-    FilterVoice0 = 1,
-    FilterVoice1 = 2,
-    FilterVoice2 = 3,
-    FilterVoice3 = 4,
-    Panning = 5,
-    Global = 6
-};
+enum class HeldModifier : uint8_t { None = 0, Panning = 1, Global = 2 };
 
 constexpr bool isModifierBlackKey(BlackKeyId k) noexcept {
-    return k == BlackKeyId::Op1 || k == BlackKeyId::Op2 || k == BlackKeyId::Op3 ||
-           k == BlackKeyId::Op4 || k == BlackKeyId::Op6 || k == BlackKeyId::Glo;
+    return k == BlackKeyId::Op6 || k == BlackKeyId::Glo;
 }
 
 // LIFO momentary key & knob-rate tracker for two-hand chording without dynamic containers.
@@ -86,10 +77,6 @@ struct ModifierKeyTracker {
                 best = mod;
             }
         };
-        check(BlackKeyId::Op1, HeldModifier::FilterVoice0);
-        check(BlackKeyId::Op2, HeldModifier::FilterVoice1);
-        check(BlackKeyId::Op3, HeldModifier::FilterVoice2);
-        check(BlackKeyId::Op4, HeldModifier::FilterVoice3);
         check(BlackKeyId::Op6, HeldModifier::Panning);
         check(BlackKeyId::Glo, HeldModifier::Global);
         return best;

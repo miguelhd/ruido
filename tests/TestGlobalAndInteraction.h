@@ -30,14 +30,19 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
 
     // 1. Boot & mode-switch focus hygiene: no phantom knob column highlight until a knob is turned
     RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
     RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 4);
     RTEST_CHECK(ctrl.hud().focusedKnob == 2u);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op2, true);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    RTEST_CHECK(ctrl.hud().fxVoiceFocus == 1u);
     RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op2, false);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
+    RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
 
     // 2. Discrete notched detents (SELECT, TARGET, GLOBAL CONFIG) step 1 item per 4 ticks
     //    across all 3 gears (Standard, Fine, Coarse)
@@ -180,6 +185,18 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     RTEST_CHECK(pageLeftStationary);
     RTEST_CHECK(midVsBaseRight > 10u && midVsFineRight > 10u);
     RTEST_CHECK(rightRestoredCleanly);
+
+    // Verify ZERO underline pixels below the top-right FINE/COARSE badge baseline (y = 18..20)
+    uint16_t maxUnderlineG6 = 0u;
+    for (size_t y = 18u; y <= 20u; ++y) {
+        for (size_t x = 155u; x <= 232u; ++x) {
+            const uint16_t g6 = (hdrPageFine[y * 240u + x] >> 5u) & 0x3Fu;
+            if (g6 > maxUnderlineG6) {
+                maxUnderlineG6 = g6;
+            }
+        }
+    }
+    RTEST_CHECK(maxUnderlineG6 == 0u);
     ctrl.onButtonEvent(ruido::ButtonId::Home, true);
     ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     ctrl.tick(0.200f, tel);
@@ -236,12 +253,12 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     }
     RTEST_CHECK(encTitleDiffs > 25u);
 
-    // (c) Armed SAVE cancelled by unassigned switch clears orphaned saveArmed LED state
+    // (c) Armed SAVE cancelled by unassigned switch (SEL) clears orphaned saveArmed LED state
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
     RTEST_CHECK(ctrl.hud().saveArmed);
-    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
     RTEST_CHECK(!ctrl.hud().saveArmed);
 
     // (d) HOME from active LFO page fades out in 150 ms with zero ghost LFO wave
@@ -346,9 +363,11 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     // 3. Step SELECT -> GLOBAL FILTER (1): relative deltas + 4-voice micro-bead spread
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
     ctrl.reset();
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, -40); // Offset Voice 0 LPF from Voices 1-3
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
 
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -12); // All(4) - 3 = Filter(1)
@@ -553,14 +572,20 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     engine.snapParametersToLatest();
 
     // 1. Tap EDIT: opens latched Channel Level & Drive page, mutually exclusive with
-    // LFO/CONFIG/SAVE
+    // FX/LFO/CONFIG/SAVE
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    RTEST_CHECK(ctrl.hud().fxPageOpen);
+
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
     RTEST_CHECK(ctrl.hud().lfoPageOpen);
+    RTEST_CHECK(!ctrl.hud().fxPageOpen);
 
     ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
     ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
     RTEST_CHECK(ctrl.hud().editPageOpen);
+    RTEST_CHECK(!ctrl.hud().fxPageOpen);
     RTEST_CHECK(!ctrl.hud().lfoPageOpen);
     RTEST_CHECK(!ctrl.hud().configPageOpen);
     RTEST_CHECK(!ctrl.hud().saveArmed);
@@ -600,12 +625,11 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 200);
     RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, 1.0f));
 
-    // 3. Momentary OP1 / OP6 / Keybed GLO override EDIT temporarily and return seamlessly on
-    // release
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, true);
-    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFilter);
-    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::VoiceFilter);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
+    // 3. Momentary OP6 / Keybed GLO override EDIT temporarily and return seamlessly on release
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Panning);
+    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Panning);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
     RTEST_CHECK(ctrl.hud().editPageOpen);
     RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Amplitude);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Amplitude);

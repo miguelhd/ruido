@@ -127,7 +127,8 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         break;
     }
     case KnobBankMode::VoiceFilter: {
-        const uint8_t refV = hud.focusedVoice & 3u;
+        const uint8_t refV = (hud.mode == HudMode::VoicePressure) ? (hud.focusedVoice & 3u)
+                                                                  : (hud.fxVoiceFocus & 3u);
         const ModulatedFilterParams mod = computeLiveVoiceFilter(
             control.voices[refV], control.voicePressure[refV], pitchMode, lfoOutput[refV]);
         if (k == 0u) {

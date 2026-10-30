@@ -10,12 +10,10 @@ namespace ruido {
 
 void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) noexcept {
     // 1. Raised Black Keys (11 monochrome white LEDs)
-    // Contiguous 4-key per-voice MS-20 filter family (OP1..OP4): 15% rest, 100% held
-    for (size_t i = 0u; i < 4u; ++i) {
-        outLeds.blackKeyLeds[i] = ctx.blackKeyHeld[i] ? 1.0f : 0.15f;
+    // OP1..OP5 & PIT unassigned: 0% dark; Spatial (OP6 Panning) & Global (GLO): 25% rest, 100% held
+    for (size_t i = 0u; i <= static_cast<size_t>(BlackKeyId::Op5); ++i) {
+        outLeds.blackKeyLeds[i] = 0.0f;
     }
-    // Spatial (OP6 Panning) & Global (GLO) landmarks: 25% rest, 100% held; OP5 & PIT unassigned 0%
-    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op5)] = 0.0f;
     outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op6)] =
         ctx.blackKeyHeld[static_cast<size_t>(BlackKeyId::Op6)] ? 1.0f : 0.25f;
     outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Pit)] = 0.0f;
@@ -30,14 +28,13 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
         ctx.hud.scopeFrozen ? 1.0f : 0.0f;
 
     // 2. Bottom White Keys (16 monochrome white LEDs)
-    const float padBaseLed =
-        ctx.state.global.pitchPressureMode ? kPadPitchBaseLed : kPadFilterBaseLed;
-    float maxPadPressure = 0.0f;
+    const float pitchMode = ctx.state.global.pitchPressureMode ? 1.0f : 0.0f;
 
     float maxLfoDepth = 0.0f;
     size_t dominantLfoVoice = 0u;
     float maxOverdriveNorm = 0.0f;
     float maxOverdrivePeak = 0.0f;
+    float maxFilterEngagement = 0.0f;
 
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceParams& vp = ctx.state.voices[i];
@@ -52,6 +49,7 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
             (vp.lfoTarget == LfoTarget::Amplitude) ? clampf(vp.lfoDepth, 0.0f, 1.0f) : 0.0f;
         const float gate = ctx.telemetry.oscGateHigh[i].load(std::memory_order_relaxed);
         const float vPeak = ctx.telemetry.voicePeak[i].load(std::memory_order_relaxed);
+        const float p = clampf(ctx.state.voicePressure[i], 0.0f, 1.0f);
 
         if (vp.lfoDepth > maxLfoDepth) {
             maxLfoDepth = vp.lfoDepth;
@@ -67,6 +65,29 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
                 maxOverdrivePeak = vPeak;
             }
         }
+        if (!vp.muted || p > 0.001f) {
+            const ModulatedFilterParams flt = computeLiveVoiceFilter(vp, p, pitchMode, lfoRaw);
+            constexpr float kHpMinOct = cxLog2Pos(kFilterCutoffMinHz);
+            constexpr float kLpMaxOct = cxLog2Pos(kFilterCutoffMaxHz);
+            const float hpEng =
+                (flt.hpCutoffHz > 2.05f)
+                    ? clampf((fastLog2(flt.hpCutoffHz) - kHpMinOct) * (1.0f / 11.0f), 0.0f, 1.0f)
+                    : 0.0f;
+            const float lpEng =
+                (flt.lpCutoffHz < 27900.0f)
+                    ? clampf((kLpMaxOct - fastLog2(flt.lpCutoffHz)) * (1.0f / 11.0f), 0.0f, 1.0f)
+                    : 0.0f;
+            const float cutEng = (hpEng > lpEng) ? hpEng : lpEng;
+            const float resEng =
+                clampf((flt.hpResonance > flt.lpResonance) ? flt.hpResonance : flt.lpResonance,
+                       0.0f, 1.0f);
+            const float fltEng =
+                clampf((cutEng > resEng) ? (cutEng + 0.35f * resEng) : (resEng + 0.35f * cutEng),
+                       0.0f, 1.0f);
+            if (fltEng > maxFilterEngagement) {
+                maxFilterEngagement = fltEng;
+            }
+        }
 
         if (vp.muted) {
             outLeds.whiteKeyLeds[i] = 0.10f;
@@ -78,11 +99,7 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
             outLeds.whiteKeyLeds[i] = restFloor + (1.0f - restFloor) * effAmp;
         }
 
-        const float p = clampf(ctx.state.voicePressure[i], 0.0f, 1.0f);
-        if (p > maxPadPressure) {
-            maxPadPressure = p;
-        }
-        outLeds.whiteKeyLeds[4u + i] = padBaseLed + (1.0f - padBaseLed) * p;
+        outLeds.whiteKeyLeds[4u + i] = kPadFilterBaseLed + (1.0f - kPadFilterBaseLed) * p;
     }
 
     float savePulse = 0.0f;
@@ -96,12 +113,9 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
         outLeds.whiteKeyLeds[s] = ctx.whiteKeyHeld[s] ? 0.75f : savePulse;
     }
 
-    // 3. Panel Tactile Buttons (unused FM/seq buttons strictly 0% dark)
+    // 3. Panel Tactile Buttons (unused switches incl. SEL strictly 0% dark)
     outLeds.buttonLeds.fill(0.0f);
     outLeds.stopLed = 0.0f;
-    // Visually couple SEL to White Keys 5-8 via identical rest brightness & live touch flare
-    outLeds.buttonLeds[static_cast<size_t>(ButtonId::Sel)] =
-        padBaseLed + (1.0f - padBaseLed) * maxPadPressure;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctMinus)] =
         (ctx.hud.knobRate == KnobRate::Fine) ? 1.0f : 0.15f;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctPlus)] =
@@ -111,6 +125,16 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] = ctx.hud.saveArmed ? 1.0f : 0.15f;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::GloRight)] =
         ctx.hud.configPageOpen ? 1.0f : 0.15f;
+
+    // FX button (MS-20 Dual Filter Page): 100% open, 15% parked rest, 15%..85% engaged filter glow
+    if (ctx.hud.fxPageOpen) {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Fx)] = 1.0f;
+    } else if (maxFilterEngagement > 1.0e-3f) {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Fx)] =
+            clampf(0.15f + 0.70f * maxFilterEngagement, 0.15f, 0.85f);
+    } else {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Fx)] = 0.15f;
+    }
 
     // EDIT button (Channel Level & MS-20 Drive): 100% when open, 15% clean rest, live flare > 70%
     if (ctx.hud.editPageOpen) {

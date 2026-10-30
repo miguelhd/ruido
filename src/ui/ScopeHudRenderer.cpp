@@ -157,12 +157,12 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         return;
     }
 
-    const bool nowPinnedOrOpen = hud.modifierHeld || hud.lfoPageOpen || hud.editPageOpen ||
-                                 hud.configPageOpen || hud.saveArmed ||
+    const bool nowPinnedOrOpen = hud.modifierHeld || hud.fxPageOpen || hud.lfoPageOpen ||
+                                 hud.editPageOpen || hud.configPageOpen || hud.saveArmed ||
                                  (hud.scopeFrozen && hud.mode == HudMode::ScopeFreeze);
     const bool prevWasPinnedOrOpen =
-        prevRawHud_.modifierHeld || prevRawHud_.lfoPageOpen || prevRawHud_.editPageOpen ||
-        prevRawHud_.configPageOpen || prevRawHud_.saveArmed ||
+        prevRawHud_.modifierHeld || prevRawHud_.fxPageOpen || prevRawHud_.lfoPageOpen ||
+        prevRawHud_.editPageOpen || prevRawHud_.configPageOpen || prevRawHud_.saveArmed ||
         (prevRawHud_.scopeFrozen && prevRawHud_.mode == HudMode::ScopeFreeze);
     const bool fadingSameMode = !nowPinnedOrOpen && !freqChanged && (hud.opacity > 0.001f) &&
                                 ((prevWasPinnedOrOpen && hud.mode == prevRawHud_.mode &&
@@ -185,7 +185,9 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.knobBank = releaseLatchHud_.knobBank;
         effectiveHud.focusedVoice = releaseLatchHud_.focusedVoice;
         effectiveHud.focusedKnob = releaseLatchHud_.focusedKnob;
+        effectiveHud.fxVoiceFocus = releaseLatchHud_.fxVoiceFocus;
         effectiveHud.lfoVoiceFocus = releaseLatchHud_.lfoVoiceFocus;
+        effectiveHud.fxPageOpen = releaseLatchHud_.fxPageOpen;
         effectiveHud.editPageOpen = releaseLatchHud_.editPageOpen;
         effectiveHud.globalTarget = releaseLatchHud_.globalTarget;
         effectiveHud.configCursor = releaseLatchHud_.configCursor;

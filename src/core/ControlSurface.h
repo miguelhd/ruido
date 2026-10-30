@@ -107,19 +107,17 @@ enum class HudMode : uint8_t {
     SaveArmed = 15,
     ScopeFreeze = 16,
     UnassignedButton = 17,
-    PressureTarget = 18,
-    VoiceLfo = 19,
-    GlobalFreq = 20,
-    GlobalFilter = 21,
-    GlobalLfo = 22,
-    GlobalAmp = 23,
-    GlobalAll = 24,
-    GlobalConfig = 25
+    VoiceLfo = 18,
+    GlobalFreq = 19,
+    GlobalFilter = 20,
+    GlobalLfo = 21,
+    GlobalAmp = 22,
+    GlobalAll = 23,
+    GlobalConfig = 24
 };
 
-// Matched monochrome PWM LED rest brightness shared by SEL and White Keys 5-8
+// Monochrome PWM LED rest brightness for White Keys 5-8 carbon-pill filter/LPG pads
 inline constexpr float kPadFilterBaseLed = 0.24f;
-inline constexpr float kPadPitchBaseLed = 0.72f;
 
 struct HudState {
     HudMode mode = HudMode::None;
@@ -132,6 +130,7 @@ struct HudState {
     EncoderId lastEncoder = EncoderId::Select;
     uint8_t focusedVoice = 0u;            // 0..3 oscillator index
     uint8_t focusedKnob = kNoFocusedKnob; // 0..3 active column highlight, or kNoFocusedKnob
+    uint8_t fxVoiceFocus = 0u;            // 0..3 = OSC 1..4 (SELECT encoder on FX Filter Page)
     uint8_t lfoVoiceFocus = 0u;           // 0..3 = OSC 1..4 (SELECT encoder on LFO Page)
     uint8_t configCursor = 0u;            // 0..kNumGlobalConfigItems-1 (SELECT in GLOBAL CONFIG)
     uint8_t snapshotSlot = 0u;            // 0..7 for White Keys 9..16
@@ -141,6 +140,7 @@ struct HudState {
     bool rateHoldActive = false; // True whenever OCT- or OCT+ is physically held
     bool scopeFrozen = false;    // Momentary waveform freeze on 11th black key
     bool saveArmed = false;
+    bool fxPageOpen = false;     // Latching MS-20 Filter page state (ButtonId::Fx)
     bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
     bool editPageOpen = false;   // Latching Channel Level & Drive page (ButtonId::Edit)
     bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)

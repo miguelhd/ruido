@@ -243,6 +243,24 @@ inline float applyLfoPan(float basePan, float depth01, float lfoBipolar) noexcep
     return clampf(center + halfSpan * clampf(lfoBipolar, -1.0f, 1.0f), -1.0f, 1.0f);
 }
 
+inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float pressure,
+                                                    float pitchMode, float lfoRaw) noexcept {
+    const float hpBase = (vp.lfoTarget == LfoTarget::HpCutoff)
+                             ? applyLfoCutoffHz(vp.hpCutoffHz, vp.lfoDepth, lfoRaw)
+                             : vp.hpCutoffHz;
+    const float hpResBase = (vp.lfoTarget == LfoTarget::HpResonance)
+                                ? applyLfoResonance(vp.hpResonance, vp.lfoDepth, lfoRaw)
+                                : vp.hpResonance;
+    const float lpBase = (vp.lfoTarget == LfoTarget::LpCutoff)
+                             ? applyLfoCutoffHz(vp.lpCutoffHz, vp.lfoDepth, lfoRaw)
+                             : vp.lpCutoffHz;
+    const float lpResBase = (vp.lfoTarget == LfoTarget::LpResonance)
+                                ? applyLfoResonance(vp.lpResonance, vp.lfoDepth, lfoRaw)
+                                : vp.lpResonance;
+    return computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase, pressure,
+                                     vp.muted ? 0.0f : 1.0f, pitchMode);
+}
+
 inline constexpr const char* lfoTargetName(LfoTarget target) noexcept {
     switch (target) {
     case LfoTarget::Pitch:
