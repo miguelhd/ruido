@@ -10,11 +10,13 @@ namespace ruido {
 
 void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) noexcept {
     // 1. Raised Black Keys (11 monochrome white LEDs)
-    // Contiguous 5-key filter family (OP1..OP4 per-voice + OP5 Global Filter): 15% rest, 100% held
-    for (size_t i = 0u; i < 5u; ++i) {
+    // Contiguous 4-key per-voice MS-20 filter family (OP1..OP4): 15% rest, 100% held
+    for (size_t i = 0u; i < 4u; ++i) {
         outLeds.blackKeyLeds[i] = ctx.blackKeyHeld[i] ? 1.0f : 0.15f;
     }
-    // Mix / Spatial pair (OP6 Panning + GLO Amplitude): 25% landmark rest, 100% held
+    // Mix / Spatial pair (OP5 Amplitude + OP6 Panning) & GLO (Global): 25% landmark rest, 100% held
+    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op5)] =
+        ctx.blackKeyHeld[static_cast<size_t>(BlackKeyId::Op5)] ? 1.0f : 0.25f;
     outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op6)] =
         ctx.blackKeyHeld[static_cast<size_t>(BlackKeyId::Op6)] ? 1.0f : 0.25f;
     outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Pit)] = 0.0f;
@@ -91,10 +93,12 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctMinus)] =
         (ctx.hud.knobRate == KnobRate::Fine) ? 1.0f : 0.15f;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctPlus)] =
-        (ctx.hud.knobRate == KnobRate::Fast) ? 1.0f : 0.15f;
+        (ctx.hud.knobRate == KnobRate::Coarse) ? 1.0f : 0.15f;
 
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::Home)] = 0.12f + 0.23f * ctx.hud.opacity;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] = ctx.hud.saveArmed ? 1.0f : 0.15f;
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::GloRight)] =
+        ctx.hud.configPageOpen ? 1.0f : 0.15f;
 
     if (ctx.hud.lfoPageOpen) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] = 1.0f;
@@ -106,18 +110,17 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
         const float raw = ctx.telemetry.lfoOutput[focusV].load(std::memory_order_relaxed);
         const float u = 0.5f * (clampf(raw, -1.0f, 1.0f) + 1.0f);
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] =
-            0.12f + (0.10f + 0.38f * clampf(maxLfoDepth, 0.0f, 1.0f)) * u;
+            0.15f + (0.08f + 0.37f * clampf(maxLfoDepth, 0.0f, 1.0f)) * u;
+    } else {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] = 0.15f;
     }
 
-    // Dual-channel PLAY/STOP split cap: steady Green PLAY when AUDIO OUTPUT = ON,
-    // breathing Red/Amber-Orange STOP when OFF, crossfading smoothly through Yellow/Amber
-    const float cyc =
-        ctx.animPhase * 1.2f - static_cast<float>(static_cast<int32_t>(ctx.animPhase * 1.2f));
-    const float tri = 1.0f - absf(2.0f * cyc - 1.0f);
-    const float standbyBreath = 0.15f + 0.55f * smoothstep01(tri);
+    // Dual-channel PLAY/STOP split cap (ADR-026 action affordance):
+    // steady Green PLAY when quiet (OFF), steady Red STOP when sound is ON,
+    // crossfading smoothly through warm Yellow/Amber during transitions
     const float runSmooth = clampf(ctx.playStopRunSmooth, 0.0f, 1.0f);
-    outLeds.buttonLeds[static_cast<size_t>(ButtonId::PlayStop)] = runSmooth;
-    outLeds.stopLed = (1.0f - runSmooth) * standbyBreath;
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::PlayStop)] = 1.0f - runSmooth;
+    outLeds.stopLed = runSmooth;
 }
 
 } // namespace ruido

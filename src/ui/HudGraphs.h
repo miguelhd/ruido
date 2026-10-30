@@ -129,10 +129,14 @@ class HudGraphs {
 
     void reset() noexcept;
     void clearImmediate() noexcept;
-    void decayOnHome(float homeDecay) noexcept;
+    void stepFadeOut(float dtClamped) noexcept;
+    bool hasResidualPhase() const noexcept {
+        return filterGraphPhase_ > 0.002f || lfoGraphPhase_ > 0.002f || filterBackdropDim_ > 0.002f;
+    }
 
     void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
-                const HudState& effectiveHud, const std::array<float, kNumOscillators>& lfoOutput,
+                const HudState& effectiveHud, bool extraCenterViewActive,
+                const std::array<float, kNumOscillators>& lfoOutput,
                 const std::array<uint32_t, kNumOscillators>& lfoDriftPacked) noexcept;
 
     float filterGraphPhase() const noexcept { return filterGraphPhase_; }

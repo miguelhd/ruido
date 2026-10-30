@@ -40,10 +40,12 @@ DSP_SRCS := \
 	src/dsp/DroneEngine.cpp
 
 UI_SRCS := \
+	src/core/GlobalControl.cpp \
 	src/core/LedEngine.cpp \
 	src/core/RuidoController.cpp \
 	src/ui/ScopeTraceEngine.cpp \
 	src/ui/HudGraphs.cpp \
+	src/ui/HudGlobalViews.cpp \
 	src/ui/HudChrome.cpp \
 	src/ui/ScopeHudRenderer.cpp
 

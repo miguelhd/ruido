@@ -45,6 +45,7 @@ size_t strlen(const char* s) {
 } // extern "C"
 
 // Unity-include the 100% platform-independent Ruido C++17 sources
+#include "core/GlobalControl.cpp"
 #include "core/LedEngine.cpp"
 #include "core/RuidoController.cpp"
 #include "dsp/DroneEngine.cpp"
@@ -53,6 +54,7 @@ size_t strlen(const char* s) {
 #include "dsp/SchmittOscillatorBank.cpp"
 #include "dsp/VoiceLfoBank.cpp"
 #include "ui/HudChrome.cpp"
+#include "ui/HudGlobalViews.cpp"
 #include "ui/HudGraphs.cpp"
 #include "ui/ScopeHudRenderer.cpp"
 #include "ui/ScopeTraceEngine.cpp"
@@ -135,6 +137,9 @@ void refreshSummary() noexcept {
     gSummaryOut[42u] = lfoVp.lfoShape;
     gSummaryOut[43u] = lfoVp.lfoRateHz;
     gSummaryOut[44u] = lfoVp.lfoDepth;
+    gSummaryOut[45u] = gCtrl->hud().configPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[46u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().globalTarget));
+    gSummaryOut[47u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().knobBank));
 }
 
 } // namespace

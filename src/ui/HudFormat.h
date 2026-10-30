@@ -121,4 +121,16 @@ inline void formatSignedPercent(char* buf, size_t cap, float bipolar) noexcept {
     appendStr(buf, p, cap, "%");
 }
 
+inline void formatSignedCents(char* buf, size_t cap, float cents) noexcept {
+    const int cInt =
+        static_cast<int>(clampf(cents, -999.0f, 999.0f) + ((cents >= 0.0f) ? 0.5f : -0.5f));
+    if (cInt == 0) {
+        appendStr(buf, 0u, cap, "0c");
+        return;
+    }
+    size_t p = appendStr(buf, 0u, cap, (cInt > 0) ? "+" : "-");
+    p = appendUInt(buf, p, cap, static_cast<uint32_t>((cInt > 0) ? cInt : -cInt));
+    appendStr(buf, p, cap, "c");
+}
+
 } // namespace ruido

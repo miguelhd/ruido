@@ -2,6 +2,7 @@
 
 #include "core/ControlSurface.h"
 #include "core/Parameters.h"
+#include "ui/HudGlobalViews.h"
 #include "ui/HudGraphs.h"
 #include "ui/ScopeTraceEngine.h"
 
@@ -48,6 +49,7 @@ class ScopeHudRenderer {
 
     ScopeTraceEngine traceEngine_{};
     HudGraphs graphs_{};
+    HudGlobalViews globalViews_{};
 
     EngineControlState frameControl_{};
     HudState frameHud_{};
@@ -61,10 +63,11 @@ class ScopeHudRenderer {
     std::array<float, kNumOscillators> knobDimSmooth_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> knobFocusSmooth_{0.0f, 0.0f, 0.0f, 0.0f};
     float headerBarSmooth_ = 0.0f;
-    float renderedHudOpacity_ = 0.0f;
+    float renderedOpacityLevel_ = 0.0f;
     float smoothedPeakL_ = 0.0f;
     float smoothedPeakR_ = 0.0f;
     HudMode prevHeaderBarMode_ = HudMode::None;
+    KnobBankMode prevKnobBank_ = KnobBankMode::Frequency;
     bool releaseLatchActive_ = false;
     bool hudGaugesPrimed_ = false;
 };

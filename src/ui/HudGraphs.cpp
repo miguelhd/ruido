@@ -1,5 +1,7 @@
 #include "ui/HudGraphs.h"
 
+#include "core/HudEnvelope.h"
+
 #include <cstring>
 
 namespace ruido {
@@ -39,19 +41,10 @@ void HudGraphs::clearImmediate() noexcept {
     lfoGraphPhase_ = 0.0f;
 }
 
-void HudGraphs::decayOnHome(float homeDecay) noexcept {
-    filterGraphPhase_ *= homeDecay;
-    filterBackdropDim_ *= homeDecay;
-    lfoGraphPhase_ *= homeDecay;
-    if (filterGraphPhase_ < 0.004f) {
-        filterGraphPhase_ = 0.0f;
-    }
-    if (filterBackdropDim_ < 0.004f) {
-        filterBackdropDim_ = 0.0f;
-    }
-    if (lfoGraphPhase_ < 0.004f) {
-        lfoGraphPhase_ = 0.0f;
-    }
+void HudGraphs::stepFadeOut(float dtClamped) noexcept {
+    filterGraphPhase_ = stepHudFadeLinear(filterGraphPhase_, false, dtClamped);
+    filterBackdropDim_ = stepHudFadeLinear(filterBackdropDim_, false, dtClamped);
+    lfoGraphPhase_ = stepHudFadeLinear(lfoGraphPhase_, false, dtClamped);
 }
 
 void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
@@ -255,23 +248,23 @@ void HudGraphs::updateLfoGraph(
 }
 
 void HudGraphs::update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
-                       const HudState& effectiveHud,
+                       const HudState& effectiveHud, bool extraCenterViewActive,
                        const std::array<float, kNumOscillators>& lfoOutput,
                        const std::array<uint32_t, kNumOscillators>& lfoDriftPacked) noexcept {
+    const bool hudVisible = (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None);
     const bool rawFilterActive =
-        (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None) &&
+        hudVisible &&
         (rawHud.knobBank == KnobBankMode::VoiceFilter ||
          rawHud.knobBank == KnobBankMode::GlobalFilter ||
+         rawHud.knobBank == KnobBankMode::GlobalAll ||
          (rawHud.mode == HudMode::VoicePressure && !control.global.pitchPressureMode));
-    const bool rawLfoGraphActive =
-        !rawFilterActive && (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None) &&
-        (rawHud.mode == HudMode::VoiceLfo || rawHud.mode == HudMode::GlobalLfo ||
-         rawHud.knobBank == KnobBankMode::Lfo);
+    const bool rawLfoGraphActive = !rawFilterActive && hudVisible &&
+                                   ((rawHud.lfoPageOpen && rawHud.knobBank == KnobBankMode::Lfo) ||
+                                    rawHud.knobBank == KnobBankMode::GlobalLfo);
 
     if (rawFilterActive) {
         const bool snapFilter = (filterGraphPhase_ <= 0.015f);
-        filterGraphPhase_ +=
-            (1.0f - filterGraphPhase_) * (1.0f - fastExpNeg(dtClamped * (1.0f / 0.090f)));
+        filterGraphPhase_ = stepHudFadeLinear(filterGraphPhase_, true, dtClamped);
 
         const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
         std::array<ModulatedFilterParams, kNumOscillators> mods{};
@@ -305,34 +298,20 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
         }
         updateFilterGraph(dtClamped, snapFilter, mods, unified);
     } else {
-        filterGraphPhase_ *= fastExpNeg(dtClamped * (1.0f / 0.180f));
-        if (filterGraphPhase_ < 0.003f) {
-            filterGraphPhase_ = 0.0f;
-        }
+        filterGraphPhase_ = stepHudFadeLinear(filterGraphPhase_, false, dtClamped);
     }
 
     if (rawLfoGraphActive) {
         const bool snapLfo = (lfoGraphPhase_ <= 0.015f);
-        lfoGraphPhase_ +=
-            (1.0f - lfoGraphPhase_) * (1.0f - fastExpNeg(dtClamped * (1.0f / 0.090f)));
-        updateLfoGraph(dtClamped, snapLfo, rawHud.lfoVoiceFocus >= kNumOscillators, control,
-                       effectiveHud, lfoDriftPacked);
+        lfoGraphPhase_ = stepHudFadeLinear(lfoGraphPhase_, true, dtClamped);
+        const bool showAll = (rawHud.knobBank == KnobBankMode::GlobalLfo);
+        updateLfoGraph(dtClamped, snapLfo, showAll, control, effectiveHud, lfoDriftPacked);
     } else {
-        lfoGraphPhase_ *= fastExpNeg(dtClamped * (1.0f / 0.180f));
-        if (lfoGraphPhase_ < 0.003f) {
-            lfoGraphPhase_ = 0.0f;
-        }
+        lfoGraphPhase_ = stepHudFadeLinear(lfoGraphPhase_, false, dtClamped);
     }
 
-    if (rawFilterActive || rawLfoGraphActive) {
-        filterBackdropDim_ +=
-            (1.0f - filterBackdropDim_) * (1.0f - fastExpNeg(dtClamped * (1.0f / 0.110f)));
-    } else {
-        filterBackdropDim_ *= fastExpNeg(dtClamped * (1.0f / 0.240f));
-        if (filterBackdropDim_ < 0.003f) {
-            filterBackdropDim_ = 0.0f;
-        }
-    }
+    const bool wantBackdrop = rawFilterActive || rawLfoGraphActive || extraCenterViewActive;
+    filterBackdropDim_ = stepHudFadeLinear(filterBackdropDim_, wantBackdrop, dtClamped);
 }
 
 void HudGraphs::compositeLfoStrip(
@@ -349,7 +328,7 @@ void HudGraphs::compositeLfoStrip(
     const size_t curveCount = multiCurves ? kNumOscillators : 1u;
 
     float maxD = 0.0f;
-    if (hud.lfoVoiceFocus >= kNumOscillators) {
+    if (hud.knobBank == KnobBankMode::GlobalLfo || hud.mode == HudMode::GlobalLfo) {
         for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
             if (control.voices[vi].lfoDepth > maxD) {
                 maxD = control.voices[vi].lfoDepth;

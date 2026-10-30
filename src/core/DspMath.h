@@ -141,4 +141,25 @@ inline float fastLog2(float x) noexcept {
     return static_cast<float>(expInt) + frac;
 }
 
+// Compile-time base-2 logarithm for positive constants (< 1e-6 octave error, zero runtime calls).
+constexpr float cxLog2Pos(float x) noexcept {
+    float m = (x > 1.0e-12f) ? x : 1.0e-12f;
+    int exp2 = 0;
+    while (m >= 2.0f && exp2 < 64) {
+        m *= 0.5f;
+        ++exp2;
+    }
+    while (m < 1.0f && exp2 > -64) {
+        m *= 2.0f;
+        --exp2;
+    }
+    const float y = (m - 1.0f) / (m + 1.0f);
+    const float y2 = y * y;
+    const float lnM =
+        2.0f * y *
+        (1.0f +
+         y2 * ((1.0f / 3.0f) + y2 * ((1.0f / 5.0f) + y2 * ((1.0f / 7.0f) + y2 * (1.0f / 9.0f)))));
+    return static_cast<float>(exp2) + lnM * 1.44269504f;
+}
+
 } // namespace ruido

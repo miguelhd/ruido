@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Config.h"
+#include "core/GlobalConfig.h"
 #include "core/Parameters.h"
 
 #include <array>
@@ -15,6 +16,8 @@ inline constexpr size_t kNumBlackKeys = 11u;
 inline constexpr size_t kNumWhiteKeys = 16u;
 inline constexpr size_t kNumLedChannels =
     kNumBlackKeys + kNumWhiteKeys + kNumPanelButtons + 1u; // 42 physical LED channels
+
+inline constexpr uint8_t kNoFocusedKnob = 0xFFu;
 
 // 7 endless quadrature encoders on the M-VAVE FM-1 front panel
 enum class EncoderId : uint8_t {
@@ -63,18 +66,26 @@ enum class BlackKeyId : uint8_t {
     Count = 11
 };
 
-// Active mapping of top-right KNOB1..KNOB4 (always displayed in the 4 bottom HUD columns)
+// 5 multi-voice destinations selected via SELECT while holding keybed GLO
+enum class GlobalTarget : uint8_t { Freq = 0, Filter = 1, Lfo = 2, Amp = 3, All = 4, Count = 5 };
+
+// Active mapping of top-right KNOB1..KNOB4 (displayed in the 4 bottom HUD columns unless None)
 enum class KnobBankMode : uint8_t {
     Frequency = 0,
     Amplitude = 1,
     Panning = 2,
     VoiceFilter = 3,
-    GlobalFilter = 4,
-    Lfo = 5
+    Lfo = 4,
+    GlobalFreq = 5,
+    GlobalFilter = 6,
+    GlobalLfo = 7,
+    GlobalAmp = 8,
+    GlobalAll = 9,
+    None = 10
 };
 
-// Encoder sweep rate selected via OCT- (Fine) and OCT+ (Fast: 1-1.5 turns full sweep)
-enum class KnobRate : int8_t { Fine = -1, Standard = 0, Fast = 1 };
+// Encoder sweep rate selected via OCT- (Fine) and OCT+ (Coarse: ~1.3 turns full sweep)
+enum class KnobRate : int8_t { Fine = -1, Standard = 0, Coarse = 1 };
 
 // Active function displayed in the top HUD header whenever any control or key is touched
 enum class HudMode : uint8_t {
@@ -83,24 +94,27 @@ enum class HudMode : uint8_t {
     Amplitude = 2,
     Panning = 3,
     VoiceFilter = 4,
-    GlobalFilter = 5,
-    MasterLevel = 6,
-    RailCoupling = 7,
-    UnassignedEncoder = 8,
-    SnapshotMorph = 9,
-    KnobRate = 10,
-    VoiceGate = 11,
-    VoicePressure = 12,
-    SnapshotSlot = 13,
-    UnassignedKey = 14,
-    OutputRouting = 15,
-    AudioOutput = 16,
-    SaveArmed = 17,
-    ScopeFreeze = 18,
-    UnassignedButton = 19,
-    PressureTarget = 20,
-    VoiceLfo = 21,
-    GlobalLfo = 22
+    MasterLevel = 5,
+    RailCoupling = 6,
+    UnassignedEncoder = 7,
+    KnobRate = 8,
+    VoiceGate = 9,
+    VoicePressure = 10,
+    SnapshotSlot = 11,
+    UnassignedKey = 12,
+    OutputRouting = 13,
+    AudioOutput = 14,
+    SaveArmed = 15,
+    ScopeFreeze = 16,
+    UnassignedButton = 17,
+    PressureTarget = 18,
+    VoiceLfo = 19,
+    GlobalFreq = 20,
+    GlobalFilter = 21,
+    GlobalLfo = 22,
+    GlobalAmp = 23,
+    GlobalAll = 24,
+    GlobalConfig = 25
 };
 
 // Matched monochrome PWM LED rest brightness shared by SEL and White Keys 5-8
@@ -111,25 +125,31 @@ struct HudState {
     HudMode mode = HudMode::None;
     KnobBankMode knobBank = KnobBankMode::Frequency;
     KnobRate knobRate = KnobRate::Standard;
+    GlobalTarget globalTarget = GlobalTarget::All;
+    GlobalConfigState config{};
     ButtonId lastButton = ButtonId::Count;
-    uint8_t focusedVoice = 0u;  // 0..3 oscillator or knob index
-    uint8_t focusedKnob = 0u;   // 0..3 active column highlight
-    uint8_t lfoVoiceFocus = 0u; // 0..3 = OSC 1..4, 4 = ALL 4 (SELECT encoder on LFO Page)
-    uint8_t snapshotSlot = 0u;  // 0..7 for White Keys 9..16
-    float morphPosition = 0.0f; // [0.0f, 1.0f] PRESETS scrub position
-    float opacity = 0.0f;       // [0.0f, 1.0f] smooth S-curve alpha envelope
+    EncoderId lastEncoder = EncoderId::Select;
+    uint8_t focusedVoice = 0u;            // 0..3 oscillator index
+    uint8_t focusedKnob = kNoFocusedKnob; // 0..3 active column highlight, or kNoFocusedKnob
+    uint8_t lfoVoiceFocus = 0u;           // 0..3 = OSC 1..4 (SELECT encoder on LFO Page)
+    uint8_t configCursor = 0u;            // 0..kNumGlobalConfigItems-1 (SELECT in GLOBAL CONFIG)
+    uint8_t snapshotSlot = 0u;            // 0..7 for White Keys 9..16
+    float morphPosition = 0.0f;           // [0.0f, 1.0f] snapshot pressure morph position
+    float opacity = 0.0f;                 // [0.0f, 1.0f] smooth 150 ms S-curve alpha envelope
     bool modifierHeld = false;
-    bool scopeFrozen = false; // Momentary waveform freeze on 11th black key
+    bool rateHoldActive = false; // True whenever OCT- or OCT+ is physically held
+    bool scopeFrozen = false;    // Momentary waveform freeze on 11th black key
     bool saveArmed = false;
-    bool lfoPageOpen = false; // Latching LFO page state (ButtonId::Lfo)
+    bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
+    bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
 };
 
 // Software-PWM brightness [0.0f, 1.0f] across all 42 physical LED channels on the M-VAVE FM-1:
 // - blackKeyLeds[0..10] & whiteKeyLeds[0..15]: 27 monochrome white silicone key LEDs
 // - buttonLeds[0..11]: 12 monochrome white function/octave button LEDs (OCT-/+, FX..SEQ)
-// - buttonLeds[12] (PlayStop): Green PLAY LED under the split PLAY/STOP cap
+// - buttonLeds[12] (PlayStop): Green PLAY LED under the split PLAY/STOP cap (lit when quiet)
 // - buttonLeds[13] (Rec): Red LED under the REC button
-// - stopLed: Red/Amber-Orange STOP LED under the split PLAY/STOP cap (mixes to Yellow with PLAY)
+// - stopLed: Red STOP LED under the split PLAY/STOP cap (lit when sound is ON)
 struct LedState {
     std::array<float, kNumBlackKeys> blackKeyLeds{};
     std::array<float, kNumWhiteKeys> whiteKeyLeds{};

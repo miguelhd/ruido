@@ -1,6 +1,7 @@
 #include "ui/ScopeHudRenderer.h"
 
 #include "core/DspMath.h"
+#include "core/HudEnvelope.h"
 #include "core/LfoMath.h"
 #include "ui/HudChrome.h"
 #include "ui/MonoCanvas.h"
@@ -14,6 +15,7 @@ ScopeHudRenderer::ScopeHudRenderer() noexcept {
 void ScopeHudRenderer::reset() noexcept {
     traceEngine_.reset();
     graphs_.reset();
+    globalViews_.reset();
 
     frameControl_ = EngineControlState::makeDefault();
     for (size_t v = 0u; v < kNumOscillators; ++v) {
@@ -29,10 +31,11 @@ void ScopeHudRenderer::reset() noexcept {
     knobDimSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
     knobFocusSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
     headerBarSmooth_ = 0.0f;
-    renderedHudOpacity_ = 0.0f;
+    renderedOpacityLevel_ = 0.0f;
     smoothedPeakL_ = 0.0f;
     smoothedPeakR_ = 0.0f;
     prevHeaderBarMode_ = HudMode::None;
+    prevKnobBank_ = KnobBankMode::Frequency;
     releaseLatchActive_ = false;
     hudGaugesPrimed_ = false;
 }
@@ -59,11 +62,21 @@ void ScopeHudRenderer::updateHudGauges(float dtClamped, bool snapImmediate) noex
         prevHeaderBarMode_ = HudMode::None;
     }
 
+    const bool snapBank = snapImmediate || (prevKnobBank_ != frameHud_.knobBank);
+    prevKnobBank_ = frameHud_.knobBank;
     for (uint8_t k = 0u; k < 4u; ++k) {
-        knobPosSignedSmooth_[k] = slewScalar(knobPosSignedSmooth_[k], tgt.posSigned[k], alphaGauge);
-        knobDimSmooth_[k] = slewScalar(knobDimSmooth_[k], tgt.dimmed[k] ? 1.0f : 0.0f, alphaGauge);
-        knobFocusSmooth_[k] =
-            slewScalar(knobFocusSmooth_[k], tgt.focused[k] ? 1.0f : 0.0f, alphaGauge);
+        if (snapBank) {
+            knobPosSignedSmooth_[k] = tgt.posSigned[k];
+            knobDimSmooth_[k] = tgt.dimmed[k] ? 1.0f : 0.0f;
+            knobFocusSmooth_[k] = tgt.focused[k] ? 1.0f : 0.0f;
+        } else {
+            knobPosSignedSmooth_[k] =
+                slewScalar(knobPosSignedSmooth_[k], tgt.posSigned[k], alphaGauge);
+            knobDimSmooth_[k] =
+                slewScalar(knobDimSmooth_[k], tgt.dimmed[k] ? 1.0f : 0.0f, alphaGauge);
+            knobFocusSmooth_[k] =
+                slewScalar(knobFocusSmooth_[k], tgt.focused[k] ? 1.0f : 0.0f, alphaGauge);
+        }
     }
 }
 
@@ -105,46 +118,53 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     }
 
     if (hud.mode == HudMode::None && hud.opacity <= 0.001f) {
+        const bool syntheticInstantHide = (prevRawHud_.opacity > 0.25f);
         releaseLatchActive_ = false;
         prevRawHud_ = hud;
-        if (hud.scopeFrozen ||
-            (renderedHudOpacity_ <= 0.004f && graphs_.filterGraphPhase() <= 0.004f &&
-             graphs_.backdropDim() <= 0.004f)) {
+        if (dtSec <= 0.0f || syntheticInstantHide ||
+            (renderedOpacityLevel_ <= 0.002f && !graphs_.hasResidualPhase() &&
+             !globalViews_.hasResidualPhase())) {
             frameHud_ = hud;
-            renderedHudOpacity_ = 0.0f;
+            renderedOpacityLevel_ = 0.0f;
             graphs_.clearImmediate();
+            globalViews_.clearImmediate();
             hudGaugesPrimed_ = false;
             return;
         }
 
-        const float homeDecay = fastExpNeg(dtClamped * (1.0f / 0.065f));
-        renderedHudOpacity_ *= homeDecay;
-        graphs_.decayOnHome(homeDecay);
-        if (renderedHudOpacity_ < 0.004f) {
-            renderedHudOpacity_ = 0.0f;
+        renderedOpacityLevel_ = stepHudFadeLinear(renderedOpacityLevel_, false, dtClamped);
+        graphs_.stepFadeOut(dtClamped);
+        globalViews_.update(dtClamped, control, hud, frameLfoOutput_);
+        frameHud_.opacity = smoothstep01(renderedOpacityLevel_);
+        if (renderedOpacityLevel_ <= 0.001f && !graphs_.hasResidualPhase() &&
+            !globalViews_.hasResidualPhase()) {
+            renderedOpacityLevel_ = 0.0f;
             frameHud_.mode = HudMode::None;
+            frameHud_.opacity = 0.0f;
             hudGaugesPrimed_ = false;
         }
-        frameHud_.opacity = renderedHudOpacity_;
         return;
     }
 
-    const bool prevWasMomentary =
-        prevRawHud_.modifierHeld || prevRawHud_.mode == HudMode::ScopeFreeze ||
-        prevRawHud_.mode == HudMode::VoiceFilter || prevRawHud_.mode == HudMode::GlobalFilter ||
-        prevRawHud_.mode == HudMode::Amplitude || prevRawHud_.mode == HudMode::Panning ||
-        prevRawHud_.mode == HudMode::KnobRate || prevRawHud_.mode == HudMode::VoicePressure ||
-        prevRawHud_.mode == HudMode::VoiceLfo || prevRawHud_.mode == HudMode::GlobalLfo;
-    const bool isPassiveFallback = !hud.modifierHeld && (hud.mode == HudMode::VoiceFrequency) &&
-                                   (hud.knobBank == KnobBankMode::Frequency) && !freqChanged &&
-                                   (hud.opacity > 0.004f) &&
-                                   (hud.opacity <= prevRawHud_.opacity + 0.002f);
+    const bool nowPinnedOrOpen = hud.modifierHeld || hud.lfoPageOpen || hud.configPageOpen ||
+                                 hud.saveArmed ||
+                                 (hud.scopeFrozen && hud.mode == HudMode::ScopeFreeze);
+    const bool prevWasPinnedOrOpen =
+        prevRawHud_.modifierHeld || prevRawHud_.lfoPageOpen || prevRawHud_.configPageOpen ||
+        prevRawHud_.saveArmed ||
+        (prevRawHud_.scopeFrozen && prevRawHud_.mode == HudMode::ScopeFreeze);
+    const bool fadingSameMode = !nowPinnedOrOpen && !freqChanged && (hud.opacity > 0.001f) &&
+                                ((prevWasPinnedOrOpen && hud.mode == prevRawHud_.mode &&
+                                  hud.opacity <= prevRawHud_.opacity + 0.002f) ||
+                                 (releaseLatchActive_ && hud.mode == releaseLatchHud_.mode &&
+                                  hud.opacity <= prevRawHud_.opacity + 0.002f));
 
-    if (!releaseLatchActive_ && prevWasMomentary && prevRawHud_.opacity > 0.02f &&
-        isPassiveFallback) {
-        releaseLatchActive_ = true;
-        releaseLatchHud_ = prevRawHud_;
-    } else if (releaseLatchActive_ && !isPassiveFallback) {
+    if (fadingSameMode) {
+        if (!releaseLatchActive_) {
+            releaseLatchActive_ = true;
+            releaseLatchHud_ = prevRawHud_;
+        }
+    } else {
         releaseLatchActive_ = false;
     }
 
@@ -155,21 +175,24 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.focusedVoice = releaseLatchHud_.focusedVoice;
         effectiveHud.focusedKnob = releaseLatchHud_.focusedKnob;
         effectiveHud.lfoVoiceFocus = releaseLatchHud_.lfoVoiceFocus;
-        effectiveHud.lfoPageOpen = releaseLatchHud_.lfoPageOpen;
-        effectiveHud.knobRate = releaseLatchHud_.knobRate;
+        effectiveHud.globalTarget = releaseLatchHud_.globalTarget;
+        effectiveHud.configCursor = releaseLatchHud_.configCursor;
+        effectiveHud.config = releaseLatchHud_.config;
     }
 
     frameHud_ = effectiveHud;
-    renderedHudOpacity_ = effectiveHud.opacity;
+    renderedOpacityLevel_ = clampf(effectiveHud.opacity, 0.0f, 1.0f);
     prevRawHud_ = hud;
 
     const bool snapGauges = !hudGaugesPrimed_;
-    hudGaugesPrimed_ = (renderedHudOpacity_ > 0.004f);
+    hudGaugesPrimed_ = (effectiveHud.opacity > 0.004f);
     if (hudGaugesPrimed_) {
         updateHudGauges(dtClamped, snapGauges);
     }
 
-    graphs_.update(dtClamped, control, hud, effectiveHud, frameLfoOutput_, frameLfoDriftPacked_);
+    globalViews_.update(dtClamped, control, hud, frameLfoOutput_);
+    graphs_.update(dtClamped, control, hud, effectiveHud, globalViews_.anyActiveTarget(hud),
+                   frameLfoOutput_, frameLfoDriftPacked_);
 }
 
 void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,
@@ -233,23 +256,39 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     const MonoStripCanvas cv{lumBuf, y0, y1, hudAlpha8};
 
     const float hudAlpha01 = static_cast<float>(hudAlpha8) * (1.0f / 255.0f);
-    const float filterEnv01 = smoothstep01(clampf(graphs_.filterGraphPhase(), 0.0f, 1.0f));
-    const float effFilterAlpha01 = filterEnv01 * hudAlpha01;
-    const auto filterAlpha8 = static_cast<uint8_t>(effFilterAlpha01 * 255.0f + 0.5f);
-    const float lfoEnv01 = smoothstep01(clampf(graphs_.lfoGraphPhase(), 0.0f, 1.0f));
-    const float effLfoAlpha01 = lfoEnv01 * hudAlpha01;
-    const auto lfoAlpha8 = static_cast<uint8_t>(effLfoAlpha01 * 255.0f + 0.5f);
+    const auto resolveViewAlpha = [&](float linearPhase, float& outAlpha01) -> uint8_t {
+        const float env01 = smoothstep01(clampf(linearPhase, 0.0f, 1.0f));
+        outAlpha01 = (env01 < hudAlpha01) ? env01 : hudAlpha01;
+        return static_cast<uint8_t>(outAlpha01 * 255.0f + 0.5f);
+    };
+
+    float effFilterAlpha01 = 0.0f;
+    float effLfoAlpha01 = 0.0f;
+    float dummy01 = 0.0f;
+    const uint8_t filterAlpha8 = resolveViewAlpha(graphs_.filterGraphPhase(), effFilterAlpha01);
+    const uint8_t lfoAlpha8 = resolveViewAlpha(graphs_.lfoGraphPhase(), effLfoAlpha01);
+    const uint8_t freqAlpha8 = resolveViewAlpha(globalViews_.freqPhase(), dummy01);
+    const uint8_t ampAlpha8 = resolveViewAlpha(globalViews_.ampPhase(), dummy01);
+    const uint8_t allAlpha8 = resolveViewAlpha(globalViews_.allOverlayPhase(), dummy01);
+    const uint8_t cfgAlpha8 = resolveViewAlpha(globalViews_.configPhase(), dummy01);
 
     cv.applyVerticalScrim(0, 34, 0.80f, true);
-    const float graphEnvMax = (filterEnv01 > lfoEnv01) ? filterEnv01 : lfoEnv01;
-    const int botScrimTop = 178 - static_cast<int>(8.0f * graphEnvMax + 0.5f);
-    cv.applyVerticalScrim(botScrimTop, 240, 0.90f, false);
+    if (frameHud_.knobBank != KnobBankMode::None) {
+        const float graphEnvMax =
+            (effFilterAlpha01 > effLfoAlpha01) ? effFilterAlpha01 : effLfoAlpha01;
+        const int botScrimTop = 178 - static_cast<int>(8.0f * graphEnvMax + 0.5f);
+        cv.applyVerticalScrim(botScrimTop, 240, 0.90f, false);
+    }
 
     graphs_.compositeLfoStrip(y0, y1, stripHeight, lumBuf, linScratch, effLfoAlpha01, lfoAlpha8,
                               frameControl_, frameHud_, frameLfoPhase_);
-    compositeTopHeaderStrip(cv, frameControl_, frameHud_, frameLfoOutput_, headerBarSmooth_);
     graphs_.compositeFilterStrip(y0, y1, stripHeight, lumBuf, linScratch, effFilterAlpha01,
                                  filterAlpha8);
+    globalViews_.compositeGlobalAllOverlayStrip(y0, y1, lumBuf, allAlpha8);
+    globalViews_.compositeGlobalFreqStrip(y0, y1, lumBuf, freqAlpha8);
+    globalViews_.compositeGlobalAmpStrip(y0, y1, lumBuf, ampAlpha8);
+    globalViews_.compositeGlobalConfigStrip(y0, y1, lumBuf, cfgAlpha8, frameControl_, frameHud_);
+    compositeTopHeaderStrip(cv, frameControl_, frameHud_, frameLfoOutput_, headerBarSmooth_);
     compositeBottomKnobStrip(cv, frameControl_, frameHud_, frameLfoOutput_, knobPosSignedSmooth_,
                              knobDimSmooth_, knobFocusSmooth_);
 }

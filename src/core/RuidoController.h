@@ -2,6 +2,7 @@
 
 #include "core/ControlSurface.h"
 #include "core/HudEnvelope.h"
+#include "core/ModifierTracker.h"
 #include "core/Parameters.h"
 
 #include <array>
@@ -10,7 +11,7 @@
 namespace ruido {
 
 // Stateless two-hand instrument controller, 3-gear linear X4 quadrature encoder scaling,
-// soft S-curve HUD envelope generator, and 27-key + 14-button varibright white LED engine.
+// centralized 150 ms S-curve HUD envelope, and 27-key + 14-button varibright LED engine.
 class RuidoController {
   public:
     RuidoController() noexcept;
@@ -24,7 +25,7 @@ class RuidoController {
     }
 
     // Endless encoder rotation: `ticks` signed X4 quadrature steps (96 steps = 360 deg turn).
-    // Speed is strictly constant/linear per gear (Standard, Hold OCT- Fine, Hold OCT+ Fast).
+    // Speed is strictly constant/linear per gear (Standard, Hold OCT- Fine, Hold OCT+ Coarse).
     void onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept;
 
     // Analog MASTER volume potentiometer [0.0f, 1.0f]
@@ -40,7 +41,7 @@ class RuidoController {
     void onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexcept;
     void onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) noexcept;
 
-    // Advance HUD bloom/hold/dissolve timers & refresh all 41 varibright PWM LED levels.
+    // Advance 150 ms HUD envelope & refresh all 42 varibright PWM LED levels.
     void tick(float dtSec, const EngineTelemetry& telemetry) noexcept;
 
     const EngineControlState& state() const noexcept { return state_; }
@@ -50,24 +51,11 @@ class RuidoController {
     const LedState& leds() const noexcept { return leds_; }
 
   private:
-    enum class HeldModifier : uint8_t {
-        None = 0,
-        FilterVoice0 = 1,
-        FilterVoice1 = 2,
-        FilterVoice2 = 3,
-        FilterVoice3 = 4,
-        Amplitude = 5,
-        Panning = 6,
-        GlobalFilter = 7
-    };
-
-    HeldModifier activeModifier() const noexcept;
-    KnobRate activeKnobRate() const noexcept;
-    HudMode currentLfoHudMode() const noexcept;
-    bool isAnyMomentaryHudHoldActive() const noexcept;
+    KnobBankMode baseKnobBank() const noexcept;
     void syncModifierHud() noexcept;
     void restoreOrDissolveHud() noexcept;
-    void triggerHud(HudMode mode, uint8_t voiceIndex = 0u, uint8_t knobIndex = 0u) noexcept;
+    void triggerHud(HudMode mode, uint8_t voiceIndex = 0u,
+                    uint8_t knobIndex = kNoFocusedKnob) noexcept;
     void latchSwitchHud(HudMode mode, ButtonId button = ButtonId::Count) noexcept;
     void publishState() noexcept;
     void updateLeds(const EngineTelemetry& telemetry) noexcept;
@@ -76,25 +64,21 @@ class RuidoController {
     EngineControlState state_{};
     HudState hud_{};
     LedState leds_{};
+    std::array<VoiceParams, kNumOscillators> gloPreHoldVoices_{};
 
-    std::array<bool, kNumBlackKeys> blackKeyHeld_{};
-    std::array<uint32_t, kNumBlackKeys> blackKeyOrder_{};
-    uint32_t pressSeq_ = 0u;
-
-    std::array<bool, kNumWhiteKeys> whiteKeyHeld_{};
-    bool octMinusHeld_ = false;
-    bool octPlusHeld_ = false;
-    uint32_t octMinusOrder_ = 0u;
-    uint32_t octPlusOrder_ = 0u;
-
+    ModifierKeyTracker keys_{};
     HudEnvelopeTracker env_{};
+    bool knobTurnedDuringRateHold_ = false;
+    bool gloSnapshotValid_ = false;
     float animPhase_ = 0.0f;
     float masterPot_ = 0.85f;
+    float masterPotHudAnchor_ = 0.85f;
     float playStopRunSmooth_ = 1.0f;
     HudMode latchedHudMode_ = HudMode::None;
     ButtonId latchedButton_ = ButtonId::Count;
     int32_t selectTickAccum_ = 0;
     int32_t targetTickAccum_ = 0;
+    int32_t configTickAccum_ = 0;
 };
 
 } // namespace ruido
