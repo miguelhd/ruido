@@ -381,14 +381,15 @@ body {
   background: #131313;
 }
 
-/* Hardware-accurate PLAY/STOP dual-channel LED (Green PLAY + Red/Orange STOP -> Yellow mix) */
+/* Hardware-accurate PLAY/STOP dual-channel LED (Green PLAY when quiet, Red STOP when sound ON) */
 .play-stop-btn {
+  --led: 1;
   --led-play: 1;
   --led-stop: 0;
-  --ps-r: 46;
-  --ps-g: 232;
-  --ps-b: 110;
-  --ps-color: rgb(46, 232, 110);
+  --ps-r: 51;
+  --ps-g: 255;
+  --ps-b: 121;
+  --ps-color: rgb(51, 255, 121);
   font-size: 0.60rem;
   line-height: 1.05;
   gap: 2px;
@@ -413,8 +414,8 @@ body {
 }
 
 .play-stop-btn .stop-label {
-  color: color-mix(in srgb, #6e6e6e calc((1 - var(--led-stop)) * 100%), #ff6a3d calc(var(--led-stop) * 100%));
-  text-shadow: 0 0 calc(var(--led-stop) * 9px) rgba(255, 86, 42, calc(var(--led-stop) * 0.84));
+  color: color-mix(in srgb, #6e6e6e calc((1 - var(--led-stop)) * 100%), #ff5a4d calc(var(--led-stop) * 100%));
+  text-shadow: 0 0 calc(var(--led-stop) * 9px) rgba(255, 62, 48, calc(var(--led-stop) * 0.84));
 }
 
 /* Hardware-accurate REC single-channel Red LED */

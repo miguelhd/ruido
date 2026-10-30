@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>M-VAVE FM-1 Hardware Simulator | Ruido</title>
-  <link rel="stylesheet" href="style.css?v=20261030d">
+  <link rel="stylesheet" href="style.css?v=20261030e">
 </head>
 <body>
   <header class="topbar">
@@ -139,7 +139,7 @@
             <button type="button" class="panel-btn" data-button="9" aria-pressed="false" aria-label="SAVE Arm Snapshot">SAVE</button>
             <button type="button" class="panel-btn" data-button="10" aria-label="ARP (Unassigned in v1)">ARP</button>
             <button type="button" class="panel-btn" data-button="11" aria-label="SEQ (Unassigned in v1)">SEQ</button>
-            <button type="button" class="panel-btn play-stop-btn" data-button="12" aria-pressed="true" aria-label="PLAY/STOP Audio Output">
+            <button type="button" class="panel-btn play-stop-btn" data-button="12" aria-pressed="false" aria-label="PLAY/STOP Audio Output">
               <span class="play-label">PLAY</span><span class="btn-divider"></span><span class="stop-label">STOP</span>
             </button>
             <button type="button" class="panel-btn rec-btn" data-button="13" aria-label="REC (Unassigned in v1)">REC</button>
@@ -233,14 +233,14 @@
   <footer class="bottom-guide">
     <h2>Two-Hand Control Surface &amp; Hardware Auditioning</h2>
     <ul role="list" class="guide-list">
-      <li><strong>Left-Hand Momentary Holds:</strong> Hold <code>1–4</code> (<code>OP1–4</code> Osc 1–4 Filter), <code>5</code> (<code>OP5</code> Global Filter), <code>6</code> (<code>OP6</code> Panning), <code>G</code> (<code>GLO</code> Amplitude), or <code>0</code> (Scope Freeze) while turning <code>KNOB1–4</code> — all modifier black keys are strictly momentary and return immediately on release.</li>
-      <li><strong>Per-Voice Analog LFOs (<code>LFO</code> / <code>SELECT</code>):</strong> Tap <code>LFO</code> (<code>L</code>) to toggle the per-voice LFO page, step <code>SELECT</code> (<code>,</code> / <code>.</code>) across <code>OSC 1–4</code> and <code>ALL 4</code>, and shape <code>TARGET | SHAPE | RATE | DEPTH</code> on <code>KNOB1–4</code> (<code>H</code> or <code>Esc</code> exits back to the scope while LFOs keep modulating).</li>
-      <li><strong>3-Speed Encoders (<code>OCT-</code> / <code>OCT+</code>):</strong> Hold <code>OCT-</code> (<code>[</code> or <code>-</code>) for <strong>Fine</strong> sub-cent tuning, or hold <code>OCT+</code> (<code>]</code> or <code>=</code>) for <strong>Fast</strong> full-range sweeps in ~1–1.5 turns; release returns immediately to Standard rate.</li>
-      <li><strong>Carbon-Pill Expression (<code>SEL</code> Linked Brightness) &amp; USB-MIDI:</strong> Drag upward on <strong>White Keys 5–8</strong> (or scroll wheel / <code>↑↓</code> while holding <code>A S D F</code>) to sweep MS-20 filter formant &amp; dual resonance (or Vactrol LPG when muted). Tap <strong><code>SEL</code></strong> (<code>Q</code>) to toggle <strong>Keys 5–8</strong> into Pitch Bend — <code>SEL</code> and <strong>Keys 5–8</strong> step their LED brightness in unison so their link is always visible.</li>
+      <li><strong>Left-Hand Momentary Holds:</strong> Hold <code>1–4</code> (<code>OP1–4</code> Osc 1–4 Filter), <code>5</code> (<code>OP5</code> Osc 1–4 Amplitude), <code>6</code> (<code>OP6</code> Panning), <code>G</code> (<code>GLO</code> + <code>SELECT</code> <code>,</code>/<code>.</code> across <code>GLOBAL FREQ · FILTER · LFO · AMP · ALL</code>), or <code>0</code> (Scope Freeze) while turning <code>KNOB1–4</code>.</li>
+      <li><strong>Focused Pages (<code>LFO</code> &amp; Right-Grid <code>GLO</code>):</strong> Tap <code>LFO</code> (<code>L</code>) and step <code>SELECT</code> (<code>,</code>/<code>.</code>) across <code>OSC 1–4</code> (`TARGET | SHAPE | RATE | DEPTH`), or tap right-grid <code>GLO</code> (<code>;</code>) for the <code>GLOBAL CONFIG</code> menu (<code>GLO RELEASE: LATCH / SNAP BACK</code>, <code>OUTPUT ROUTING</code>). Tap <code>HOME</code> (<code>H</code> / <code>Esc</code>) anytime to clear overlays.</li>
+      <li><strong>3-Speed Encoders (<code>OCT-</code> / <code>OCT+</code>):</strong> Hold <code>OCT-</code> (<code>[</code> or <code>-</code>) for <strong>FINE</strong> sub-cent tuning, or hold <code>OCT+</code> (<code>]</code> or <code>=</code>) for <strong>COARSE</strong> full-range sweeps in ~1.3 turns — locking <code>FINE</code> / <code>COARSE</code> in the top-left HUD while showing live high-precision values on the right.</li>
+      <li><strong>Carbon-Pill Expression (<code>SEL</code> Linked Brightness) &amp; USB-MIDI:</strong> Drag upward on <strong>White Keys 5–8</strong> (or scroll wheel / <code>↑↓</code> while holding <code>A S D F</code>) to sweep MS-20 filter formant &amp; dual resonance (or Vactrol LPG when muted). Tap <strong><code>SEL</code></strong> (<code>Q</code>) to toggle <strong>Keys 5–8</strong> into Pitch Bend, or drive via MIDI Notes <code>F3–G5</code> + <code>CC 7 / 16–19 / 70–73</code>.</li>
     </ul>
   </footer>
 
   <div id="sr-announcer" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
-  <script type="module" src="app.js?v=20261030d"></script>
+  <script type="module" src="app.js?v=20261030g"></script>
 </body>
 </html>

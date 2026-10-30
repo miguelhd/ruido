@@ -15,14 +15,14 @@ const MIDI_KEYBED_MAP = [
   { kind: 'white', idx: 4 },  // 60 C4  (Pressure Pad 1)
   { kind: 'black', idx: 3 },  // 61 C#4 (OP4)
   { kind: 'white', idx: 5 },  // 62 D4  (Pressure Pad 2)
-  { kind: 'black', idx: 4 },  // 63 D#4 (OP5 Global Filter)
+  { kind: 'black', idx: 4 },  // 63 D#4 (OP5 Amplitude)
   { kind: 'white', idx: 6 },  // 64 E4  (Pressure Pad 3)
   { kind: 'white', idx: 7 },  // 65 F4  (Pressure Pad 4)
   { kind: 'black', idx: 5 },  // 66 F#4 (OP6 Pan)
   { kind: 'white', idx: 8 },  // 67 G4  (Snap 1)
   { kind: 'black', idx: 6 },  // 68 G#4 (PIT)
   { kind: 'white', idx: 9 },  // 69 A4  (Snap 2)
-  { kind: 'black', idx: 7 },  // 70 A#4 (GLO Amp)
+  { kind: 'black', idx: 7 },  // 70 A#4 (GLO Global)
   { kind: 'white', idx: 10 }, // 71 B4  (Snap 3)
   { kind: 'white', idx: 11 }, // 72 C5  (Snap 4)
   { kind: 'black', idx: 8 },  // 73 C#5 (MONO)
@@ -215,7 +215,7 @@ function sendEncoderSteps(encId, ticks) {
 
 function syncAriaFromSummary() {
   if (!uiWasm || !uiPtrs) return;
-  const s = uiF32.subarray(uiPtrs.summary, uiPtrs.summary + 45);
+  const s = uiF32.subarray(uiPtrs.summary, uiPtrs.summary + 48);
 
   const couplingPct = Math.round(s[32] * 100);
   const mono = s[35] > 0.5;
@@ -232,8 +232,8 @@ function syncAriaFromSummary() {
   const selectEl = document.querySelector('[data-encoder="0"]');
   if (selectEl) {
     if (lfoOpen) {
-      const focusNames = ['Osc 1', 'Osc 2', 'Osc 3', 'Osc 4', 'All 4 Voices'];
-      selectEl.setAttribute('aria-valuenow', String(Math.min(100, Math.max(0, lfoVoiceFocus * 25))));
+      const focusNames = ['Osc 1', 'Osc 2', 'Osc 3', 'Osc 4'];
+      selectEl.setAttribute('aria-valuenow', String(Math.min(100, Math.max(0, lfoVoiceFocus * 33))));
       selectEl.setAttribute('aria-valuetext', `LFO Voice ${focusNames[lfoVoiceFocus] || 'Osc 1'}`);
     } else {
       selectEl.setAttribute('aria-valuenow', '0');
@@ -296,7 +296,10 @@ function syncAriaFromSummary() {
   setPressed('[data-black="9"]', !mono);
   setPressed('[data-button="3"]', pitchMode);
   setPressed('[data-button="5"]', lfoOpen);
-  setPressed('[data-button="12"]', run);
+  setPressed(
+    '[data-button="12"]',
+    run && Boolean((audioCtx && audioCtx.state === 'running') || audioStarting)
+  );
   setPressed('[data-button="9"]', saveArmed);
 }
 
@@ -394,6 +397,27 @@ function bindKnobs() {
       'wheel',
       (e) => {
         e.preventDefault();
+        const knobBank = uiWasm && uiPtrs ? Math.round(uiF32[uiPtrs.summary + 47]) : 0;
+        const isDiscrete =
+          encId === 0 ||
+          (encId === 3 && (knobBank === 4 || knobBank === 7)) ||
+          (encId >= 3 && knobBank === 10);
+
+        if (isDiscrete) {
+          if (e.deltaMode === 1 || Math.abs(e.deltaY) >= 24) {
+            wheelAccum = 0;
+            sendEncoderSteps(encId, e.deltaY < 0 ? 4 : -4);
+          } else {
+            wheelAccum += -e.deltaY / 16;
+            const detents = Math.trunc(wheelAccum);
+            if (detents !== 0) {
+              wheelAccum -= detents;
+              sendEncoderSteps(encId, detents > 0 ? 4 : -4);
+            }
+          }
+          return;
+        }
+
         wheelAccum += -e.deltaY * 0.35;
         let ticks = Math.trunc(wheelAccum);
         if (ticks === 0 && Math.abs(e.deltaY) >= 4) {
@@ -427,6 +451,20 @@ function bindKnobs() {
   });
 }
 
+function pressPanelButton(btnId) {
+  const wasAudioRunning = Boolean(audioCtx && audioCtx.state === 'running');
+  const wasMasterRun = uiF32[uiPtrs.summary + 36] > 0.5;
+  ensureAudioRunning();
+  if (btnId === 12 && !wasAudioRunning && wasMasterRun) {
+    // Browser was quiet because WebAudio had not started yet:
+    // cycle off -> on synchronously so first PLAY/STOP press starts sound (AUDIO OUTPUT ON).
+    uiWasm.wasm_ui_button(12, 1);
+    uiWasm.wasm_ui_button(12, 0);
+  }
+  uiWasm.wasm_ui_button(btnId, 1);
+  flushControlToWorklet();
+}
+
 function bindButtonsAndKeybed() {
   // 14 Panel Buttons
   document.querySelectorAll('.panel-btn').forEach((btn) => {
@@ -434,17 +472,16 @@ function bindButtonsAndKeybed() {
 
     btn.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
-      ensureAudioRunning();
       btn.setPointerCapture(e.pointerId);
       btn.classList.add('is-held');
-      uiWasm.wasm_ui_button(btnId, 1);
-      flushControlToWorklet();
+      pressPanelButton(btnId);
 
       let released = false;
       const onRelease = () => {
         if (released) return;
         released = true;
         btn.classList.remove('is-held');
+        btn.blur();
         uiWasm.wasm_ui_button(btnId, 0);
         flushControlToWorklet();
         btn.removeEventListener('pointerup', onRelease);
@@ -459,8 +496,7 @@ function bindButtonsAndKeybed() {
     // Keyboard activation on native <button> fires click with detail === 0
     btn.addEventListener('click', (e) => {
       if (e.detail === 0) {
-        ensureAudioRunning();
-        uiWasm.wasm_ui_button(btnId, 1);
+        pressPanelButton(btnId);
         uiWasm.wasm_ui_button(btnId, 0);
         flushControlToWorklet();
       }
@@ -485,6 +521,7 @@ function bindButtonsAndKeybed() {
         if (released) return;
         released = true;
         keyEl.classList.remove('is-held');
+        keyEl.blur();
         uiWasm.wasm_ui_black_key(keyId, 0);
         flushControlToWorklet();
         keyEl.removeEventListener('pointerup', onRelease);
@@ -544,6 +581,7 @@ function bindButtonsAndKeybed() {
 
       const onRelease = () => {
         keyEl.classList.remove('is-held');
+        keyEl.blur();
         if (hasPressure) {
           activeWhitePressures[wIdx] = 0;
           keyEl.style.setProperty('--pressure', '0');
@@ -601,10 +639,11 @@ function bindComputerKeyboard() {
   const keyToButton = {
     BracketLeft: 0,  // OCT- (momentary Fine knob rate)
     Minus: 0,        // OCT- (momentary Fine knob rate)
-    BracketRight: 1, // OCT+ (momentary Fast knob rate)
-    Equal: 1,        // OCT+ (momentary Fast knob rate)
+    BracketRight: 1, // OCT+ (momentary Coarse knob rate)
+    Equal: 1,        // OCT+ (momentary Coarse knob rate)
     KeyQ: 3,         // SEL (Pad Pressure Target: MS-20 Filter/LPG <-> Pitch Bend)
     KeyL: 5,         // LFO (Per-Voice LFO Page toggle)
+    Semicolon: 7,    // GLO right grid (GLOBAL CONFIG menu toggle)
     KeyH: 8,         // HOME
     Escape: 8,       // HOME
   };
@@ -647,12 +686,19 @@ function bindComputerKeyboard() {
       return;
     }
 
-    if (e.code === 'Space' && document.activeElement === document.body) {
+    if (e.code === 'Space' && document.activeElement?.id !== 'audio-toggle-btn') {
       e.preventDefault();
-      ensureAudioRunning();
+      if (
+        document.activeElement &&
+        (document.activeElement.classList.contains('panel-btn') ||
+          document.activeElement.classList.contains('silicone-key'))
+      ) {
+        document.activeElement.blur();
+      }
       heldKeyboardCodes.add(e.code);
-      uiWasm.wasm_ui_button(12, 1);
-      flushControlToWorklet();
+      const playEl = document.querySelector('[data-button="12"]');
+      if (playEl) playEl.classList.add('is-held');
+      pressPanelButton(12);
       return;
     }
 
@@ -702,6 +748,8 @@ function bindComputerKeyboard() {
     heldKeyboardCodes.delete(e.code);
 
     if (e.code === 'Space') {
+      const playEl = document.querySelector('[data-button="12"]');
+      if (playEl) playEl.classList.remove('is-held');
       uiWasm.wasm_ui_button(12, 0);
       flushControlToWorklet();
     } else if (e.code in keyToBlack) {
@@ -741,6 +789,8 @@ function bindComputerKeyboard() {
     if (!uiWasm || heldKeyboardCodes.size === 0) return;
     for (const code of heldKeyboardCodes) {
       if (code === 'Space') {
+        const playEl = document.querySelector('[data-button="12"]');
+        if (playEl) playEl.classList.remove('is-held');
         uiWasm.wasm_ui_button(12, 0);
       } else if (code in keyToBlack) {
         const bId = keyToBlack[code];
@@ -784,6 +834,7 @@ async function initWebMidi() {
   try {
     const midi = await navigator.requestMIDIAccess({ sysex: false });
     const heldMidiWhitePads = new Set();
+    const lastCcValues = new Int16Array(128).fill(-1);
 
     const handleMidiMessage = (ev) => {
       if (!uiWasm || !ev.data || ev.data.length < 2) return;
@@ -861,6 +912,19 @@ async function initWebMidi() {
           uiWasm.wasm_ui_master_pot(masterPotValue);
           updateMasterVisual();
           flushControlToWorklet();
+        } else if ((d1 >= 16 && d1 <= 19) || (d1 >= 70 && d1 <= 73) || d1 === 20 || d1 === 21) {
+          const encId =
+            d1 === 20 ? 0 : d1 === 21 ? 2 : 3 + (d1 >= 70 ? d1 - 70 : d1 - 16);
+          const prev = lastCcValues[d1];
+          lastCcValues[d1] = d2;
+          if (prev >= 0) {
+            let ticks = Math.round((d2 - prev) * 2.0);
+            if (ticks === 0 && d2 === 127 && prev === 127) ticks = 2;
+            else if (ticks === 0 && d2 === 0 && prev === 0) ticks = -2;
+            if (ticks !== 0) {
+              sendEncoderSteps(encId, ticks);
+            }
+          }
         }
       }
     };
@@ -897,6 +961,7 @@ function startDisplayAndLedLoop() {
     document.querySelector(`[data-button="${i}"]`)
   );
 
+  let soundOnSmooth = 0;
   let lastFrameMs = performance.now();
 
   const frame = (nowMs) => {
@@ -906,9 +971,18 @@ function startDisplayAndLedLoop() {
     uiWasm.wasm_ui_tick_and_render(dtSec);
     ctx.putImageData(imageData, 0, 0);
 
+    const soundActive =
+      uiF32[uiPtrs.summary + 36] > 0.5 &&
+      Boolean((audioCtx && audioCtx.state === 'running') || audioStarting);
+    const soundTarget = soundActive ? 1 : 0;
+    soundOnSmooth += (soundTarget - soundOnSmooth) * (1 - Math.exp(-dtSec * 12.5));
+    if (Math.abs(soundTarget - soundOnSmooth) < 1e-4) {
+      soundOnSmooth = soundTarget;
+    }
+
     // Refresh all 42 hardware software-PWM LED channels:
     // [0..10] 11 white black keys, [11..26] 16 white keys, [27..38] 12 white buttons,
-    // [39] Green PLAY LED, [40] Red REC LED, [41] Red/Amber-Orange STOP LED
+    // [39] Green PLAY LED (lit when quiet), [40] Red REC LED, [41] Red STOP LED (lit when sound ON)
     const ledsBase = uiPtrs.leds;
     for (let i = 0; i < 11; i++) {
       if (blackKeyEls[i]) {
@@ -927,11 +1001,11 @@ function startDisplayAndLedLoop() {
     }
     const playStopEl = buttonEls[12];
     if (playStopEl) {
-      const playG = clamp01(uiF32[ledsBase + 27 + 12]);
-      const stopR = clamp01(uiF32[ledsBase + 41]);
+      const stopR = clamp01(soundOnSmooth);
+      const playG = clamp01(1 - soundOnSmooth);
       const rawR = 46 * playG + 255 * stopR;
-      const rawG = 232 * playG + 82 * stopR;
-      const rawB = 110 * playG + 34 * stopR;
+      const rawG = 232 * playG + 56 * stopR;
+      const rawB = 110 * playG + 44 * stopR;
       const peak = Math.max(rawR, rawG, rawB, 1e-4);
       const nr = Math.round((rawR / peak) * 255);
       const ng = Math.round((rawG / peak) * 255);
