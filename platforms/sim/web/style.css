@@ -381,11 +381,9 @@ body {
   background: #131313;
 }
 
-/* Hardware-accurate PLAY/STOP dual-channel LED (Green PLAY when quiet, Red STOP when sound ON) */
+/* Hardware-accurate PLAY/STOP dual-channel LED (Green when stopped, Red when playing) */
 .play-stop-btn {
   --led: 1;
-  --led-play: 1;
-  --led-stop: 0;
   --ps-r: 51;
   --ps-g: 255;
   --ps-b: 121;
@@ -395,7 +393,7 @@ body {
   gap: 2px;
   border-color: color-mix(in srgb, #2a2a2a calc((1 - var(--led) * 0.58) * 100%), var(--ps-color) calc(var(--led) * 58%));
   color: color-mix(in srgb, #6e6e6e calc((1 - var(--led)) * 100%), var(--ps-color) calc(var(--led) * 100%));
-  text-shadow: none;
+  text-shadow: 0 0 calc(var(--led) * 9px) rgba(var(--ps-r), var(--ps-g), var(--ps-b), calc(var(--led) * 0.84));
   box-shadow:
     0 2px 4px rgba(0, 0, 0, 0.72),
     inset 0 1px 1px rgba(var(--ps-r), var(--ps-g), var(--ps-b), calc(0.06 + var(--led) * 0.24));
@@ -406,16 +404,6 @@ body {
   box-shadow:
     0 0 calc(var(--led) * 12px) rgba(var(--ps-r), var(--ps-g), var(--ps-b), calc(var(--led) * 0.88)),
     0 0 calc(var(--led) * 4px) rgba(var(--ps-r), var(--ps-g), var(--ps-b), var(--led));
-}
-
-.play-stop-btn .play-label {
-  color: color-mix(in srgb, #6e6e6e calc((1 - var(--led-play)) * 100%), #57ff92 calc(var(--led-play) * 100%));
-  text-shadow: 0 0 calc(var(--led-play) * 9px) rgba(58, 240, 120, calc(var(--led-play) * 0.82));
-}
-
-.play-stop-btn .stop-label {
-  color: color-mix(in srgb, #6e6e6e calc((1 - var(--led-stop)) * 100%), #ff5a4d calc(var(--led-stop) * 100%));
-  text-shadow: 0 0 calc(var(--led-stop) * 9px) rgba(255, 62, 48, calc(var(--led-stop) * 0.84));
 }
 
 /* Hardware-accurate REC single-channel Red LED */

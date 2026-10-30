@@ -118,9 +118,14 @@ async function ensureAudioRunning() {
   const rateBadge = document.getElementById('audio-rate');
 
   if (audioCtx && audioCtx.state === 'suspended') {
-    await audioCtx.resume();
-    powerBtn.setAttribute('aria-pressed', 'true');
-    powerBtn.textContent = 'Audio Active (Pause)';
+    audioStarting = true;
+    try {
+      await audioCtx.resume();
+      powerBtn.setAttribute('aria-pressed', 'true');
+      powerBtn.textContent = 'Audio Active (Pause)';
+    } finally {
+      audioStarting = false;
+    }
     return;
   }
 
@@ -178,7 +183,12 @@ async function ensureAudioRunning() {
 async function toggleAudioPower() {
   const powerBtn = document.getElementById('audio-toggle-btn');
   if (!audioCtx || audioCtx.state !== 'running') {
+    if (uiWasm && uiPtrs && uiF32[uiPtrs.summary + 36] < 0.5) {
+      uiWasm.wasm_ui_button(12, 1);
+      uiWasm.wasm_ui_button(12, 0);
+    }
     await ensureAudioRunning();
+    flushControlToWorklet();
   } else {
     await audioCtx.suspend();
     powerBtn.setAttribute('aria-pressed', 'false');
@@ -961,7 +971,7 @@ function startDisplayAndLedLoop() {
     document.querySelector(`[data-button="${i}"]`)
   );
 
-  let soundOnSmooth = 0;
+  let webAudioSmooth = 0;
   let lastFrameMs = performance.now();
 
   const frame = (nowMs) => {
@@ -971,18 +981,16 @@ function startDisplayAndLedLoop() {
     uiWasm.wasm_ui_tick_and_render(dtSec);
     ctx.putImageData(imageData, 0, 0);
 
-    const soundActive =
-      uiF32[uiPtrs.summary + 36] > 0.5 &&
-      Boolean((audioCtx && audioCtx.state === 'running') || audioStarting);
-    const soundTarget = soundActive ? 1 : 0;
-    soundOnSmooth += (soundTarget - soundOnSmooth) * (1 - Math.exp(-dtSec * 12.5));
-    if (Math.abs(soundTarget - soundOnSmooth) < 1e-4) {
-      soundOnSmooth = soundTarget;
+    const webAudioActive = Boolean((audioCtx && audioCtx.state === 'running') || audioStarting);
+    const webAudioTarget = webAudioActive ? 1 : 0;
+    webAudioSmooth += (webAudioTarget - webAudioSmooth) * (1 - Math.exp(-dtSec * 12.5));
+    if (Math.abs(webAudioTarget - webAudioSmooth) < 1e-4) {
+      webAudioSmooth = webAudioTarget;
     }
 
     // Refresh all 42 hardware software-PWM LED channels:
     // [0..10] 11 white black keys, [11..26] 16 white keys, [27..38] 12 white buttons,
-    // [39] Green PLAY LED (lit when quiet), [40] Red REC LED, [41] Red STOP LED (lit when sound ON)
+    // [39] Green PLAY LED (lit when stopped), [40] Red REC LED, [41] Red STOP LED (lit when playing)
     const ledsBase = uiPtrs.leds;
     for (let i = 0; i < 11; i++) {
       if (blackKeyEls[i]) {
@@ -1001,8 +1009,10 @@ function startDisplayAndLedLoop() {
     }
     const playStopEl = buttonEls[12];
     if (playStopEl) {
-      const stopR = clamp01(soundOnSmooth);
-      const playG = clamp01(1 - soundOnSmooth);
+      const wasmPlayG = clamp01(uiF32[ledsBase + 39]);
+      const wasmStopR = clamp01(uiF32[ledsBase + 41]);
+      const stopR = clamp01(webAudioSmooth * wasmStopR);
+      const playG = clamp01((1 - webAudioSmooth) + webAudioSmooth * wasmPlayG);
       const rawR = 46 * playG + 255 * stopR;
       const rawG = 232 * playG + 56 * stopR;
       const rawB = 110 * playG + 44 * stopR;
@@ -1012,8 +1022,6 @@ function startDisplayAndLedLoop() {
       const nb = Math.round((rawB / peak) * 255);
       const level = clamp01(Math.max(playG, stopR, (playG + stopR) * 0.75));
       playStopEl.style.setProperty('--led', level.toFixed(3));
-      playStopEl.style.setProperty('--led-play', playG.toFixed(3));
-      playStopEl.style.setProperty('--led-stop', stopR.toFixed(3));
       playStopEl.style.setProperty('--ps-r', String(nr));
       playStopEl.style.setProperty('--ps-g', String(ng));
       playStopEl.style.setProperty('--ps-b', String(nb));
