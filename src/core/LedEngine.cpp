@@ -8,7 +8,42 @@
 
 namespace ruido {
 
-void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) noexcept {
+namespace {
+constexpr float kSubAudioLoOct = cxLog2Pos(15.0f);
+constexpr float kInvSubAudioSpanOct = 1.0f / (cxLog2Pos(25.0f) - cxLog2Pos(15.0f));
+// Exact integer multiples of 1000.0 s animPhase wrap (1500 & 350 cycles -> zero wrap discontinuity)
+constexpr float kMutedPulseHz = 1.50f;
+constexpr float kSubAudioBreathHz = 0.35f;
+} // namespace
+
+void LedSmoothState::reset(const EngineControlState& state) noexcept {
+    animPhase = 0.0f;
+    playStopRunSmooth = state.global.masterRun ? 1.0f : 0.0f;
+    for (size_t i = 0u; i < kNumOscillators; ++i) {
+        muteBlendSmooth[i] = state.voices[i].muted ? 1.0f : 0.0f;
+        const float audible = smoothstep01(
+            (fastLog2(state.voices[i].frequencyHz) - kSubAudioLoOct) * kInvSubAudioSpanOct);
+        subAudioBlendSmooth[i] = 1.0f - audible;
+    }
+}
+
+void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothState& smooth,
+                             LedState& outLeds) noexcept {
+    const float dt = clampf(dtSec, 0.0f, 0.25f);
+    smooth.animPhase += dt;
+    if (smooth.animPhase >= 1000.0f) {
+        smooth.animPhase -= 1000.0f;
+    }
+
+    const float runTarget = ctx.state.global.masterRun ? 1.0f : 0.0f;
+    if (dt > 0.0f) {
+        smooth.playStopRunSmooth +=
+            (runTarget - smooth.playStopRunSmooth) * (1.0f - fastExp(-dt * 12.5f));
+        if (absf(runTarget - smooth.playStopRunSmooth) < 1.0e-4f) {
+            smooth.playStopRunSmooth = runTarget;
+        }
+    }
+
     // 1. Raised Black Keys (11 monochrome white LEDs)
     // OP1..OP5 & PIT unassigned: 0% dark; Spatial (OP6 Panning) & Global (GLO): 25% rest, 100% held
     for (size_t i = 0u; i <= static_cast<size_t>(BlackKeyId::Op5); ++i) {
@@ -29,6 +64,17 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
 
     // 2. Bottom White Keys (16 monochrome white LEDs)
     const float pitchMode = ctx.state.global.pitchPressureMode ? 1.0f : 0.0f;
+    const float muteAlpha = (dt > 0.0f) ? (1.0f - fastExp(-dt * 12.5f)) : 0.0f;
+    const float subAlpha = (dt > 0.0f) ? (1.0f - fastExp(-dt * 9.0f)) : 0.0f;
+
+    // Smooth C^2 analog sine waves:
+    // - User-activated Muted beacon: 1.50 Hz (4% <-> 54%) to clearly signal why voice is silent
+    // - Sub-audio (< 20 Hz) breathing: 0.35 Hz (~2.86 s calm breath, 4.3x slower than Muted)
+    const float muteWave01 =
+        0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(smooth.animPhase * kMutedPulseHz)));
+    const float mutePulseLed = 0.04f + 0.50f * muteWave01;
+    const float breathWave01 =
+        0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(smooth.animPhase * kSubAudioBreathHz)));
 
     float maxLfoDepth = 0.0f;
     size_t dominantLfoVoice = 0u;
@@ -39,15 +85,9 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceParams& vp = ctx.state.voices[i];
         const float lfoRaw = ctx.telemetry.lfoOutput[i].load(std::memory_order_relaxed);
-        const float effHz = (vp.lfoTarget == LfoTarget::Pitch && vp.lfoDepth > 0.0f)
-                                ? applyLfoPitchHz(vp.frequencyHz, vp.lfoDepth, lfoRaw)
-                                : vp.frequencyHz;
         const float effAmp = (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > 0.0f)
                                  ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth, lfoRaw)
                                  : vp.amplitude;
-        const float ampDepth =
-            (vp.lfoTarget == LfoTarget::Amplitude) ? clampf(vp.lfoDepth, 0.0f, 1.0f) : 0.0f;
-        const float gate = ctx.telemetry.oscGateHigh[i].load(std::memory_order_relaxed);
         const float vPeak = ctx.telemetry.voicePeak[i].load(std::memory_order_relaxed);
         const float p = clampf(ctx.state.voicePressure[i], 0.0f, 1.0f);
 
@@ -89,23 +129,51 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
             }
         }
 
-        if (vp.muted) {
-            outLeds.whiteKeyLeds[i] = 0.10f;
-        } else if (effHz < 20.0f) {
-            const float peakBright = 0.60f + 0.40f * effAmp;
-            outLeds.whiteKeyLeds[i] = 0.12f + (peakBright - 0.12f) * clampf(gate, 0.0f, 1.0f);
-        } else {
-            const float restFloor = 0.60f - 0.42f * ampDepth;
-            outLeds.whiteKeyLeds[i] = restFloor + (1.0f - restFloor) * effAmp;
+        // Taper visual LFO modulation on key LEDs above 2..7 Hz so audio-rate FM/AM never strobes
+        const float lfoVisWeight = 1.0f - smoothstep01((vp.lfoRateHz - 2.0f) * 0.20f);
+        const float visHz =
+            (vp.lfoTarget == LfoTarget::Pitch && vp.lfoDepth > 0.0f)
+                ? applyLfoPitchHz(vp.frequencyHz, vp.lfoDepth * lfoVisWeight, lfoRaw)
+                : vp.frequencyHz;
+        const float visAmp =
+            (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > 0.0f)
+                ? applyLfoAmplitude(vp.amplitude, vp.lfoDepth * lfoVisWeight, lfoRaw)
+                : vp.amplitude;
+        const float visAmpDepth = (vp.lfoTarget == LfoTarget::Amplitude)
+                                      ? clampf(vp.lfoDepth * lfoVisWeight, 0.0f, 1.0f)
+                                      : 0.0f;
+
+        const float subAudioTarget =
+            1.0f - smoothstep01((fastLog2(visHz) - kSubAudioLoOct) * kInvSubAudioSpanOct);
+        smooth.subAudioBlendSmooth[i] +=
+            (subAudioTarget - smooth.subAudioBlendSmooth[i]) * subAlpha;
+        if (absf(subAudioTarget - smooth.subAudioBlendSmooth[i]) < 1.0e-4f) {
+            smooth.subAudioBlendSmooth[i] = subAudioTarget;
         }
+
+        const float muteTarget = vp.muted ? 1.0f : 0.0f;
+        smooth.muteBlendSmooth[i] += (muteTarget - smooth.muteBlendSmooth[i]) * muteAlpha;
+        if (absf(muteTarget - smooth.muteBlendSmooth[i]) < 1.0e-4f) {
+            smooth.muteBlendSmooth[i] = muteTarget;
+        }
+
+        const float subBlend = smoothstep01(smooth.subAudioBlendSmooth[i]);
+        const float muteBlend = smoothstep01(smooth.muteBlendSmooth[i]);
+
+        const float restFloor = 0.60f - 0.42f * visAmpDepth;
+        const float steadyAudibleLed = restFloor + (1.0f - restFloor) * visAmp;
+        const float subBreathCrest = 0.52f + 0.28f * clampf(vp.amplitude, 0.0f, 1.0f);
+        const float subBreathLed = 0.14f + (subBreathCrest - 0.14f) * breathWave01;
+        const float unmutedLed = steadyAudibleLed + (subBreathLed - steadyAudibleLed) * subBlend;
+        outLeds.whiteKeyLeds[i] = unmutedLed + (mutePulseLed - unmutedLed) * muteBlend;
 
         outLeds.whiteKeyLeds[4u + i] = kPadFilterBaseLed + (1.0f - kPadFilterBaseLed) * p;
     }
 
     float savePulse = 0.0f;
     if (ctx.hud.saveArmed) {
-        const float cyc =
-            ctx.animPhase * 2.5f - static_cast<float>(static_cast<int32_t>(ctx.animPhase * 2.5f));
+        const float cyc = smooth.animPhase * 2.5f -
+                          static_cast<float>(static_cast<int32_t>(smooth.animPhase * 2.5f));
         const float tri = 1.0f - absf(2.0f * cyc - 1.0f);
         savePulse = 0.12f + 0.48f * smoothstep01(tri);
     }
@@ -165,7 +233,7 @@ void computePanelAndKeybedLeds(const LedInputContext& ctx, LedState& outLeds) no
     // Dual-channel PLAY/STOP split cap (ADR-026 action affordance):
     // steady Green PLAY when quiet (OFF), steady Red STOP when sound is ON,
     // crossfading smoothly through warm Yellow/Amber during transitions
-    const float runSmooth = clampf(ctx.playStopRunSmooth, 0.0f, 1.0f);
+    const float runSmooth = clampf(smooth.playStopRunSmooth, 0.0f, 1.0f);
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::PlayStop)] = 1.0f - runSmooth;
     outLeds.stopLed = runSmooth;
 }

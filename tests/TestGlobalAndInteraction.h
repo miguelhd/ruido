@@ -514,6 +514,31 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
         nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::GloRight)], 1.0f));
     verifyViewStripsAndCenter(false); // Bottom 4-knob strip strictly hidden!
 
+    // Verify GLOBAL CONFIG renders zero row separators (y = 69, 97) and zero leftmost white slit
+    // (x = 10..13 on selected row y = 44..67 has only subtle ~12% highlight tint, never white bar)
+    uint16_t maxConfigSepG6 = 0u;
+    uint16_t maxSelectedLeftEdgeG6 = 0u;
+    for (size_t x = 14u; x <= 226u; ++x) {
+        const uint16_t g6Sep0 = (s16[69u * 240u + x] >> 5u) & 0x3Fu;
+        const uint16_t g6Sep1 = (s16[97u * 240u + x] >> 5u) & 0x3Fu;
+        if (g6Sep0 > maxConfigSepG6) {
+            maxConfigSepG6 = g6Sep0;
+        }
+        if (g6Sep1 > maxConfigSepG6) {
+            maxConfigSepG6 = g6Sep1;
+        }
+    }
+    for (size_t y = 44u; y < 68u; ++y) {
+        for (size_t x = 10u; x <= 13u; ++x) {
+            const uint16_t g6Edge = (s16[y * 240u + x] >> 5u) & 0x3Fu;
+            if (g6Edge > maxSelectedLeftEdgeG6) {
+                maxSelectedLeftEdgeG6 = g6Edge;
+            }
+        }
+    }
+    RTEST_CHECK(maxConfigSepG6 == 0u);
+    RTEST_CHECK(maxSelectedLeftEdgeG6 <= 10u);
+
     // Row 0: GLO RELEASE -> step CW to SNAP BACK via Knob2
     RTEST_CHECK(ctrl.hud().config.gloRelease == ruido::GloReleaseMode::Latch);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 4);

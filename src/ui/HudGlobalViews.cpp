@@ -289,20 +289,15 @@ void HudGlobalViews::compositeGlobalConfigStrip(int y0, int y1, uint8_t* lumBuf,
                     }
                 }
             }
-            cv.drawVerticalSlit(11.0f, static_cast<float>(ry + 3), static_cast<float>(ry + 21),
-                                255.0f);
-        } else {
-            cv.drawHorizontalFilament(14.0f, 226.0f, static_cast<float>(ry + 25), 22.0f, 0.50f,
-                                      true);
         }
 
         const char* itemLbl = globalConfigItemLabel(itemId);
         const char* valLbl = globalConfigValueLabel(itemId, hud.config, control.global);
         if (selected) {
-            cv.drawSans(kFontSansMedium, 18, ry + 5, itemLbl, 255u, 0);
+            cv.drawSans(kFontSansMedium, 16, ry + 5, itemLbl, 255u, 0);
             cv.drawSansRight(kFontSansMedium, 224, ry + 5, valLbl, 255u, 0);
         } else {
-            cv.drawSans(kFontSansSmall, 18, ry + 6, itemLbl, 138u, 1);
+            cv.drawSans(kFontSansSmall, 16, ry + 6, itemLbl, 138u, 1);
             cv.drawSansRight(kFontSansMedium, 224, ry + 5, valLbl, 174u, 0);
         }
     }

@@ -2,6 +2,7 @@
 
 #include "core/ControlSurface.h"
 #include "core/HudEnvelope.h"
+#include "core/LedEngine.h"
 #include "core/ModifierTracker.h"
 #include "core/Parameters.h"
 
@@ -59,7 +60,7 @@ class RuidoController {
                     uint8_t knobIndex = kNoFocusedKnob) noexcept;
     void latchSwitchHud(HudMode mode, ButtonId button = ButtonId::Count) noexcept;
     void publishState() noexcept;
-    void updateLeds(const EngineTelemetry& telemetry) noexcept;
+    void updateLeds(float dtSec, const EngineTelemetry& telemetry) noexcept;
 
     LockFreeControlBus* controlBus_ = nullptr;
     EngineControlState state_{};
@@ -69,12 +70,11 @@ class RuidoController {
 
     ModifierKeyTracker keys_{};
     HudEnvelopeTracker env_{};
+    LedSmoothState ledSmooth_{};
     bool knobTurnedDuringRateHold_ = false;
     bool gloSnapshotValid_ = false;
-    float animPhase_ = 0.0f;
     float masterPot_ = 0.85f;
     float masterPotHudAnchor_ = 0.85f;
-    float playStopRunSmooth_ = 1.0f;
     HudMode latchedHudMode_ = HudMode::None;
     ButtonId latchedButton_ = ButtonId::Count;
     int32_t selectTickAccum_ = 0;

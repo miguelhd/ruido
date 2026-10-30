@@ -20,10 +20,9 @@ void RuidoController::reset() noexcept {
     gloPreHoldVoices_ = state_.voices;
     keys_.reset();
     env_.reset();
+    ledSmooth_.reset(state_);
     knobTurnedDuringRateHold_ = false;
     gloSnapshotValid_ = false;
-    animPhase_ = 0.0f;
-    playStopRunSmooth_ = state_.global.masterRun ? 1.0f : 0.0f;
     latchedHudMode_ = HudMode::None;
     latchedButton_ = ButtonId::Count;
     selectTickAccum_ = 0;
@@ -31,7 +30,7 @@ void RuidoController::reset() noexcept {
     configTickAccum_ = 0;
 
     EngineTelemetry zeroTel{};
-    updateLeds(zeroTel);
+    updateLeds(0.0f, zeroTel);
     publishState();
 }
 
@@ -625,11 +624,6 @@ void RuidoController::onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) 
 
 void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexcept {
     const float dt = clampf(dtSec, 0.0f, 0.25f);
-    animPhase_ += dt;
-    if (animPhase_ > 1000.0f) {
-        animPhase_ -= 1000.0f;
-    }
-
     const bool modPinned = (keys_.activeModifier() != HeldModifier::None) || hud_.rateHoldActive;
     const bool momentaryPinned = keys_.isAnyMomentaryHudHoldActive(hud_.scopeFrozen);
     const bool switchLatched = (latchedHudMode_ != HudMode::None);
@@ -658,26 +652,14 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
         hud_.focusedKnob = kNoFocusedKnob;
     }
 
-    const float runTarget = state_.global.masterRun ? 1.0f : 0.0f;
-    playStopRunSmooth_ += (runTarget - playStopRunSmooth_) * (1.0f - fastExp(-dt * 12.5f));
-    if (absf(runTarget - playStopRunSmooth_) < 1.0e-4f) {
-        playStopRunSmooth_ = runTarget;
-    }
-
-    updateLeds(telemetry);
+    updateLeds(dt, telemetry);
 }
 
-void RuidoController::updateLeds(const EngineTelemetry& telemetry) noexcept {
+void RuidoController::updateLeds(float dtSec, const EngineTelemetry& telemetry) noexcept {
     const LedInputContext ctx{
-        state_,
-        hud_,
-        telemetry,
-        keys_.blackKeyHeld,
-        keys_.whiteKeyHeld,
-        animPhase_,
-        playStopRunSmooth_,
+        state_, hud_, telemetry, keys_.blackKeyHeld, keys_.whiteKeyHeld,
     };
-    computePanelAndKeybedLeds(ctx, leds_);
+    stepAndComputePanelLeds(dtSec, ctx, ledSmooth_, leds_);
 }
 
 } // namespace ruido

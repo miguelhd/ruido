@@ -125,8 +125,8 @@ Each of the 4 voices (`Osc 1..4`) owns **1 dedicated LFO** matching its dedicate
   - **`KNOB 4` (`DEPTH`):** Unipolar `0–100%` modulation amount (`±5 oct` pitch FM, `±7.5 oct` filter cutoff, `0–100%` resonance, `0–100%` AM into pre-filter overdrive) with a hard stop at `0%` CCW so any LFO zeros cleanly by feel.
 - **Live Full-Screen LFO Visualization:** Spans edge-to-edge across the entire `240 px` display (`x = 0..239`) and fills the full vertical viewport (`y = 26..188`, `±75 px` / `150 px` peak-to-peak centered on a `y = 107` zero-horizon filament) over a `72%`-dimmed background scope, with clean gradient shading and a high-radiance `#FFFFFF` optical Phase Beacon.
 
-#### Scalable `GLOBAL CONFIG` Menu (Right-Grid `GLO` — `ADR-027`)
-- **Enter / Exit:** Tap right-grid **`GLO`** (`ButtonId::GloRight`) to open/close **`GLOBAL CONFIG`** (`1/N` row counter in top-right; bottom 4-knob strip cleanly hidden over a `72%`-dimmed live scope; `HOME` or 2nd `GLO` tap dissolves in `150 ms`).
+#### Scalable `GLOBAL CONFIG` Menu (Right-Grid `GLO` — `ADR-027`, `ADR-029`)
+- **Enter / Exit:** Tap right-grid **`GLO`** (`ButtonId::GloRight`) to open/close **`GLOBAL CONFIG`** (`1/N` row counter in top-right; divider-free row list with subtle selected-row tint, zero row-separator lines or left edge bars, and bottom 4-knob strip cleanly hidden over a `72%`-dimmed live scope; `HOME` or 2nd `GLO` tap dissolves in `150 ms`).
 - **Navigation & Editing:** Turn **`SELECT`** (`1` row/detent) to move the highlighted row cursor across the vertical `5`-row viewport; turn **any `KNOB 1–4`** (`1` option/detent) to edit the highlighted row's value:
   1. **`GLO RELEASE`:** **`LATCH`** *(default — `GLOBAL` multi-voice edits persist when releasing keybed `GLO`)* / **`SNAP BACK`** *(Elektron `CTRL-ALL`-style temporary performance warp: captures `4 x VoiceParams` on keybed `GLO` press and smoothly restores them via `C^1` parameter slews on release)*.
   2. **`OUTPUT ROUTING`:** **`STEREO`** / **`DUAL MONO`** (synced bidirectionally with `GlobalParams::monoCollapse` and the physical `MONO` / `POLY` black keys).
@@ -145,10 +145,10 @@ Using analog `SARADC` sampling of the silicone keybed's carbon-pill contact resi
 #### Bottom Row — 16 White Keys (4 Silkscreen-Dotted Groups of 4)
 - **Dot 1 (`White Keys 1-4`): Osc 1-4 Latching Mute / Gate Switches**
   - Clean tap toggles `Osc 1-4` gate (`GATE OSC 1..4`: `ACTIVE` / `MUTED` with `2-5 ms` clickless vactrol fade), remembering the oscillator's pre-mute amplitude when toggled back on. On the **`EDIT`** (`Level & Drive`) page, muted oscillators display **`0%`** (without erasing their remembered level unless turned) and turning their `KNOB 1-4` clockwise fades them in smoothly from `0%` while clearing their mute state.
-  - **Acoustic Key LED Feedback (`LedEngine.cpp`):**
-    - *Muted (`muted == true`):* Steady **`10%`** dim ember (`0.10`).
-    - *Active at Audio Rate (`effHz >= 20 Hz`):* Steady **`60–100%`** scaled by live post-LFO voice level (dipping down toward `18%` under deep `AMP` LFO modulation so tremolo depth breathes visibly on the key).
-    - *Active at Sub-Audio Rate (`effHz < 20 Hz`):* Pulses live between **`12%`** (Schmitt gate low) and **`60–100%`** (Schmitt gate high) on each oscillator cycle so slow `0.05–20 Hz` sub-cycle polyrhythms blink visibly on the physical keys.
+  - **Acoustic & Diagnostic Key LED Feedback (`LedEngine.cpp` — Smooth `C^2` Transitions, Zero Harsh Pulses):**
+    - *User-Activated Muted (`muted == true`):* Pulses smoothly at **`1.50 Hz`** (`4% <-> 54%` `C^2` analog sine, gliding in/out smoothly via an S-curve slew on tap) to clearly catch the eye whenever an oscillator is silent because it was muted.
+    - *Active Below Hearing Range (`!muted`, `< 20 Hz`):* Breathes slowly and calmly at **`0.35 Hz`** (`~2.86 s` cycle — `4.3x` slower than Muted, `14% <-> ~70%` `C^2` analog sine, smoothly crossfading across `15–25 Hz`) to indicate an unmuted oscillator running below audible pitch.
+    - *Active at Audible Rate (`!muted`, `>= 25 Hz`):* Steady **`60–100%`** scaled by voice level (tracking slow `< 2 Hz` `AMP` LFO tremolo smoothly while tapering out `>= 7 Hz` fast/audio-rate modulation so keys never strobe).
 - **Dot 2 (`White Keys 5-8`): Osc 1-4 MS-20 Filter / Vactrol LPG Pressure Expression Pads**
   - Rest at **`24%` soft glow** and flare continuously up to **`100%`** proportionally to finger pressure (`0.000 Hz` pitch shift):
   - Displays `FILTER EXP OSC 1..4` (or `LPG SWELL OSC 1..4` when muted) + live `0-100%` bar and the live pressure-modulated MS-20 passband curve on the HUD.

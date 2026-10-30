@@ -91,15 +91,15 @@ Available cycles per `44.118 kHz` stereo frame: **`~5,440 - 7,250` cycles**.
 ## 5. Modular Codebase Hygiene & Cross-Platform Portability (`src/` <-> `platforms/`)
 
 All handwritten files in `src/` are strictly capped at **`<= 700` lines**, organized as a one-way subsystem DAG (`src/core` <- `src/dsp` and `src/core` <- `src/ui`, zero cross-includes between `dsp` and `ui`), and verified automatically on every `make test` via `tools/check_hygiene.py`:
-- **`src/core/` (`sizeof(RuidoController) = 728 B`):** `RuidoController` (orchestration across latching right-grid `FX`, `EDIT`, `LFO`, and `GLOBAL CONFIG` pages + momentary `OP6`/`GLO` holds), `ModifierTracker` (LIFO `OP6`/`GLO` & `OCT-/+` stacks), `HudEnvelope` (`150 ms` centralized S-curve timer), `EncoderMath` (3-gear linear X4 scaling + gear-invariant `4`-tick detents), `LfoMath` (shared zero-`libm` LFO waveform + `computeLiveVoiceFilter` helpers), `GlobalControl` (orthogonal `GLOBAL FREQ/FILTER/LFO/AMP/ALL` transforms + `SNAP BACK` snapshot), `GlobalConfig` (data-driven `GLOBAL CONFIG` table), `LedEngine` (`42`-channel hardware PWM mapper including `FX` filter engagement glow, `EDIT` overdrive flare, `LFO` breath, and `< 20 Hz` sub-audio gate pulsing on `Keys 1–4`).
-- **`src/ui/` (`sizeof(ScopeHudRenderer) = 85,968 B`):** `ScopeHudRenderer` (chunk pipeline & tonemap), `ScopeTraceEngine` (trigger lock & `60x60` bloom), `HudAmpGraph` (`EDIT` 4-column channel level & MS-20 saturation wings), `HudGraphs` (`FX` / `GLOBAL FILTER` MS-20 passbands & `LFO` plots), `HudGlobalViews` (`GLOBAL FREQ/AMP/ALL` & `GLOBAL CONFIG` list), `HudChrome` + `HudColumnText` + `HudFormat` (divider-free top/bottom chrome, `FINE`/`COARSE` status badge, 4-voice micro-beads, zero-`snprintf` formatters).
+- **`src/core/` (`sizeof(RuidoController) = 760 B`):** `RuidoController` (orchestration across latching right-grid `FX`, `EDIT`, `LFO`, and `GLOBAL CONFIG` pages + momentary `OP6`/`GLO` holds), `ModifierTracker` (LIFO `OP6`/`GLO` & `OCT-/+` stacks), `HudEnvelope` (`150 ms` centralized S-curve timer), `EncoderMath` (3-gear linear X4 scaling + gear-invariant `4`-tick detents), `LfoMath` (shared zero-`libm` LFO waveform + `computeLiveVoiceFilter` helpers), `GlobalControl` (orthogonal `GLOBAL FREQ/FILTER/LFO/AMP/ALL` transforms + `SNAP BACK` snapshot), `GlobalConfig` (data-driven `GLOBAL CONFIG` table), `LedEngine` (`42`-channel hardware PWM mapper + `LedSmoothState` slews for `1.50 Hz` Muted beacon, `0.35 Hz` `< 20 Hz` sub-audio breathing, `FX` filter glow, `EDIT` overdrive flare, and `LFO` breath).
+- **`src/ui/` (`sizeof(ScopeHudRenderer) = 85,968 B`):** `ScopeHudRenderer` (chunk pipeline & tonemap), `ScopeTraceEngine` (trigger lock & `60x60` bloom), `HudAmpGraph` (`EDIT` 4-column channel level & MS-20 saturation wings), `HudGraphs` (`FX` / `GLOBAL FILTER` MS-20 passbands & `LFO` plots), `HudGlobalViews` (`GLOBAL FREQ/AMP/ALL` & divider-free `GLOBAL CONFIG` list), `HudChrome` + `HudColumnText` + `HudFormat` (divider-free top/bottom chrome, `FINE`/`COARSE` status badge, 4-voice micro-beads, zero-`snprintf` formatters).
 
 ```text
           ┌──────────────────────────────────────────┐
           │     Portable Modular Engine (src/)       │
           │  • src/dsp/  DroneEngine (45.69 KB)      │
           │  • src/ui/   ScopeHudRenderer (85.97 KB) │
-          │  • src/core/ RuidoController (728 B)     │
+          │  • src/core/ RuidoController (760 B)     │
           └────────────────────┬─────────────────────┘
                                │  Pure C++17 Structs (Zero OS/SDK Headers)
              ┌─────────────────┴─────────────────┐

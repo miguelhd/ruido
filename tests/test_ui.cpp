@@ -572,12 +572,95 @@ void testHudEnvelopeAndVaribrightLeds() {
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
     ctrl.tick(0.016f, tel);
 
-    // Verify OP6 & GLO landmarks rest at 25%; OP1..OP5 = 0%
+    // Verify OP6 & GLO landmarks rest at 25%; OP1..OP5 = 0%;
+    // and verify White Keys 1-4 smooth Mute pulse (1.50 Hz, 4..54%) vs slow Sub-Audio breath (0.35
+    // Hz, 14..70%):
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op1)], 0.0f));
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op5)], 0.0f));
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op6)], 0.25f));
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Glo)], 0.25f));
-    CHECK(near(ctrl.leds().whiteKeyLeds[0], 0.60f + 0.40f * ctrl.state().voices[0].amplitude));
+    const float steadyAudible0 = 0.60f + 0.40f * ctrl.state().voices[0].amplitude;
+    CHECK(near(ctrl.leds().whiteKeyLeds[0], steadyAudible0));
+
+    // Tap White Key 1 -> user-activated Mute: S-curve onset (no harsh 1-frame snap!) into 1.50 Hz
+    // pulse
+    ctrl.onWhiteKeyGate(0u, true);
+    ctrl.onWhiteKeyGate(0u, false);
+    CHECK(ctrl.state().voices[0].muted);
+    ctrl.tick(0.016f, tel);
+    CHECK(ctrl.leds().whiteKeyLeds[0] > steadyAudible0 - 0.12f); // Smooth onset, zero harsh jump!
+
+    for (int i = 0; i < 30; ++i) {
+        ctrl.tick(0.016f, tel); // Settle onto 1.50 Hz mute wave (~0.48 s)
+    }
+    float muteMin = 1.0f;
+    float muteMax = 0.0f;
+    float maxMuteStep = 0.0f;
+    float prevMuteLed = ctrl.leds().whiteKeyLeds[0];
+    for (int i = 0; i < 90; ++i) { // ~1.44 s (> 2 full 1.50 Hz cycles)
+        ctrl.tick(0.016f, tel);
+        const float v = ctrl.leds().whiteKeyLeds[0];
+        const float d = std::fabs(v - prevMuteLed);
+        if (v < muteMin) {
+            muteMin = v;
+        }
+        if (v > muteMax) {
+            muteMax = v;
+        }
+        if (d > maxMuteStep) {
+            maxMuteStep = d;
+        }
+        prevMuteLed = v;
+    }
+    CHECK(muteMin < 0.07f);
+    CHECK(muteMax > 0.50f && muteMax < 0.58f);
+    CHECK(maxMuteStep > 0.030f && maxMuteStep < 0.055f); // Smooth continuous C^2 sine, zero snaps
+
+    // Unmute White Key 1 -> smooth bloom back to steady audible glow, then sweep < 20 Hz into slow
+    // 0.35 Hz breath!
+    ctrl.onWhiteKeyGate(0u, true);
+    ctrl.onWhiteKeyGate(0u, false);
+    CHECK(!ctrl.state().voices[0].muted);
+    const float preUnmuteStepLed = ctrl.leds().whiteKeyLeds[0];
+    ctrl.tick(0.016f, tel);
+    CHECK(std::fabs(ctrl.leds().whiteKeyLeds[0] - preUnmuteStepLed) < 0.12f);
+    for (int i = 0; i < 40; ++i) {
+        ctrl.tick(0.016f, tel);
+    }
+    CHECK(near(ctrl.leds().whiteKeyLeds[0], steadyAudible0, 1.0e-3f));
+
+    // Sweep Osc 1 down below hearing range (~1 Hz) via COARSE + Knob1 -> slow 0.35 Hz breathing!
+    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -110);
+    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
+    CHECK(ctrl.state().voices[0].frequencyHz < 5.0f);
+    ctrl.tick(0.016f, tel);
+    CHECK(ctrl.leds().whiteKeyLeds[0] > steadyAudible0 - 0.10f); // Smooth frequency-threshold slew!
+    for (int i = 0; i < 45; ++i) {
+        ctrl.tick(0.016f, tel);
+    }
+    float breathMin = 1.0f;
+    float breathMax = 0.0f;
+    float maxBreathStep = 0.0f;
+    float prevBreathLed = ctrl.leds().whiteKeyLeds[0];
+    for (int i = 0; i < 200; ++i) { // ~3.2 s (> 1 full 2.86 s breath cycle)
+        ctrl.tick(0.016f, tel);
+        const float v = ctrl.leds().whiteKeyLeds[0];
+        const float d = std::fabs(v - prevBreathLed);
+        if (v < breathMin) {
+            breathMin = v;
+        }
+        if (v > breathMax) {
+            breathMax = v;
+        }
+        if (d > maxBreathStep) {
+            maxBreathStep = d;
+        }
+        prevBreathLed = v;
+    }
+    CHECK(breathMin > 0.12f && breathMin < 0.18f);
+    CHECK(breathMax > 0.66f && breathMax < 0.74f);
+    CHECK(maxBreathStep < 0.025f); // >3x slower & gentler than the 1.50 Hz user-activated Mute!
 
     // Verify dual-channel PLAY/STOP split cap:
     // - Sound ON (AUDIO OUTPUT = ON): PLAY (Green) = 0.0, STOP (Red) = 1.0
