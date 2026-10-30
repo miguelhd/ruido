@@ -15,7 +15,7 @@ const MIDI_KEYBED_MAP = [
   { kind: 'white', idx: 4 },  // 60 C4  (Pressure Pad 1)
   { kind: 'black', idx: 3 },  // 61 C#4 (OP4)
   { kind: 'white', idx: 5 },  // 62 D4  (Pressure Pad 2)
-  { kind: 'black', idx: 4 },  // 63 D#4 (OP5 Amplitude)
+  { kind: 'black', idx: 4 },  // 63 D#4 (OP5 Unassigned)
   { kind: 'white', idx: 6 },  // 64 E4  (Pressure Pad 3)
   { kind: 'white', idx: 7 },  // 65 F4  (Pressure Pad 4)
   { kind: 'black', idx: 5 },  // 66 F#4 (OP6 Pan)
@@ -149,7 +149,7 @@ async function ensureAudioRunning() {
         rateBadge.textContent = `DSP: ${(msg.sampleRate / 1000).toFixed(1)} kHz (${osKhz} kHz 4x)`;
       } else if (msg.type === 'telemetry') {
         const t = msg.telemetry;
-        if (t && t.length >= 22) {
+        if (t && t.length >= 26) {
           uiF32.set(t, uiPtrs.telemetryIn);
           uiWasm.wasm_ui_apply_telemetry();
         }
@@ -258,12 +258,12 @@ function syncAriaFromSummary() {
   }
 
   const lfoTargetNames = [
+    'Pitch',
     'LPF Cutoff',
     'LPF Resonance',
     'HPF Cutoff',
     'HPF Resonance',
     'Amplitude',
-    'Pitch',
     'Stereo Pan',
   ];
 
@@ -409,7 +409,7 @@ function bindKnobs() {
         e.preventDefault();
         const knobBank = uiWasm && uiPtrs ? Math.round(uiF32[uiPtrs.summary + 47]) : 0;
         const isDiscrete =
-          encId === 0 ||
+          (encId === 0 && knobBank !== 1) ||
           (encId === 3 && (knobBank === 4 || knobBank === 7)) ||
           (encId >= 3 && knobBank === 10);
 
@@ -653,6 +653,7 @@ function bindComputerKeyboard() {
     Equal: 1,        // OCT+ (momentary Coarse knob rate)
     KeyQ: 3,         // SEL (Pad Pressure Target: MS-20 Filter/LPG <-> Pitch Bend)
     KeyL: 5,         // LFO (Per-Voice LFO Page toggle)
+    KeyE: 6,         // EDIT (Channel Level & MS-20 Overdrive Page toggle)
     Semicolon: 7,    // GLO right grid (GLOBAL CONFIG menu toggle)
     KeyH: 8,         // HOME
     Escape: 8,       // HOME
