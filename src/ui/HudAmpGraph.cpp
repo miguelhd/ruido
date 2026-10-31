@@ -153,16 +153,14 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
 
     // 1. Optical reference horizons: 0% floor (y = 180) and 70% / 1.0x Drive Knee (y = 79.2)
     cv.drawHorizontalFilament(10.0f, 230.0f, kColYBot, 40.0f, 0.52f, true);
-    cv.drawHorizontalFilament(10.0f, 230.0f, kKneeY, 26.0f, 0.48f, true);
+    cv.drawHorizontalFilament(10.0f, 230.0f, kKneeY, 36.0f, 0.50f, true);
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         const float cx = 30.0f + static_cast<float>(v) * 60.0f;
         cv.drawVerticalSlit(cx, kColYTop, kColYBot + 2.5f, 24.0f);
-        cv.drawHorizontalFilament(cx - 15.0f, cx - 6.0f, kKneeY, 64.0f, 0.54f, true);
-        cv.drawHorizontalFilament(cx + 6.0f, cx + 15.0f, kKneeY, 64.0f, 0.54f, true);
     }
 
-    // 2. Linear-photon columns: clean VCA stem + plasma (0-70%) & 3A narrow hairy drive cap (>70%)
+    // 2. Linear-photon columns: clean VCA stem (0-70%) & 3A narrow hairy drive cap (>70%)
     const bool perVoiceFocus = !isGlobalKnobBank(hud.knobBank);
     const int pyStart = (y0 > 32) ? y0 : 32;
     const int pyEnd = (y1 < 183) ? y1 : 183;
@@ -175,7 +173,7 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
             const int cxInt = 30 + static_cast<int>(v) * 60;
             const float cx = static_cast<float>(cxInt);
             const float fy = faderY_[v];
-            const float pyPeak = peakY_[v];
+            const float level01 = clampf((kColYBot - fy) * (1.0f / kColYSpan), 0.0f, 1.0f);
             const float drv = driveNorm_[v];
             const float dim = muteDim_[v];
             const float activeW = 1.0f - 0.78f * dim;
@@ -183,28 +181,31 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
                 (perVoiceFocus && hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - dim);
             const float focBoost = 1.0f + 0.18f * effFoc;
 
+            // Level-scaled brightness: clearly visible ~47% silver-white floor at lowest audible
+            // level, brightening monotonically across 0-70% clean VCA into 100% incandescent white.
+            const float levelCurve = level01 * (0.58f + 0.42f * level01);
+            const float stemBaseE = (240.0f + 840.0f * levelCurve) * activeW * focBoost;
+
             const float stemTop = (drv > 0.005f) ? kKneeY : fy;
-            const float plasmaTop = (pyPeak > kKneeY) ? pyPeak : kKneeY;
-            const int xLo = cxInt - 10;
-            const int xHi = cxInt + 10;
+            const int xLo = cxInt - 4;
+            const int xHi = cxInt + 4;
 
             for (int py = pyStart; py < pyEnd; ++py) {
                 const float pyF = static_cast<float>(py);
-                const bool inStem = (pyF >= stemTop - 0.5f && pyF <= kColYBot + 0.5f);
-                const bool inPlasma = (pyF >= plasmaTop && pyF <= kColYBot);
-                if (!inStem && !inPlasma) {
+                if (pyF < stemTop - 0.5f || pyF > kColYBot + 0.5f) {
+                    continue;
+                }
+                const float topCov = clampf((pyF + 0.5f) - stemTop, 0.0f, 1.0f);
+                const float botCov = clampf((kColYBot + 0.5f) - pyF, 0.0f, 1.0f);
+                const float rowE = stemBaseE * topCov * botCov;
+                if (rowE < 1.0f) {
                     continue;
                 }
                 uint16_t* linRow = linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
                 for (int px = xLo; px <= xHi; ++px) {
                     const float dx = absf(static_cast<float>(px) - cx);
-                    float energy = 0.0f;
-                    if (inStem && dx < 4.5f) {
-                        energy += 265.0f * fastExpNeg(dx * dx * 1.65f) * activeW * focBoost;
-                    }
-                    if (inPlasma && dx < 9.5f) {
-                        energy += 155.0f * fastExpNeg(dx * dx * 0.115f) * activeW;
-                    }
+                    const float edgeD = (dx > 0.52f) ? (dx - 0.52f) : 0.0f;
+                    const float energy = rowE * fastExpNeg(edgeD * edgeD * 2.10f);
                     if (energy >= 1.0f) {
                         const uint32_t add = static_cast<uint32_t>(energy * masterE + 0.5f);
                         const uint32_t next = static_cast<uint32_t>(linRow[px]) + add;
@@ -215,7 +216,52 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
 
             const float hZone = kKneeY - fy;
             if (dim < 0.92f && drv > 0.005f && hZone > 1.2f) {
-                const float peakW = 2.8f * fastExp2(0.78f * fastLog2(clampf(drv, 0.001f, 1.0f)));
+                const float peakW = 3.8f * fastExp2(0.78f * fastLog2(clampf(drv, 0.001f, 1.0f)));
+                const int kneeClipY = static_cast<int>(kKneeY) + 1;
+                const int driveYEnd = (pyEnd < kneeClipY) ? pyEnd : kneeClipY;
+
+                // Subtle CRT phosphor bloom confined strictly to the > 70% V-cone drive region
+                int auraY0 = static_cast<int>(fy - 3.0f);
+                if (auraY0 < pyStart) {
+                    auraY0 = pyStart;
+                }
+                if (auraY0 < driveYEnd) {
+                    const float invHZone = 1.0f / hZone;
+                    const float auraBaseE = (30.0f + 48.0f * drv) * activeW * focBoost * masterE;
+                    for (int py = auraY0; py < driveYEnd; ++py) {
+                        const float pyF = static_cast<float>(py);
+                        const float u = clampf((kKneeY - pyF) * invHZone, 0.0f, 1.0f);
+                        const float tipFade =
+                            (pyF < fy) ? fastExpNeg((fy - pyF) * (fy - pyF) * 0.42f) : 1.0f;
+                        const float rowE = auraBaseE * u * tipFade;
+                        if (rowE < 1.5f) {
+                            continue;
+                        }
+                        const float halfSpan = 0.95f + u * (peakW * 0.62f + 0.85f);
+                        const float invFalloff = 1.0f / (halfSpan * halfSpan * 1.35f);
+                        const int axRange = static_cast<int>(halfSpan * 2.1f) + 2;
+                        int ax0 = cxInt - axRange;
+                        int ax1 = cxInt + axRange;
+                        if (ax0 < 2) {
+                            ax0 = 2;
+                        }
+                        if (ax1 > 237) {
+                            ax1 = 237;
+                        }
+                        uint16_t* linRow =
+                            linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
+                        for (int px = ax0; px <= ax1; ++px) {
+                            const float dx = static_cast<float>(px) - cx;
+                            const uint32_t add = static_cast<uint32_t>(
+                                rowE * fastExpNeg(dx * dx * invFalloff) + 0.5f);
+                            if (add > 0u) {
+                                const uint32_t next = static_cast<uint32_t>(linRow[px]) + add;
+                                linRow[px] = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
+                            }
+                        }
+                    }
+                }
+
                 OverdriveHairArray layer1{};
                 OverdriveHairArray layer2{};
                 smoothZeroPhase(overdriveHair_[v].data(), layer1.data(), kOverdriveHairPoints,
@@ -223,7 +269,7 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
                 smoothZeroPhase(overdriveHair_[v].data(), layer2.data(), kOverdriveHairPoints,
                                 0.45f, 3u);
                 const float* layers[3] = {overdriveHair_[v].data(), layer1.data(), layer2.data()};
-                constexpr float kLayerBaseE[3] = {215.0f, 125.0f, 78.0f};
+                constexpr float kLayerBaseE[3] = {350.0f, 205.0f, 130.0f};
 
                 int nPts = static_cast<int>(hZone * 1.45f + 0.5f);
                 if (nPts < 12) {
@@ -236,7 +282,7 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
 
                 for (size_t s = 0u; s < 3u; ++s) {
                     const float layerE =
-                        kLayerBaseE[s] * (0.82f + 0.42f * drv) * activeW * focBoost * masterE;
+                        kLayerBaseE[s] * (1.00f + 0.46f * drv) * activeW * focBoost * masterE;
                     const float layerGain =
                         (1.15f + 2.35f * drv) * (1.0f - 0.14f * static_cast<float>(s));
                     float px0 = cx;
@@ -253,22 +299,25 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
                         const float clipped = clampf(rawVal * layerGain, -1.0f, 1.0f);
                         const float cx1 = cx + clipped * (u * peakW);
                         const float segE = layerE * ((absf(clipped) >= 0.93f) ? 1.48f : 1.0f);
+                        const float segBloomE = segE * (0.14f + 0.14f * drv) * u;
+                        const float baseR2 = 0.27f * (1.0f - u);
+                        const float coreFalloff = 0.95f + 1.00f * u;
 
                         const float yLoF = (py0 < cy) ? py0 : cy;
                         const float yHiF = (py0 > cy) ? py0 : cy;
-                        int segY0 = static_cast<int>(yLoF) - 2;
-                        int segY1 = static_cast<int>(yHiF) + 3;
+                        int segY0 = static_cast<int>(yLoF) - 3;
+                        int segY1 = static_cast<int>(yHiF) + 4;
                         if (segY0 < pyStart) {
                             segY0 = pyStart;
                         }
-                        if (segY1 > pyEnd) {
-                            segY1 = pyEnd;
+                        if (segY1 > driveYEnd) {
+                            segY1 = driveYEnd;
                         }
                         if (segY0 < segY1) {
                             const float xLoF = (px0 < cx1) ? px0 : cx1;
                             const float xHiF = (px0 > cx1) ? px0 : cx1;
-                            int segX0 = static_cast<int>(xLoF) - 2;
-                            int segX1 = static_cast<int>(xHiF) + 2;
+                            int segX0 = static_cast<int>(xLoF) - 4;
+                            int segX1 = static_cast<int>(xHiF) + 4;
                             if (segX0 < 2) {
                                 segX0 = 2;
                             }
@@ -293,9 +342,15 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
                                     const float ddx = wx - t * vx;
                                     const float ddy = wy - t * vy;
                                     const float d2 = ddx * ddx + ddy * ddy;
-                                    if (d2 < 3.6f) {
-                                        const uint32_t add = static_cast<uint32_t>(
-                                            segE * fastExpNeg(d2 * 2.05f) + 0.5f);
+                                    if (d2 < 12.5f) {
+                                        const float effD2 = (d2 > baseR2) ? (d2 - baseR2) : 0.0f;
+                                        const float core =
+                                            (effD2 < 3.8f)
+                                                ? (segE * fastExpNeg(effD2 * coreFalloff))
+                                                : 0.0f;
+                                        const float bloom = segBloomE * fastExpNeg(d2 * 0.28f);
+                                        const uint32_t add =
+                                            static_cast<uint32_t>(core + bloom + 0.5f);
                                         if (add > 0u) {
                                             const uint32_t next =
                                                 static_cast<uint32_t>(linRow[px]) + add;
@@ -316,18 +371,22 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
         screenBlendLinearStrip(stripHeight, 2u, 238u, linScratch, lumBuf);
     }
 
-    // 3. Clean optical crest bead strictly within the clean VCA zone (<= 70%)
+    // 3. Clean optical crest bead strictly within the clean VCA zone (<= 70%), matched in width
+    //    to the 3-px capsule stem and scaling smoothly in brightness with level.
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         if (driveNorm_[v] > 0.006f) {
             continue;
         }
         const float cx = 30.0f + static_cast<float>(v) * 60.0f;
         const float fy = faderY_[v];
+        const float cleanFrac =
+            clampf((kColYBot - fy) * (1.0f / (kCleanAmpKnee * kColYSpan)), 0.0f, 1.0f);
         const float dim = muteDim_[v];
         const float effFoc = (perVoiceFocus && hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - dim);
-        const float beadInt = (0.80f + (0.30f - 0.80f) * dim) + 0.18f * effFoc;
-        const float beadRad = 1.95f + 0.40f * effFoc;
-        cv.drawOpticalBead(cx, fy, clampf(beadInt, 0.25f, 1.0f), beadRad);
+        const float audibleBeadInt = 0.56f + 0.36f * cleanFrac + 0.12f * effFoc;
+        const float beadInt = audibleBeadInt + (0.28f - audibleBeadInt) * dim;
+        const float beadRad = 1.80f + 0.25f * effFoc;
+        cv.drawOpticalBead(cx, fy, clampf(beadInt, 0.24f, 1.0f), beadRad);
     }
 }
 

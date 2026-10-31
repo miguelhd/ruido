@@ -1361,6 +1361,69 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         }
         RTEST_CHECK(monotonicSkirt);
     }
+
+    // (g) LEVEL screen (`HudAmpGraph::compositeLevelStrip`): 3-px dot-matched stem width (`x =
+    //     29..31` solid body at `cx = 30`) and monotonic level-brightness scaling across `3% ->
+    //     35% -> 68% -> 100%`, with clearly visible brightness even at the lowest audible level.
+    {
+        ruido::EngineTelemetry silentTel{};
+        ruido::HudState lvlHud{};
+        lvlHud.mode = ruido::HudMode::Amplitude;
+        lvlHud.knobBank = ruido::KnobBankMode::Amplitude;
+        lvlHud.editTarget = ruido::EditTarget::Level;
+        lvlHud.editPageOpen = true;
+        lvlHud.opacity = 1.0f;
+
+        const std::array<float, 4> testLevels{0.03f, 0.35f, 0.68f, 1.00f};
+        std::array<uint32_t, 4> stemBodySums{};
+        for (size_t li = 0u; li < testLevels.size(); ++li) {
+            renderer.reset();
+            ruido::EngineControlState lvlSt{};
+            lvlSt.global.masterRun = false;
+            lvlSt.global.masterTrim = 0.0f;
+            lvlSt.voices[0].amplitude = testLevels[li];
+            for (int f = 0; f < 8; ++f) {
+                renderer.prepareFrame(0.025f, lvlSt, lvlHud, silentTel);
+            }
+            renderer.renderFullScreenStrips(amp16.data());
+            const auto pxG6 = [&](size_t y, size_t x) -> uint16_t {
+                return (amp16[y * 240u + x] >> 5u) & 0x3Fu;
+            };
+            if (li == 0u) {
+                // Lowest audible level (3%): clearly visible bead/stem (>= 28 G6) and thicker
+                // 3-px body at y = 178 (`x = 29, 30, 31` all >= 16 G6; outer `x <= 25` == 0).
+                uint16_t lowMaxG6 = 0u;
+                for (size_t y = 172u; y <= 181u; ++y) {
+                    for (size_t x = 28u; x <= 32u; ++x) {
+                        const uint16_t g = pxG6(y, x);
+                        if (g > lowMaxG6) {
+                            lowMaxG6 = g;
+                        }
+                    }
+                }
+                RTEST_CHECK(lowMaxG6 >= 28u);
+                RTEST_CHECK(pxG6(178u, 29u) >= 16u && pxG6(178u, 30u) >= 26u &&
+                            pxG6(178u, 31u) >= 16u);
+                RTEST_CHECK(pxG6(178u, 25u) == 0u && pxG6(178u, 35u) == 0u);
+            }
+            if (li == 2u) {
+                // At 68% clean VCA, `x = 29..31` mid-stem (`y = 140`) forms a bright 3-px bar
+                // matching the dot width, with crisp zero halo outside `x = 26..34`.
+                RTEST_CHECK(pxG6(140u, 29u) >= 34u && pxG6(140u, 30u) >= 46u &&
+                            pxG6(140u, 31u) >= 34u);
+                RTEST_CHECK(pxG6(140u, 26u) == 0u && pxG6(140u, 34u) == 0u);
+            }
+            uint32_t bodySum = 0u;
+            for (size_t y = 177u; y <= 179u; ++y) {
+                for (size_t x = 29u; x <= 31u; ++x) {
+                    bodySum += pxG6(y, x);
+                }
+            }
+            stemBodySums[li] = bodySum;
+        }
+        RTEST_CHECK(stemBodySums[0] < stemBodySums[1] && stemBodySums[1] < stemBodySums[2] &&
+                    stemBodySums[2] < stemBodySums[3]);
+    }
 #undef RTEST_CHECK
 }
 
