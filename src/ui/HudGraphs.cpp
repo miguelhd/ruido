@@ -11,10 +11,6 @@ void HudGraphs::reset() noexcept {
     for (auto& fc : filterCurvesFixed_) {
         fc.fill(fltZeroFixed);
     }
-    for (auto& cc : filterCompCurvesFixed_) {
-        cc.fill(fltZeroFixed);
-    }
-    filterCompWeights_ = {0.0f, 0.0f};
     filterDivergenceSmooth_ = 0.0f;
     filterHpBeadX_ = 0.0f;
     filterHpBeadY_ = kFilterYZeroDb;
@@ -54,8 +50,6 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
                                   const std::array<ModulatedFilterParams, kNumOscillators>& mods,
                                   bool unified) noexcept {
     std::array<std::array<int16_t, kFilterSweepPts>, kNumOscillators> tgtCurves{};
-    std::array<std::array<int16_t, kFilterSweepPts>, 2> tgtComp{};
-    std::array<float, 2> tgtCompWeights{0.0f, 0.0f};
     float tgtHpX = filterHpBeadX_;
     float tgtHpY = filterHpBeadY_;
     float tgtHpInt = 0.0f;
@@ -68,13 +62,6 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
     if (unified) {
         const DualMs20Coeffs mainC = makeDualMs20Coeffs(mods[0].hpCutoffHz, mods[0].hpResonance,
                                                         mods[0].lpCutoffHz, mods[0].lpResonance);
-        const float resEnergy = 0.5f * (mainC.rHp * mainC.hpAct + mainC.rLp * mainC.lpAct);
-        const DualMs20Coeffs comp1C = makeDualMs20Coeffs(
-            mainC.clampedHp * 1.03f, mainC.rHp * 0.76f, mainC.clampedLp * 0.97f, mainC.rLp * 0.76f);
-        const DualMs20Coeffs comp2C = makeDualMs20Coeffs(
-            mainC.clampedHp * 1.07f, mainC.rHp * 0.54f, mainC.clampedLp * 0.93f, mainC.rLp * 0.54f);
-        const float drop1Db = 1.1f + 1.8f * resEnergy;
-        const float drop2Db = 2.3f + 3.0f * resEnergy;
 
         for (size_t i = 0u; i < kFilterSweepPts; ++i) {
             const float freq = kFilterSweepFreqs[i];
@@ -83,11 +70,7 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
             tgtCurves[1][i] = yMain;
             tgtCurves[2][i] = yMain;
             tgtCurves[3][i] = yMain;
-            tgtComp[0][i] = dbToFilterYFixed(evalDualMs20Db(freq, comp1C) - drop1Db);
-            tgtComp[1][i] = dbToFilterYFixed(evalDualMs20Db(freq, comp2C) - drop2Db);
         }
-        tgtCompWeights[0] = 0.28f + 0.24f * resEnergy;
-        tgtCompWeights[1] = 0.18f + 0.22f * resEnergy;
 
         if (mainC.hpAct > 0.02f) {
             const float uHp = clampf(
@@ -115,8 +98,6 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
                 tgtCurves[v][i] = dbToFilterYFixed(evalDualMs20Db(kFilterSweepFreqs[i], c));
             }
         }
-        tgtComp[0] = tgtCurves[0];
-        tgtComp[1] = tgtCurves[0];
     }
 
     const float alphaCurve =
@@ -125,19 +106,11 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
 
     filterDivergenceSmooth_ =
         slewScalar(filterDivergenceSmooth_, unified ? 0.0f : 1.0f, alphaDiv, 0.001f);
-    filterCompWeights_[0] = slewScalar(filterCompWeights_[0], tgtCompWeights[0], alphaCurve);
-    filterCompWeights_[1] = slewScalar(filterCompWeights_[1], tgtCompWeights[1], alphaCurve);
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         for (size_t i = 0u; i < kFilterSweepPts; ++i) {
             filterCurvesFixed_[v][i] =
                 slewQ8_6(filterCurvesFixed_[v][i], tgtCurves[v][i], alphaCurve, snapImmediate);
-        }
-    }
-    for (size_t c = 0u; c < 2u; ++c) {
-        for (size_t i = 0u; i < kFilterSweepPts; ++i) {
-            filterCompCurvesFixed_[c][i] =
-                slewQ8_6(filterCompCurvesFixed_[c][i], tgtComp[c][i], alphaCurve, snapImmediate);
         }
     }
 
@@ -643,13 +616,6 @@ void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8
             }
         };
 
-        const float compVis = 1.0f - div;
-        if (compVis > 0.004f) {
-            addCurvePhoton(filterCompCurvesFixed_[1],
-                           filterCompWeights_[1] * compVis * effFilterAlpha01);
-            addCurvePhoton(filterCompCurvesFixed_[0],
-                           filterCompWeights_[0] * compVis * effFilterAlpha01);
-        }
         const float mainCurveWgt =
             (multiCurves ? (0.245f + 0.275f * div) : 0.98f) * effFilterAlpha01;
         for (size_t vc = 0u; vc < curveCount; ++vc) {
@@ -659,12 +625,12 @@ void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8
         screenBlendLinearStrip(stripHeight, 0u, kDisplayWidth, linScratch, lumBuf);
     }
 
-    const float compVis = 1.0f - div;
-    const float hpBeadVis = filterHpBeadInt_ * compVis;
+    const float singleVis = 1.0f - div;
+    const float hpBeadVis = filterHpBeadInt_ * singleVis;
     if (hpBeadVis > 0.005f) {
         filterCv.drawOpticalBead(filterHpBeadX_, filterHpBeadY_, hpBeadVis, filterHpBeadRad_);
     }
-    const float lpBeadVis = filterLpBeadInt_ * compVis;
+    const float lpBeadVis = filterLpBeadInt_ * singleVis;
     if (lpBeadVis > 0.005f) {
         filterCv.drawOpticalBead(filterLpBeadX_, filterLpBeadY_, lpBeadVis, filterLpBeadRad_);
     }

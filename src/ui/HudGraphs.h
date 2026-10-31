@@ -158,8 +158,6 @@ class HudGraphs {
                         const LfoDriftArray& lfoDriftPacked) noexcept;
 
     std::array<std::array<int16_t, kFilterSweepPts>, kNumOscillators> filterCurvesFixed_{};
-    std::array<std::array<int16_t, kFilterSweepPts>, 2> filterCompCurvesFixed_{};
-    std::array<float, 2> filterCompWeights_{0.0f, 0.0f};
     float filterDivergenceSmooth_ = 0.0f;
     float filterHpBeadX_ = 0.0f;
     float filterHpBeadY_ = kFilterYZeroDb;

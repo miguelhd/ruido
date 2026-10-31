@@ -1329,6 +1329,54 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     ctrl.tick(0.100f, driveTel);
     RTEST_CHECK(nearF(ctrl.hud().opacity, 0.0f));
     RTEST_CHECK(nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Sel)], 0.75f));
+
+    // (f) Single pure contour per oscillator on FX (`HudMode::VoiceFilter`): zero fake secondary
+    //     echo ridges below the passband spine (monotonic vertical skirt decay on same-phase 4x4
+    //     Bayer rows above and below the y = 120 background scope baseline).
+    {
+        renderer.reset();
+        ruido::EngineTelemetry silentTel{};
+        ruido::EngineControlState fltSt{};
+        fltSt.global.masterRun = false;
+        fltSt.global.masterTrim = 0.0f;
+        fltSt.voices[0].hpCutoffHz = 110.0f;
+        fltSt.voices[0].hpResonance = 0.78f;
+        fltSt.voices[0].lpCutoffHz = 2600.0f;
+        fltSt.voices[0].lpResonance = 0.78f;
+        ruido::HudState fltHud{};
+        fltHud.mode = ruido::HudMode::VoiceFilter;
+        fltHud.knobBank = ruido::KnobBankMode::VoiceFilter;
+        fltHud.fxVoiceFocus = 0u;
+        fltHud.fxPageOpen = true;
+        fltHud.opacity = 1.0f;
+        for (int f = 0; f < 8; ++f) {
+            renderer.prepareFrame(0.025f, fltSt, fltHud, silentTel);
+        }
+        renderer.renderFullScreenStrips(amp16.data());
+        const auto pxG6 = [&](size_t y, size_t x) -> uint16_t {
+            return (amp16[y * 240u + x] >> 5u) & 0x3Fu;
+        };
+        uint16_t maxPassbandSpineG6 = 0u;
+        for (size_t y = 74u; y <= 87u; ++y) {
+            const uint16_t g = pxG6(y, 120u);
+            if (g > maxPassbandSpineG6) {
+                maxPassbandSpineG6 = g;
+            }
+        }
+        RTEST_CHECK(maxPassbandSpineG6 >= 32u); // Crisp single Reinhard-tonemapped passband spine
+        bool monotonicSkirt = true;
+        for (size_t y = 90u; y <= 110u; ++y) {
+            if (pxG6(y + 4u, 120u) > pxG6(y, 120u)) {
+                monotonicSkirt = false;
+            }
+        }
+        for (size_t y = 128u; y <= 176u; ++y) {
+            if (pxG6(y + 4u, 120u) > pxG6(y, 120u)) {
+                monotonicSkirt = false;
+            }
+        }
+        RTEST_CHECK(monotonicSkirt);
+    }
 #undef RTEST_CHECK
 }
 
