@@ -1074,20 +1074,46 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, ruido::kDefaultVoiceAmp));
 
     // (d) SEL (PAN) Edge-to-Edge Stereo Panorama Curve (HudGraphs sister to FX & LFO):
-    //     SELECT focus stepping (PAN <-> OSC 1..4), left/right panorama steering,
-    //     spotlight vs 30% silver companion contrast, LFO -> PAN strip equivalence,
-    //     MONO center convergence + strictly locked knobs + centered "OUTPUT ROUTING SET TO MONO"
-    //     bottom message (no OSC 1-4 columns), and 150 ms 2nd-tap dissolve!
+    //     SELECT switches OUTPUT ROUTING (STEREO <-> MONO) with 1.5 s "OUTPUT ROUTING" header,
+    //     left/right panorama steering, spotlight vs 30% silver companion contrast, LFO -> PAN
+    //     strip equivalence, MONO center convergence + strictly locked KNOB 1-4 + centered
+    //     "OUTPUT ROUTING SET TO MONO" bottom message (no OSC 1-4 columns), and 150 ms dissolve!
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
     ctrl.tick(0.016f, driveTel);
     RTEST_CHECK(ctrl.hud().panPageOpen && !ctrl.hud().editPageOpen);
+    RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
     RTEST_CHECK(nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Sel)], 1.0f));
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -240); // Osc 1 -> L100 (-1.0)
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 240);  // Osc 4 -> R100 (+1.0)
-    RTEST_CHECK(nearF(ctrl.state().voices[0].pan, -1.0f));
-    RTEST_CHECK(nearF(ctrl.state().voices[3].pan, 1.0f));
 
+    // SELECT switches OUTPUT ROUTING cleanly between STEREO (0) and MONO (1) right on SEL,
+    // displaying HudMode::OutputRouting for 1.5 s without altering stored voice pan values!
+    const float preSelectPan0 = ctrl.state().voices[0].pan;
+    RTEST_CHECK(!ctrl.state().global.monoCollapse);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // +1 detent -> MONO
+    RTEST_CHECK(ctrl.state().global.monoCollapse);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::OutputRouting &&
+                ctrl.hud().knobBank == ruido::KnobBankMode::Panning &&
+                ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4); // -1 detent -> STEREO
+    RTEST_CHECK(!ctrl.state().global.monoCollapse);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::OutputRouting);
+    for (int i = 0; i < 8; ++i) {
+        ctrl.tick(0.25f, driveTel); // 1.5 s toast returns header cleanly to HudMode::Panning
+    }
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Panning &&
+                ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+    RTEST_CHECK(nearF(ctrl.state().voices[0].pan, preSelectPan0));
+
+    // Pan all 4 voices hard Left (L100 = -1.0) first to verify crisp Left-stage curve & zero text
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -240);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, -240);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, -240);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -240);
+    RTEST_CHECK(nearF(ctrl.state().voices[0].pan, -1.0f));
+    RTEST_CHECK(nearF(ctrl.state().voices[3].pan, -1.0f));
+
+    renderer
+        .reset(); // Clear residual background scope history so silent render has pure #000000 bg
     quietSt = ctrl.state();
     quietSt.global.masterRun = false;
     quietSt.global.masterTrim = 0.0f;
@@ -1134,15 +1160,22 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 180);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 260);
     RTEST_CHECK(nearF(ctrl.state().voices[3].pan, 1.0f));
+    RTEST_CHECK(ctrl.hud().focusedKnob == 3u);
     quietSt = ctrl.state();
     quietSt.global.masterRun = false;
     quietSt.global.masterTrim = 0.0f;
+    quietSt.voices[0].amplitude = 0.65f;
+    quietSt.voices[3].amplitude = 0.65f;
     quietSt.voices[1].lfoTarget = ruido::LfoTarget::Pan;
     quietSt.voices[1].lfoDepth = 0.55f;
     for (int f = 0; f < 16; ++f) {
         renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
     }
     renderer.renderFullScreenStrips(amp16.data());
+    const uint32_t unfocusedL100Box = sumBoxG6(amp16, 4u, 32u, 70u, 180u);
+    const uint32_t spotlightR100Box = sumBoxG6(amp16, 207u, 235u, 70u, 180u);
+    RTEST_CHECK(spotlightR100Box > unfocusedL100Box * 2u);
+
     for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 8u)) {
         renderer.renderStrip(y, 8u, amp8.data() + static_cast<size_t>(y) * 240u);
     }
@@ -1157,21 +1190,35 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     RTEST_CHECK(panPanoramaStripsEq);
 
-    // MONO mode strictly locks KNOB 1-4 & SELECT on SEL (and KNOB 4 = PAN in GLOBAL LEVEL):
-    // header stays "PAN · MONO", OSC 1-4 bottom columns are replaced by centered
-    // "OUTPUT ROUTING SET TO MONO", turning locked knobs changes zero state and zero pixels,
-    // and stereo pan positions are preserved intact when returning to STEREO!
+    // Turning SELECT CW on SEL switches STEREO -> MONO, momentarily shows "OUTPUT ROUTING · MONO"
+    // in the header (1.5 s) before settling to "PAN · MONO", replaces OSC 1-4 bottom columns with
+    // centered "OUTPUT ROUTING SET TO MONO", strictly locks KNOB 1-4 (zero state or pixel change),
+    // and preserves stereo pan positions intact when SELECT switches back to STEREO!
     const std::array<float, 4> savedStereoPan = {
         ctrl.state().voices[0].pan,
         ctrl.state().voices[1].pan,
         ctrl.state().voices[2].pan,
         ctrl.state().voices[3].pan,
     };
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, true);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // Turn SELECT CW -> MONO!
     RTEST_CHECK(ctrl.state().global.monoCollapse);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::OutputRouting &&
+                ctrl.hud().knobBank == ruido::KnobBankMode::Panning &&
+                ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+
+    // During SELECT's 1.5 s toast, header shows bold "OUTPUT ROUTING" (x = 48..126 lit!) while
+    // center curve & centered bottom message render live underneath!
+    quietSt = ctrl.state();
+    quietSt.global.masterRun = false;
+    quietSt.global.masterTrim = 0.0f;
+    for (int f = 0; f < 16; ++f) {
+        renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
+    }
+    renderer.renderFullScreenStrips(clean16.data());
+    RTEST_CHECK(maxBoxG6(clean16, 48u, 126u, 6u, 21u) >= 55u); // "OUTPUT ROUTING" bold title!
+
     for (int i = 0; i < 8; ++i) {
-        ctrl.tick(0.25f, driveTel); // Let OUTPUT ROUTING · MONO toast return to latched SEL page
+        ctrl.tick(0.25f, driveTel); // After 1.5 s, header settles back to "PAN · MONO"
     }
     RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Panning &&
                 ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
@@ -1183,15 +1230,10 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
                                sizeof(hdrRight));
     RTEST_CHECK(hdrSuffix[0] == '\0' && std::strcmp(hdrRight, "MONO") == 0);
 
-    // Render MONO SEL view: left header is short "PAN" (x = 48..126 empty), no OSC 1-4 row
+    // Render settled MONO SEL view: left header is short "PAN" (x = 48..126 empty), no OSC 1-4 row
     // (y = 191..202 empty) or 12pt value row (y = 219..232 empty), centered "OUTPUT ROUTING SET TO
     // MONO" caption at y = 206..217, and centered converged mono soundstage curve!
-    quietSt = ctrl.state();
-    quietSt.global.masterRun = false;
-    quietSt.global.masterTrim = 0.0f;
-    for (int f = 0; f < 16; ++f) {
-        renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
-    }
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
     renderer.renderFullScreenStrips(clean16.data());
     RTEST_CHECK(maxBoxG6(clean16, 48u, 126u, 6u, 21u) == 0u);
     RTEST_CHECK(maxBoxG6(clean16, 0u, 239u, 191u, 202u) == 0u);
@@ -1223,13 +1265,14 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     RTEST_CHECK(monoPanStripsEq);
 
-    // Turning KNOB 1-4 and SELECT in MONO acts strictly locked: zero pan change, zero focus, and
-    // 100% pixel-identical frame (no column lighting or header title swap)!
+    // Turning KNOB 1-4 in MONO acts strictly locked: zero pan change, zero focus, and 100%
+    // pixel-identical frame (never lights OSC 1-4 or flashes OUTPUT ROUTING)!
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 120);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 64);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, -80);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -120);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8);
-    RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Panning &&
+                ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
     for (size_t v = 0u; v < 4u; ++v) {
         RTEST_CHECK(nearF(ctrl.state().voices[v].pan, savedStereoPan[v]));
     }
@@ -1265,10 +1308,11 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
 
-    // Tap POLY -> immediately restores STEREO with original stereo pan positions intact!
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, true);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, false);
-    RTEST_CHECK(!ctrl.state().global.monoCollapse);
+    // Turning SELECT CCW on SEL switches MONO -> STEREO ("OUTPUT ROUTING · STEREO") with original
+    // stereo pan positions intact!
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
+    RTEST_CHECK(!ctrl.state().global.monoCollapse &&
+                ctrl.hud().mode == ruido::HudMode::OutputRouting);
     for (size_t v = 0u; v < 4u; ++v) {
         RTEST_CHECK(nearF(ctrl.state().voices[v].pan, savedStereoPan[v]));
     }

@@ -229,18 +229,17 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             return;
         }
         if (mod == HeldModifier::None && hud_.panPageOpen) {
-            if (state_.global.monoCollapse) {
-                return;
+            const int32_t curIdx =
+                globalConfigGetIndex(ConfigItemId::OutputRouting, hud_.config, state_.global);
+            const int32_t nextIdx =
+                stepClampedDetent(curIdx, globalConfigMaxIndex(ConfigItemId::OutputRouting), ticks,
+                                  rate, selectTickAccum_);
+            if (globalConfigSetIndex(ConfigItemId::OutputRouting, nextIdx, hud_.config,
+                                     state_.global)) {
+                publishState();
             }
-            const int32_t curSlot = (hud_.focusedKnob < kNumOscillators)
-                                        ? (static_cast<int32_t>(hud_.focusedKnob) + 1)
-                                        : 0;
-            const int32_t nextSlot = stepClampedDetent(
-                curSlot, static_cast<int32_t>(kNumOscillators), ticks, rate, selectTickAccum_);
-            const uint8_t kFocus =
-                (nextSlot > 0) ? static_cast<uint8_t>(nextSlot - 1) : kNoFocusedKnob;
-            latchKnobEdit(KnobBankMode::Panning, HudMode::Panning, kFocus,
-                          (nextSlot > 0) ? kFocus : hud_.focusedVoice);
+            hud_.knobBank = KnobBankMode::Panning;
+            triggerHud(HudMode::OutputRouting, hud_.focusedVoice, kNoFocusedKnob);
             return;
         }
         hud_.lastEncoder = EncoderId::Select;
