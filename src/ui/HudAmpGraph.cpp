@@ -1,10 +1,9 @@
 #include "ui/HudAmpGraph.h"
 
 #include "core/DspMath.h"
+#include "core/GlobalControl.h"
 #include "core/HudEnvelope.h"
 #include "core/LfoMath.h"
-#include "ui/FontSansAA.h"
-#include "ui/HudFormat.h"
 #include "ui/MonoCanvas.h"
 
 #include <cstring>
@@ -14,12 +13,12 @@ namespace ruido {
 void HudAmpGraph::reset() noexcept {
     faderY_.fill(kColYBot);
     driveNorm_.fill(0.0f);
-    driveRatio_.fill(1.0f);
     peakY_.fill(kColYBot);
     pulseWidth_.fill(0.50f);
     driftAmt_.fill(kDefaultVoiceDrift);
     driftLive_.fill(0.0f);
     muteDim_.fill(0.0f);
+    overdriveHair_ = {};
     phase_ = 0.0f;
     widthPhase_ = 0.0f;
     driftPhase_ = 0.0f;
@@ -45,9 +44,10 @@ void HudAmpGraph::stepFadeOut(float dtClamped) noexcept {
 void HudAmpGraph::update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                          const LfoSignalArray& lfoOutput,
                          const std::array<float, kNumOscillators>& voicePeak,
-                         const std::array<float, kNumOscillators>& voiceDriftNorm) noexcept {
-    const bool editVisible = rawHud.opacity > 0.001f && rawHud.editPageOpen;
-    const bool levelAct = editVisible && (rawHud.knobBank == KnobBankMode::Amplitude);
+                         const std::array<float, kNumOscillators>& voiceDriftNorm,
+                         const OverdriveHairTable& overdriveHair) noexcept {
+    const bool editVisible = rawHud.opacity > 0.001f && rawHud.editPageOpen && !rawHud.modifierHeld;
+    const bool levelAct = isLevelViewActive(rawHud);
     const bool widthAct = editVisible && (rawHud.knobBank == KnobBankMode::PulseWidth);
     const bool driftAct = editVisible && (rawHud.knobBank == KnobBankMode::VoiceDrift);
     const bool anyAct = levelAct || widthAct || driftAct;
@@ -63,6 +63,7 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
 
     const bool snap = !primed_ || (anyAct && wasInvisible);
     primed_ = true;
+    overdriveHair_ = overdriveHair;
 
     const float alphaFader = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.036f)));
     const float alphaDrift = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.065f)));
@@ -78,7 +79,6 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
         const bool silentMute = aud.muteBlend >= 0.999f;
         const float liveAmp = computeLiveVoiceAmplitude(vp, lfoA, lfoB);
         const float effAmp = silentMute ? 0.0f : clampf(liveAmp, 0.0f, 1.0f);
-        const VoiceChannelGain chGain = computeVoiceChannelGain(effAmp);
 
         const float tgtY = clampf(kColYBot - effAmp * kColYSpan, kColYTop, kColYBot);
         const float tgtDrive =
@@ -96,7 +96,6 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
 
         faderY_[v] = slewScalar(faderY_[v], tgtY, alphaFader, 0.01f);
         driveNorm_[v] = slewScalar(driveNorm_[v], tgtDrive, alphaFader, 0.002f);
-        driveRatio_[v] = slewScalar(driveRatio_[v], chGain.preDrive, alphaFader, 0.005f);
         pulseWidth_[v] = slewScalar(pulseWidth_[v], tgtPw, alphaFader, 0.002f);
         driftAmt_[v] = slewScalar(driftAmt_[v], tgtDrAmt, alphaFader, 0.002f);
         driftLive_[v] = slewScalar(driftLive_[v], tgtDrLive, alphaDrift, 0.002f);
@@ -163,7 +162,8 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
         cv.drawHorizontalFilament(cx + 6.0f, cx + 15.0f, kKneeY, 64.0f, 0.54f, true);
     }
 
-    // 2. Linear-photon caustic columns: clean VCA stem, live acoustic plasma & MS-20 drive wings
+    // 2. Linear-photon columns: clean VCA stem + plasma (0-70%) & 3A narrow hairy drive cap (>70%)
+    const bool perVoiceFocus = !isGlobalKnobBank(hud.knobBank);
     const int pyStart = (y0 > 32) ? y0 : 32;
     const int pyEnd = (y1 < 183) ? y1 : 183;
     if (pyStart < pyEnd) {
@@ -177,63 +177,137 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
             const float fy = faderY_[v];
             const float pyPeak = peakY_[v];
             const float drv = driveNorm_[v];
-            const float activeW = 1.0f - 0.78f * muteDim_[v];
-            const float effFoc = (hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - muteDim_[v]);
+            const float dim = muteDim_[v];
+            const float activeW = 1.0f - 0.78f * dim;
+            const float effFoc =
+                (perVoiceFocus && hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - dim);
             const float focBoost = 1.0f + 0.18f * effFoc;
-            const int xLo = (cxInt - 22 > 2) ? (cxInt - 22) : 2;
-            const int xHi = (cxInt + 22 < 237) ? (cxInt + 22) : 237;
+
+            const float stemTop = (drv > 0.005f) ? kKneeY : fy;
+            const float plasmaTop = (pyPeak > kKneeY) ? pyPeak : kKneeY;
+            const int xLo = cxInt - 10;
+            const int xHi = cxInt + 10;
 
             for (int py = pyStart; py < pyEnd; ++py) {
                 const float pyF = static_cast<float>(py);
-                uint16_t* linRow = linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
-
-                const bool inStem = (pyF >= fy - 0.5f && pyF <= kColYBot + 0.5f);
-                const bool inPlasma = (pyF >= pyPeak && pyF <= kColYBot);
-                const bool inWings = (drv > 0.005f && pyF >= fy - 0.5f && pyF <= kKneeY + 1.0f);
-                if (!inStem && !inPlasma && !inWings) {
+                const bool inStem = (pyF >= stemTop - 0.5f && pyF <= kColYBot + 0.5f);
+                const bool inPlasma = (pyF >= plasmaTop && pyF <= kColYBot);
+                if (!inStem && !inPlasma) {
                     continue;
                 }
-
-                float wingHalfW = 1.2f;
-                float uOver = 0.0f;
-                if (inWings) {
-                    uOver = clampf((kKneeY - pyF) * (1.0f / (kKneeY - kColYTop)), 0.0f, 1.0f);
-                    wingHalfW =
-                        1.5f + (16.5f * uOver * (0.58f + 0.42f * uOver)) * (0.32f + 0.68f * drv);
-                }
-
+                uint16_t* linRow = linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
                 for (int px = xLo; px <= xHi; ++px) {
                     const float dx = absf(static_cast<float>(px) - cx);
                     float energy = 0.0f;
-
                     if (inStem && dx < 4.5f) {
-                        const float stemCore = fastExpNeg(dx * dx * 1.65f);
-                        energy += 265.0f * stemCore * activeW * focBoost;
+                        energy += 265.0f * fastExpNeg(dx * dx * 1.65f) * activeW * focBoost;
                     }
                     if (inPlasma && dx < 9.5f) {
-                        const float sigInv2 = (pyF < kKneeY) ? 0.065f : 0.115f;
-                        const float plasma = fastExpNeg(dx * dx * sigInv2);
-                        energy += 155.0f * plasma * activeW;
+                        energy += 155.0f * fastExpNeg(dx * dx * 0.115f) * activeW;
                     }
-                    if (inWings && dx <= wingHalfW + 3.2f) {
-                        const float fill =
-                            (dx <= wingHalfW)
-                                ? (0.36f + 0.44f * (dx / (wingHalfW + 0.1f)))
-                                : (0.80f * fastExpNeg((dx - wingHalfW) * (dx - wingHalfW) * 1.4f));
-                        const float rimDist = dx - wingHalfW;
-                        const float rim = fastExpNeg(rimDist * rimDist * 1.35f);
-                        const float capDist = pyF - fy;
-                        const float cap = (capDist >= -0.6f && capDist <= 2.2f && dx <= wingHalfW)
-                                              ? fastExpNeg(capDist * capDist * 0.85f)
-                                              : 0.0f;
-                        energy += (185.0f * fill + 275.0f * rim + 210.0f * cap) *
-                                  (0.35f + 0.65f * drv) * activeW * focBoost;
-                    }
-
                     if (energy >= 1.0f) {
                         const uint32_t add = static_cast<uint32_t>(energy * masterE + 0.5f);
                         const uint32_t next = static_cast<uint32_t>(linRow[px]) + add;
                         linRow[px] = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
+                    }
+                }
+            }
+
+            const float hZone = kKneeY - fy;
+            if (dim < 0.92f && drv > 0.005f && hZone > 1.2f) {
+                const float peakW = 2.8f * fastExp2(0.78f * fastLog2(clampf(drv, 0.001f, 1.0f)));
+                OverdriveHairArray layer1{};
+                OverdriveHairArray layer2{};
+                smoothZeroPhase(overdriveHair_[v].data(), layer1.data(), kOverdriveHairPoints,
+                                0.42f, 1u);
+                smoothZeroPhase(overdriveHair_[v].data(), layer2.data(), kOverdriveHairPoints,
+                                0.45f, 3u);
+                const float* layers[3] = {overdriveHair_[v].data(), layer1.data(), layer2.data()};
+                constexpr float kLayerBaseE[3] = {215.0f, 125.0f, 78.0f};
+
+                int nPts = static_cast<int>(hZone * 1.45f + 0.5f);
+                if (nPts < 12) {
+                    nPts = 12;
+                } else if (nPts > 64) {
+                    nPts = 64;
+                }
+                const float invNPts = 1.0f / static_cast<float>(nPts);
+                constexpr float kHairMaxIdx = static_cast<float>(kOverdriveHairPoints - 1u);
+
+                for (size_t s = 0u; s < 3u; ++s) {
+                    const float layerE =
+                        kLayerBaseE[s] * (0.82f + 0.42f * drv) * activeW * focBoost * masterE;
+                    const float layerGain =
+                        (1.15f + 2.35f * drv) * (1.0f - 0.14f * static_cast<float>(s));
+                    float px0 = cx;
+                    float py0 = kKneeY;
+
+                    for (int i = 1; i <= nPts; ++i) {
+                        const float u = static_cast<float>(i) * invNPts;
+                        const float cy = kKneeY - u * hZone;
+                        const float idxF = u * kHairMaxIdx;
+                        const size_t i0 = static_cast<size_t>(idxF);
+                        const size_t i1 = (i0 + 1u < kOverdriveHairPoints) ? (i0 + 1u) : i0;
+                        const float rawVal = layers[s][i0] + (idxF - static_cast<float>(i0)) *
+                                                                 (layers[s][i1] - layers[s][i0]);
+                        const float clipped = clampf(rawVal * layerGain, -1.0f, 1.0f);
+                        const float cx1 = cx + clipped * (u * peakW);
+                        const float segE = layerE * ((absf(clipped) >= 0.93f) ? 1.48f : 1.0f);
+
+                        const float yLoF = (py0 < cy) ? py0 : cy;
+                        const float yHiF = (py0 > cy) ? py0 : cy;
+                        int segY0 = static_cast<int>(yLoF) - 2;
+                        int segY1 = static_cast<int>(yHiF) + 3;
+                        if (segY0 < pyStart) {
+                            segY0 = pyStart;
+                        }
+                        if (segY1 > pyEnd) {
+                            segY1 = pyEnd;
+                        }
+                        if (segY0 < segY1) {
+                            const float xLoF = (px0 < cx1) ? px0 : cx1;
+                            const float xHiF = (px0 > cx1) ? px0 : cx1;
+                            int segX0 = static_cast<int>(xLoF) - 2;
+                            int segX1 = static_cast<int>(xHiF) + 2;
+                            if (segX0 < 2) {
+                                segX0 = 2;
+                            }
+                            if (segX1 > 237) {
+                                segX1 = 237;
+                            }
+                            const float vx = cx1 - px0;
+                            const float vy = cy - py0;
+                            const float len2 = vx * vx + vy * vy;
+                            const float invLen2 = (len2 > 1.0e-5f) ? (1.0f / len2) : 0.0f;
+
+                            for (int py = segY0; py < segY1; ++py) {
+                                uint16_t* linRow =
+                                    linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
+                                const float wy = static_cast<float>(py) - py0;
+                                for (int px = segX0; px <= segX1; ++px) {
+                                    const float wx = static_cast<float>(px) - px0;
+                                    const float t =
+                                        (invLen2 > 0.0f)
+                                            ? clampf((wx * vx + wy * vy) * invLen2, 0.0f, 1.0f)
+                                            : 0.0f;
+                                    const float ddx = wx - t * vx;
+                                    const float ddy = wy - t * vy;
+                                    const float d2 = ddx * ddx + ddy * ddy;
+                                    if (d2 < 3.6f) {
+                                        const uint32_t add = static_cast<uint32_t>(
+                                            segE * fastExpNeg(d2 * 2.05f) + 0.5f);
+                                        if (add > 0u) {
+                                            const uint32_t next =
+                                                static_cast<uint32_t>(linRow[px]) + add;
+                                            linRow[px] = static_cast<uint16_t>(
+                                                (next > 4095u) ? 4095u : next);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        px0 = cx1;
+                        py0 = cy;
                     }
                 }
             }
@@ -242,33 +316,18 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
         screenBlendLinearStrip(stripHeight, 2u, 238u, linScratch, lumBuf);
     }
 
-    // 3. Crest optical beads / overdrive coronas & compact drive-multiplier callouts
+    // 3. Clean optical crest bead strictly within the clean VCA zone (<= 70%)
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        const int cxInt = 30 + static_cast<int>(v) * 60;
-        const float cx = static_cast<float>(cxInt);
-        const float fy = faderY_[v];
-        const float drv = driveNorm_[v];
-        const float dim = muteDim_[v];
-        const float effFoc = (hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - dim);
-
-        if (drv > 0.02f && dim < 0.85f) {
-            const float beaconInt = (0.84f + 0.16f * effFoc) * (1.0f - 0.6f * dim);
-            cv.drawLfoPhaseBeacon(cx, fy, beaconInt, drv);
-
-            char multStr[12]{};
-            formatMultiplierX(multStr, sizeof(multStr), driveRatio_[v]);
-            int lblY = static_cast<int>(fy) - 13;
-            if (lblY < 25) {
-                lblY = 25;
-            }
-            const float lblF = (186.0f + 56.0f * effFoc) * (1.0f - 0.45f * dim);
-            cv.drawSansCentered(kFontSansSmall, cxInt, lblY, multStr,
-                                static_cast<uint8_t>(lblF + 0.5f), 1);
-        } else {
-            const float beadInt = (0.80f + (0.30f - 0.80f) * dim) + 0.18f * effFoc;
-            const float beadRad = 1.95f + 0.40f * effFoc;
-            cv.drawOpticalBead(cx, fy, clampf(beadInt, 0.25f, 1.0f), beadRad);
+        if (driveNorm_[v] > 0.006f) {
+            continue;
         }
+        const float cx = 30.0f + static_cast<float>(v) * 60.0f;
+        const float fy = faderY_[v];
+        const float dim = muteDim_[v];
+        const float effFoc = (perVoiceFocus && hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - dim);
+        const float beadInt = (0.80f + (0.30f - 0.80f) * dim) + 0.18f * effFoc;
+        const float beadRad = 1.95f + 0.40f * effFoc;
+        cv.drawOpticalBead(cx, fy, clampf(beadInt, 0.25f, 1.0f), beadRad);
     }
 }
 

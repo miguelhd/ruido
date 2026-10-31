@@ -20,6 +20,73 @@ constexpr bool isKnobFocusableMode(HudMode mode) noexcept {
            mode == HudMode::VoicePressure || mode == HudMode::VoiceLfo || isGlobalHudMode(mode);
 }
 
+inline void formatHeaderDriveValue(float ampVal, char* rightText, size_t rightCap) noexcept {
+    if (ampVal > kCleanAmpKnee + 0.003f) {
+        const VoiceChannelGain cg = computeVoiceChannelGain(ampVal);
+        char multBuf[12]{};
+        formatMultiplierX(multBuf, sizeof(multBuf), cg.preDrive);
+        size_t rp = appendStr(rightText, 0u, rightCap, "DRIVE ");
+        appendStr(rightText, rp, rightCap, multBuf);
+    } else {
+        appendStr(rightText, 0u, rightCap, "CLEAN VCA");
+    }
+}
+
+inline void formatHeaderEnsembleDrive(const EngineControlState& control,
+                                      const LfoSignalArray& lfoOutput, char* rightText,
+                                      size_t rightCap) noexcept {
+    const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
+    bool anyActive = false;
+    float maxAmp = 0.0f;
+    for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
+        if (computeVoiceAudibility(control.voices[vi], control.voicePressure[vi], pitchMode)
+                .muteBlend < 0.999f) {
+            anyActive = true;
+            const float la =
+                computeLiveVoiceAmplitude(control.voices[vi], lfoOutput[lfoBankIndex(vi, 0u)],
+                                          lfoOutput[lfoBankIndex(vi, 1u)]);
+            if (la > maxAmp) {
+                maxAmp = la;
+            }
+        }
+    }
+    if (!anyActive) {
+        appendStr(rightText, 0u, rightCap, "ALL MUTED");
+    } else {
+        formatHeaderDriveValue(maxAmp, rightText, rightCap);
+    }
+}
+
+inline void formatHeaderPanMode(const EngineControlState& control, const HudState& hud,
+                                char* leftSuffix, size_t suffixCap, char* rightText,
+                                size_t rightCap) noexcept {
+    const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
+    if (hud.focusedKnob < kNumOscillators) {
+        const uint8_t kv = hud.focusedKnob & 3u;
+        size_t lp = appendStr(leftSuffix, 0u, suffixCap, " OSC ");
+        appendUInt(leftSuffix, lp, suffixCap, static_cast<uint32_t>(kv + 1u));
+        const bool muted =
+            computeVoiceAudibility(control.voices[kv], control.voicePressure[kv], pitchMode)
+                .muteBlend >= 0.999f;
+        appendStr(rightText, 0u, rightCap,
+                  muted ? "MUTED" : (control.global.monoCollapse ? "DUAL MONO" : "STEREO"));
+        return;
+    }
+    if (hud.panPageOpen && !hud.modifierHeld) {
+        appendStr(leftSuffix, 0u, suffixCap, " ALL");
+    }
+    bool anyActive = false;
+    for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
+        if (computeVoiceAudibility(control.voices[vi], control.voicePressure[vi], pitchMode)
+                .muteBlend < 0.999f) {
+            anyActive = true;
+            break;
+        }
+    }
+    appendStr(rightText, 0u, rightCap,
+              !anyActive ? "ALL MUTED" : (control.global.monoCollapse ? "DUAL MONO" : "STEREO"));
+}
+
 inline void formatColumnRoleAndValue(const EngineControlState& control, const HudState& hud,
                                      const LfoSignalArray& lfoOutput, uint8_t k, char* roleLbl,
                                      size_t roleCap, char* valStr, size_t valCap,
@@ -33,7 +100,7 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         switch (hud.knobBank) {
         case KnobBankMode::GlobalFreq:
             if (k == 0u) {
-                appendStr(roleLbl, 0u, roleCap, "PITCH");
+                appendStr(roleLbl, 0u, roleCap, "FREQ");
                 formatCompactHz(valStr, valCap, outGlobal.primaryValue);
             } else if (k == 1u) {
                 appendStr(roleLbl, 0u, roleCap, "SPREAD");
@@ -89,11 +156,11 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
                 appendStr(roleLbl, 0u, roleCap, "TILT");
                 formatSignedPercent(valStr, valCap, outGlobal.primaryValue);
             } else if (k == 2u) {
-                appendStr(roleLbl, 0u, roleCap, "WIDTH");
+                appendStr(roleLbl, 0u, roleCap, "SPREAD");
                 formatPercent(valStr, valCap, outGlobal.primaryValue);
             } else {
-                appendStr(roleLbl, 0u, roleCap, "BALANCE");
-                formatSignedPercent(valStr, valCap, outGlobal.primaryValue);
+                appendStr(roleLbl, 0u, roleCap, "PAN");
+                formatPanValue(valStr, valCap, outGlobal.primaryValue);
             }
             return;
         case KnobBankMode::GlobalAll:
@@ -107,7 +174,7 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
                 appendStr(roleLbl, 0u, roleCap, "LFO");
                 formatPercent(valStr, valCap, outGlobal.primaryValue);
             } else {
-                appendStr(roleLbl, 0u, roleCap, "AMP");
+                appendStr(roleLbl, 0u, roleCap, "LEVEL");
                 formatPercent(valStr, valCap, outGlobal.primaryValue);
             }
             return;

@@ -89,22 +89,21 @@ for (let i = 0; i < 46; i++) {
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.2);
 
-// Verify 42 hardware LED channels (OP1..OP5 & SEL strictly 0.0, FX 100% open -> engaged glow when closed)
+// Verify 42 hardware LED channels (OP1..OP6 unassigned 0.0, FX 100% open, SEL/LFO/EDIT/GLO 15% rest)
 const ledsIdx = ex.wasm_ui_get_leds_ptr() >> 2;
 const summaryIdx = ex.wasm_ui_get_summary_ptr() >> 2;
 assert.equal(f32[summaryIdx + 49], 1.0);               // fxPageOpen === true
 assert.equal(f32[summaryIdx + 50], 0.0);               // fxVoiceFocus === 0 (OSC 1)
 ex.wasm_ui_encoder(0, 4);                              // SELECT -> OSC 2 on FX page
 assert.equal(f32[summaryIdx + 50], 1.0);
-for (let op = 0; op <= 4; op++) {
-  assert.ok(Math.abs(f32[ledsIdx + op] - 0.0) < 1e-6); // OP1..OP5 black keys -> 0% (unassigned)
+for (let op = 0; op <= 5; op++) {
+  assert.ok(Math.abs(f32[ledsIdx + op] - 0.0) < 1e-6); // OP1..OP6 black keys -> 0% (unassigned)
 }
-assert.ok(Math.abs(f32[ledsIdx + 5] - 0.25) < 1e-4);   // OP6 Panning landmark -> 25%
 assert.ok(Math.abs(f32[ledsIdx + 7] - 0.25) < 1e-4);   // GLO Global landmark -> 25%
 assert.ok(Math.abs(f32[ledsIdx + 6] - 0.0) < 1e-6);    // PIT black key -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 10] - 0.0) < 1e-6);   // 11th black key -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 27 + 2] - 1.0) < 1e-4);  // FX button -> 100% while open
-assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.0) < 1e-6);  // SEL button -> 0% (unassigned)
+assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.15) < 1e-4); // SEL button (PAN) -> 15% rest when closed
 assert.ok(Math.abs(f32[ledsIdx + 27 + 5] - 0.15) < 1e-4); // LFO button -> 15% rest when closed & depth==0
 assert.ok(Math.abs(f32[ledsIdx + 27 + 6] - 0.15) < 1e-4); // EDIT button -> 15% rest when closed & clean
 assert.ok(Math.abs(f32[ledsIdx + 27 + 7] - 0.15) < 1e-4); // GLO right button -> 15% rest when closed
@@ -115,14 +114,15 @@ for (let i = 0; i < 4; i++) {
   assert.ok(Math.abs(f32[ledsIdx + 11 + 4 + i] - 0.24) < 1e-4); // Keys 5-8 -> 24% rest
 }
 
-// Tapping unassigned SEL (button 3) closes FX page, keeps pitchPressureMode === false & SEL LED === 0%,
+// Tapping SEL (button 3) opens dedicated Stereo PAN page (closing FX page), lights SEL LED === 100%,
 // and FX LED shows engaged filter glow (> 15%) because Osc 1 filter resonance/cutoffs are engaged!
 ex.wasm_ui_button(3, 1);
 ex.wasm_ui_button(3, 0);
 ex.wasm_ui_tick_and_render(0.016);
 assert.equal(f32[summaryIdx + 49], 0.0);
+assert.equal(f32[summaryIdx + 52], 1.0); // panPageOpen === true
 assert.equal(f32[summaryIdx + 37], 0.0);
-assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.0) < 1e-6);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 1.0) < 1e-4);
 assert.ok(f32[ledsIdx + 27 + 2] > 0.30 && f32[ledsIdx + 27 + 2] <= 0.85);
 
 // Open Dual Per-Voice LFO Page (button 5), step SELECT (encoder 0) across

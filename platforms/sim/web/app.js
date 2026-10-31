@@ -653,8 +653,9 @@ function bindComputerKeyboard() {
     BracketRight: 1, // OCT+ (momentary Coarse knob rate)
     Equal: 1,        // OCT+ (momentary Coarse knob rate)
     KeyQ: 2,         // FX (Per-Voice MS-20 Dual Filter Page toggle)
+    KeyW: 3,         // SEL (Per-Voice Stereo Panning Page toggle)
     KeyL: 5,         // LFO (Per-Voice LFO Page toggle)
-    KeyE: 6,         // EDIT (Channel Level & MS-20 Overdrive Page toggle)
+    KeyE: 6,         // EDIT (Duty, Drift & Channel Level/Drive Page toggle)
     Semicolon: 7,    // GLO right grid (GLOBAL CONFIG menu toggle)
     KeyH: 8,         // HOME
     Escape: 8,       // HOME

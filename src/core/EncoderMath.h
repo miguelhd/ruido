@@ -87,6 +87,7 @@ inline void applyEditKnobDelta(EditTarget target, VoiceParams& vp, int32_t ticks
         vp.drift = adjustLinear01(vp.drift, ticks, rate, 0.0f, 1.0f);
         break;
     case EditTarget::Level:
+    case EditTarget::Count:
         if (vp.muted) {
             if (ticks > 0) {
                 vp.muted = false;
@@ -104,10 +105,6 @@ inline void applyEditKnobDelta(EditTarget target, VoiceParams& vp, int32_t ticks
                 vp.amplitude = nextAmp;
             }
         }
-        break;
-    case EditTarget::Pan:
-    case EditTarget::Count:
-        vp.pan = adjustLinear01(vp.pan, ticks, rate, -1.0f, 1.0f);
         break;
     }
 }

@@ -72,7 +72,7 @@ constexpr const char* globalTargetSuffix(GlobalTarget target) noexcept {
     case GlobalTarget::Lfo:
         return " LFO";
     case GlobalTarget::Amp:
-        return " AMP";
+        return " LEVEL";
     case GlobalTarget::All:
     case GlobalTarget::Count:
         return " ALL";

@@ -25,7 +25,7 @@ struct GlobalConfigState {
 constexpr const char* globalConfigItemLabel(ConfigItemId id) noexcept {
     switch (id) {
     case ConfigItemId::GloRelease:
-        return "GLO RELEASE";
+        return "GLOBAL RELEASE";
     case ConfigItemId::OutputRouting:
         return "OUTPUT ROUTING";
     case ConfigItemId::Count:

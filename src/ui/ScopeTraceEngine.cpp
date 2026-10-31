@@ -36,6 +36,7 @@ void ScopeTraceEngine::reset() noexcept {
     }
     busTrailLQ12_.fill(0);
     busTrailRQ12_.fill(0);
+    overdriveHair_ = {};
 
     strandWeightQ8_[12] = 112u;
     rebuildTilesAndBloom();
@@ -600,6 +601,8 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
     }
     applyStrandPhosphor(13u, scratchB.data(), alphaMid, snapColdBoot);
     strandWeightQ8_[13] = static_cast<uint16_t>(0.46f * busPresenceSmooth_ * 256.0f + 0.5f);
+    updateOverdriveHair<kHistorySize>(history_, historyWrite_, historyCount_, streamStalled,
+                                      snapColdBoot, control, overdriveHair_);
     phosphorPrimed_ = true;
 
     rebuildTilesAndBloom();

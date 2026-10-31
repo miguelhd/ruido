@@ -2,6 +2,7 @@
 
 #include "core/Parameters.h"
 #include "ui/MonoCanvas.h"
+#include "ui/ScopeTraceMath.h"
 
 #include <array>
 #include <cstddef>
@@ -49,14 +50,9 @@ class ScopeTraceEngine {
     void renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t bgKeepQ8, uint16_t* linBuf,
                                uint8_t* lumBuf) const noexcept;
 
-  private:
-    struct CompactScopeSample {
-        int16_t leftQ12 = 0;
-        int16_t rightQ12 = 0;
-        // Upper 15 bits = signed Q2.12 voice sample, bit 0 = delayed rising-edge flag
-        std::array<int16_t, kNumOscillators> voiceEdgeQ12{0, 0, 0, 0};
-    };
+    const OverdriveHairTable& overdriveHair() const noexcept { return overdriveHair_; }
 
+  private:
     void rebuildTilesAndBloom() noexcept;
 
     // 4096-sample rolling audio + 4-voice scope history (~93 ms @ 44.1 kHz, locks down to 20 Hz)
@@ -90,6 +86,9 @@ class ScopeTraceEngine {
 
     // Quarter-resolution (60x60) pre-blurred caustic bloom grid (scaled linear photon units)
     std::array<uint16_t, kBloomWidth * kBloomHeight> bloomGrid_{};
+
+    // 48-point centered bipolar live transient window per voice for HudAmpGraph 3A overdrive cap
+    OverdriveHairTable overdriveHair_{};
 };
 
 } // namespace ruido

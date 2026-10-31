@@ -44,13 +44,10 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     }
 
     // 1. Raised Black Keys (11 monochrome white LEDs)
-    // OP1..OP5 & PIT unassigned: 0% dark; Spatial (OP6 Panning) & Global (GLO): 25% rest, 100% held
-    for (size_t i = 0u; i <= static_cast<size_t>(BlackKeyId::Op5); ++i) {
+    // OP1..OP6 & PIT unassigned: 0% dark; Global (GLO): 25% rest, 100% held
+    for (size_t i = 0u; i <= static_cast<size_t>(BlackKeyId::Pit); ++i) {
         outLeds.blackKeyLeds[i] = 0.0f;
     }
-    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op6)] =
-        ctx.blackKeyHeld[static_cast<size_t>(BlackKeyId::Op6)] ? 1.0f : 0.25f;
-    outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Pit)] = 0.0f;
     outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Glo)] =
         ctx.blackKeyHeld[static_cast<size_t>(BlackKeyId::Glo)] ? 1.0f : 0.25f;
     outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Mono)] =
@@ -80,6 +77,7 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     float maxOverdriveNorm = 0.0f;
     float maxOverdrivePeak = 0.0f;
     float maxFilterEngagement = 0.0f;
+    float maxPanEngagement = 0.0f;
 
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceParams& vp = ctx.state.voices[i];
@@ -137,6 +135,23 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
         const float effDepthA = computeLiveLfoADepth(vp, lfoBRaw);
         const float lfoVisWeightA = 1.0f - smoothstep01((effRateA - 2.0f) * 0.20f);
         const float lfoVisWeightB = 1.0f - smoothstep01((vp.lfoBRateHz - 2.0f) * 0.20f);
+        if ((!vp.muted || p > 0.001f) && !ctx.state.global.monoCollapse) {
+            float visPan = (vp.lfoTarget == LfoTarget::Pan && effDepthA > 0.0f)
+                               ? applyLfoPan(vp.pan, effDepthA * lfoVisWeightA, lfoARaw)
+                               : vp.pan;
+            if (vp.lfoBTarget == LfoTarget::Pan && vp.lfoBDepth > 0.0f) {
+                visPan = applyLfoPan(visPan, vp.lfoBDepth * lfoVisWeightB, lfoBRaw);
+            }
+            const float wideEng = clampf((absf(visPan) - 0.65f) * (1.0f / 0.35f), 0.0f, 1.0f);
+            const float panModEng = ((vp.lfoTarget == LfoTarget::Pan && effDepthA > 1.0e-3f) ||
+                                     (vp.lfoBTarget == LfoTarget::Pan && vp.lfoBDepth > 1.0e-3f))
+                                        ? clampf(0.15f + 0.85f * absf(visPan), 0.0f, 1.0f)
+                                        : 0.0f;
+            const float panEng = (wideEng > panModEng) ? wideEng : panModEng;
+            if (panEng > maxPanEngagement) {
+                maxPanEngagement = panEng;
+            }
+        }
         float visAmp = (vp.lfoTarget == LfoTarget::Amplitude && effDepthA > 0.0f)
                            ? applyLfoAmplitude(vp.amplitude, effDepthA * lfoVisWeightA, lfoARaw)
                            : vp.amplitude;
@@ -187,7 +202,7 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
         outLeds.whiteKeyLeds[s] = ctx.whiteKeyHeld[s] ? 0.75f : savePulse;
     }
 
-    // 3. Panel Tactile Buttons (unused switches incl. SEL strictly 0% dark)
+    // 3. Panel Tactile Buttons (unused switches ENV/ARP/SEQ/REC strictly 0% dark)
     outLeds.buttonLeds.fill(0.0f);
     outLeds.stopLed = 0.0f;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctMinus)] =
@@ -208,6 +223,16 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
             clampf(0.15f + 0.70f * maxFilterEngagement, 0.15f, 0.85f);
     } else {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Fx)] = 0.15f;
+    }
+
+    // SEL button (Stereo Panning Page): 100% open, 15% rest, 15%..75% wide/LFO stereo glow
+    if (ctx.hud.panPageOpen) {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Sel)] = 1.0f;
+    } else if (maxPanEngagement > 1.0e-3f) {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Sel)] =
+            clampf(0.15f + 0.60f * maxPanEngagement, 0.15f, 0.75f);
+    } else {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Sel)] = 0.15f;
     }
 
     // EDIT button (Channel Level & MS-20 Drive): 100% when open, 15% clean rest, live flare > 70%

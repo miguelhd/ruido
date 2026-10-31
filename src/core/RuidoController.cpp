@@ -48,6 +48,9 @@ KnobBankMode RuidoController::baseKnobBank() const noexcept {
     if (hud_.fxPageOpen) {
         return KnobBankMode::VoiceFilter;
     }
+    if (hud_.panPageOpen) {
+        return KnobBankMode::Panning;
+    }
     if (hud_.editPageOpen) {
         return knobBankForEditTarget(hud_.editTarget);
     }
@@ -56,6 +59,7 @@ KnobBankMode RuidoController::baseKnobBank() const noexcept {
 
 void RuidoController::closeAllPages() noexcept {
     hud_.fxPageOpen = false;
+    hud_.panPageOpen = false;
     hud_.lfoPageOpen = false;
     hud_.editPageOpen = false;
     hud_.configPageOpen = false;
@@ -120,10 +124,6 @@ void RuidoController::syncModifierHud() noexcept {
     hud_.modifierHeld = (mod != HeldModifier::None) || hud_.rateHoldActive;
 
     switch (mod) {
-    case HeldModifier::Panning:
-        hud_.knobBank = KnobBankMode::Panning;
-        triggerHud(HudMode::Panning, hud_.focusedVoice, kNoFocusedKnob);
-        break;
     case HeldModifier::Global:
         hud_.knobBank = knobBankForGlobalTarget(hud_.globalTarget);
         triggerHud(hudModeForGlobalTarget(hud_.globalTarget), hud_.focusedVoice, kNoFocusedKnob);
@@ -302,6 +302,15 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             latchedHudMode_ = HudMode::VoiceLfo;
             hud_.mode = HudMode::VoiceLfo;
             env_.latchPage();
+        } else if (hud_.panPageOpen) {
+            state_.voices[kIdx].pan =
+                adjustLinear01(state_.voices[kIdx].pan, ticks, rate, -1.0f, 1.0f);
+            hud_.knobBank = KnobBankMode::Panning;
+            hud_.focusedKnob = kIdx;
+            hud_.focusedVoice = kIdx;
+            latchedHudMode_ = HudMode::Panning;
+            hud_.mode = HudMode::Panning;
+            env_.latchPage();
         } else if (hud_.editPageOpen) {
             applyEditKnobDelta(hud_.editTarget, state_.voices[kIdx], ticks, rate);
             hud_.knobBank = knobBankForEditTarget(hud_.editTarget);
@@ -315,12 +324,6 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             hud_.knobBank = KnobBankMode::Frequency;
             triggerHud(HudMode::VoiceFrequency, kIdx, kIdx);
         }
-        break;
-    }
-    case HeldModifier::Panning: {
-        state_.voices[kIdx].pan = adjustLinear01(state_.voices[kIdx].pan, ticks, rate, -1.0f, 1.0f);
-        hud_.knobBank = KnobBankMode::Panning;
-        triggerHud(HudMode::Panning, kIdx, kIdx);
         break;
     }
     case HeldModifier::Global: {
@@ -391,29 +394,34 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
         return;
     }
 
-    if (button == ButtonId::Fx || button == ButtonId::Lfo || button == ButtonId::Edit ||
-        button == ButtonId::GloRight) {
+    if (button == ButtonId::Fx || button == ButtonId::Sel || button == ButtonId::Lfo ||
+        button == ButtonId::Edit || button == ButtonId::GloRight) {
         selectTickAccum_ = 0;
         targetTickAccum_ = 0;
         configTickAccum_ = 0;
         hud_.focusedKnob = kNoFocusedKnob;
         const bool isFx = (button == ButtonId::Fx);
+        const bool isPan = (button == ButtonId::Sel);
         const bool isLfo = (button == ButtonId::Lfo);
         const bool isEdit = (button == ButtonId::Edit);
         const bool opening = isFx     ? !hud_.fxPageOpen
+                             : isPan  ? !hud_.panPageOpen
                              : isLfo  ? !hud_.lfoPageOpen
                              : isEdit ? !hud_.editPageOpen
                                       : !hud_.configPageOpen;
         closeAllPages();
         if (opening) {
             hud_.fxPageOpen = isFx;
+            hud_.panPageOpen = isPan;
             hud_.lfoPageOpen = isLfo;
             hud_.editPageOpen = isEdit;
-            hud_.configPageOpen = (!isFx && !isLfo && !isEdit);
+            hud_.configPageOpen = (!isFx && !isPan && !isLfo && !isEdit);
             hud_.saveArmed = false;
             if (isFx) {
                 hud_.focusedVoice = static_cast<uint8_t>(hud_.fxVoiceFocus & 3u);
                 latchedHudMode_ = HudMode::VoiceFilter;
+            } else if (isPan) {
+                latchedHudMode_ = HudMode::Panning;
             } else if (isLfo) {
                 hud_.focusedVoice = lfoFocusVoice(hud_.lfoVoiceFocus);
                 latchedHudMode_ = HudMode::VoiceLfo;
@@ -433,7 +441,8 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
 
     if (button == ButtonId::PlayStop) {
         state_.global.masterRun = !state_.global.masterRun;
-        if (hud_.fxPageOpen || hud_.lfoPageOpen || hud_.editPageOpen || hud_.configPageOpen) {
+        if (hud_.fxPageOpen || hud_.panPageOpen || hud_.lfoPageOpen || hud_.editPageOpen ||
+            hud_.configPageOpen) {
             hud_.lastButton = button;
             triggerHud(HudMode::AudioOutput, hud_.focusedVoice, kNoFocusedKnob);
         } else {
@@ -559,7 +568,8 @@ void RuidoController::onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexce
         if (pressed && !wasPressed) {
             VoiceParams& vp = state_.voices[whiteKeyIndex];
             const bool lfoAmpActive =
-                (vp.lfoTarget == LfoTarget::Amplitude) && (vp.lfoDepth > kSilentAmpThreshold);
+                ((vp.lfoTarget == LfoTarget::Amplitude) && (vp.lfoDepth > kSilentAmpThreshold)) ||
+                ((vp.lfoBTarget == LfoTarget::Amplitude) && (vp.lfoBDepth > kSilentAmpThreshold));
             if (!vp.muted && vp.amplitude <= kSilentAmpThreshold && !lfoAmpActive) {
                 vp.amplitude = kDefaultVoiceAmp;
             } else {

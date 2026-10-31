@@ -16,7 +16,7 @@ constexpr float kGcFilterLogHi = cxLog2Pos(kFilterCutoffMaxHz);
 constexpr float kGcFilterLogRange = kGcFilterLogHi - kGcFilterLogLo;
 constexpr float kGcLfoLogLo = cxLog2Pos(kLfoFreqMinHz);
 constexpr float kGcLfoLogRange = cxLog2Pos(kLfoFreqMaxHz) - kGcLfoLogLo;
-constexpr float kRefPanRms = 0.74759615f; // RMS of {-1.0, -0.34, +0.34, +1.0}
+constexpr float kRefAmpSpreadRms = 0.37379808f; // RMS of 0.5 * {-1.0, -0.34, +0.34, +1.0}
 
 void finalizeSpread(GlobalColumnSummary& s) noexcept {
     float lo = s.voiceSigned[0];
@@ -175,32 +175,39 @@ void applyGlobalAmpKnob(uint8_t knobIdx, int32_t ticks, KnobRate rate,
     }
 
     if (knobIdx == 2u) {
+        float meanAmp = 0.0f;
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            meanAmp += state.voices[i].amplitude;
+        }
+        meanAmp *= 0.25f;
+        std::array<float, kNumOscillators> dev{};
         float sumSq = 0.0f;
         for (size_t i = 0u; i < kNumOscillators; ++i) {
-            sumSq += state.voices[i].pan * state.voices[i].pan;
+            dev[i] = state.voices[i].amplitude - meanAmp;
+            sumSq += dev[i] * dev[i];
         }
         const float rms = (sumSq > 1.0e-8f) ? (sumSq * 0.25f * fastInvSqrt(sumSq * 0.25f)) : 0.0f;
-        const float curWidth = clampf(rms * (1.0f / kRefPanRms), 0.0f, 1.0f);
-        const float nextWidth = adjustLinear01(curWidth, ticks, rate, 0.0f, 1.0f);
-        if (rms > 0.005f) {
-            const float scale = (nextWidth * kRefPanRms) / rms;
+        const float curSpread = clampf(rms * (1.0f / kRefAmpSpreadRms), 0.0f, 1.0f);
+        const float nextSpread = adjustLinear01(curSpread, ticks, rate, 0.0f, 1.0f);
+        std::array<float, kNumOscillators> unit{-1.3376206f, -0.4547910f, 0.4547910f, 1.3376206f};
+        if (rms > 0.002f) {
+            const float invRms = 1.0f / rms;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
-                state.voices[i].pan = clampf(state.voices[i].pan * scale, -1.0f, 1.0f);
+                unit[i] = dev[i] * invRms;
             }
-        } else if (ticks > 0) {
-            constexpr std::array<float, kNumOscillators> kSeedPan{-1.0f, -0.34f, 0.34f, 1.0f};
-            for (size_t i = 0u; i < kNumOscillators; ++i) {
-                state.voices[i].pan = clampf(kSeedPan[i] * nextWidth, -1.0f, 1.0f);
-            }
+        } else if (ticks <= 0) {
+            return;
+        }
+        const float nextRms = nextSpread * kRefAmpSpreadRms;
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            state.voices[i].amplitude = clampf(meanAmp + unit[i] * nextRms, 0.0f, 1.0f);
         }
         return;
     }
 
-    const float delta = adjustLinear01(0.5f, ticks, rate, 0.0f, 1.0f) - 0.5f;
-    state.voices[0].amplitude = clampf(state.voices[0].amplitude - delta, 0.0f, 1.0f);
-    state.voices[1].amplitude = clampf(state.voices[1].amplitude + delta, 0.0f, 1.0f);
-    state.voices[2].amplitude = clampf(state.voices[2].amplitude - delta, 0.0f, 1.0f);
-    state.voices[3].amplitude = clampf(state.voices[3].amplitude + delta, 0.0f, 1.0f);
+    for (size_t i = 0u; i < kNumOscillators; ++i) {
+        state.voices[i].pan = adjustLinear01(state.voices[i].pan, ticks, rate, -1.0f, 1.0f);
+    }
 }
 
 } // namespace
@@ -583,18 +590,27 @@ GlobalColumnSummary evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx,
         s.primaryValue = clampf(0.5f * ((amps[2] + amps[3]) - (amps[0] + amps[1])), -1.0f, 1.0f);
         s.posSigned = s.primaryValue;
     } else if (k == 2u) {
+        const float meanAmp = 0.25f * (amps[0] + amps[1] + amps[2] + amps[3]);
         float sumSq = 0.0f;
         for (size_t i = 0u; i < kNumOscillators; ++i) {
-            sumSq += pans[i] * pans[i];
-            s.voiceSigned[i] = pans[i];
+            const float dev = amps[i] - meanAmp;
+            sumSq += dev * dev;
+            s.voiceSigned[i] = 2.0f * amps[i] - 1.0f;
         }
         const float rms = (sumSq > 1.0e-8f) ? (sumSq * 0.25f * fastInvSqrt(sumSq * 0.25f)) : 0.0f;
-        s.primaryValue = clampf(rms * (1.0f / kRefPanRms), 0.0f, 1.0f);
+        s.primaryValue = clampf(rms * (1.0f / kRefAmpSpreadRms), 0.0f, 1.0f);
         s.posSigned = 2.0f * s.primaryValue - 1.0f;
+        finalizeSpread(s);
     } else {
         s.bipolar = true;
-        s.primaryValue = clampf(0.5f * ((amps[1] + amps[3]) - (amps[0] + amps[2])), -1.0f, 1.0f);
+        float sumPan = 0.0f;
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            sumPan += pans[i];
+            s.voiceSigned[i] = pans[i];
+        }
+        s.primaryValue = clampf(sumPan * 0.25f, -1.0f, 1.0f);
         s.posSigned = s.primaryValue;
+        finalizeSpread(s);
     }
     return s;
 }

@@ -2,16 +2,17 @@
 
 #include "core/ControlSurface.h"
 #include "core/Parameters.h"
+#include "ui/ScopeTraceMath.h"
 
 #include <array>
 #include <cstdint>
 
 namespace ruido {
 
-// Full-screen (x = 0..239, y = 26..188) 4-channel per-oscillator visualizations for the
-// latching EDIT page (WIDTH · DRIFT · LEVEL):
-//  - LEVEL: Optical VCA faders, live voicePeak plasma & 1.0x..4.5x MS-20 overdrive wings (> 70%)
-//  - WIDTH: 4-column CMOS Schmitt single-cycle pulse duty cells (5% needle .. 50% sq .. 95% wide)
+// Full-screen (x = 0..239, y = 26..188) 4-channel oscillator visualizations:
+//  - LEVEL: Optical VCA faders, live voicePeak plasma & 3A narrow triangular overdrive cap (> 70%)
+//           shared across EDIT -> LEVEL, GLOBAL LEVEL (K1-K3), and GLOBAL ALL (K4).
+//  - DUTY:  4-column CMOS Schmitt single-cycle pulse duty cells (5% needle .. 50% sq .. 95% wide)
 //  - DRIFT: 4-column thermal excursion brackets + live Core 1 1/f pitch wander beacons
 class HudAmpGraph {
   public:
@@ -24,11 +25,19 @@ class HudAmpGraph {
     void clearImmediate() noexcept;
     void stepFadeOut(float dtClamped) noexcept;
 
+    static constexpr bool isLevelViewActive(const HudState& rawHud) noexcept {
+        return rawHud.opacity > 0.001f &&
+               ((rawHud.editPageOpen && !rawHud.modifierHeld &&
+                 rawHud.knobBank == KnobBankMode::Amplitude) ||
+                (rawHud.knobBank == KnobBankMode::GlobalAmp && rawHud.focusedKnob != 3u) ||
+                (rawHud.knobBank == KnobBankMode::GlobalAll && rawHud.focusedKnob == 3u));
+    }
+
     bool isActive(const HudState& rawHud) const noexcept {
-        return rawHud.opacity > 0.001f && rawHud.editPageOpen &&
-               (rawHud.knobBank == KnobBankMode::Amplitude ||
-                rawHud.knobBank == KnobBankMode::PulseWidth ||
-                rawHud.knobBank == KnobBankMode::VoiceDrift);
+        const bool editVis = rawHud.opacity > 0.001f && rawHud.editPageOpen && !rawHud.modifierHeld;
+        return isLevelViewActive(rawHud) ||
+               (editVis && (rawHud.knobBank == KnobBankMode::PulseWidth ||
+                            rawHud.knobBank == KnobBankMode::VoiceDrift));
     }
 
     bool hasResidualPhase() const noexcept {
@@ -43,7 +52,8 @@ class HudAmpGraph {
     void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                 const LfoSignalArray& lfoOutput,
                 const std::array<float, kNumOscillators>& voicePeak,
-                const std::array<float, kNumOscillators>& voiceDriftNorm) noexcept;
+                const std::array<float, kNumOscillators>& voiceDriftNorm,
+                const OverdriveHairTable& overdriveHair) noexcept;
 
     void compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint16_t* linScratch,
                         float hudAlpha01, const HudState& hud) const noexcept;
@@ -61,12 +71,12 @@ class HudAmpGraph {
 
     std::array<float, kNumOscillators> faderY_{kColYBot, kColYBot, kColYBot, kColYBot};
     std::array<float, kNumOscillators> driveNorm_{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<float, kNumOscillators> driveRatio_{1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, kNumOscillators> peakY_{kColYBot, kColYBot, kColYBot, kColYBot};
     std::array<float, kNumOscillators> pulseWidth_{0.50f, 0.50f, 0.50f, 0.50f};
     std::array<float, kNumOscillators> driftAmt_{0.10f, 0.10f, 0.10f, 0.10f};
     std::array<float, kNumOscillators> driftLive_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> muteDim_{0.0f, 0.0f, 0.0f, 0.0f};
+    OverdriveHairTable overdriveHair_{};
     float phase_ = 0.0f;
     float widthPhase_ = 0.0f;
     float driftPhase_ = 0.0f;

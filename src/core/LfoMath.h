@@ -406,9 +406,9 @@ inline VoiceAudibility computeVoiceAudibility(const VoiceParams& vp, float voice
 inline constexpr const char* lfoTargetName(LfoTarget target) noexcept {
     switch (target) {
     case LfoTarget::Pitch:
-        return "PITCH";
+        return "FREQ";
     case LfoTarget::PulseWidth:
-        return "WIDTH";
+        return "DUTY";
     case LfoTarget::LpCutoff:
         return "LPF";
     case LfoTarget::LpResonance:
@@ -418,7 +418,7 @@ inline constexpr const char* lfoTargetName(LfoTarget target) noexcept {
     case LfoTarget::HpResonance:
         return "HP RES";
     case LfoTarget::Amplitude:
-        return "AMP";
+        return "LEVEL";
     case LfoTarget::Pan:
         return "PAN";
     case LfoTarget::LfoARate:
@@ -454,9 +454,9 @@ inline constexpr const char* lfoShapeLabel(float shape01) noexcept {
         return "SQUARE";
     }
     if (shape01 < 0.96f) {
-        return "SQR-DRF";
+        return "SQR-RND";
     }
-    return "DRIFT";
+    return "RANDOM";
 }
 
 } // namespace ruido

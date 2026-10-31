@@ -267,15 +267,19 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
                        const LfoSignalArray& lfoOutput,
                        const LfoDriftArray& lfoDriftPacked) noexcept {
     const bool hudVisible = (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None);
+    const bool globalAllFilter =
+        (rawHud.knobBank == KnobBankMode::GlobalAll) &&
+        (rawHud.focusedKnob == 1u || rawHud.focusedKnob >= kNumOscillators);
+    const bool globalAllLfo =
+        (rawHud.knobBank == KnobBankMode::GlobalAll) && (rawHud.focusedKnob == 2u);
     const bool rawFilterActive =
         hudVisible &&
         (rawHud.knobBank == KnobBankMode::VoiceFilter ||
-         rawHud.knobBank == KnobBankMode::GlobalFilter ||
-         rawHud.knobBank == KnobBankMode::GlobalAll ||
+         rawHud.knobBank == KnobBankMode::GlobalFilter || globalAllFilter ||
          (rawHud.mode == HudMode::VoicePressure && !control.global.pitchPressureMode));
     const bool rawLfoGraphActive = !rawFilterActive && hudVisible &&
                                    ((rawHud.lfoPageOpen && rawHud.knobBank == KnobBankMode::Lfo) ||
-                                    rawHud.knobBank == KnobBankMode::GlobalLfo);
+                                    rawHud.knobBank == KnobBankMode::GlobalLfo || globalAllLfo);
 
     if (rawFilterActive) {
         const bool snapFilter = (filterGraphPhase_ <= 0.015f);
@@ -324,7 +328,7 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
     if (rawLfoGraphActive) {
         const bool snapLfo = (lfoGraphPhase_ <= 0.015f);
         lfoGraphPhase_ = stepHudFadeLinear(lfoGraphPhase_, true, dtClamped);
-        const bool showAll = (rawHud.knobBank == KnobBankMode::GlobalLfo);
+        const bool showAll = (rawHud.knobBank == KnobBankMode::GlobalLfo) || globalAllLfo;
         updateLfoGraph(dtClamped, snapLfo, showAll, control, effectiveHud, lfoOutput,
                        lfoDriftPacked);
     } else {

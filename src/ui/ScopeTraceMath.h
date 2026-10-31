@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/DspMath.h"
+#include "core/Parameters.h"
 #include "ui/MonoCanvas.h"
 
 #include <array>
@@ -61,6 +62,17 @@ inline float unpackVoiceEdgeSample(int16_t packed) noexcept {
 inline bool unpackVoiceEdgeFlag(int16_t packed) noexcept {
     return (static_cast<uint16_t>(packed) & 1u) != 0u;
 }
+
+inline constexpr size_t kOverdriveHairPoints = 48u;
+using OverdriveHairArray = std::array<float, kOverdriveHairPoints>;
+using OverdriveHairTable = std::array<OverdriveHairArray, kNumOscillators>;
+
+struct CompactScopeSample {
+    int16_t leftQ12 = 0;
+    int16_t rightQ12 = 0;
+    // Upper 15 bits = signed Q2.12 voice sample, bit 0 = delayed rising-edge flag
+    std::array<int16_t, kNumOscillators> voiceEdgeQ12{0, 0, 0, 0};
+};
 
 // Zero-libm full-wave sin(2 * pi * phase01) via 5th-order minimax polynomial
 inline float fastSinPhase01(float phase01) noexcept {
@@ -218,6 +230,121 @@ inline void tonemapBloomScanline(int py, uint32_t bgKeepQ8, const uint16_t* bloo
             lum = (lum * bgKeepQ8 + 128u) >> 8u;
         }
         lumRow[colX] = static_cast<uint8_t>(lum);
+    }
+}
+
+// Extract 48-point centered bipolar transient waveform per voice for HudAmpGraph 3A overdrive cap.
+template <size_t HistorySize>
+inline void updateOverdriveHair(const std::array<CompactScopeSample, HistorySize>& history,
+                                size_t historyWrite, size_t historyCount, bool streamStalled,
+                                bool snapImmediate, const EngineControlState& control,
+                                OverdriveHairTable& persistedHair) noexcept {
+    constexpr size_t kMask = HistorySize - 1u;
+    constexpr float kInvPts = 1.0f / static_cast<float>(kOverdriveHairPoints - 1u);
+    const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
+
+    for (size_t v = 0u; v < kNumOscillators; ++v) {
+        const VoiceParams& vp = control.voices[v];
+        const float effHz =
+            clampf(vp.frequencyHz * computeVoicePitchRatio(control.voicePressure[v], pitchMode),
+                   20.0f, kAudioFreqMaxHz);
+        const float period = clampf(44100.0f / effHz, 16.0f, 1200.0f);
+        const float maxSpan = (historyCount > 160u) ? static_cast<float>(historyCount - 96u) : 0.0f;
+        const bool canReadHistory =
+            (!streamStalled) && (historyCount >= 256u) && (maxSpan >= 160.0f);
+
+        OverdriveHairArray raw{};
+        float maxAbsRaw = 0.0f;
+
+        if (canReadHistory) {
+            const float spanCap = (maxSpan < 3600.0f) ? maxSpan : 3600.0f;
+            const float span = clampf(period * 9.7f, 160.0f, spanCap);
+            const size_t needAhead = static_cast<size_t>(span) + 48u;
+            size_t startIdx = (historyWrite + HistorySize - 1u - needAhead) & kMask;
+            const size_t maxSearch =
+                (historyCount > needAhead + 16u) ? (historyCount - needAhead - 16u) : 0u;
+            const size_t searchLim = (maxSearch < 1400u) ? maxSearch : 1400u;
+            for (size_t back = 0u; back < searchLim; ++back) {
+                const size_t cand = (startIdx + HistorySize - back) & kMask;
+                if (unpackVoiceEdgeFlag(history[cand].voiceEdgeQ12[v])) {
+                    startIdx = cand;
+                    break;
+                }
+            }
+
+            const size_t dStep = static_cast<size_t>(clampf(period * 0.045f + 0.5f, 2.0f, 40.0f));
+            const size_t qStep = static_cast<size_t>(clampf(period * 0.23f + 0.5f, 4.0f, 180.0f));
+            for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
+                const size_t off = static_cast<size_t>(static_cast<float>(i) * kInvPts * span);
+                const size_t idx = (startIdx + off) & kMask;
+                const size_t idxM1 = (idx + HistorySize - dStep) & kMask;
+                const size_t idxM2 = (idx + HistorySize - 2u * dStep) & kMask;
+                const size_t idxQ = (idx + qStep) & kMask;
+
+                const float vc = unpackVoiceEdgeSample(history[idx].voiceEdgeQ12[v]);
+                const float vm1 = unpackVoiceEdgeSample(history[idxM1].voiceEdgeQ12[v]);
+                const float vm2 = unpackVoiceEdgeSample(history[idxM2].voiceEdgeQ12[v]);
+                const float vq = unpackVoiceEdgeSample(history[idxQ].voiceEdgeQ12[v]);
+                const float vd2 = vc - 2.0f * vm1 + vm2;
+                const float bc =
+                    0.5f * (unpackQ3_12(history[idx].leftQ12) + unpackQ3_12(history[idx].rightQ12));
+                const float beatEnv = clampf(bc * vc * 1.45f + 0.45f * vc * vq, -0.35f, 1.45f);
+                const float val = vc * (0.14f + 0.86f * beatEnv) + 1.05f * vd2;
+                raw[i] = val;
+                const float av = absf(val);
+                if (av > maxAbsRaw) {
+                    maxAbsRaw = av;
+                }
+            }
+        }
+
+        if (maxAbsRaw < 0.008f) {
+            const float duty = clampf(vp.pulseWidth, kPulseWidthMin, kPulseWidthMax);
+            const float partnerHz =
+                clampf(control.voices[(v + 1u) & 3u].frequencyHz, 20.0f, kAudioFreqMaxHz);
+            const float ratio = clampf(partnerHz / effHz, 0.35f, 3.2f);
+            for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
+                const float u = static_cast<float>(i) * kInvPts;
+                const float cyc = u * 6.4f + 0.19f * static_cast<float>(v);
+                const float ph = cyc - static_cast<float>(static_cast<int>(cyc));
+                const float dRise = absf(ph);
+                const float dFall = absf(ph - duty);
+                const float vc = (ph < duty) ? 1.0f : -1.0f;
+                const float spike = 1.35f * fastExpNeg(dRise * dRise * 420.0f) -
+                                    1.35f * fastExpNeg(dFall * dFall * 420.0f);
+                const float beat = 0.65f + 0.35f * fastSinPhase01(u * 2.3f * ratio +
+                                                                  0.27f * static_cast<float>(v));
+                raw[i] = vc * beat + spike;
+            }
+        }
+
+        float mean = 0.0f;
+        for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
+            mean += raw[i];
+        }
+        mean *= (1.0f / static_cast<float>(kOverdriveHairPoints));
+
+        float posPk = 0.20f;
+        float negPk = 0.20f;
+        for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
+            raw[i] -= mean;
+            if (raw[i] > posPk) {
+                posPk = raw[i];
+            }
+            if (-raw[i] > negPk) {
+                negPk = -raw[i];
+            }
+        }
+
+        const float invPos = 1.0f / posPk;
+        const float invNeg = 1.0f / negPk;
+        for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
+            const float norm = (raw[i] >= 0.0f) ? (raw[i] * invPos) : (raw[i] * invNeg);
+            const float clamped = clampf(norm, -1.0f, 1.0f);
+            persistedHair[v][i] =
+                snapImmediate ? clamped
+                              : (persistedHair[v][i] + 0.36f * (clamped - persistedHair[v][i]));
+        }
     }
 }
 

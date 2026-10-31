@@ -69,9 +69,9 @@ enum class BlackKeyId : uint8_t {
 // 5 multi-voice destinations selected via SELECT while holding keybed GLO
 enum class GlobalTarget : uint8_t { Freq = 0, Filter = 1, Lfo = 2, Amp = 3, All = 4, Count = 5 };
 
-// 4 per-oscillator modes selected via discrete SELECT on the latching EDIT page
-// (signal-flow order: Osc Width -> Osc Drift -> Channel Level/Drive -> Stereo Pan; default = Level)
-enum class EditTarget : uint8_t { Width = 0, Drift = 1, Level = 2, Pan = 3, Count = 4 };
+// 3 per-oscillator modes selected via discrete SELECT on the latching EDIT page
+// (signal-flow order: Osc Width -> Osc Drift -> Channel Level/Drive; default = Level)
+enum class EditTarget : uint8_t { Width = 0, Drift = 1, Level = 2, Count = 3 };
 
 // Active mapping of top-right KNOB1..KNOB4 (displayed in the 4 bottom HUD columns unless None)
 enum class KnobBankMode : uint8_t {
@@ -131,10 +131,8 @@ constexpr KnobBankMode knobBankForEditTarget(EditTarget target) noexcept {
     case EditTarget::Drift:
         return KnobBankMode::VoiceDrift;
     case EditTarget::Level:
-        return KnobBankMode::Amplitude;
-    case EditTarget::Pan:
     case EditTarget::Count:
-        return KnobBankMode::Panning;
+        return KnobBankMode::Amplitude;
     }
     return KnobBankMode::Amplitude;
 }
@@ -146,10 +144,8 @@ constexpr HudMode hudModeForEditTarget(EditTarget target) noexcept {
     case EditTarget::Drift:
         return HudMode::VoiceDrift;
     case EditTarget::Level:
-        return HudMode::Amplitude;
-    case EditTarget::Pan:
     case EditTarget::Count:
-        return HudMode::Panning;
+        return HudMode::Amplitude;
     }
     return HudMode::Amplitude;
 }
@@ -186,6 +182,7 @@ struct HudState {
     bool scopeFrozen = false;    // Momentary waveform freeze on 11th black key
     bool saveArmed = false;
     bool fxPageOpen = false;     // Latching MS-20 Filter page state (ButtonId::Fx)
+    bool panPageOpen = false;    // Latching Stereo Panning page state (ButtonId::Sel)
     bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
     bool editPageOpen = false;   // Latching Channel Level & Drive page (ButtonId::Edit)
     bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)

@@ -208,17 +208,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         return computeLiveVoiceAmplitude(control.voices[vi], lfoOutput[lfoBankIndex(vi, 0u)],
                                          lfoOutput[lfoBankIndex(vi, 1u)]);
     };
-    const auto formatDriveStatus = [&](float ampVal) noexcept {
-        if (ampVal > kCleanAmpKnee + 0.003f) {
-            const VoiceChannelGain cg = computeVoiceChannelGain(ampVal);
-            char multBuf[12]{};
-            formatMultiplierX(multBuf, sizeof(multBuf), cg.preDrive);
-            size_t rp = appendStr(rightText, 0u, sizeof(rightText), "DRIVE ");
-            appendStr(rightText, rp, sizeof(rightText), multBuf);
-        } else {
-            appendStr(rightText, 0u, sizeof(rightText), "CLEAN VCA");
-        }
-    };
 
     switch (hud.mode) {
     case HudMode::None:
@@ -235,7 +224,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     }
     case HudMode::PulseWidth: {
-        appendStr(leftMain, 0u, sizeof(leftMain), "WIDTH");
+        appendStr(leftMain, 0u, sizeof(leftMain), "DUTY");
         if (hud.focusedKnob < kNumOscillators) {
             const uint8_t kv = hud.focusedKnob & 3u;
             size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
@@ -310,40 +299,18 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             if (voiceAud(kv).muteBlend >= 0.999f) {
                 appendStr(rightText, 0u, sizeof(rightText), "MUTED");
             } else {
-                formatDriveStatus(liveAmpAt(kv));
+                formatHeaderDriveValue(liveAmpAt(kv), rightText, sizeof(rightText));
             }
         } else {
             appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
-            bool anyActive = false;
-            float maxAmp = 0.0f;
-            for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
-                if (voiceAud(vi).muteBlend < 0.999f) {
-                    anyActive = true;
-                    const float la = liveAmpAt(vi);
-                    if (la > maxAmp) {
-                        maxAmp = la;
-                    }
-                }
-            }
-            if (!anyActive) {
-                appendStr(rightText, 0u, sizeof(rightText), "ALL MUTED");
-            } else {
-                formatDriveStatus(maxAmp);
-            }
+            formatHeaderEnsembleDrive(control, lfoOutput, rightText, sizeof(rightText));
         }
         break;
     }
     case HudMode::Panning:
-        appendStr(leftMain, 0u, sizeof(leftMain), "PANNING");
-        if (hud.focusedKnob < kNumOscillators) {
-            size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
-            appendUInt(leftSuffix, lp, sizeof(leftSuffix),
-                       static_cast<uint32_t>((hud.focusedKnob & 3u) + 1u));
-        } else if (hud.editPageOpen && !hud.modifierHeld) {
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
-        }
-        appendStr(rightText, 0u, sizeof(rightText),
-                  control.global.monoCollapse ? "DUAL MONO" : "STEREO");
+        appendStr(leftMain, 0u, sizeof(leftMain), "PAN");
+        formatHeaderPanMode(control, hud, leftSuffix, sizeof(leftSuffix), rightText,
+                            sizeof(rightText));
         break;
     case HudMode::MasterLevel:
         appendStr(leftMain, 0u, sizeof(leftMain), "MASTER LEVEL");
@@ -378,11 +345,8 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     }
     case HudMode::VoicePressure: {
-        if (control.global.pitchPressureMode) {
-            appendStr(leftMain, 0u, sizeof(leftMain), "PITCH BEND");
-        } else {
-            appendStr(leftMain, 0u, sizeof(leftMain), focVp.muted ? "LPG SWELL" : "FILTER EXP");
-        }
+        appendStr(leftMain, 0u, sizeof(leftMain),
+                  control.global.pitchPressureMode ? "PITCH BEND" : "PRESSURE");
         size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
         appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
         headerBarNorm = clampf(control.voicePressure[v], 0.0f, 1.0f);
@@ -398,7 +362,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     }
     case HudMode::UnassignedKey: {
-        if (hud.lastBlackKey <= BlackKeyId::Op5) {
+        if (hud.lastBlackKey <= BlackKeyId::Op6) {
             size_t p = appendStr(leftMain, 0u, sizeof(leftMain), "OP");
             p = appendUInt(leftMain, p, sizeof(leftMain),
                            static_cast<uint32_t>(hud.lastBlackKey) + 1u);
@@ -476,9 +440,13 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     }
     case HudMode::GlobalAmp:
         appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " AMP");
-        appendStr(rightText, 0u, sizeof(rightText),
-                  control.global.monoCollapse ? "DUAL MONO" : "STEREO");
+        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " LEVEL");
+        if (hud.focusedKnob == 3u) {
+            appendStr(rightText, 0u, sizeof(rightText),
+                      control.global.monoCollapse ? "DUAL MONO" : "STEREO");
+        } else {
+            formatHeaderEnsembleDrive(control, lfoOutput, rightText, sizeof(rightText));
+        }
         break;
     case HudMode::GlobalAll:
         appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
@@ -499,9 +467,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     case HudMode::UnassignedButton: {
         const char* swName = "PANEL";
         switch (hud.lastButton) {
-        case ButtonId::Sel:
-            swName = "SEL";
-            break;
         case ButtonId::Env:
             swName = "ENV";
             break;

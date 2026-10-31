@@ -100,7 +100,7 @@ alignas(16) ruido::ScopeFrame gScopeBatchIn[kMaxScopeBatch]{};
 alignas(16) float gTelemetryIn[kTelemetryFloats]{};
 alignas(16) uint16_t gScanlineStripRgb565[ruido::kDisplayWidth * ruido::kScanlineStripHeight]{};
 uint8_t* const gScreenRgba = reinterpret_cast<uint8_t*>(kRgbaArenaAddr);
-alignas(16) float gSummaryOut[52]{};
+alignas(16) float gSummaryOut[53]{};
 bool gControlDirty = true;
 
 void refreshSummary() noexcept {
@@ -144,6 +144,7 @@ void refreshSummary() noexcept {
     gSummaryOut[49u] = gCtrl->hud().fxPageOpen ? 1.0f : 0.0f;
     gSummaryOut[50u] = static_cast<float>(gCtrl->hud().fxVoiceFocus);
     gSummaryOut[51u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().editTarget));
+    gSummaryOut[52u] = gCtrl->hud().panPageOpen ? 1.0f : 0.0f;
 }
 
 } // namespace

@@ -149,8 +149,8 @@ int main(int argc, char** argv) {
     }
 
     std::printf("=== Ruido Native macOS CoreAudio Auditioner (44,118 Hz / 4x OS) ===\n");
-    std::printf("  [j] FX Filter  | [k] EDIT Level | [l] LFO Page   | [;] GLOBAL CONFIG\n");
-    std::printf("  [6] OP6 Pan    | [g] GLO Global | [,/.] SELECT   | [h] HOME | [m] MONO\n");
+    std::printf("  [j] FX Filter  | [b] SEL Pan    | [k] EDIT Page  | [l] LFO | [;] CONFIG\n");
+    std::printf("  [g] GLO Global | [,/.] SELECT   | [h] HOME       | [m] MONO/STEREO\n");
     std::printf("  [q/w/e/r] KNOB 1-4 +            | [u/i/o/p] KNOB 1-4 -\n");
     std::printf("  [z/x/c/v] Osc 1-4 Mutes         | [a/s/d/f] Pulse Pad Pressure\n");
     std::printf("  [ [ / ] ] ALGORITHM Coupling    | [ - / = ] Knob Rate (Fine/Coarse)\n");
@@ -220,6 +220,10 @@ int main(int argc, char** argv) {
             case 'j':
                 controller.onButtonEvent(ruido::ButtonId::Fx, true);
                 controller.onButtonEvent(ruido::ButtonId::Fx, false);
+                break;
+            case 'b':
+                controller.onButtonEvent(ruido::ButtonId::Sel, true);
+                controller.onButtonEvent(ruido::ButtonId::Sel, false);
                 break;
             case 'k':
                 controller.onButtonEvent(ruido::ButtonId::Edit, true);

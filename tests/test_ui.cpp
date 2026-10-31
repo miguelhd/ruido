@@ -136,17 +136,13 @@ void testTwoHandErgonomicsAndLinearGears() {
     CHECK(!ctrl.hud().fxPageOpen);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
 
-    // LIFO chording across remaining momentary black keys (OP6 Panning + Keybed GLO)
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
-    CHECK(ctrl.hud().mode == ruido::HudMode::Panning);
+    // Momentary Keybed GLO hold + release
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
     CHECK(ctrl.hud().mode == ruido::HudMode::GlobalAll);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
-    CHECK(ctrl.hud().mode == ruido::HudMode::Panning);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
     CHECK(!ctrl.hud().modifierHeld);
 
-    // 3. EDIT Page (Channel Level & MS-20 Drive), OP5 (Unassigned), OP6 (Panning), Keybed GLO
+    // 3. EDIT Page (Channel Level & MS-20 Drive), SEL (Panning), OP1..OP6 (Unassigned), Keybed GLO
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
     CHECK(ctrl.hud().mode == ruido::HudMode::GlobalAll);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::GlobalAll);
@@ -161,15 +157,18 @@ void testTwoHandErgonomicsAndLinearGears() {
     }
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
 
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -30);
+    CHECK(ctrl.hud().panPageOpen);
     CHECK(ctrl.hud().mode == ruido::HudMode::Panning);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Panning);
     CHECK(ctrl.state().voices[3].pan < 0.65f);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
 
-    // OP1..OP5 are all unassigned (show UnassignedKey, leave KNOB1-4 on Frequency)
-    for (uint8_t op = 0u; op <= static_cast<uint8_t>(ruido::BlackKeyId::Op5); ++op) {
+    // OP1..OP6 are all unassigned (show UnassignedKey, leave KNOB1-4 on Frequency)
+    for (uint8_t op = 0u; op <= static_cast<uint8_t>(ruido::BlackKeyId::Op6); ++op) {
         const auto key = static_cast<ruido::BlackKeyId>(op);
         ctrl.onBlackKeyEvent(key, true);
         CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedKey);
@@ -362,8 +361,11 @@ void testButtonsOctavesKeybedAndPressure() {
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
     CHECK(!ctrl.state().global.pitchPressureMode);
-    CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedButton);
-    CHECK(ctrl.hud().lastButton == ruido::ButtonId::Sel);
+    CHECK(ctrl.hud().panPageOpen);
+    CHECK(ctrl.hud().mode == ruido::HudMode::Panning);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
+    CHECK(!ctrl.hud().panPageOpen);
 
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, true);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
@@ -396,8 +398,8 @@ void testHudEnvelopeAndVaribrightLeds() {
     ruido::RuidoController ctrl;
     ruido::EngineTelemetry tel{};
 
-    // Hold OP6: unified 150 ms S-curve fade-in (smoothstep01), pinned indefinitely while held
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
+    // Hold GLO: unified 150 ms S-curve fade-in (smoothstep01), pinned indefinitely while held
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
     ctrl.tick(0.030f, tel); // 20% of 150 ms -> smoothstep01(0.2) = 0.104 (eased start!)
     CHECK(ctrl.hud().opacity > 0.08f && ctrl.hud().opacity < 0.14f);
     ctrl.tick(0.045f, tel); // 50% of 150 ms (75 ms total) -> smoothstep01(0.5) = 0.500
@@ -407,8 +409,8 @@ void testHudEnvelopeAndVaribrightLeds() {
     }
     CHECK(near(ctrl.hud().opacity, 1.0f));
 
-    // Release OP6: momentary hold dissolves smoothly in 150 ms without 1.5 s freeze
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
+    // Release GLO: momentary hold dissolves smoothly in 150 ms without 1.5 s freeze
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
     ctrl.tick(0.075f, tel); // 50% of 150 ms fade-out -> 0.50
     CHECK(near(ctrl.hud().opacity, 0.50f, 0.03f));
@@ -454,11 +456,11 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(near(ctrl.hud().opacity, 1.0f));
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)], 1.0f));
 
-    // Holding & releasing a momentary modifier (OP6 / GLO / Pad 5) returns to latched FX page:
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
+    // Holding & releasing a momentary modifier (GLO / Pad 5) returns to latched FX page:
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
     ctrl.tick(0.050f, tel);
-    CHECK(ctrl.hud().mode == ruido::HudMode::Panning);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
+    CHECK(ctrl.hud().mode == ruido::HudMode::GlobalAll);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
     ctrl.tick(0.050f, tel);
     CHECK(ctrl.hud().fxPageOpen);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFilter);
@@ -473,9 +475,9 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFilter);
     CHECK(near(ctrl.hud().opacity, 1.0f));
 
-    // Tap SEL (unassigned) -> closes FX page and latches UnassignedButton until HOME:
-    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
+    // Tap ENV (unassigned) -> closes FX page and latches UnassignedButton until HOME:
+    ctrl.onButtonEvent(ruido::ButtonId::Env, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Env, false);
     CHECK(!ctrl.hud().fxPageOpen);
     CHECK(!ctrl.state().global.pitchPressureMode);
     CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedButton);
@@ -532,16 +534,16 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(near(ctrl.hud().opacity, 0.0f));
     CHECK(ctrl.hud().mode == ruido::HudMode::None);
 
-    // Verify unassigned buttons (incl. SEL), OP1..OP5/PIT keys, & resting 11th black key are
-    // strictly 0% dark, while assigned FX, LFO, EDIT & GLO right buttons rest at 15%:
+    // Verify unassigned buttons, OP1..OP6/PIT keys, & resting 11th black key are
+    // strictly 0% dark, while assigned FX, SEL, LFO, EDIT & GLO right buttons rest at 15%:
     const auto& leds = ctrl.leds();
-    for (size_t op = 0u; op <= static_cast<size_t>(ruido::BlackKeyId::Op5); ++op) {
+    for (size_t op = 0u; op <= static_cast<size_t>(ruido::BlackKeyId::Op6); ++op) {
         CHECK(near(leds.blackKeyLeds[op], 0.0f));
     }
     CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Pit)], 0.0f));
     CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::ScopeFreezeKey)], 0.0f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)], 0.15f));
-    CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Sel)], 0.0f));
+    CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Sel)], 0.15f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Env)], 0.0f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)], 0.15f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)], 0.15f));
@@ -550,14 +552,13 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Seq)], 0.0f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Rec)], 0.0f));
 
-    // White Keys 5..8 rest at kPadFilterBaseLed (0.24) and flare under pressure while SEL stays 0%
+    // White Keys 5..8 rest at kPadFilterBaseLed (0.24) and flare under pressure
     // and FX LED flares dynamically with live filter engagement!
     for (size_t i = 0u; i < 4u; ++i) {
         CHECK(near(leds.whiteKeyLeds[4u + i], ruido::kPadFilterBaseLed));
     }
     ctrl.onWhiteKeyPressure(4u, 0.75f);
     ctrl.tick(0.016f, tel);
-    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Sel)], 0.0f));
     CHECK(ctrl.leds().whiteKeyLeds[4u] > 0.80f);
     CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)] > 0.45f &&
           ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)] <= 0.85f);
@@ -572,12 +573,12 @@ void testHudEnvelopeAndVaribrightLeds() {
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
     ctrl.tick(0.016f, tel);
 
-    // Verify OP6 & GLO landmarks rest at 25%; OP1..OP5 = 0%;
+    // Verify GLO landmark rests at 25%; OP1..OP6 = 0%;
     // and verify White Keys 1-4 smooth Mute pulse (1.50 Hz, 4..54%) vs slow Sub-Audio breath (0.35
     // Hz, 14..70%):
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op1)], 0.0f));
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op5)], 0.0f));
-    CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op6)], 0.25f));
+    CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op6)], 0.0f));
     CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Glo)], 0.25f));
     const float steadyAudible0 = 0.60f + 0.40f * ctrl.state().voices[0].amplitude;
     CHECK(near(ctrl.leds().whiteKeyLeds[0], steadyAudible0));
@@ -1383,8 +1384,9 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
         trRenderer.prepareFrame(0.020f, trCtrl.state(), trCtrl.hud(), trEngine.telemetry());
     }
 
-    // (d) Momentary OP6 release holds PANNING labels smoothly during dissolve (no FREQUENCY snap)
-    trCtrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
+    // (d) Closing SEL (PAN) page holds PAN labels smoothly during dissolve (no FREQUENCY snap)
+    trCtrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    trCtrl.onButtonEvent(ruido::ButtonId::Sel, false);
     for (int f = 0; f < 12; ++f) {
         trCtrl.tick(0.030f, trEngine.telemetry());
         ruido::HudState h = trCtrl.hud();
@@ -1393,7 +1395,8 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     }
     trRenderer.renderFullScreenStrips(img16.data());
 
-    trCtrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
+    trCtrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    trCtrl.onButtonEvent(ruido::ButtonId::Sel, false);
     CHECK(trCtrl.hud().knobBank == ruido::KnobBankMode::Frequency);
     trCtrl.tick(0.016f, trEngine.telemetry());
     {
@@ -1685,13 +1688,14 @@ void testPerVoiceLfoPageAndHudGraph() {
     }
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
 
-    // 4. Momentary OP6 Panning hold overrides LFO Page temporarily and returns cleanly on release!
+    // 4. Momentary Keybed GLO hold overrides LFO Page temporarily (resuming remembered GlobalLfo
+    // target) and returns cleanly on release!
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -32); // Focus OSC 1A (0)
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, true);
-    CHECK(ctrl.hud().mode == ruido::HudMode::Panning);
-    CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Panning);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
+    CHECK(ctrl.hud().mode == ruido::HudMode::GlobalLfo);
+    CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::GlobalLfo);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
     CHECK(ctrl.hud().lfoPageOpen);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Lfo);

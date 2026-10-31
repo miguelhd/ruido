@@ -147,7 +147,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         renderedOpacityLevel_ = stepHudFadeLinear(renderedOpacityLevel_, false, dtClamped);
         graphs_.stepFadeOut(dtClamped);
         ampGraph_.stepFadeOut(dtClamped);
-        globalViews_.update(dtClamped, control, hud, frameLfoOutput_);
+        globalViews_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_);
         frameHud_.opacity = smoothstep01(renderedOpacityLevel_);
         if (renderedOpacityLevel_ <= 0.001f && !graphs_.hasResidualPhase() &&
             !ampGraph_.hasResidualPhase() && !globalViews_.hasResidualPhase()) {
@@ -161,12 +161,14 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         return;
     }
 
-    const bool nowPinnedOrOpen = hud.modifierHeld || hud.fxPageOpen || hud.lfoPageOpen ||
-                                 hud.editPageOpen || hud.configPageOpen || hud.saveArmed ||
+    const bool nowPinnedOrOpen = hud.modifierHeld || hud.fxPageOpen || hud.panPageOpen ||
+                                 hud.lfoPageOpen || hud.editPageOpen || hud.configPageOpen ||
+                                 hud.saveArmed ||
                                  (hud.scopeFrozen && hud.mode == HudMode::ScopeFreeze);
     const bool prevWasPinnedOrOpen =
-        prevRawHud_.modifierHeld || prevRawHud_.fxPageOpen || prevRawHud_.lfoPageOpen ||
-        prevRawHud_.editPageOpen || prevRawHud_.configPageOpen || prevRawHud_.saveArmed ||
+        prevRawHud_.modifierHeld || prevRawHud_.fxPageOpen || prevRawHud_.panPageOpen ||
+        prevRawHud_.lfoPageOpen || prevRawHud_.editPageOpen || prevRawHud_.configPageOpen ||
+        prevRawHud_.saveArmed ||
         (prevRawHud_.scopeFrozen && prevRawHud_.mode == HudMode::ScopeFreeze);
     const bool fadingSameMode = !nowPinnedOrOpen && !freqChanged && (hud.opacity > 0.001f) &&
                                 ((prevWasPinnedOrOpen && hud.mode == prevRawHud_.mode &&
@@ -192,6 +194,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.fxVoiceFocus = releaseLatchHud_.fxVoiceFocus;
         effectiveHud.lfoVoiceFocus = releaseLatchHud_.lfoVoiceFocus;
         effectiveHud.fxPageOpen = releaseLatchHud_.fxPageOpen;
+        effectiveHud.panPageOpen = releaseLatchHud_.panPageOpen;
         effectiveHud.editPageOpen = releaseLatchHud_.editPageOpen;
         effectiveHud.editTarget = releaseLatchHud_.editTarget;
         effectiveHud.globalTarget = releaseLatchHud_.globalTarget;
@@ -224,8 +227,9 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         updateHudGauges(dtClamped, snapGauges);
     }
 
-    globalViews_.update(dtClamped, control, hud, frameLfoOutput_);
-    ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_, frameVoiceDrift_);
+    globalViews_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_);
+    ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_, frameVoiceDrift_,
+                     traceEngine_.overdriveHair());
     const bool extraCenterView = globalViews_.anyActiveTarget(hud) || ampGraph_.isActive(hud);
     graphs_.update(dtClamped, control, hud, effectiveHud, extraCenterView, frameLfoOutput_,
                    frameLfoDriftPacked_);
@@ -301,13 +305,12 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     float effFilterAlpha01 = 0.0f;
     float effLfoAlpha01 = 0.0f;
     float effEditGraphAlpha01 = 0.0f;
+    float effPanAlpha01 = 0.0f;
     float dummy01 = 0.0f;
     const uint8_t filterAlpha8 = resolveViewAlpha(graphs_.filterGraphPhase(), effFilterAlpha01);
     const uint8_t lfoAlpha8 = resolveViewAlpha(graphs_.lfoGraphPhase(), effLfoAlpha01);
     (void)resolveViewAlpha(ampGraph_.maxPhase(), effEditGraphAlpha01);
-    const uint8_t freqAlpha8 = resolveViewAlpha(globalViews_.freqPhase(), dummy01);
-    const uint8_t ampAlpha8 = resolveViewAlpha(globalViews_.ampPhase(), dummy01);
-    const uint8_t allAlpha8 = resolveViewAlpha(globalViews_.allOverlayPhase(), dummy01);
+    const uint8_t panAlpha8 = resolveViewAlpha(globalViews_.panPhase(), effPanAlpha01);
     const uint8_t cfgAlpha8 = resolveViewAlpha(globalViews_.configPhase(), dummy01);
 
     cv.applyVerticalScrim(0, 34, 0.80f, true);
@@ -315,6 +318,9 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
         float graphEnvMax = (effFilterAlpha01 > effLfoAlpha01) ? effFilterAlpha01 : effLfoAlpha01;
         if (effEditGraphAlpha01 > graphEnvMax) {
             graphEnvMax = effEditGraphAlpha01;
+        }
+        if (effPanAlpha01 > graphEnvMax) {
+            graphEnvMax = effPanAlpha01;
         }
         const int botScrimTop = 178 - static_cast<int>(8.0f * graphEnvMax + 0.5f);
         cv.applyVerticalScrim(botScrimTop, 240, 0.90f, false);
@@ -325,9 +331,8 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     graphs_.compositeFilterStrip(y0, y1, stripHeight, lumBuf, linScratch, effFilterAlpha01,
                                  filterAlpha8);
     ampGraph_.compositeStrip(y0, y1, stripHeight, lumBuf, linScratch, hudAlpha01, frameHud_);
-    globalViews_.compositeGlobalAllOverlayStrip(y0, y1, lumBuf, allAlpha8);
-    globalViews_.compositeGlobalFreqStrip(y0, y1, lumBuf, freqAlpha8);
-    globalViews_.compositeGlobalAmpStrip(y0, y1, lumBuf, ampAlpha8);
+    globalViews_.compositePanStageStrip(y0, y1, stripHeight, lumBuf, linScratch, effPanAlpha01,
+                                        panAlpha8, frameHud_);
     globalViews_.compositeGlobalConfigStrip(y0, y1, lumBuf, cfgAlpha8, frameControl_, frameHud_);
     compositeTopHeaderStrip(cv, frameControl_, frameHud_, frameLfoOutput_, headerBarSmooth_,
                             fineOverlayPhase_, coarseOverlayPhase_);
