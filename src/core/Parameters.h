@@ -115,7 +115,7 @@ inline constexpr VoiceChannelGain computeVoiceChannelGain(float amplitude) noexc
 struct GlobalParams {
     float circuitCoupling = 0.25f;  // ALGORITHM knob: [0.0, 1.0] rail sag -> starved-rail sync
     float masterTrim = 0.85f;       // Software headroom trim before DAC / pedals
-    bool monoCollapse = false;      // MONO vs POLY (true = Dual-Mono L==R)
+    bool monoCollapse = false;      // MONO vs POLY (true = MONO L==R)
     bool masterRun = true;          // PLAY/STOP button (clickless master kill/run)
     bool pitchPressureMode = false; // SEL button: false = MS-20 Filter/LPG, true = Pitch Bend
 };

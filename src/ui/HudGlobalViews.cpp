@@ -111,6 +111,7 @@ void HudGlobalViews::reset() noexcept {
     focusWeight_.fill(0.0f);
     muteDim_.fill(0.0f);
     hasFocusSmooth_ = 0.0f;
+    monoCollapse_ = false;
     primed_ = false;
     clearImmediate();
 }
@@ -154,6 +155,7 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
 
     const bool snapPan = !primed_ || wasPanInvisible;
     primed_ = true;
+    monoCollapse_ = control.global.monoCollapse;
 
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
     const float panScale = control.global.monoCollapse ? 0.0f : 1.0f;
@@ -234,12 +236,14 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
 
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
 
-    // 1. Edge-to-edge baseline filament (y = 184, matching FX) + phantom-center slit (x = 120)
+    // 1. Edge-to-edge baseline filament (y = 184, matching FX) + stereo soundstage ticks
     cv.drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kPanYBot, 32.0f, 0.50f,
                               false);
-    cv.drawVerticalSlit(kPanCenterX, 36.0f, kPanYBot, 22.0f);
-    cv.drawVerticalSlit(kPanCenterX - 53.0f, kPanYBot - 2.5f, kPanYBot + 2.5f, 34.0f);
-    cv.drawVerticalSlit(kPanCenterX + 53.0f, kPanYBot - 2.5f, kPanYBot + 2.5f, 34.0f);
+    if (!monoCollapse_) {
+        cv.drawVerticalSlit(kPanCenterX, 36.0f, kPanYBot, 22.0f);
+        cv.drawVerticalSlit(kPanCenterX - 53.0f, kPanYBot - 2.5f, kPanYBot + 2.5f, 34.0f);
+        cv.drawVerticalSlit(kPanCenterX + 53.0f, kPanYBot - 2.5f, kPanYBot + 2.5f, 34.0f);
+    }
 
     const float hF = clampf(hasFocusSmooth_, 0.0f, 1.0f);
 

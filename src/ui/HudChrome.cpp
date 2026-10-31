@@ -55,7 +55,13 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
                 evaluateGlobalColumn(hud.knobBank, k, control, lfoOutput);
             out.posSigned[k] = gs.posSigned;
             out.dimAmount[k] = 0.0f;
+            if (gs.disabled) {
+                out.focused[k] = false;
+            }
             continue;
+        }
+        if (hud.knobBank == KnobBankMode::Panning && control.global.monoCollapse) {
+            out.focused[k] = false;
         }
 
         const VoiceAudibility aud =
@@ -376,7 +382,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     case HudMode::OutputRouting:
         appendStr(leftMain, 0u, sizeof(leftMain), "OUTPUT ROUTING");
         appendStr(rightText, 0u, sizeof(rightText),
-                  control.global.monoCollapse ? "DUAL MONO" : "STEREO");
+                  control.global.monoCollapse ? "MONO" : "STEREO");
         break;
     case HudMode::AudioOutput:
         appendStr(leftMain, 0u, sizeof(leftMain), "AUDIO OUTPUT");
@@ -443,7 +449,8 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         appendStr(leftSuffix, 0u, sizeof(leftSuffix), " LEVEL");
         if (hud.focusedKnob == 3u) {
             appendStr(rightText, 0u, sizeof(rightText),
-                      control.global.monoCollapse ? "DUAL MONO" : "STEREO");
+                      control.global.monoCollapse ? (hud.panLockedNotice ? "MONO LOCKED" : "MONO")
+                                                  : "STEREO");
         } else {
             formatHeaderEnsembleDrive(control, lfoOutput, rightText, sizeof(rightText));
         }
@@ -491,7 +498,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
 
     if (hud.mode != HudMode::None && !showHeaderBar && rightText[0] == '\0') {
         const char* defStatus = !control.global.masterRun     ? "AUDIO OFF"
-                                : control.global.monoCollapse ? "DUAL MONO"
+                                : control.global.monoCollapse ? "MONO"
                                                               : "STEREO";
         appendStr(rightText, 0u, sizeof(rightText), defStatus);
     }
@@ -517,7 +524,12 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             }
             dstCv.drawOpticalBead(barXf + barNorm * barWf, 13.5f, 0.95f, 2.1f);
         } else if (rightText[0] != '\0') {
-            dstCv.drawSansRight(kFontSansSmall, 230, 6, rightText, 168u, 1);
+            const uint8_t rightGray = (control.global.monoCollapse && hud.panLockedNotice &&
+                                       (hud.mode == HudMode::Panning ||
+                                        (hud.mode == HudMode::GlobalAmp && hud.focusedKnob == 3u)))
+                                          ? 236u
+                                          : 168u;
+            dstCv.drawSansRight(kFontSansSmall, 230, 6, rightText, rightGray, 1);
         }
     };
 
@@ -600,6 +612,15 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
         const bool bipolar = gs.bipolar;
 
         const float dim = clampf(knobDimSmooth[k], 0.0f, 1.0f);
+        if (gs.disabled) {
+            const auto disLbl = static_cast<uint8_t>(88.0f + (64.0f - 88.0f) * dim + 0.5f);
+            const auto disVal = static_cast<uint8_t>(104.0f + (76.0f - 104.0f) * dim + 0.5f);
+            cv.drawSansCentered(kFontSansSmall, cx, 191, roleLbl, disLbl, 1);
+            cv.drawHorizontalFilament(static_cast<float>(cx) - 20.0f,
+                                      static_cast<float>(cx) + 20.0f, 207.5f, 22.0f, 0.58f, true);
+            cv.drawSansCentered(kFontSansMedium, cx, 214, valStr, disVal, 0);
+            continue;
+        }
         const float foc = clampf(knobFocusSmooth[k], 0.0f, 1.0f);
         const float effFoc = foc * (1.0f - dim);
         const float posSigned = clampf(knobPosSignedSmooth[k], -1.0f, 1.0f);

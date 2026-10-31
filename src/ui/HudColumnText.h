@@ -61,19 +61,19 @@ inline void formatHeaderPanMode(const EngineControlState& control, const HudStat
                                 char* leftSuffix, size_t suffixCap, char* rightText,
                                 size_t rightCap) noexcept {
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
-    if (hud.focusedKnob < kNumOscillators) {
+    if (!control.global.monoCollapse && hud.focusedKnob < kNumOscillators) {
         const uint8_t kv = hud.focusedKnob & 3u;
         size_t lp = appendStr(leftSuffix, 0u, suffixCap, " OSC ");
         appendUInt(leftSuffix, lp, suffixCap, static_cast<uint32_t>(kv + 1u));
         const bool muted =
             computeVoiceAudibility(control.voices[kv], control.voicePressure[kv], pitchMode)
                 .muteBlend >= 0.999f;
-        appendStr(rightText, 0u, rightCap,
-                  muted ? "MUTED" : (control.global.monoCollapse ? "DUAL MONO" : "STEREO"));
+        appendStr(rightText, 0u, rightCap, muted ? "MUTED" : "STEREO");
         return;
     }
-    if (hud.panPageOpen && !hud.modifierHeld) {
-        appendStr(leftSuffix, 0u, suffixCap, " ALL");
+    if (control.global.monoCollapse && hud.panLockedNotice) {
+        appendStr(rightText, 0u, rightCap, "MONO LOCKED");
+        return;
     }
     bool anyActive = false;
     for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
@@ -84,7 +84,7 @@ inline void formatHeaderPanMode(const EngineControlState& control, const HudStat
         }
     }
     appendStr(rightText, 0u, rightCap,
-              !anyActive ? "ALL MUTED" : (control.global.monoCollapse ? "DUAL MONO" : "STEREO"));
+              !anyActive ? "MUTED" : (control.global.monoCollapse ? "MONO" : "STEREO"));
 }
 
 inline void formatColumnRoleAndValue(const EngineControlState& control, const HudState& hud,
@@ -160,7 +160,11 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
                 formatPercent(valStr, valCap, outGlobal.primaryValue);
             } else {
                 appendStr(roleLbl, 0u, roleCap, "PAN");
-                formatPanValue(valStr, valCap, outGlobal.primaryValue);
+                if (control.global.monoCollapse) {
+                    appendStr(valStr, 0u, valCap, "MONO");
+                } else {
+                    formatPanValue(valStr, valCap, outGlobal.primaryValue);
+                }
             }
             return;
         case KnobBankMode::GlobalAll:
@@ -247,9 +251,14 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         const VoiceParams& vp = control.voices[k];
         size_t p = appendStr(roleLbl, 0u, roleCap, "OSC ");
         appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
-        outGlobal.bipolar = true;
-        const float livePan = computeLiveVoicePan(vp, lfoA, lfoB);
-        formatPanValue(valStr, valCap, clampf(livePan * panScale, -1.0f, 1.0f));
+        if (control.global.monoCollapse) {
+            outGlobal.disabled = true;
+            appendStr(valStr, 0u, valCap, "MONO");
+        } else {
+            outGlobal.bipolar = true;
+            const float livePan = computeLiveVoicePan(vp, lfoA, lfoB);
+            formatPanValue(valStr, valCap, clampf(livePan * panScale, -1.0f, 1.0f));
+        }
         break;
     }
     case KnobBankMode::Lfo: {

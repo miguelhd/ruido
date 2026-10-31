@@ -53,6 +53,7 @@ class HudGlobalViews {
     float hasFocusSmooth_ = 0.0f;
     float panPhase_ = 0.0f;
     float configPhase_ = 0.0f;
+    bool monoCollapse_ = false;
     bool primed_ = false;
 };
 

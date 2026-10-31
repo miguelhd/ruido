@@ -3,6 +3,7 @@
 #include "core/Config.h"
 #include "core/ControlSurface.h"
 #include "core/DspMath.h"
+#include "core/LfoMath.h"
 #include "core/Parameters.h"
 
 #include <cstdint>
@@ -106,6 +107,52 @@ inline void applyEditKnobDelta(EditTarget target, VoiceParams& vp, int32_t ticks
             }
         }
         break;
+    }
+}
+
+inline void applyVoiceFilterKnobDelta(VoiceParams& vp, uint8_t knobIdx, int32_t ticks,
+                                      KnobRate rate) noexcept {
+    if (knobIdx == 0u) {
+        vp.hpCutoffHz = adjustFilterCutoff(vp.hpCutoffHz, ticks, rate);
+    } else if (knobIdx == 1u) {
+        vp.hpResonance = adjustLinear01(vp.hpResonance, ticks, rate, 0.0f, 1.0f);
+    } else if (knobIdx == 2u) {
+        vp.lpCutoffHz = adjustFilterCutoff(vp.lpCutoffHz, ticks, rate);
+    } else {
+        vp.lpResonance = adjustLinear01(vp.lpResonance, ticks, rate, 0.0f, 1.0f);
+    }
+}
+
+inline void applyVoiceLfoKnobDelta(VoiceParams& vp, size_t subIdx, uint8_t knobIdx, int32_t ticks,
+                                   KnobRate rate, int32_t& targetTickAccum) noexcept {
+    if (knobIdx == 0u) {
+        LfoTarget& tgtRef = lfoSlotTargetRef(vp, subIdx);
+        const int32_t maxTgt =
+            static_cast<int32_t>((subIdx == 0u) ? kNumLfoATargets : kNumLfoBTargets) - 1;
+        tgtRef = static_cast<LfoTarget>(
+            stepClampedDetent(static_cast<int32_t>(tgtRef), maxTgt, ticks, rate, targetTickAccum));
+    } else if (knobIdx == 1u) {
+        lfoSlotShapeRef(vp, subIdx) =
+            adjustLinear01(lfoSlotShape(vp, subIdx), ticks, rate, 0.0f, 1.0f);
+    } else if (knobIdx == 2u) {
+        lfoSlotRateHzRef(vp, subIdx) = adjustLfoRate(lfoSlotRateHz(vp, subIdx), ticks, rate);
+    } else {
+        lfoSlotDepthRef(vp, subIdx) =
+            adjustLinear01(lfoSlotDepth(vp, subIdx), ticks, rate, 0.0f, 1.0f);
+    }
+}
+
+inline void toggleVoiceMuteGate(VoiceParams& vp) noexcept {
+    const bool lfoAmpActive =
+        ((vp.lfoTarget == LfoTarget::Amplitude) && (vp.lfoDepth > kSilentAmpThreshold)) ||
+        ((vp.lfoBTarget == LfoTarget::Amplitude) && (vp.lfoBDepth > kSilentAmpThreshold));
+    if (!vp.muted && vp.amplitude <= kSilentAmpThreshold && !lfoAmpActive) {
+        vp.amplitude = kDefaultVoiceAmp;
+    } else {
+        vp.muted = !vp.muted;
+        if (!vp.muted && vp.amplitude <= 0.01f && !lfoAmpActive) {
+            vp.amplitude = kDefaultVoiceAmp;
+        }
     }
 }
 

@@ -54,11 +54,13 @@ class RuidoController {
   private:
     KnobBankMode baseKnobBank() const noexcept;
     void closeAllPages() noexcept;
+    void notePanLocked() noexcept;
     void syncModifierHud() noexcept;
     void restoreOrDissolveHud() noexcept;
     void triggerHud(HudMode mode, uint8_t voiceIndex = 0u,
                     uint8_t knobIndex = kNoFocusedKnob) noexcept;
     void latchSwitchHud(HudMode mode, ButtonId button = ButtonId::Count) noexcept;
+    void latchKnobEdit(KnobBankMode bank, HudMode mode, uint8_t knobIdx, uint8_t voiceIdx) noexcept;
     void publishState() noexcept;
     void updateLeds(float dtSec, const EngineTelemetry& telemetry) noexcept;
 
@@ -73,8 +75,10 @@ class RuidoController {
     LedSmoothState ledSmooth_{};
     bool knobTurnedDuringRateHold_ = false;
     bool gloSnapshotValid_ = false;
+    bool dismissedByHome_ = false;
     float masterPot_ = 0.85f;
     float masterPotHudAnchor_ = 0.85f;
+    float panLockedSec_ = 0.0f;
     HudMode latchedHudMode_ = HudMode::None;
     ButtonId latchedButton_ = ButtonId::Count;
     int32_t selectTickAccum_ = 0;

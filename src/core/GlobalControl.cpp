@@ -205,6 +205,9 @@ void applyGlobalAmpKnob(uint8_t knobIdx, int32_t ticks, KnobRate rate,
         return;
     }
 
+    if (state.global.monoCollapse) {
+        return;
+    }
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         state.voices[i].pan = adjustLinear01(state.voices[i].pan, ticks, rate, -1.0f, 1.0f);
     }
@@ -601,6 +604,8 @@ GlobalColumnSummary evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx,
         s.primaryValue = clampf(rms * (1.0f / kRefAmpSpreadRms), 0.0f, 1.0f);
         s.posSigned = 2.0f * s.primaryValue - 1.0f;
         finalizeSpread(s);
+    } else if (control.global.monoCollapse) {
+        s.disabled = true;
     } else {
         s.bipolar = true;
         float sumPan = 0.0f;

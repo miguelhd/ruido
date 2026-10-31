@@ -86,7 +86,7 @@ constexpr const char* globalConfigValueLabel(ConfigItemId id, const GlobalConfig
     case ConfigItemId::GloRelease:
         return (cfg.gloRelease == GloReleaseMode::SnapBack) ? "SNAP BACK" : "LATCH";
     case ConfigItemId::OutputRouting:
-        return global.monoCollapse ? "DUAL MONO" : "STEREO";
+        return global.monoCollapse ? "MONO" : "STEREO";
     case ConfigItemId::Count:
         break;
     }

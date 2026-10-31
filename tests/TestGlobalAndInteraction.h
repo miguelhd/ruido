@@ -613,13 +613,19 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(ctrl.hud().config.gloRelease == ruido::GloReleaseMode::SnapBack);
     RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::GlobalConfig);
 
-    // Step SELECT -> Row 1: OUTPUT ROUTING -> step CW to DUAL MONO via ALGORITHM, synced with
+    // Step SELECT -> Row 1: OUTPUT ROUTING -> step CW to MONO via ALGORITHM, synced with
     // MONO/POLY
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 1u);
     RTEST_CHECK(!ctrl.state().global.monoCollapse);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::OutputRouting,
+                                                          ctrl.hud().config, ctrl.state().global),
+                            "STEREO") == 0);
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     RTEST_CHECK(ctrl.state().global.monoCollapse);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::OutputRouting,
+                                                          ctrl.hud().config, ctrl.state().global),
+                            "MONO") == 0);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, true);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, false);
     RTEST_CHECK(!ctrl.state().global.monoCollapse);
@@ -1070,7 +1076,8 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     // (d) SEL (PAN) Edge-to-Edge Stereo Panorama Curve (HudGraphs sister to FX & LFO):
     //     SELECT focus stepping (PAN <-> OSC 1..4), left/right panorama steering,
     //     spotlight vs 30% silver companion contrast, LFO -> PAN strip equivalence,
-    //     DUAL MONO center convergence, and 150 ms 2nd-tap dissolve + 75% wide-stereo LED glow!
+    //     MONO center convergence + locked knobs + disabled "MONO" bottom rail + "MONO LOCKED"
+    //     turn confirmation, and 150 ms 2nd-tap dissolve + 75% wide-stereo LED glow!
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
     ctrl.tick(0.016f, driveTel);
@@ -1150,8 +1157,61 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     RTEST_CHECK(panPanoramaStripsEq);
 
-    // DUAL MONO collapses all 4 curves onto phantom center (x = 120, symmetric L == R)
-    quietSt.global.monoCollapse = true;
+    // MONO mode locks KNOB 1-4 & SELECT on SEL (and KNOB 4 = PAN in GLOBAL LEVEL), shows explicit
+    // disabled "MONO" bottom readouts (never "C", zero optical bead), flashes "MONO LOCKED" for
+    // 1.5 s on attempted turn, and preserves stereo pan values intact when returning to POLY!
+    const std::array<float, 4> savedStereoPan = {
+        ctrl.state().voices[0].pan,
+        ctrl.state().voices[1].pan,
+        ctrl.state().voices[2].pan,
+        ctrl.state().voices[3].pan,
+    };
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, true);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
+    RTEST_CHECK(ctrl.state().global.monoCollapse);
+    RTEST_CHECK(!ctrl.hud().panLockedNotice);
+    for (int i = 0; i < 8; ++i) {
+        ctrl.tick(0.25f, driveTel); // Let OUTPUT ROUTING · MONO toast return to latched SEL page
+    }
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Panning &&
+                ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+
+    const ruido::LfoSignalArray zeroLfo{};
+    for (uint8_t k = 0u; k < 4u; ++k) {
+        char roleBuf[12]{};
+        char valBuf[16]{};
+        ruido::GlobalColumnSummary colGs{};
+        ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, k, roleBuf,
+                                        sizeof(roleBuf), valBuf, sizeof(valBuf), colGs);
+        RTEST_CHECK(colGs.disabled && !colGs.bipolar);
+        RTEST_CHECK(std::strcmp(valBuf, "MONO") == 0);
+    }
+    char hdrSuffix[16]{};
+    char hdrRight[24]{};
+    ruido::formatHeaderPanMode(ctrl.state(), ctrl.hud(), hdrSuffix, sizeof(hdrSuffix), hdrRight,
+                               sizeof(hdrRight));
+    RTEST_CHECK(hdrSuffix[0] == '\0' && std::strcmp(hdrRight, "MONO") == 0);
+
+    // Attempted turns on KNOB 1-4 and SELECT in MONO leave pan 100% untouched & trigger MONO LOCKED
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 120);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -120);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8);
+    RTEST_CHECK(ctrl.hud().panLockedNotice);
+    RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+    for (size_t v = 0u; v < 4u; ++v) {
+        RTEST_CHECK(nearF(ctrl.state().voices[v].pan, savedStereoPan[v]));
+    }
+    hdrSuffix[0] = '\0';
+    hdrRight[0] = '\0';
+    ruido::formatHeaderPanMode(ctrl.state(), ctrl.hud(), hdrSuffix, sizeof(hdrSuffix), hdrRight,
+                               sizeof(hdrRight));
+    RTEST_CHECK(std::strcmp(hdrRight, "MONO LOCKED") == 0);
+
+    // Render MONO locked SEL view: centered curve, zero optical slider bead on y=207.5, and
+    // bit-identical 240x8 == 240x16 == 240x24 strip equivalence
+    quietSt = ctrl.state();
+    quietSt.global.masterRun = false;
+    quietSt.global.masterTrim = 0.0f;
     for (int f = 0; f < 16; ++f) {
         renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
     }
@@ -1163,6 +1223,61 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         static_cast<int32_t>(monoLeftHalf) - static_cast<int32_t>(monoRightHalf);
     RTEST_CHECK(std::abs(monoHalfDiff) <= 16);
     RTEST_CHECK(monoCenterPeak > monoLeftHalf * 3u);
+    // Disabled bottom slider tracks (y = 205..210) have only subtle 22-lum hairline (g6 <= 8), no
+    // bright optical slider bead!
+    RTEST_CHECK(maxBoxG6(clean16, 8u, 232u, 205u, 210u) <= 8u);
+    for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 8u)) {
+        renderer.renderStrip(y, 8u, amp8.data() + static_cast<size_t>(y) * 240u);
+    }
+    for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 24u)) {
+        renderer.renderStrip(y, 24u, amp24.data() + static_cast<size_t>(y) * 240u);
+    }
+    bool monoPanStripsEq = true;
+    for (size_t i = 0u; i < clean16.size(); ++i) {
+        if (clean16[i] != amp8[i] || clean16[i] != amp24[i]) {
+            monoPanStripsEq = false;
+        }
+    }
+    RTEST_CHECK(monoPanStripsEq);
+
+    // 1.5 s decay clears panLockedNotice automatically (tick clamps dt <= 0.25 s)
+    for (int i = 0; i < 7; ++i) {
+        ctrl.tick(0.25f, driveTel);
+    }
+    RTEST_CHECK(!ctrl.hud().panLockedNotice);
+
+    // Hold GLO -> GLOBAL LEVEL -> KNOB 4 (PAN) in MONO is also locked & labeled "MONO"
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -20); // Home to GlobalTarget::Freq (0)
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 12);  // Step +3 detents -> GlobalTarget::Amp (3)
+    RTEST_CHECK(ctrl.hud().globalTarget == ruido::GlobalTarget::Amp);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -80);
+    RTEST_CHECK(ctrl.hud().panLockedNotice);
+    for (size_t v = 0u; v < 4u; ++v) {
+        RTEST_CHECK(nearF(ctrl.state().voices[v].pan, savedStereoPan[v]));
+    }
+    {
+        char roleBuf[12]{};
+        char valBuf[16]{};
+        ruido::GlobalColumnSummary colGs{};
+        ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, 3u, roleBuf,
+                                        sizeof(roleBuf), valBuf, sizeof(valBuf), colGs);
+        RTEST_CHECK(colGs.disabled && std::strcmp(roleBuf, "PAN") == 0 &&
+                    std::strcmp(valBuf, "MONO") == 0);
+    }
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
+
+    // Tap POLY -> immediately restores STEREO with original stereo pan positions intact!
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, true);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, false);
+    RTEST_CHECK(!ctrl.state().global.monoCollapse && !ctrl.hud().panLockedNotice);
+    for (size_t v = 0u; v < 4u; ++v) {
+        RTEST_CHECK(nearF(ctrl.state().voices[v].pan, savedStereoPan[v]));
+    }
+    for (int i = 0; i < 8; ++i) {
+        ctrl.tick(0.25f, driveTel); // Return to latched SEL page in STEREO
+    }
+
 
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);

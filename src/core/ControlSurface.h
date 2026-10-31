@@ -183,9 +183,10 @@ struct HudState {
     bool saveArmed = false;
     bool fxPageOpen = false;     // Latching MS-20 Filter page state (ButtonId::Fx)
     bool panPageOpen = false;    // Latching Stereo Panning page state (ButtonId::Sel)
-    bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
-    bool editPageOpen = false;   // Latching Channel Level & Drive page (ButtonId::Edit)
-    bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
+    bool lfoPageOpen = false;     // Latching LFO page state (ButtonId::Lfo)
+    bool editPageOpen = false;    // Latching Channel Level & Drive page (ButtonId::Edit)
+    bool configPageOpen = false;  // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
+    bool panLockedNotice = false; // 1.5 s "MONO LOCKED" header feedback when turning PAN in MONO
 };
 
 // Software-PWM brightness [0.0f, 1.0f] across all 42 physical LED channels on the M-VAVE FM-1:

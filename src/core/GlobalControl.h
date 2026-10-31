@@ -12,6 +12,7 @@ struct GlobalColumnSummary {
     float posSigned = 0.0f;
     std::array<float, kNumOscillators> voiceSigned{0.0f, 0.0f, 0.0f, 0.0f};
     bool bipolar = false;
+    bool disabled = false;
     bool hasVoiceSpread = false;
     bool lfoShapeMixed = false;
     bool lfoTargetMixed = false;
