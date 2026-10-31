@@ -1466,16 +1466,14 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
                     stemBodySums[2] < stemBodySums[3]);
     }
 
-    // (h) Shared `y = 186` edge-to-edge baseline (`kGraphBaselineY`, `0..239`, `32.0f`, `0.50f`)
-    //     consistency across FILTER (`FX`), PAN (`SEL`), and LEVEL (`EDIT`):
+    // (h) Shared `y = 186` edge-to-edge baseline (`kGraphBaselineY`, `0..239`, `50.0f`, `0.50f`)
+    //     bit-exact opacity & position consistency across FILTER (`FX`), PAN (`SEL` STEREO & MONO),
+    //     and LEVEL (`EDIT`):
     {
         ruido::EngineTelemetry silentTel{};
         ruido::EngineControlState baseSt = ruido::EngineControlState::makeDefault();
         baseSt.global.masterRun = false;
         baseSt.global.masterTrim = 0.0f;
-        for (size_t v = 0u; v < 4u; ++v) {
-            baseSt.voices[v].pan = 1.0f; // Pan R100 so left edge x = 0..20 is unoccluded on PAN
-        }
 
         // 1. FILTER (`HudMode::VoiceFilter`, open passband)
         renderer.reset();
@@ -1489,7 +1487,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         }
         renderer.renderFullScreenStrips(amp8.data());
 
-        // 2. PAN (`HudMode::Panning`)
+        // 2. PAN (`HudMode::Panning`, default STEREO spread)
         renderer.reset();
         ruido::HudState panH{};
         panH.mode = ruido::HudMode::Panning;
@@ -1501,7 +1499,16 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         }
         renderer.renderFullScreenStrips(amp16.data());
 
-        // 3. LEVEL (`HudMode::Amplitude`)
+        // 3. PAN in MONO (`monoCollapse = true`)
+        renderer.reset();
+        ruido::EngineControlState monoSt = baseSt;
+        monoSt.global.monoCollapse = true;
+        for (int f = 0; f < 8; ++f) {
+            renderer.prepareFrame(0.025f, monoSt, panH, silentTel);
+        }
+        renderer.renderFullScreenStrips(clean16.data());
+
+        // 4. LEVEL (`HudMode::Amplitude`)
         renderer.reset();
         ruido::HudState lvlH{};
         lvlH.mode = ruido::HudMode::Amplitude;
@@ -1523,27 +1530,24 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
             return s;
         };
 
-        // All 3 graphs span full width (x = 0..3 and x = 236..239 lit at y = 186) and peak on row
-        // y = 186 (higher G6 sum than y = 184 and y = 188, zero overhanging slits at y = 189..190).
-        for (const auto* imgPtr : {&amp8, &amp16, &amp24}) {
-            RTEST_CHECK(rowSumG6(*imgPtr, 186u, 0u, 3u) >= 20u);
-            RTEST_CHECK(rowSumG6(*imgPtr, 186u, 236u, 239u) >= 20u);
-            RTEST_CHECK(rowSumG6(*imgPtr, 186u, 0u, 19u) > rowSumG6(*imgPtr, 184u, 0u, 19u) * 2u);
-            RTEST_CHECK(rowSumG6(*imgPtr, 186u, 0u, 19u) > rowSumG6(*imgPtr, 188u, 0u, 19u) * 2u);
-            RTEST_CHECK(rowSumG6(*imgPtr, 189u, 0u, 239u) == 0u);
-        }
+        // Full 240-px edge-to-edge baseline at y = 186 (`G6 ~ 12`) with zero overhang at y >= 189
+        RTEST_CHECK(rowSumG6(amp8, 186u, 0u, 3u) >= 40u);
+        RTEST_CHECK(rowSumG6(amp8, 186u, 236u, 239u) >= 40u);
+        RTEST_CHECK(rowSumG6(amp8, 189u, 0u, 239u) == 0u);
 
-        // Unoccluded baseline segment (`x = 0..19, y = 184..189`) is bit-for-bit identical between
-        // PAN (`amp16`) and LEVEL (`amp24`), matching `drawGraphBaseline()` (`32.0f`, `0.50f`).
-        bool panLvlBaselineIdentical = true;
-        for (size_t y = 184u; y <= 189u; ++y) {
-            for (size_t x = 0u; x <= 19u; ++x) {
-                if (amp16[y * 240u + x] != amp24[y * 240u + x]) {
-                    panLvlBaselineIdentical = false;
+        // Every single pixel x = 0..239 across rows y = 186..189 has 100% bit-exact identical
+        // baseline opacity across FILTER, PAN (STEREO), PAN (MONO), and LEVEL!
+        bool allBaselinesBitExact = true;
+        for (size_t y = 186u; y <= 189u; ++y) {
+            for (size_t x = 0u; x < 240u; ++x) {
+                const size_t idx = y * 240u + x;
+                if (amp16[idx] != amp8[idx] || clean16[idx] != amp8[idx] ||
+                    amp24[idx] != amp8[idx]) {
+                    allBaselinesBitExact = false;
                 }
             }
         }
-        RTEST_CHECK(panLvlBaselineIdentical);
+        RTEST_CHECK(allBaselinesBitExact);
     }
 #undef RTEST_CHECK
 }

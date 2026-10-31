@@ -15,7 +15,7 @@ inline constexpr uint16_t kScanlineStripHeight = 16u;
 
 // Canonical edge-to-edge unipolar graph baseline (FILTER default, shared with PAN and LEVEL)
 inline constexpr float kGraphBaselineY = 186.0f;
-inline constexpr float kGraphBaselinePeakLum = 32.0f;
+inline constexpr float kGraphBaselinePeakLum = 50.0f;
 inline constexpr float kGraphBaselineHalfSigma = 0.50f;
 
 // Compile-time elementary math helpers for zero-SRAM XIP Flash optical lookup tables

@@ -20,11 +20,13 @@ constexpr float kPanCenterX = 120.0f;
 constexpr float kPanHalfSpanX = 106.0f; // L100 = 14.0f, C = 120.0f, R100 = 226.0f
 
 // Steep-shouldered Cauchy-Lorentzian acoustic localization bell: (1 + (dx/w)^2)^-1.5
+// with smooth zero-toe so distant tails settle cleanly onto kPanYBot without baseline haze.
 inline float evalPanBellY(float x, float cx, float apexH, float invW2) noexcept {
     const float dx = x - cx;
     const float d = 1.0f + dx * dx * invW2;
     const float invSqrtD = fastInvSqrt(d);
-    const float bell = invSqrtD * invSqrtD * invSqrtD;
+    const float rawBell = invSqrtD * invSqrtD * invSqrtD;
+    const float bell = (rawBell > 0.012f) ? ((rawBell - 0.012f) * (1.0f / 0.988f)) : 0.0f;
     return clampf(kPanYBot - apexH * bell, kPanYTop, kPanYBot);
 }
 
@@ -38,7 +40,7 @@ inline void shadePanoramaCurveSkirt(int y0, int y1, uint8_t* lumBuf, float cx, f
     for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
         const float yB = evalPanBellY(static_cast<float>(colX + 1u), cx, apexH, invW2);
         const float yTopSeg = (yA < yB) ? yA : yB;
-        if (kPanYBot - yTopSeg > 0.25f) {
+        if (kPanYBot - yTopSeg > 0.50f) {
             int pyStart = static_cast<int>(yTopSeg - 0.5f);
             if (pyStart < static_cast<int>(kPanYTop)) {
                 pyStart = static_cast<int>(kPanYTop);
@@ -46,7 +48,7 @@ inline void shadePanoramaCurveSkirt(int y0, int y1, uint8_t* lumBuf, float cx, f
             if (pyStart < y0) {
                 pyStart = y0;
             }
-            int pyEnd = static_cast<int>(kPanYBot);
+            int pyEnd = static_cast<int>(kPanYBot) - 1;
             if (pyEnd > y1 - 1) {
                 pyEnd = y1 - 1;
             }
@@ -82,7 +84,8 @@ inline void shadePanoramaCurveSkirt(int y0, int y1, uint8_t* lumBuf, float cx, f
                     const float perpDist = d2 * fastInvSqrt(d2 + 0.25f);
                     const float vDist = (vy > 0.0f) ? vy : 0.0f;
                     const float effDist = 0.65f * vDist + 0.35f * perpDist;
-                    const float crestGlow = glowAmp * fastExpNeg(effDist * 0.048f);
+                    const float baseTaper = smoothstep01((kPanYBot - pyF) * (1.0f / 6.0f));
+                    const float crestGlow = glowAmp * fastExpNeg(effDist * 0.048f) * baseTaper;
                     int alpha = static_cast<int>((22.0f + crestGlow) * colScale * subEdge + 0.5f);
                     if (alpha > 220) {
                         alpha = 220;
@@ -239,7 +242,7 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
     // 1. Canonical edge-to-edge baseline filament (y = 186, shared with FILTER & LEVEL)
     cv.drawGraphBaseline();
     if (!monoCollapse_) {
-        cv.drawVerticalSlit(kPanCenterX, 36.0f, kPanYBot, 22.0f);
+        cv.drawVerticalSlit(kPanCenterX, 36.0f, kPanYBot - 1.0f, 22.0f);
     }
 
     const float hF = clampf(hasFocusSmooth_, 0.0f, 1.0f);
@@ -282,7 +285,7 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
             for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
                 const float yB = evalPanBellY(static_cast<float>(colX + 1u), cx, apexH, invW2);
                 const float yTopSeg = (yA < yB) ? yA : yB;
-                const float tailFade = smoothstep01((kPanYBot - yTopSeg) * (1.0f / 2.5f));
+                const float tailFade = smoothstep01((kPanYBot - yTopSeg - 1.2f) * (1.0f / 4.5f));
                 if (tailFade > 0.004f) {
                     splatPhotonSegment(static_cast<int>(colX), yA, yB, weight * tailFade, 0.62f, y0,
                                        y1, linScratch);

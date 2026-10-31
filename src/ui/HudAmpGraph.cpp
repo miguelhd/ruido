@@ -158,7 +158,7 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         const float cx = 30.0f + static_cast<float>(v) * 60.0f;
-        cv.drawVerticalSlit(cx, kColYTop, kColYBot, 22.0f);
+        cv.drawVerticalSlit(cx, kColYTop, kColYBot - 1.0f, 22.0f);
     }
 
     // 2. Linear-photon columns: clean VCA stem (0-70%) & 3A narrow hairy drive cap (>70%)
@@ -193,11 +193,11 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
 
             for (int py = pyStart; py < pyEnd; ++py) {
                 const float pyF = static_cast<float>(py);
-                if (pyF < stemTop - 0.5f || pyF > kColYBot + 0.5f) {
+                if (pyF < stemTop - 0.5f || pyF >= kColYBot) {
                     continue;
                 }
                 const float topCov = clampf((pyF + 0.5f) - stemTop, 0.0f, 1.0f);
-                const float botCov = clampf((kColYBot + 0.5f) - pyF, 0.0f, 1.0f);
+                const float botCov = clampf(kColYBot - pyF, 0.0f, 1.0f);
                 const float rowE = stemBaseE * topCov * botCov;
                 if (rowE < 1.0f) {
                     continue;

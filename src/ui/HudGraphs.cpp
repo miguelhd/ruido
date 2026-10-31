@@ -544,7 +544,7 @@ void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8
                 if (pyStart < y0) {
                     pyStart = y0;
                 }
-                int pyEnd = static_cast<int>(kFilterYBot);
+                int pyEnd = static_cast<int>(kFilterYBot) - 1;
                 if (pyEnd > y1 - 1) {
                     pyEnd = y1 - 1;
                 }
@@ -608,10 +608,14 @@ void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8
                 return;
             }
             for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
-                splatPhotonSegment(static_cast<int>(colX),
-                                   static_cast<float>(pts[colX]) * kFixedToPx,
-                                   static_cast<float>(pts[colX + 1u]) * kFixedToPx, weight, 0.62f,
-                                   y0, y1, linScratch);
+                const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
+                const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
+                const float yTopSeg = (yA < yB) ? yA : yB;
+                const float tailFade = smoothstep01((kFilterYBot - yTopSeg - 1.2f) * (1.0f / 4.5f));
+                if (tailFade > 0.004f) {
+                    splatPhotonSegment(static_cast<int>(colX), yA, yB, weight * tailFade, 0.62f, y0,
+                                       y1, linScratch);
+                }
             }
         };
 
