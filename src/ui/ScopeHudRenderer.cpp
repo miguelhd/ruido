@@ -3,6 +3,7 @@
 #include "core/DspMath.h"
 #include "core/HudEnvelope.h"
 #include "core/LfoMath.h"
+#include "ui/GraphStyle.h"
 #include "ui/HudChrome.h"
 #include "ui/MonoCanvas.h"
 
@@ -297,22 +298,20 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     const MonoStripCanvas cv{lumBuf, y0, y1, hudAlpha8};
 
     const float hudAlpha01 = static_cast<float>(hudAlpha8) * (1.0f / 255.0f);
-    const auto resolveViewAlpha = [&](float linearPhase, float& outAlpha01) -> uint8_t {
-        const float env01 = smoothstep01(clampf(linearPhase, 0.0f, 1.0f));
-        outAlpha01 = (env01 < hudAlpha01) ? env01 : hudAlpha01;
-        return static_cast<uint8_t>(outAlpha01 * 255.0f + 0.5f);
-    };
 
     float effFilterAlpha01 = 0.0f;
     float effLfoAlpha01 = 0.0f;
     float effEditGraphAlpha01 = 0.0f;
     float effPanAlpha01 = 0.0f;
     float dummy01 = 0.0f;
-    const uint8_t filterAlpha8 = resolveViewAlpha(graphs_.filterGraphPhase(), effFilterAlpha01);
-    const uint8_t lfoAlpha8 = resolveViewAlpha(graphs_.lfoGraphPhase(), effLfoAlpha01);
-    (void)resolveViewAlpha(ampGraph_.maxPhase(), effEditGraphAlpha01);
-    const uint8_t panAlpha8 = resolveViewAlpha(globalViews_.panPhase(), effPanAlpha01);
-    const uint8_t cfgAlpha8 = resolveViewAlpha(globalViews_.configPhase(), dummy01);
+    const uint8_t filterAlpha8 =
+        resolveSubViewAlpha(graphs_.filterGraphPhase(), hudAlpha01, effFilterAlpha01);
+    const uint8_t lfoAlpha8 =
+        resolveSubViewAlpha(graphs_.lfoGraphPhase(), hudAlpha01, effLfoAlpha01);
+    (void)resolveSubViewAlpha(ampGraph_.maxPhase(), hudAlpha01, effEditGraphAlpha01);
+    const uint8_t panAlpha8 =
+        resolveSubViewAlpha(globalViews_.panPhase(), hudAlpha01, effPanAlpha01);
+    const uint8_t cfgAlpha8 = resolveSubViewAlpha(globalViews_.configPhase(), hudAlpha01, dummy01);
 
     cv.applyVerticalScrim(0, 34, 0.80f, true);
     if (frameHud_.knobBank != KnobBankMode::None) {

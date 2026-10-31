@@ -2,6 +2,7 @@
 
 #include "core/ControlSurface.h"
 #include "core/Parameters.h"
+#include "ui/GraphStyle.h"
 #include "ui/MonoCanvas.h"
 #include "ui/ScopeTraceMath.h"
 

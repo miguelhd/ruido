@@ -99,33 +99,27 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
 void HudAmpGraph::compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                  uint16_t* linScratch, float hudAlpha01,
                                  const HudState& hud) const noexcept {
-    if (hudAlpha01 <= 0.002f || y1 <= 16 || y0 >= 198) {
+    if (hudAlpha01 <= 0.002f || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
     }
 
-    const auto resolveSubAlpha = [&](float linPhase, float& outE) noexcept -> uint8_t {
-        const float env01 = smoothstep01(clampf(linPhase, 0.0f, 1.0f));
-        outE = (env01 < hudAlpha01) ? env01 : hudAlpha01;
-        return static_cast<uint8_t>(outE * 255.0f + 0.5f);
-    };
-
     if (widthPhase_ > 0.002f) {
         float wAlpha01 = 0.0f;
-        const uint8_t wAlpha8 = resolveSubAlpha(widthPhase_, wAlpha01);
+        const uint8_t wAlpha8 = resolveSubViewAlpha(widthPhase_, hudAlpha01, wAlpha01);
         if (wAlpha8 > 0u) {
             compositeWidthStrip(y0, y1, stripHeight, lumBuf, linScratch, wAlpha01, wAlpha8, hud);
         }
     }
     if (driftPhase_ > 0.002f) {
         float dAlpha01 = 0.0f;
-        const uint8_t dAlpha8 = resolveSubAlpha(driftPhase_, dAlpha01);
+        const uint8_t dAlpha8 = resolveSubViewAlpha(driftPhase_, hudAlpha01, dAlpha01);
         if (dAlpha8 > 0u) {
             compositeDriftStrip(y0, y1, stripHeight, lumBuf, linScratch, dAlpha01, dAlpha8, hud);
         }
     }
     if (phase_ > 0.002f) {
         float lAlpha01 = 0.0f;
-        const uint8_t lAlpha8 = resolveSubAlpha(phase_, lAlpha01);
+        const uint8_t lAlpha8 = resolveSubViewAlpha(phase_, hudAlpha01, lAlpha01);
         if (lAlpha8 > 0u) {
             compositeLevelStrip(y0, y1, stripHeight, lumBuf, linScratch, lAlpha01, lAlpha8, hud);
         }
@@ -135,20 +129,18 @@ void HudAmpGraph::compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* 
 void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                       uint16_t* linScratch, float effAlpha01, uint8_t alpha8,
                                       const HudState& hud) const noexcept {
-    if (alpha8 == 0u || y1 <= 16 || y0 >= 198) {
+    if (alpha8 == 0u || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
     }
 
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
 
     // 1. Canonical edge-to-edge 0% baseline (y = 186, shared with FILTER & PAN) + 70% Drive Knee
-    cv.drawGraphBaseline();
-    cv.drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kKneeY, 22.0f, 0.48f,
-                              false);
+    drawGraphBaseline(cv);
+    drawGraphRefHorizon(cv, kKneeY);
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        const float cx = 30.0f + static_cast<float>(v) * 60.0f;
-        cv.drawVerticalSlit(cx, kColYTop, kColYBot - 1.0f, 22.0f);
+        drawGraphGuideSlit(cv, hudColumnCenterXF(v), kColYTop);
     }
 
     // 2. Linear-photon columns: clean VCA stem (0-70%) & 3A narrow hairy drive cap (>70%)
@@ -161,7 +153,7 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
         const float masterE = clampf(effAlpha01, 0.0f, 1.0f);
 
         for (size_t v = 0u; v < kNumOscillators; ++v) {
-            const int cxInt = 30 + static_cast<int>(v) * 60;
+            const int cxInt = hudColumnCenterX(v);
             const float cx = static_cast<float>(cxInt);
             const float fy = faderY_[v];
             const float level01 = clampf((kColYBot - fy) * (1.0f / kColYSpan), 0.0f, 1.0f);
@@ -368,7 +360,7 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
         if (driveNorm_[v] > 0.006f) {
             continue;
         }
-        const float cx = 30.0f + static_cast<float>(v) * 60.0f;
+        const float cx = hudColumnCenterXF(v);
         const float fy = faderY_[v];
         const float cleanFrac =
             clampf((kColYBot - fy) * (1.0f / (kCleanAmpKnee * kColYSpan)), 0.0f, 1.0f);
@@ -392,7 +384,7 @@ void HudAmpGraph::compositeWidthStrip(int y0, int y1, uint16_t stripHeight, uint
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
     cv.drawHorizontalFilament(10.0f, 230.0f, kYMid, 28.0f, 0.48f, true);
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        const float cx = 30.0f + static_cast<float>(v) * 60.0f;
+        const float cx = hudColumnCenterXF(v);
         cv.drawVerticalSlit(cx, kYHigh - 6.0f, kYLow + 6.0f, 22.0f);
     }
 
@@ -404,7 +396,7 @@ void HudAmpGraph::compositeWidthStrip(int y0, int y1, uint16_t stripHeight, uint
         const float masterE = clampf(effAlpha01, 0.0f, 1.0f);
 
         for (size_t v = 0u; v < kNumOscillators; ++v) {
-            const int cxInt = 30 + static_cast<int>(v) * 60;
+            const int cxInt = hudColumnCenterX(v);
             const float cx = static_cast<float>(cxInt);
             const float x0 = cx - kHalfSpanX;
             const float x1 = cx + kHalfSpanX;
@@ -448,7 +440,7 @@ void HudAmpGraph::compositeWidthStrip(int y0, int y1, uint16_t stripHeight, uint
     }
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        const float cx = 30.0f + static_cast<float>(v) * 60.0f;
+        const float cx = hudColumnCenterXF(v);
         const float x0 = cx - kHalfSpanX;
         const float x1 = cx + kHalfSpanX;
         const float xEdge =
@@ -478,7 +470,7 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
     cv.drawHorizontalFilament(10.0f, 230.0f, kYZero, 36.0f, 0.50f, true);
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        const float cx = 30.0f + static_cast<float>(v) * 60.0f;
+        const float cx = hudColumnCenterXF(v);
         cv.drawVerticalSlit(cx, kYZero - kMaxSpanPx - 4.0f, kYZero + kMaxSpanPx + 4.0f, 24.0f);
     }
 
@@ -490,7 +482,7 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
         const float masterE = clampf(effAlpha01, 0.0f, 1.0f);
 
         for (size_t v = 0u; v < kNumOscillators; ++v) {
-            const int cxInt = 30 + static_cast<int>(v) * 60;
+            const int cxInt = hudColumnCenterX(v);
             const float cx = static_cast<float>(cxInt);
             const float spanPx = clampf(driftAmt_[v], 0.0f, 1.0f) * kMaxSpanPx;
             const float beaconY = clampf(kYZero - driftLive_[v] * kMaxSpanPx, kYZero - kMaxSpanPx,
@@ -532,7 +524,7 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
     }
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        const float cx = 30.0f + static_cast<float>(v) * 60.0f;
+        const float cx = hudColumnCenterXF(v);
         const float dAmt = clampf(driftAmt_[v], 0.0f, 1.0f);
         const float spanPx = dAmt * kMaxSpanPx;
         const float beaconY =

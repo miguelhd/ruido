@@ -4,6 +4,7 @@
 #include "core/DspMath.h"
 #include "core/LfoMath.h"
 #include "core/Parameters.h"
+#include "ui/GraphStyle.h"
 #include "ui/MonoCanvas.h"
 
 #include <array>
@@ -17,7 +18,7 @@ inline constexpr int kFilterXStart = 0;
 inline constexpr size_t kFilterSweepPts = kDisplayWidth + 1u;
 inline constexpr float kFilterLogMin = cxLog2Pos(kFilterCutoffMinHz);
 inline constexpr float kFilterLogSpan = cxLog2Pos(kFilterCutoffMaxHz) - kFilterLogMin;
-inline constexpr float kFilterYTop = 26.0f;
+inline constexpr float kFilterYTop = kGraphTopY;
 inline constexpr float kFilterYZeroDb = 86.0f;
 inline constexpr float kFilterYBot = kGraphBaselineY;
 inline constexpr float kFilterDbToPx = 3.36f;
@@ -29,7 +30,7 @@ inline constexpr float filterNormToScreenX(float u01) noexcept {
 }
 
 // Full-screen (x = 0..239 edge-to-edge, y = 26..188) bipolar per-voice LFO visualization
-inline constexpr float kLfoYTop = 26.0f;
+inline constexpr float kLfoYTop = kGraphTopY;
 inline constexpr float kLfoYZero = 107.0f; // Midpoint between top header and bottom strip
 inline constexpr float kLfoYBot = 188.0f;
 inline constexpr float kLfoMaxAmpPx = 75.0f; // +-75 px (150 px peak-to-peak) excursion

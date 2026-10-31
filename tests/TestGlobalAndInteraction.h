@@ -7,6 +7,7 @@
 #include "core/RuidoController.h"
 #include "dsp/DroneEngine.h"
 #include "ui/FontSansAA.h"
+#include "ui/GraphStyle.h"
 #include "ui/HudColumnText.h"
 #include "ui/ScopeHudRenderer.h"
 
@@ -806,19 +807,22 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(eqStrips);
     RTEST_CHECK(monoOk);
 
-    // Verify 0-70% clean stem (`y = 85..175`, quiet background) stays razor-sharp (`cx = 30`) with
-    // zero wide post-filter `voicePeak` plasma halo in `x = 20..25` / `x = 35..40`!
+    // Verify 0-70% clean stem (quiet background) stays razor-sharp on Column 0 with zero wide
+    // post-filter `voicePeak` plasma halo to the left or right of the stem!
+    const auto col0X = static_cast<size_t>(ruido::hudColumnCenterX(0u));
+    const auto cleanStemTopY = static_cast<size_t>(ruido::HudAmpGraph::kKneeY) + 4u;
+    const auto cleanStemBotY = static_cast<size_t>(ruido::HudAmpGraph::kColYBot) - 11u;
     size_t cleanStemSideHaloPx = 0u;
-    for (size_t y = 85u; y <= 175u; ++y) {
+    for (size_t y = cleanStemTopY; y <= cleanStemBotY; ++y) {
         if (y == 120u) {
             continue; // quiet scope flatline horizon
         }
-        for (size_t x = 20u; x <= 25u; ++x) {
+        for (size_t x = col0X - 10u; x <= col0X - 5u; ++x) {
             if (((amp16[y * 240u + x] >> 5u) & 0x3Fu) >= 4u) {
                 ++cleanStemSideHaloPx;
             }
         }
-        for (size_t x = 35u; x <= 40u; ++x) {
+        for (size_t x = col0X + 5u; x <= col0X + 10u; ++x) {
             if (((amp16[y * 240u + x] >> 5u) & 0x3Fu) >= 4u) {
                 ++cleanStemSideHaloPx;
             }
@@ -826,10 +830,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     RTEST_CHECK(cleanStemSideHaloPx == 0u);
 
-    // Compare Column 0 upper overdrive zone (y = 36..76) between 100% (4.5x drive, Option 3A
-    // narrow triangular hairy CRT cap) and clean 65% VCA:
-    //  - Narrow V-triangle lights center hair (`x = 24..36`) while keeping wide outer regions
-    //    (`x = 8..22` and `x = 38..52`) 100% clear (zero wide wings or floating text!).
+    // Compare Column 0 upper overdrive zone between 100% (4.5x drive, Option 3A narrow triangular
+    // hairy CRT cap) and clean 65% VCA:
+    //  - Narrow V-triangle lights center hair while keeping wide outer regions 100% clear.
     static ruido::DroneEngine drvEng;
     static std::array<float, 128> drvOutL{};
     static std::array<float, 128> drvOutR{};
@@ -855,11 +858,13 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     renderer.renderFullScreenStrips(clean16.data());
 
+    const auto drvTopY = static_cast<size_t>(ruido::HudAmpGraph::kColYTop);
+    const auto drvBotY = static_cast<size_t>(ruido::HudAmpGraph::kKneeY) - 5u;
     size_t driveZonePxHot = 0u;
     size_t driveZonePxClean = 0u;
     size_t wideOuterPxHot = 0u;
-    for (size_t y = 36u; y <= 76u; ++y) {
-        for (size_t x = 24u; x <= 36u; ++x) {
+    for (size_t y = drvTopY; y <= drvBotY; ++y) {
+        for (size_t x = col0X - 6u; x <= col0X + 6u; ++x) {
             if (((amp16[y * 240u + x] >> 5u) & 0x3Fu) >= 6u) {
                 ++driveZonePxHot;
             }
@@ -867,12 +872,12 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
                 ++driveZonePxClean;
             }
         }
-        for (size_t x = 8u; x <= 22u; ++x) {
+        for (size_t x = col0X - 22u; x <= col0X - 8u; ++x) {
             if (((amp16[y * 240u + x] >> 5u) & 0x3Fu) >= 12u) {
                 ++wideOuterPxHot;
             }
         }
-        for (size_t x = 38u; x <= 52u; ++x) {
+        for (size_t x = col0X + 8u; x <= col0X + 22u; ++x) {
             if (((amp16[y * 240u + x] >> 5u) & 0x3Fu) >= 12u) {
                 ++wideOuterPxHot;
             }
@@ -965,9 +970,11 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     renderer.reset();
     const auto maxOscLabelG6 = [&](const std::array<uint16_t, 240u * 240u>& img, size_t col) {
         uint16_t maxG6 = 0u;
-        const size_t x0 = col * 60u + 8u;
-        const size_t x1 = col * 60u + 52u;
-        for (size_t y = 191u; y <= 201u; ++y) {
+        const auto colCx = static_cast<size_t>(ruido::hudColumnCenterX(col));
+        const size_t x0 = colCx - 22u;
+        const size_t x1 = colCx + 22u;
+        const auto lblY0 = static_cast<size_t>(ruido::kHudBotLabelY);
+        for (size_t y = lblY0; y <= lblY0 + 10u; ++y) {
             for (size_t x = x0; x <= x1; ++x) {
                 const uint16_t g6 = (img[y * 240u + x] >> 5u) & 0x3Fu;
                 if (g6 > maxG6) {
@@ -1158,12 +1165,14 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         return maxG;
     };
 
-    const uint32_t leftPanorama = sumBoxG6(amp16, 4u, 108u, 44u, 180u);
-    const uint32_t rightPanorama = sumBoxG6(amp16, 132u, 235u, 44u, 180u);
+    const auto baseY = static_cast<size_t>(ruido::kGraphBaselineY);
+    const auto graphTopY = static_cast<size_t>(ruido::kGraphTopY);
+    const uint32_t leftPanorama = sumBoxG6(amp16, 4u, 108u, 44u, baseY - 6u);
+    const uint32_t rightPanorama = sumBoxG6(amp16, 132u, 235u, 44u, baseY - 6u);
     RTEST_CHECK(leftPanorama > rightPanorama * 4u);
-    // Edge-to-edge y = 186 baseline filament is present on both sides; zero floating top text!
-    RTEST_CHECK(maxBoxG6(amp16, 200u, 239u, 185u, 187u) >= 6u);
-    RTEST_CHECK(maxBoxG6(amp16, 4u, 235u, 26u, 33u) == 0u);
+    // Edge-to-edge baseline filament is present on both sides; zero floating top text!
+    RTEST_CHECK(maxBoxG6(amp16, 200u, 239u, baseY - 1u, baseY + 1u) >= 6u);
+    RTEST_CHECK(maxBoxG6(amp16, 4u, 235u, graphTopY, graphTopY + 7u) == 0u);
 
     // Spread Osc 1 -> L100, Osc 2 -> C + LFO->PAN, Osc 3 -> R45, Osc 4 -> R100 (focusedKnob = 3):
     // verify Osc 4 spotlight outshines unfocused Osc 1 companion & 240x8 == 240x16 == 240x24!
@@ -1418,9 +1427,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         RTEST_CHECK(monotonicSkirt);
     }
 
-    // (g) LEVEL screen (`HudAmpGraph::compositeLevelStrip`): 3-px dot-matched stem width (`x =
-    //     29..31` solid body at `cx = 30`) and monotonic level-brightness scaling across `3% ->
-    //     35% -> 68% -> 100%`, with clearly visible brightness even at the lowest audible level.
+    // (g) LEVEL screen (`HudAmpGraph::compositeLevelStrip`): 3-px dot-matched stem width around
+    //     Column 0 center and monotonic level-brightness scaling across `3% -> 35% -> 68% -> 100%`,
+    //     with clearly visible brightness even at the lowest audible level.
     {
         ruido::EngineTelemetry silentTel{};
         ruido::HudState lvlHud{};
@@ -1429,6 +1438,10 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         lvlHud.editTarget = ruido::EditTarget::Level;
         lvlHud.editPageOpen = true;
         lvlHud.opacity = 1.0f;
+
+        const auto lvlBaseY = static_cast<size_t>(ruido::HudAmpGraph::kColYBot);
+        const size_t stemNearBaseY = lvlBaseY - 2u;
+        const size_t stemMidY = (lvlBaseY - 44u) & ~size_t{3u};
 
         const std::array<float, 4> testLevels{0.03f, 0.35f, 0.68f, 1.00f};
         std::array<uint32_t, 4> stemBodySums{};
@@ -1446,11 +1459,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
                 return (amp16[y * 240u + x] >> 5u) & 0x3Fu;
             };
             if (li == 0u) {
-                // Lowest audible level (3%): clearly visible bead/stem (>= 28 G6) and thicker
-                // 3-px body at y = 184 (`x = 29, 30, 31` all >= 16 G6; outer `x <= 25` == 0).
                 uint16_t lowMaxG6 = 0u;
-                for (size_t y = 178u; y <= 187u; ++y) {
-                    for (size_t x = 28u; x <= 32u; ++x) {
+                for (size_t y = lvlBaseY - 8u; y <= lvlBaseY + 1u; ++y) {
+                    for (size_t x = col0X - 2u; x <= col0X + 2u; ++x) {
                         const uint16_t g = pxG6(y, x);
                         if (g > lowMaxG6) {
                             lowMaxG6 = g;
@@ -1458,20 +1469,20 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
                     }
                 }
                 RTEST_CHECK(lowMaxG6 >= 28u);
-                RTEST_CHECK(pxG6(184u, 29u) >= 16u && pxG6(184u, 30u) >= 26u &&
-                            pxG6(184u, 31u) >= 16u);
-                RTEST_CHECK(pxG6(184u, 25u) == 0u && pxG6(184u, 35u) == 0u);
+                RTEST_CHECK(pxG6(stemNearBaseY, col0X - 1u) >= 16u &&
+                            pxG6(stemNearBaseY, col0X) >= 26u &&
+                            pxG6(stemNearBaseY, col0X + 1u) >= 16u);
+                RTEST_CHECK(pxG6(stemNearBaseY, col0X - 5u) == 0u &&
+                            pxG6(stemNearBaseY, col0X + 5u) == 0u);
             }
             if (li == 2u) {
-                // At 68% clean VCA, `x = 29..31` mid-stem (`y = 140`) forms a bright 3-px bar
-                // matching the dot width, with crisp zero halo outside `x = 26..34`.
-                RTEST_CHECK(pxG6(140u, 29u) >= 34u && pxG6(140u, 30u) >= 46u &&
-                            pxG6(140u, 31u) >= 34u);
-                RTEST_CHECK(pxG6(140u, 26u) == 0u && pxG6(140u, 34u) == 0u);
+                RTEST_CHECK(pxG6(stemMidY, col0X - 1u) >= 34u && pxG6(stemMidY, col0X) >= 46u &&
+                            pxG6(stemMidY, col0X + 1u) >= 34u);
+                RTEST_CHECK(pxG6(stemMidY, col0X - 4u) == 0u && pxG6(stemMidY, col0X + 4u) == 0u);
             }
             uint32_t bodySum = 0u;
-            for (size_t y = 183u; y <= 185u; ++y) {
-                for (size_t x = 29u; x <= 31u; ++x) {
+            for (size_t y = lvlBaseY - 3u; y <= lvlBaseY - 1u; ++y) {
+                for (size_t x = col0X - 1u; x <= col0X + 1u; ++x) {
                     bodySum += pxG6(y, x);
                 }
             }
@@ -1481,9 +1492,8 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
                     stemBodySums[2] < stemBodySums[3]);
     }
 
-    // (h) Shared `y = 186` edge-to-edge baseline (`kGraphBaselineY`, `0..239`, `50.0f`, `0.50f`)
-    //     bit-exact opacity & position consistency across FILTER (`FX`), PAN (`SEL` STEREO & MONO),
-    //     and LEVEL (`EDIT`):
+    // (h) Shared `kGraphBaselineY` edge-to-edge baseline (`drawGraphBaseline`) bit-exact opacity &
+    //     position consistency across FILTER (`FX`), PAN (`SEL` STEREO & MONO), and LEVEL (`EDIT`):
     {
         ruido::EngineTelemetry silentTel{};
         ruido::EngineControlState baseSt = ruido::EngineControlState::makeDefault();
@@ -1545,15 +1555,15 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
             return s;
         };
 
-        // Full 240-px edge-to-edge baseline at y = 186 (`G6 ~ 12`) with zero overhang at y >= 189
-        RTEST_CHECK(rowSumG6(amp8, 186u, 0u, 3u) >= 40u);
-        RTEST_CHECK(rowSumG6(amp8, 186u, 236u, 239u) >= 40u);
-        RTEST_CHECK(rowSumG6(amp8, 189u, 0u, 239u) == 0u);
+        // Full 240-px edge-to-edge baseline at kGraphBaselineY with zero overhang 3 px below
+        RTEST_CHECK(rowSumG6(amp8, baseY, 0u, 3u) >= 40u);
+        RTEST_CHECK(rowSumG6(amp8, baseY, 236u, 239u) >= 40u);
+        RTEST_CHECK(rowSumG6(amp8, baseY + 3u, 0u, 239u) == 0u);
 
-        // Every single pixel x = 0..239 across rows y = 186..189 has 100% bit-exact identical
-        // baseline opacity across FILTER, PAN (STEREO), PAN (MONO), and LEVEL!
+        // Every single pixel x = 0..239 across rows [baseY .. baseY + 3] has 100% bit-exact
+        // identical baseline opacity across FILTER, PAN (STEREO), PAN (MONO), and LEVEL!
         bool allBaselinesBitExact = true;
-        for (size_t y = 186u; y <= 189u; ++y) {
+        for (size_t y = baseY; y <= baseY + 3u; ++y) {
             for (size_t x = 0u; x < 240u; ++x) {
                 const size_t idx = y * 240u + x;
                 if (amp16[idx] != amp8[idx] || clean16[idx] != amp8[idx] ||

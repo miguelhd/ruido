@@ -55,12 +55,19 @@ ALL_ENGINE_SRCS := $(DSP_SRCS) $(UI_SRCS)
 DSP_OBJS := $(patsubst src/%.cpp,$(BUILD_DIR)/%.o,$(DSP_SRCS))
 UI_OBJS := $(patsubst src/%.cpp,$(BUILD_DIR)/%.o,$(UI_SRCS))
 
+UBSAN_DSP_OBJS := $(patsubst src/%.cpp,$(BUILD_DIR)/ubsan/%.o,$(DSP_SRCS))
+UBSAN_UI_OBJS := $(patsubst src/%.cpp,$(BUILD_DIR)/ubsan/%.o,$(UI_SRCS))
+TSAN_DSP_OBJS := $(patsubst src/%.cpp,$(BUILD_DIR)/tsan/%.o,$(DSP_SRCS))
+
 TEST_DSP_BIN := $(BUILD_DIR)/test_dsp
 TEST_UI_BIN := $(BUILD_DIR)/test_ui
+TEST_DSP_UBSAN_BIN := $(BUILD_DIR)/test_dsp_ubsan
+TEST_UI_UBSAN_BIN := $(BUILD_DIR)/test_ui_ubsan
+TEST_DSP_TSAN_BIN := $(BUILD_DIR)/test_dsp_tsan
 WASM_OUT := platforms/sim/web/ruido.wasm
 MACOS_SIM_BIN := $(BUILD_DIR)/ruido_sim_macos
 
-.PHONY: all check format test wasm sim-macos serve tsan ubsan clean
+.PHONY: all check format test test-ui test-dsp wasm sim-macos serve tsan ubsan ubsan-ui clean
 
 all: $(TEST_DSP_BIN) $(TEST_UI_BIN) $(WASM_OUT) $(MACOS_SIM_BIN)
 
@@ -68,7 +75,7 @@ check:
 	python3 tools/check_hygiene.py
 
 format:
-	"$(CLANG_FORMAT)" -i $(wildcard src/core/*.h src/core/*.cpp src/dsp/*.h src/dsp/*.cpp src/ui/*.h src/ui/*.cpp tests/*.h tests/*.cpp)
+	@"$(CLANG_FORMAT)" -i $(wildcard src/core/*.h src/core/*.cpp src/dsp/*.h src/dsp/*.cpp src/ui/*.h src/ui/*.cpp tests/*.h tests/*.cpp)
 
 $(BUILD_DIR)/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
@@ -83,6 +90,13 @@ $(TEST_DSP_BIN): $(DSP_OBJS) $(BUILD_DIR)/tests/test_dsp.o
 
 $(TEST_UI_BIN): $(DSP_OBJS) $(UI_OBJS) $(BUILD_DIR)/tests/test_ui.o
 	$(CXX) $(TEST_CXXFLAGS) -pthread $^ -o $@
+
+test-ui: check $(TEST_UI_BIN) $(WASM_OUT)
+	./$(TEST_UI_BIN)
+	@if [ -n "$(NODE)" ]; then "$(NODE)" tests/verify_wasm.mjs; fi
+
+test-dsp: check $(TEST_DSP_BIN)
+	./$(TEST_DSP_BIN)
 
 test: check $(TEST_DSP_BIN) $(TEST_UI_BIN) $(WASM_OUT) $(MACOS_SIM_BIN)
 	./$(TEST_DSP_BIN)
@@ -114,34 +128,44 @@ serve: $(WASM_OUT)
 	@echo "Ruido Web Simulator running at http://127.0.0.1:8080 (Cache-Control: no-store)"
 	python3 tools/serve_web.py 8080
 
-tsan:
-	@mkdir -p $(BUILD_DIR)/tsan/core $(BUILD_DIR)/tsan/dsp $(BUILD_DIR)/tsan/ui $(BUILD_DIR)/tsan/tests
-	@for f in $(ALL_ENGINE_SRCS); do \
-		$(CXX) $(DSP_CXXFLAGS) -O1 -g -fsanitize=thread -c $$f -o $(BUILD_DIR)/tsan/$${f#src/}.o || exit 1; \
-	done
-	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=thread -c tests/test_dsp.cpp -o $(BUILD_DIR)/tsan/tests/test_dsp.o
-	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=thread -pthread \
-		$(patsubst src/%.cpp,$(BUILD_DIR)/tsan/%.cpp.o,$(DSP_SRCS)) \
-		$(BUILD_DIR)/tsan/tests/test_dsp.o -o $(BUILD_DIR)/test_dsp_tsan
-	./$(BUILD_DIR)/test_dsp_tsan
+$(BUILD_DIR)/tsan/%.o: src/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(DSP_CXXFLAGS) -O1 -g -fsanitize=thread -c $< -o $@
 
-ubsan:
-	@mkdir -p $(BUILD_DIR)/ubsan/core $(BUILD_DIR)/ubsan/dsp $(BUILD_DIR)/ubsan/ui $(BUILD_DIR)/ubsan/tests
-	@for f in $(ALL_ENGINE_SRCS); do \
-		$(CXX) $(DSP_CXXFLAGS) -O1 -g -fsanitize=undefined -c $$f -o $(BUILD_DIR)/ubsan/$${f#src/}.o || exit 1; \
-	done
-	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=undefined -c tests/test_dsp.cpp -o $(BUILD_DIR)/ubsan/tests/test_dsp.o
-	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=undefined -c tests/test_ui.cpp -o $(BUILD_DIR)/ubsan/tests/test_ui.o
-	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=undefined -pthread \
-		$(patsubst src/%.cpp,$(BUILD_DIR)/ubsan/%.cpp.o,$(DSP_SRCS)) \
-		$(BUILD_DIR)/ubsan/tests/test_dsp.o -o $(BUILD_DIR)/test_dsp_ubsan
-	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=undefined -pthread \
-		$(patsubst src/%.cpp,$(BUILD_DIR)/ubsan/%.cpp.o,$(ALL_ENGINE_SRCS)) \
-		$(BUILD_DIR)/ubsan/tests/test_ui.o -o $(BUILD_DIR)/test_ui_ubsan
-	./$(BUILD_DIR)/test_dsp_ubsan
-	./$(BUILD_DIR)/test_ui_ubsan
+$(BUILD_DIR)/tsan/tests/%.o: tests/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=thread -c $< -o $@
+
+$(TEST_DSP_TSAN_BIN): $(TSAN_DSP_OBJS) $(BUILD_DIR)/tsan/tests/test_dsp.o
+	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=thread -pthread $^ -o $@
+
+tsan: $(TEST_DSP_TSAN_BIN)
+	./$(TEST_DSP_TSAN_BIN)
+
+$(BUILD_DIR)/ubsan/%.o: src/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(DSP_CXXFLAGS) -O1 -g -fsanitize=undefined -c $< -o $@
+
+$(BUILD_DIR)/ubsan/tests/%.o: tests/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=undefined -c $< -o $@
+
+$(TEST_DSP_UBSAN_BIN): $(UBSAN_DSP_OBJS) $(BUILD_DIR)/ubsan/tests/test_dsp.o
+	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=undefined -pthread $^ -o $@
+
+$(TEST_UI_UBSAN_BIN): $(UBSAN_DSP_OBJS) $(UBSAN_UI_OBJS) $(BUILD_DIR)/ubsan/tests/test_ui.o
+	$(CXX) $(TEST_CXXFLAGS) -O1 -g -fsanitize=undefined -pthread $^ -o $@
+
+ubsan-ui: $(TEST_UI_UBSAN_BIN)
+	./$(TEST_UI_UBSAN_BIN)
+
+ubsan: $(TEST_DSP_UBSAN_BIN) $(TEST_UI_UBSAN_BIN)
+	./$(TEST_DSP_UBSAN_BIN)
+	./$(TEST_UI_UBSAN_BIN)
 
 clean:
 	rm -rf $(BUILD_DIR) $(WASM_OUT)
 
--include $(DSP_OBJS:.o=.d) $(UI_OBJS:.o=.d) $(BUILD_DIR)/tests/test_dsp.d $(BUILD_DIR)/tests/test_ui.d
+-include $(DSP_OBJS:.o=.d) $(UI_OBJS:.o=.d) $(BUILD_DIR)/tests/test_dsp.d $(BUILD_DIR)/tests/test_ui.d \
+	$(UBSAN_DSP_OBJS:.o=.d) $(UBSAN_UI_OBJS:.o=.d) $(BUILD_DIR)/ubsan/tests/test_dsp.d $(BUILD_DIR)/ubsan/tests/test_ui.d \
+	$(TSAN_DSP_OBJS:.o=.d) $(BUILD_DIR)/tsan/tests/test_dsp.d

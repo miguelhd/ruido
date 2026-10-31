@@ -13,11 +13,6 @@ inline constexpr uint16_t kDisplayWidth = 240u;
 inline constexpr uint16_t kDisplayHeight = 240u;
 inline constexpr uint16_t kScanlineStripHeight = 16u;
 
-// Canonical edge-to-edge unipolar graph baseline (FILTER default, shared with PAN and LEVEL)
-inline constexpr float kGraphBaselineY = 186.0f;
-inline constexpr float kGraphBaselinePeakLum = 50.0f;
-inline constexpr float kGraphBaselineHalfSigma = 0.50f;
-
 // Compile-time elementary math helpers for zero-SRAM XIP Flash optical lookup tables
 constexpr float cxExpPos(float u) noexcept {
     const float s = u * 0.125f;
@@ -324,12 +319,6 @@ struct MonoStripCanvas {
                 }
             }
         }
-    }
-
-    // Canonical edge-to-edge unipolar graph baseline (y = 186, shared by FILTER, PAN, and LEVEL)
-    void drawGraphBaseline() const noexcept {
-        drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kGraphBaselineY,
-                               kGraphBaselinePeakLum, kGraphBaselineHalfSigma, false);
     }
 
     // Sub-pixel vertical optical slit / stem filament

@@ -5,6 +5,7 @@
 #include "core/GlobalControl.h"
 #include "core/LfoMath.h"
 #include "ui/FontSansAA.h"
+#include "ui/GraphStyle.h"
 #include "ui/HudColumnText.h"
 #include "ui/HudFormat.h"
 #include "ui/HudGraphs.h"
@@ -601,7 +602,7 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
     }
 
     for (uint8_t k = 0u; k < 4u; ++k) {
-        const int cx = 30 + static_cast<int>(k) * 60;
+        const int cx = hudColumnCenterX(k);
         char roleLbl[12]{};
         char valStr[16]{};
         GlobalColumnSummary gs{};
@@ -613,10 +614,11 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
         if (gs.disabled) {
             const auto disLbl = static_cast<uint8_t>(88.0f + (64.0f - 88.0f) * dim + 0.5f);
             const auto disVal = static_cast<uint8_t>(104.0f + (76.0f - 104.0f) * dim + 0.5f);
-            cv.drawSansCentered(kFontSansSmall, cx, 191, roleLbl, disLbl, 1);
+            cv.drawSansCentered(kFontSansSmall, cx, kHudBotLabelY, roleLbl, disLbl, 1);
             cv.drawHorizontalFilament(static_cast<float>(cx) - 20.0f,
-                                      static_cast<float>(cx) + 20.0f, 207.5f, 22.0f, 0.58f, true);
-            cv.drawSansCentered(kFontSansSmall, cx, 216, valStr, disVal, 0);
+                                      static_cast<float>(cx) + 20.0f, kHudBotTrackY, 22.0f, 0.58f,
+                                      true);
+            cv.drawSansCentered(kFontSansSmall, cx, kHudBotDisabledValueY, valStr, disVal, 0);
             continue;
         }
         const float foc = clampf(knobFocusSmooth[k], 0.0f, 1.0f);
@@ -625,12 +627,12 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
 
         const float baseLbl = 154.0f + (72.0f - 154.0f) * dim;
         const auto lblGray = static_cast<uint8_t>(baseLbl + (255.0f - baseLbl) * effFoc + 0.5f);
-        cv.drawSansCentered(kFontSansSmall, cx, 191, roleLbl, lblGray, 1);
+        cv.drawSansCentered(kFontSansSmall, cx, kHudBotLabelY, roleLbl, lblGray, 1);
 
         const float cxF = static_cast<float>(cx);
         const float bxf = cxF - 20.0f;
         const float bwf = 40.0f;
-        const float byf = 207.5f;
+        const float byf = kHudBotTrackY;
         const float trackLum = 42.0f + (22.0f - 42.0f) * dim;
         const float unfocLum = 178.0f + (64.0f - 178.0f) * dim;
         const float activeLum = unfocLum + (235.0f - unfocLum) * effFoc;
@@ -664,7 +666,7 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
 
         const float baseVal = 224.0f + (96.0f - 224.0f) * dim;
         const auto valGray = static_cast<uint8_t>(baseVal + (255.0f - baseVal) * effFoc + 0.5f);
-        cv.drawSansCentered(kFontSansMedium, cx, 214, valStr, valGray, 0);
+        cv.drawSansCentered(kFontSansMedium, cx, kHudBotValueY, valStr, valGray, 0);
     }
 }
 

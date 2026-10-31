@@ -5,6 +5,7 @@
 #include "core/HudEnvelope.h"
 #include "core/LfoMath.h"
 #include "ui/FontSansAA.h"
+#include "ui/GraphStyle.h"
 #include "ui/MonoCanvas.h"
 
 #include <cstring>
@@ -13,7 +14,7 @@ namespace ruido {
 
 namespace {
 
-constexpr float kPanYTop = 26.0f;
+constexpr float kPanYTop = kGraphTopY;
 constexpr float kPanYBot = kGraphBaselineY;
 constexpr float kPanZeroRef = 110.0f;
 constexpr float kPanCenterX = 120.0f;
@@ -30,7 +31,6 @@ inline float evalPanBellY(float x, float cx, float apexH, float invW2) noexcept 
     return clampf(kPanYBot - apexH * bell, kPanYTop, kPanYBot);
 }
 
-// HudGraphs-matched 4x-subsampled directional vertical-decay skirt shader
 inline void shadePanoramaCurveSkirt(int y0, int y1, uint8_t* lumBuf, float cx, float apexH,
                                     float invW2, float colScale) noexcept {
     if (colScale <= 0.004f) {
@@ -39,64 +39,7 @@ inline void shadePanoramaCurveSkirt(int y0, int y1, uint8_t* lumBuf, float cx, f
     float yA = evalPanBellY(0.0f, cx, apexH, invW2);
     for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
         const float yB = evalPanBellY(static_cast<float>(colX + 1u), cx, apexH, invW2);
-        const float yTopSeg = (yA < yB) ? yA : yB;
-        if (kPanYBot - yTopSeg > 0.50f) {
-            int pyStart = static_cast<int>(yTopSeg - 0.5f);
-            if (pyStart < static_cast<int>(kPanYTop)) {
-                pyStart = static_cast<int>(kPanYTop);
-            }
-            if (pyStart < y0) {
-                pyStart = y0;
-            }
-            int pyEnd = static_cast<int>(kPanYBot) - 1;
-            if (pyEnd > y1 - 1) {
-                pyEnd = y1 - 1;
-            }
-            if (pyStart <= pyEnd) {
-                const float dy = yB - yA;
-                const float absDy = absf(dy);
-                const float yMid = 0.5f * (yA + yB);
-                const float hornBoost =
-                    1.0f + 0.42f * clampf((kPanZeroRef - yTopSeg) * (1.0f / 56.0f), 0.0f, 1.0f);
-                const float glowAmp = 74.0f * hornBoost;
-                const float invL2 = 1.0f / (1.0f + dy * dy);
-                const bool steepSeg = (absDy > 1.5f);
-
-                for (int py = pyStart; py <= pyEnd; ++py) {
-                    const float pyF = static_cast<float>(py);
-                    float subEdge = 0.0f;
-                    if (!steepSeg) {
-                        subEdge = clampf((pyF + 0.5f) - yMid, 0.0f, 1.0f);
-                    } else {
-                        for (int s = 0; s < 4; ++s) {
-                            const float u = (static_cast<float>(s) + 0.5f) * 0.25f;
-                            const float ySub = yA + u * dy;
-                            subEdge += clampf((pyF + 0.5f) - ySub, 0.0f, 1.0f) * 0.25f;
-                        }
-                    }
-                    if (subEdge <= 0.004f) {
-                        continue;
-                    }
-                    const float vy = pyF - yMid;
-                    const float segT = clampf(vy * dy * invL2, -0.5f, 0.5f);
-                    const float ey = vy - dy * segT;
-                    const float d2 = segT * segT + ey * ey;
-                    const float perpDist = d2 * fastInvSqrt(d2 + 0.25f);
-                    const float vDist = (vy > 0.0f) ? vy : 0.0f;
-                    const float effDist = 0.65f * vDist + 0.35f * perpDist;
-                    const float baseTaper = smoothstep01((kPanYBot - pyF) * (1.0f / 6.0f));
-                    const float crestGlow = glowAmp * fastExpNeg(effDist * 0.048f) * baseTaper;
-                    int alpha = static_cast<int>((22.0f + crestGlow) * colScale * subEdge + 0.5f);
-                    if (alpha > 220) {
-                        alpha = 220;
-                    }
-                    if (alpha > 0) {
-                        uint8_t& dst = lumBuf[static_cast<size_t>(py - y0) * kDisplayWidth + colX];
-                        dst = blendLum8(dst, 240u, static_cast<uint8_t>(alpha));
-                    }
-                }
-            }
-        }
+        shadeUnipolarGraphColumn(colX, yA, yB, kPanZeroRef, 74.0f, colScale, y0, y1, lumBuf);
         yA = yB;
     }
 }
@@ -233,16 +176,16 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
                                             uint16_t* linScratch, float effPanAlpha01,
                                             uint8_t alpha8, const HudState& hud) const noexcept {
     (void)hud;
-    if (alpha8 == 0u || y1 <= 16 || y0 >= 198) {
+    if (alpha8 == 0u || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
     }
 
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
 
     // 1. Canonical edge-to-edge baseline filament (y = 186, shared with FILTER & LEVEL)
-    cv.drawGraphBaseline();
+    drawGraphBaseline(cv);
     if (!monoCollapse_) {
-        cv.drawVerticalSlit(kPanCenterX, 36.0f, kPanYBot - 1.0f, 22.0f);
+        drawGraphGuideSlit(cv, kPanCenterX, 36.0f);
     }
 
     const float hF = clampf(hasFocusSmooth_, 0.0f, 1.0f);
@@ -284,12 +227,7 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
             float yA = evalPanBellY(0.0f, cx, apexH, invW2);
             for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
                 const float yB = evalPanBellY(static_cast<float>(colX + 1u), cx, apexH, invW2);
-                const float yTopSeg = (yA < yB) ? yA : yB;
-                const float tailFade = smoothstep01((kPanYBot - yTopSeg - 1.2f) * (1.0f / 4.5f));
-                if (tailFade > 0.004f) {
-                    splatPhotonSegment(static_cast<int>(colX), yA, yB, weight * tailFade, 0.62f, y0,
-                                       y1, linScratch);
-                }
+                splatUnipolarGraphSegment(colX, yA, yB, weight, y0, y1, linScratch);
                 yA = yB;
             }
         }

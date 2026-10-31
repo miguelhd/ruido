@@ -513,7 +513,7 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
 void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                      uint16_t* linScratch, float effFilterAlpha01,
                                      uint8_t filterAlpha8) const noexcept {
-    if (filterAlpha8 == 0u || y1 <= 16 || y0 >= 198) {
+    if (filterAlpha8 == 0u || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
     }
     constexpr float kFixedToPx = 1.0f / 64.0f;
@@ -522,79 +522,20 @@ void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8
     const bool multiCurves = (div > 0.001f);
     const size_t curveCount = multiCurves ? kNumOscillators : 1u;
 
-    filterCv.drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kFilterYZeroDb,
-                                    22.0f, 0.48f, false);
-    filterCv.drawGraphBaseline();
+    drawGraphRefHorizon(filterCv, kFilterYZeroDb);
+    drawGraphBaseline(filterCv);
 
     const float fillScale = multiCurves ? (0.25f + 0.05f * div) : 1.0f;
-    if (y1 > static_cast<int>(kFilterYTop) && y0 <= static_cast<int>(kFilterYBot)) {
+    const float colScale = fillScale * effFilterAlpha01;
+    if (colScale > 0.004f && y1 > static_cast<int>(kFilterYTop) &&
+        y0 <= static_cast<int>(kFilterYBot)) {
         for (size_t vc = 0u; vc < curveCount; ++vc) {
             const auto& pts = filterCurvesFixed_[vc];
             for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
                 const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
                 const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
-                const float yTopSeg = (yA < yB) ? yA : yB;
-                if (kFilterYBot - yTopSeg <= 0.25f) {
-                    continue;
-                }
-                int pyStart = static_cast<int>(yTopSeg - 0.5f);
-                if (pyStart < static_cast<int>(kFilterYTop)) {
-                    pyStart = static_cast<int>(kFilterYTop);
-                }
-                if (pyStart < y0) {
-                    pyStart = y0;
-                }
-                int pyEnd = static_cast<int>(kFilterYBot) - 1;
-                if (pyEnd > y1 - 1) {
-                    pyEnd = y1 - 1;
-                }
-                if (pyStart > pyEnd) {
-                    continue;
-                }
-
-                const float dy = yB - yA;
-                const float absDy = absf(dy);
-                const float yMid = 0.5f * (yA + yB);
-                const float hornBoost =
-                    1.0f + 0.42f * clampf((kFilterYZeroDb - yTopSeg) * (1.0f / 56.0f), 0.0f, 1.0f);
-                const float colScale = fillScale * effFilterAlpha01;
-                const float glowAmp = 76.0f * hornBoost;
-                const float invL2 = 1.0f / (1.0f + dy * dy);
-                const bool steepSeg = (absDy > 1.5f);
-
-                for (int py = pyStart; py <= pyEnd; ++py) {
-                    const float pyF = static_cast<float>(py);
-                    float subEdge = 0.0f;
-                    if (!steepSeg) {
-                        subEdge = clampf((pyF + 0.5f) - yMid, 0.0f, 1.0f);
-                    } else {
-                        for (int s = 0; s < 4; ++s) {
-                            const float u = (static_cast<float>(s) + 0.5f) * 0.25f;
-                            const float ySub = yA + u * dy;
-                            subEdge += clampf((pyF + 0.5f) - ySub, 0.0f, 1.0f) * 0.25f;
-                        }
-                    }
-                    if (subEdge <= 0.004f) {
-                        continue;
-                    }
-
-                    const float vy = pyF - yMid;
-                    const float segT = clampf(vy * dy * invL2, -0.5f, 0.5f);
-                    const float ey = vy - dy * segT;
-                    const float d2 = segT * segT + ey * ey;
-                    const float perpDist = d2 * fastInvSqrt(d2 + 0.25f);
-                    const float vDist = (vy > 0.0f) ? vy : 0.0f;
-                    const float effDist = 0.65f * vDist + 0.35f * perpDist;
-                    const float crestGlow = glowAmp * fastExpNeg(effDist * 0.048f);
-                    int alpha = static_cast<int>((22.0f + crestGlow) * colScale * subEdge + 0.5f);
-                    if (alpha > 220) {
-                        alpha = 220;
-                    }
-                    if (alpha > 0) {
-                        uint8_t& dst = lumBuf[static_cast<size_t>(py - y0) * kDisplayWidth + colX];
-                        dst = blendLum8(dst, 240u, static_cast<uint8_t>(alpha));
-                    }
-                }
+                shadeUnipolarGraphColumn(colX, yA, yB, kFilterYZeroDb, 76.0f, colScale, y0, y1,
+                                         lumBuf);
             }
         }
     }
@@ -602,27 +543,17 @@ void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8
     if (y1 > static_cast<int>(kFilterYTop) - 4 && y0 <= static_cast<int>(kFilterYBot) + 5) {
         std::memset(linScratch, 0,
                     static_cast<size_t>(stripHeight) * kDisplayWidth * sizeof(uint16_t));
-        auto addCurvePhoton = [&](const std::array<int16_t, kFilterSweepPts>& pts,
-                                  float weight) noexcept {
-            if (weight <= 0.004f) {
-                return;
-            }
-            for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
-                const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
-                const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
-                const float yTopSeg = (yA < yB) ? yA : yB;
-                const float tailFade = smoothstep01((kFilterYBot - yTopSeg - 1.2f) * (1.0f / 4.5f));
-                if (tailFade > 0.004f) {
-                    splatPhotonSegment(static_cast<int>(colX), yA, yB, weight * tailFade, 0.62f, y0,
-                                       y1, linScratch);
-                }
-            }
-        };
-
         const float mainCurveWgt =
             (multiCurves ? (0.245f + 0.275f * div) : 0.98f) * effFilterAlpha01;
-        for (size_t vc = 0u; vc < curveCount; ++vc) {
-            addCurvePhoton(filterCurvesFixed_[vc], mainCurveWgt);
+        if (mainCurveWgt > 0.004f) {
+            for (size_t vc = 0u; vc < curveCount; ++vc) {
+                const auto& pts = filterCurvesFixed_[vc];
+                for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                    const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
+                    const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
+                    splatUnipolarGraphSegment(colX, yA, yB, mainCurveWgt, y0, y1, linScratch);
+                }
+            }
         }
 
         screenBlendLinearStrip(stripHeight, 0u, kDisplayWidth, linScratch, lumBuf);
