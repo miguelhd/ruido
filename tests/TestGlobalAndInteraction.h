@@ -1067,9 +1067,10 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(!ctrl.state().voices[0].muted);
     RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, ruido::kDefaultVoiceAmp));
 
-    // (d) SEL (PAN) Polar Listener Soundstage: polar sector steering, zero text/fog clutter,
-    //     LFO -> PAN polar bracket strip equivalence, DUAL MONO 0-deg spine convergence,
-    //     and 150 ms 2nd-tap dissolve + 75% wide-stereo LED glow!
+    // (d) SEL (PAN) Edge-to-Edge Stereo Panorama Curve (HudGraphs sister to FX & LFO):
+    //     SELECT focus stepping (PAN <-> OSC 1..4), left/right panorama steering,
+    //     spotlight vs 30% silver companion contrast, LFO -> PAN strip equivalence,
+    //     DUAL MONO center convergence, and 150 ms 2nd-tap dissolve + 75% wide-stereo LED glow!
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
     ctrl.tick(0.016f, driveTel);
@@ -1113,18 +1114,15 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         return maxG;
     };
 
-    const uint32_t leftPolarSector = sumBoxG6(amp16, 36u, 110u, 96u, 162u);
-    const uint32_t rightPolarSector = sumBoxG6(amp16, 130u, 204u, 96u, 162u);
-    RTEST_CHECK(leftPolarSector > rightPolarSector * 3u);
-    // Zero "L C R" floating text (y = 26..35), zero "1..4" left numerals (x = 4..20 above/below
-    // the background scope's y = 120 silent horizon), and zero wide Gaussian fog bloom!
-    RTEST_CHECK(maxBoxG6(amp16, 4u, 235u, 26u, 35u) == 0u);
-    RTEST_CHECK(maxBoxG6(amp16, 4u, 20u, 44u, 112u) == 0u);
-    RTEST_CHECK(maxBoxG6(amp16, 4u, 20u, 128u, 166u) == 0u);
-    RTEST_CHECK(maxBoxG6(amp16, 20u, 52u, 40u, 68u) == 0u);
+    const uint32_t leftPanorama = sumBoxG6(amp16, 4u, 108u, 44u, 180u);
+    const uint32_t rightPanorama = sumBoxG6(amp16, 132u, 235u, 44u, 180u);
+    RTEST_CHECK(leftPanorama > rightPanorama * 4u);
+    // Edge-to-edge y = 184 baseline filament is present on both sides; zero floating top text!
+    RTEST_CHECK(maxBoxG6(amp16, 200u, 235u, 183u, 185u) >= 3u);
+    RTEST_CHECK(maxBoxG6(amp16, 4u, 235u, 26u, 33u) == 0u);
 
-    // Spread Osc 3 -> R45 & Osc 4 -> R100 (+1.0), plus active LFO A -> PAN on Osc 2:
-    // verify 240x8 == 240x16 == 240x24 bit-identical strip equivalence with polar orbit bracket!
+    // Spread Osc 1 -> L100, Osc 2 -> C + LFO->PAN, Osc 3 -> R45, Osc 4 -> R100 (focusedKnob = 3):
+    // verify Osc 4 spotlight outshines unfocused Osc 1 companion & 240x8 == 240x16 == 240x24!
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 90);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 180);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 260);
@@ -1144,27 +1142,27 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 24u)) {
         renderer.renderStrip(y, 24u, amp24.data() + static_cast<size_t>(y) * 240u);
     }
-    bool panPolarStripsEq = true;
+    bool panPanoramaStripsEq = true;
     for (size_t i = 0u; i < amp16.size(); ++i) {
         if (amp16[i] != amp8[i] || amp16[i] != amp24[i]) {
-            panPolarStripsEq = false;
+            panPanoramaStripsEq = false;
         }
     }
-    RTEST_CHECK(panPolarStripsEq);
+    RTEST_CHECK(panPanoramaStripsEq);
 
-    // DUAL MONO collapses all 4 polar rays onto the 0-deg vertical center spine (x = 114..126)
+    // DUAL MONO collapses all 4 curves onto phantom center (x = 120, symmetric L == R)
     quietSt.global.monoCollapse = true;
     for (int f = 0; f < 16; ++f) {
         renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
     }
     renderer.renderFullScreenStrips(clean16.data());
-    const uint32_t monoLeftSector = sumBoxG6(clean16, 36u, 110u, 96u, 162u);
-    const uint32_t monoRightSector = sumBoxG6(clean16, 130u, 204u, 96u, 162u);
-    const uint32_t monoCenterSpine = sumBoxG6(clean16, 114u, 126u, 72u, 160u);
-    const int32_t monoSectorDiff =
-        static_cast<int32_t>(monoLeftSector) - static_cast<int32_t>(monoRightSector);
-    RTEST_CHECK(std::abs(monoSectorDiff) <= 16);
-    RTEST_CHECK(monoCenterSpine > monoLeftSector * 2u);
+    const uint32_t monoLeftHalf = sumBoxG6(clean16, 10u, 96u, 50u, 180u);
+    const uint32_t monoRightHalf = sumBoxG6(clean16, 143u, 229u, 50u, 180u);
+    const uint32_t monoCenterPeak = sumBoxG6(clean16, 98u, 142u, 50u, 180u);
+    const int32_t monoHalfDiff =
+        static_cast<int32_t>(monoLeftHalf) - static_cast<int32_t>(monoRightHalf);
+    RTEST_CHECK(std::abs(monoHalfDiff) <= 16);
+    RTEST_CHECK(monoCenterPeak > monoLeftHalf * 3u);
 
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);

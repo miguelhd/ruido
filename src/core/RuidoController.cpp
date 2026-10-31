@@ -24,11 +24,10 @@ void RuidoController::reset() noexcept {
     ledSmooth_.reset(state_);
     knobTurnedDuringRateHold_ = false;
     gloSnapshotValid_ = false;
+    dismissedByHome_ = false;
     latchedHudMode_ = HudMode::None;
     latchedButton_ = ButtonId::Count;
-    selectTickAccum_ = 0;
-    targetTickAccum_ = 0;
-    configTickAccum_ = 0;
+    selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
 
     EngineTelemetry zeroTel{};
     updateLeds(0.0f, zeroTel);
@@ -42,30 +41,21 @@ void RuidoController::publishState() noexcept {
 }
 
 KnobBankMode RuidoController::baseKnobBank() const noexcept {
-    if (hud_.configPageOpen) {
-        return KnobBankMode::None;
-    }
-    if (hud_.fxPageOpen) {
-        return KnobBankMode::VoiceFilter;
-    }
-    if (hud_.panPageOpen) {
-        return KnobBankMode::Panning;
-    }
-    if (hud_.editPageOpen) {
-        return knobBankForEditTarget(hud_.editTarget);
-    }
-    return hud_.lfoPageOpen ? KnobBankMode::Lfo : KnobBankMode::Frequency;
+    return hud_.configPageOpen ? KnobBankMode::None
+           : hud_.fxPageOpen   ? KnobBankMode::VoiceFilter
+           : hud_.panPageOpen  ? KnobBankMode::Panning
+           : hud_.editPageOpen ? knobBankForEditTarget(hud_.editTarget)
+           : hud_.lfoPageOpen  ? KnobBankMode::Lfo
+                               : KnobBankMode::Frequency;
 }
 
 void RuidoController::closeAllPages() noexcept {
-    hud_.fxPageOpen = false;
-    hud_.panPageOpen = false;
-    hud_.lfoPageOpen = false;
-    hud_.editPageOpen = false;
-    hud_.configPageOpen = false;
+    hud_.freqPageOpen = hud_.fxPageOpen = hud_.panPageOpen = false;
+    hud_.lfoPageOpen = hud_.editPageOpen = hud_.configPageOpen = false;
 }
 
 void RuidoController::triggerHud(HudMode mode, uint8_t voiceIndex, uint8_t knobIndex) noexcept {
+    dismissedByHome_ = false;
     hud_.mode = mode;
     hud_.focusedVoice = static_cast<uint8_t>(voiceIndex & 3u);
     hud_.focusedKnob = (knobIndex < kNumOscillators) ? knobIndex : kNoFocusedKnob;
@@ -73,12 +63,24 @@ void RuidoController::triggerHud(HudMode mode, uint8_t voiceIndex, uint8_t knobI
 }
 
 void RuidoController::latchSwitchHud(HudMode mode, ButtonId button) noexcept {
+    dismissedByHome_ = false;
     latchedHudMode_ = mode;
     latchedButton_ = button;
     if (button != ButtonId::Count) {
         hud_.lastButton = button;
     }
     hud_.focusedKnob = kNoFocusedKnob;
+    hud_.mode = mode;
+    env_.latchPage();
+}
+
+void RuidoController::latchKnobEdit(KnobBankMode bank, HudMode mode, uint8_t knobIdx,
+                                    uint8_t voiceIdx) noexcept {
+    dismissedByHome_ = false;
+    hud_.knobBank = bank;
+    hud_.focusedKnob = knobIdx;
+    hud_.focusedVoice = static_cast<uint8_t>(voiceIdx & 3u);
+    latchedHudMode_ = mode;
     hud_.mode = mode;
     env_.latchPage();
 }
@@ -237,6 +239,18 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             env_.latchPage();
             return;
         }
+        if (mod == HeldModifier::None && hud_.panPageOpen) {
+            const int32_t curSlot = (hud_.focusedKnob < kNumOscillators)
+                                        ? (static_cast<int32_t>(hud_.focusedKnob) + 1)
+                                        : 0;
+            const int32_t nextSlot = stepClampedDetent(
+                curSlot, static_cast<int32_t>(kNumOscillators), ticks, rate, selectTickAccum_);
+            const uint8_t kFocus =
+                (nextSlot > 0) ? static_cast<uint8_t>(nextSlot - 1) : kNoFocusedKnob;
+            latchKnobEdit(KnobBankMode::Panning, HudMode::Panning, kFocus,
+                          (nextSlot > 0) ? kFocus : hud_.focusedVoice);
+            return;
+        }
         hud_.lastEncoder = EncoderId::Select;
         triggerHud(HudMode::UnassignedEncoder, hud_.focusedVoice, kNoFocusedKnob);
         return;
@@ -254,84 +268,64 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
     }
     const uint8_t kIdx = static_cast<uint8_t>(knobIdx);
 
-    switch (mod) {
-    case HeldModifier::None: {
-        if (hud_.fxPageOpen) {
-            const size_t vIdx = static_cast<size_t>(hud_.fxVoiceFocus & 3u);
-            VoiceParams& vp = state_.voices[vIdx];
-            if (kIdx == 0u) {
-                vp.hpCutoffHz = adjustFilterCutoff(vp.hpCutoffHz, ticks, rate);
-            } else if (kIdx == 1u) {
-                vp.hpResonance = adjustLinear01(vp.hpResonance, ticks, rate, 0.0f, 1.0f);
-            } else if (kIdx == 2u) {
-                vp.lpCutoffHz = adjustFilterCutoff(vp.lpCutoffHz, ticks, rate);
-            } else {
-                vp.lpResonance = adjustLinear01(vp.lpResonance, ticks, rate, 0.0f, 1.0f);
-            }
-            hud_.knobBank = KnobBankMode::VoiceFilter;
-            hud_.focusedKnob = kIdx;
-            hud_.focusedVoice = static_cast<uint8_t>(vIdx);
-            latchedHudMode_ = HudMode::VoiceFilter;
-            hud_.mode = HudMode::VoiceFilter;
-            env_.latchPage();
-        } else if (hud_.lfoPageOpen) {
-            const uint8_t slotFocus = static_cast<uint8_t>(hud_.lfoVoiceFocus & 7u);
-            const size_t vIdx = lfoFocusVoice(slotFocus);
-            const size_t subIdx = lfoFocusSub(slotFocus);
-            VoiceParams& vp = state_.voices[vIdx];
-            if (kIdx == 0u) {
-                LfoTarget& tgtRef = lfoSlotTargetRef(vp, subIdx);
-                const int32_t curTgt = static_cast<int32_t>(tgtRef);
-                const int32_t maxTgt =
-                    static_cast<int32_t>((subIdx == 0u) ? kNumLfoATargets : kNumLfoBTargets) - 1;
-                tgtRef = static_cast<LfoTarget>(
-                    stepClampedDetent(curTgt, maxTgt, ticks, rate, targetTickAccum_));
-            } else if (kIdx == 1u) {
-                float& shpRef = lfoSlotShapeRef(vp, subIdx);
-                shpRef = adjustLinear01(shpRef, ticks, rate, 0.0f, 1.0f);
-            } else if (kIdx == 2u) {
-                float& rateRef = lfoSlotRateHzRef(vp, subIdx);
-                rateRef = adjustLfoRate(rateRef, ticks, rate);
-            } else {
-                float& depRef = lfoSlotDepthRef(vp, subIdx);
-                depRef = adjustLinear01(depRef, ticks, rate, 0.0f, 1.0f);
-            }
-            hud_.knobBank = KnobBankMode::Lfo;
-            hud_.focusedKnob = kIdx;
-            hud_.focusedVoice = static_cast<uint8_t>(vIdx);
-            latchedHudMode_ = HudMode::VoiceLfo;
-            hud_.mode = HudMode::VoiceLfo;
-            env_.latchPage();
-        } else if (hud_.panPageOpen) {
-            state_.voices[kIdx].pan =
-                adjustLinear01(state_.voices[kIdx].pan, ticks, rate, -1.0f, 1.0f);
-            hud_.knobBank = KnobBankMode::Panning;
-            hud_.focusedKnob = kIdx;
-            hud_.focusedVoice = kIdx;
-            latchedHudMode_ = HudMode::Panning;
-            hud_.mode = HudMode::Panning;
-            env_.latchPage();
-        } else if (hud_.editPageOpen) {
-            applyEditKnobDelta(hud_.editTarget, state_.voices[kIdx], ticks, rate);
-            hud_.knobBank = knobBankForEditTarget(hud_.editTarget);
-            hud_.focusedKnob = kIdx;
-            hud_.focusedVoice = kIdx;
-            latchedHudMode_ = hudModeForEditTarget(hud_.editTarget);
-            hud_.mode = latchedHudMode_;
-            env_.latchPage();
-        } else {
-            adjustVoiceFrequency(state_.voices[kIdx], ticks, rate);
-            hud_.knobBank = KnobBankMode::Frequency;
-            triggerHud(HudMode::VoiceFrequency, kIdx, kIdx);
-        }
-        break;
-    }
-    case HeldModifier::Global: {
+    if (mod == HeldModifier::Global) {
         applyGlobalKnobDelta(hud_.globalTarget, kIdx, ticks, rate, targetTickAccum_, state_);
         hud_.knobBank = knobBankForGlobalTarget(hud_.globalTarget);
         triggerHud(hudModeForGlobalTarget(hud_.globalTarget), hud_.focusedVoice, kIdx);
-        break;
+        publishState();
+        return;
     }
+
+    if (hud_.fxPageOpen) {
+        const size_t vIdx = static_cast<size_t>(hud_.fxVoiceFocus & 3u);
+        VoiceParams& vp = state_.voices[vIdx];
+        if (kIdx == 0u) {
+            vp.hpCutoffHz = adjustFilterCutoff(vp.hpCutoffHz, ticks, rate);
+        } else if (kIdx == 1u) {
+            vp.hpResonance = adjustLinear01(vp.hpResonance, ticks, rate, 0.0f, 1.0f);
+        } else if (kIdx == 2u) {
+            vp.lpCutoffHz = adjustFilterCutoff(vp.lpCutoffHz, ticks, rate);
+        } else {
+            vp.lpResonance = adjustLinear01(vp.lpResonance, ticks, rate, 0.0f, 1.0f);
+        }
+        latchKnobEdit(KnobBankMode::VoiceFilter, HudMode::VoiceFilter, kIdx,
+                      static_cast<uint8_t>(vIdx));
+    } else if (hud_.lfoPageOpen) {
+        const uint8_t slotFocus = static_cast<uint8_t>(hud_.lfoVoiceFocus & 7u);
+        const size_t vIdx = lfoFocusVoice(slotFocus);
+        const size_t subIdx = lfoFocusSub(slotFocus);
+        VoiceParams& vp = state_.voices[vIdx];
+        if (kIdx == 0u) {
+            LfoTarget& tgtRef = lfoSlotTargetRef(vp, subIdx);
+            const int32_t maxTgt =
+                static_cast<int32_t>((subIdx == 0u) ? kNumLfoATargets : kNumLfoBTargets) - 1;
+            tgtRef = static_cast<LfoTarget>(stepClampedDetent(static_cast<int32_t>(tgtRef), maxTgt,
+                                                              ticks, rate, targetTickAccum_));
+        } else if (kIdx == 1u) {
+            lfoSlotShapeRef(vp, subIdx) =
+                adjustLinear01(lfoSlotShape(vp, subIdx), ticks, rate, 0.0f, 1.0f);
+        } else if (kIdx == 2u) {
+            lfoSlotRateHzRef(vp, subIdx) = adjustLfoRate(lfoSlotRateHz(vp, subIdx), ticks, rate);
+        } else {
+            lfoSlotDepthRef(vp, subIdx) =
+                adjustLinear01(lfoSlotDepth(vp, subIdx), ticks, rate, 0.0f, 1.0f);
+        }
+        latchKnobEdit(KnobBankMode::Lfo, HudMode::VoiceLfo, kIdx, static_cast<uint8_t>(vIdx));
+    } else if (hud_.panPageOpen) {
+        state_.voices[kIdx].pan = adjustLinear01(state_.voices[kIdx].pan, ticks, rate, -1.0f, 1.0f);
+        latchKnobEdit(KnobBankMode::Panning, HudMode::Panning, kIdx, kIdx);
+    } else if (hud_.editPageOpen) {
+        applyEditKnobDelta(hud_.editTarget, state_.voices[kIdx], ticks, rate);
+        latchKnobEdit(knobBankForEditTarget(hud_.editTarget), hudModeForEditTarget(hud_.editTarget),
+                      kIdx, kIdx);
+    } else {
+        adjustVoiceFrequency(state_.voices[kIdx], ticks, rate);
+        if (hud_.freqPageOpen) {
+            latchKnobEdit(KnobBankMode::Frequency, HudMode::VoiceFrequency, kIdx, kIdx);
+        } else {
+            hud_.knobBank = KnobBankMode::Frequency;
+            triggerHud(HudMode::VoiceFrequency, kIdx, kIdx);
+        }
     }
 
     publishState();
@@ -360,6 +354,7 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
         hud_.modifierHeld = (keys_.activeModifier() != HeldModifier::None) || nowRateHeld;
 
         if (nowRateHeld) {
+            dismissedByHome_ = false;
             if (!wasRateHeld) {
                 knobTurnedDuringRateHold_ = false;
                 const bool unassignedToast = (hud_.mode == HudMode::UnassignedEncoder) ||
@@ -396,9 +391,7 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
 
     if (button == ButtonId::Fx || button == ButtonId::Sel || button == ButtonId::Lfo ||
         button == ButtonId::Edit || button == ButtonId::GloRight) {
-        selectTickAccum_ = 0;
-        targetTickAccum_ = 0;
-        configTickAccum_ = 0;
+        selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
         hud_.focusedKnob = kNoFocusedKnob;
         const bool isFx = (button == ButtonId::Fx);
         const bool isPan = (button == ButtonId::Sel);
@@ -411,6 +404,7 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
                                       : !hud_.configPageOpen;
         closeAllPages();
         if (opening) {
+            dismissedByHome_ = false;
             hud_.fxPageOpen = isFx;
             hud_.panPageOpen = isPan;
             hud_.lfoPageOpen = isLfo;
@@ -441,8 +435,8 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
 
     if (button == ButtonId::PlayStop) {
         state_.global.masterRun = !state_.global.masterRun;
-        if (hud_.fxPageOpen || hud_.panPageOpen || hud_.lfoPageOpen || hud_.editPageOpen ||
-            hud_.configPageOpen) {
+        if (hud_.freqPageOpen || hud_.fxPageOpen || hud_.panPageOpen || hud_.lfoPageOpen ||
+            hud_.editPageOpen || hud_.configPageOpen) {
             hud_.lastButton = button;
             triggerHud(HudMode::AudioOutput, hud_.focusedVoice, kNoFocusedKnob);
         } else {
@@ -454,15 +448,25 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
     }
 
     if (button == ButtonId::Home) {
+        const bool hudActive = (latchedHudMode_ != HudMode::None) || hud_.freqPageOpen ||
+                               hud_.fxPageOpen || hud_.panPageOpen || hud_.lfoPageOpen ||
+                               hud_.editPageOpen || hud_.configPageOpen || hud_.saveArmed ||
+                               keys_.isAnyMomentaryHudHoldActive(hud_.scopeFrozen) ||
+                               (hud_.mode != HudMode::None && !dismissedByHome_);
         closeAllPages();
         hud_.saveArmed = false;
-        latchedHudMode_ = HudMode::None;
-        latchedButton_ = ButtonId::Count;
-        selectTickAccum_ = 0;
-        targetTickAccum_ = 0;
-        configTickAccum_ = 0;
+        selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
         hud_.focusedKnob = kNoFocusedKnob;
         knobTurnedDuringRateHold_ = false;
+        if (!hudActive) {
+            hud_.freqPageOpen = true;
+            hud_.knobBank = KnobBankMode::Frequency;
+            latchSwitchHud(HudMode::VoiceFrequency, ButtonId::Home);
+            return;
+        }
+        dismissedByHome_ = true;
+        latchedHudMode_ = HudMode::None;
+        latchedButton_ = ButtonId::Count;
         if (keys_.isAnyMomentaryHudHoldActive(hud_.scopeFrozen)) {
             if (keys_.activeModifier() == HeldModifier::None && !hud_.scopeFrozen &&
                 hud_.rateHoldActive) {
@@ -673,6 +677,7 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
         }
     }
     if (dissolvedToIdle) {
+        dismissedByHome_ = false;
         hud_.mode = HudMode::None;
         hud_.focusedKnob = kNoFocusedKnob;
     }

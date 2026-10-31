@@ -2,14 +2,13 @@
 
 #include "core/ControlSurface.h"
 #include "core/Parameters.h"
-#include "ui/ScopeTraceMath.h"
 
 #include <array>
 #include <cstdint>
 
 namespace ruido {
 
-// Polar Listener Stereo Soundstage (SEL -> PAN, GLOBAL LEVEL K4)
+// Edge-to-edge Stereo Panorama Curve (SEL -> PAN, GLOBAL LEVEL K4; HudGraphs sister to FX & LFO)
 // and flat vertical GLOBAL CONFIG list menu (right GLO).
 class HudGlobalViews {
   public:
@@ -29,8 +28,7 @@ class HudGlobalViews {
 
     void compositePanStageStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                 uint16_t* linScratch, float effPanAlpha01, uint8_t alpha8,
-                                const HudState& hud,
-                                const OverdriveHairTable& overdriveHair) const noexcept;
+                                const HudState& hud) const noexcept;
     void compositeGlobalConfigStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
                                     const EngineControlState& control,
                                     const HudState& hud) const noexcept;
@@ -42,15 +40,17 @@ class HudGlobalViews {
                 (rawHud.knobBank == KnobBankMode::GlobalAmp && rawHud.focusedKnob == 3u));
     }
 
-    std::array<float, kNumOscillators> panSigned_{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<float, kNumOscillators> panBase_{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<float, kNumOscillators> panOrbitMin_{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<float, kNumOscillators> panOrbitMax_{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, kNumOscillators> panX_{78.0f, 162.0f, 48.0f, 192.0f};
+    std::array<float, kNumOscillators> panBaseX_{78.0f, 162.0f, 48.0f, 192.0f};
+    std::array<float, kNumOscillators> orbitXMin_{78.0f, 162.0f, 48.0f, 192.0f};
+    std::array<float, kNumOscillators> orbitXMax_{78.0f, 162.0f, 48.0f, 192.0f};
     std::array<float, kNumOscillators> panLfoDepth_{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<float, kNumOscillators> rayLen_{80.0f, 80.0f, 80.0f, 80.0f};
-    std::array<float, kNumOscillators> waveAmp_{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, kNumOscillators> apexH_{88.0f, 88.0f, 88.0f, 88.0f};
+    std::array<float, kNumOscillators> invWidth2_{0.003f, 0.0035f, 0.004f, 0.005f};
+    std::array<float, kNumOscillators> focusWeight_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> muteDim_{0.0f, 0.0f, 0.0f, 0.0f};
 
+    float hasFocusSmooth_ = 0.0f;
     float panPhase_ = 0.0f;
     float configPhase_ = 0.0f;
     bool primed_ = false;

@@ -332,7 +332,7 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
                                  filterAlpha8);
     ampGraph_.compositeStrip(y0, y1, stripHeight, lumBuf, linScratch, hudAlpha01, frameHud_);
     globalViews_.compositePanStageStrip(y0, y1, stripHeight, lumBuf, linScratch, effPanAlpha01,
-                                        panAlpha8, frameHud_, traceEngine_.overdriveHair());
+                                        panAlpha8, frameHud_);
     globalViews_.compositeGlobalConfigStrip(y0, y1, lumBuf, cfgAlpha8, frameControl_, frameHud_);
     compositeTopHeaderStrip(cv, frameControl_, frameHud_, frameLfoOutput_, headerBarSmooth_,
                             fineOverlayPhase_, coarseOverlayPhase_);

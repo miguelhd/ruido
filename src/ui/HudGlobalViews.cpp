@@ -13,218 +13,105 @@ namespace ruido {
 
 namespace {
 
-constexpr float kOriginX = 120.0f;
-constexpr float kOriginY = 168.0f;
-constexpr float kStageRadius = 112.0f;
-constexpr float kRayInnerR = 11.0f;
-// sin(0.9333f) * 112.0f = 90.0f -> aligns L100/R100 horizon ends with OSC 1/4 columns (x = 30, 210)
-constexpr float kMaxPolarAngleRad = 0.9333f;
+constexpr float kPanYTop = 28.0f;
+constexpr float kPanYBot = 184.0f;
+constexpr float kPanZeroRef = 108.0f;
+constexpr float kPanCenterX = 120.0f;
+constexpr float kPanHalfSpanX = 106.0f; // L100 = 14.0f, C = 120.0f, R100 = 226.0f
 
-// Zero-libm polar unit direction from pan in [-1, +1] (0 = straight up: (0, -1))
-inline void fastPolarDir(float panNorm, float& dirX, float& dirY) noexcept {
-    const float theta = clampf(panNorm, -1.0f, 1.0f) * kMaxPolarAngleRad;
-    const float a = absf(theta);
-    const float a2 = a * a;
-    const float s = a * (1.0f - a2 * (0.16666667f - 0.0083143f * a2));
-    const float b = kHalfPi - a;
-    const float b2 = b * b;
-    const float c = b * (1.0f - b2 * (0.16666667f - 0.0083143f * b2));
-    dirX = (theta < 0.0f) ? -s : s;
-    dirY = -c;
+// Steep-shouldered Cauchy-Lorentzian acoustic localization bell: (1 + (dx/w)^2)^-1.5
+inline float evalPanBellY(float x, float cx, float apexH, float invW2) noexcept {
+    const float dx = x - cx;
+    const float d = 1.0f + dx * dx * invW2;
+    const float invSqrtD = fastInvSqrt(d);
+    const float bell = invSqrtD * invSqrtD * invSqrtD;
+    return clampf(kPanYBot - apexH * bell, kPanYTop, kPanYBot);
 }
 
-// Sub-pixel arbitrary-angle optical line segment matching MonoStripCanvas::drawVerticalSlit
-inline void drawPolarSegmentFilament(const MonoStripCanvas& cv, float x0, float y0Seg, float x1,
-                                     float y1Seg, float peakLum, float halfSigma = 0.52f) noexcept {
-    const float effPeak = peakLum * (static_cast<float>(cv.masterAlpha8) * (1.0f / 255.0f));
-    if (effPeak <= 0.5f) {
+// HudGraphs-matched 4x-subsampled directional vertical-decay skirt shader
+inline void shadePanoramaCurveSkirt(int y0, int y1, uint8_t* lumBuf, float cx, float apexH,
+                                    float invW2, float colScale) noexcept {
+    if (colScale <= 0.004f) {
         return;
     }
-    const float minXF = (x0 < x1) ? x0 : x1;
-    const float maxXF = (x0 > x1) ? x0 : x1;
-    const float minYF = (y0Seg < y1Seg) ? y0Seg : y1Seg;
-    const float maxYF = (y0Seg > y1Seg) ? y0Seg : y1Seg;
-
-    int pxStart = static_cast<int>(minXF) - 3;
-    int pxEnd = static_cast<int>(maxXF) + 3;
-    if (pxStart < 0) {
-        pxStart = 0;
-    }
-    if (pxEnd > static_cast<int>(kDisplayWidth) - 1) {
-        pxEnd = static_cast<int>(kDisplayWidth) - 1;
-    }
-    int pyStart = static_cast<int>(minYF) - 3;
-    int pyEnd = static_cast<int>(maxYF) + 3;
-    if (pyStart < cv.y0) {
-        pyStart = cv.y0;
-    }
-    if (pyEnd > cv.y1 - 1) {
-        pyEnd = cv.y1 - 1;
-    }
-    if (pxStart > pxEnd || pyStart > pyEnd) {
-        return;
-    }
-
-    const float vx = x1 - x0;
-    const float vy = y1Seg - y0Seg;
-    const float len2 = vx * vx + vy * vy;
-    const float invLen2 = (len2 > 1.0e-5f) ? (1.0f / len2) : 0.0f;
-    const float inv2Sig2 = 1.0f / (2.0f * halfSigma * halfSigma);
-
-    for (int py = pyStart; py <= pyEnd; ++py) {
-        uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
-        const float wy = static_cast<float>(py) - y0Seg;
-        for (int px = pxStart; px <= pxEnd; ++px) {
-            const float wx = static_cast<float>(px) - x0;
-            const float t =
-                (invLen2 > 0.0f) ? clampf((wx * vx + wy * vy) * invLen2, 0.0f, 1.0f) : 0.0f;
-            const float ddx = wx - t * vx;
-            const float ddy = wy - t * vy;
-            const float d2 = ddx * ddx + ddy * ddy;
-            if (d2 < 4.5f) {
-                const uint32_t a8 =
-                    static_cast<uint32_t>(effPeak * fastExpNeg(d2 * inv2Sig2) + 0.5f);
-                if (a8 > 0u) {
-                    row[px] =
-                        blendLum8(row[px], 255u, static_cast<uint8_t>((a8 > 255u) ? 255u : a8));
-                }
+    float yA = evalPanBellY(0.0f, cx, apexH, invW2);
+    for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+        const float yB = evalPanBellY(static_cast<float>(colX + 1u), cx, apexH, invW2);
+        const float yTopSeg = (yA < yB) ? yA : yB;
+        if (kPanYBot - yTopSeg > 0.25f) {
+            int pyStart = static_cast<int>(yTopSeg - 0.5f);
+            if (pyStart < static_cast<int>(kPanYTop)) {
+                pyStart = static_cast<int>(kPanYTop);
             }
-        }
-    }
-}
-
-// Analytical circular-arc optical filament centered at (kOriginX, kOriginY)
-inline void drawPolarArcFilament(const MonoStripCanvas& cv, float radius, float pan0, float pan1,
-                                 float peakLum, float halfSigma = 0.52f,
-                                 bool taperEnds = true) noexcept {
-    const float effPeak = peakLum * (static_cast<float>(cv.masterAlpha8) * (1.0f / 255.0f));
-    if (effPeak <= 0.5f || radius <= 2.0f) {
-        return;
-    }
-    const float pLo = (pan0 < pan1) ? pan0 : pan1;
-    const float pHi = (pan0 > pan1) ? pan0 : pan1;
-
-    float d0X = 0.0f;
-    float d0Y = -1.0f;
-    float d1X = 0.0f;
-    float d1Y = -1.0f;
-    fastPolarDir(pLo, d0X, d0Y);
-    fastPolarDir(pHi, d1X, d1Y);
-
-    const float end0X = kOriginX + radius * d0X;
-    const float end0Y = kOriginY + radius * d0Y;
-    const float end1X = kOriginX + radius * d1X;
-    const float end1Y = kOriginY + radius * d1Y;
-
-    float minYF = (end0Y < end1Y) ? end0Y : end1Y;
-    if (pLo <= 0.0f && pHi >= 0.0f) {
-        const float apexY = kOriginY - radius;
-        if (apexY < minYF) {
-            minYF = apexY;
-        }
-    }
-    const float maxYF = (end0Y > end1Y) ? end0Y : end1Y;
-
-    int pxStart = static_cast<int>(end0X) - 3;
-    int pxEnd = static_cast<int>(end1X) + 3;
-    if (pxStart < 0) {
-        pxStart = 0;
-    }
-    if (pxEnd > static_cast<int>(kDisplayWidth) - 1) {
-        pxEnd = static_cast<int>(kDisplayWidth) - 1;
-    }
-    int pyStart = static_cast<int>(minYF) - 3;
-    int pyEnd = static_cast<int>(maxYF) + 3;
-    if (pyStart < cv.y0) {
-        pyStart = cv.y0;
-    }
-    if (pyEnd > cv.y1 - 1) {
-        pyEnd = cv.y1 - 1;
-    }
-    if (pxStart > pxEnd || pyStart > pyEnd) {
-        return;
-    }
-
-    const float rMin = radius - 2.6f;
-    const float rMax = radius + 2.6f;
-    const float rMin2 = rMin * rMin;
-    const float rMax2 = rMax * rMax;
-    const float inv2Sig2 = 1.0f / (2.0f * halfSigma * halfSigma);
-
-    for (int py = pyStart; py <= pyEnd; ++py) {
-        const float pyF = static_cast<float>(py);
-        const float dy = pyF - kOriginY;
-        if (dy >= 0.0f) {
-            continue;
-        }
-        const float dy2 = dy * dy;
-        uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
-        for (int px = pxStart; px <= pxEnd; ++px) {
-            const float pxF = static_cast<float>(px);
-            const float dx = pxF - kOriginX;
-            const float r2 = dx * dx + dy2;
-            if (r2 < rMin2 || r2 > rMax2) {
-                continue;
+            if (pyStart < y0) {
+                pyStart = y0;
             }
-            const float invR = fastInvSqrt(r2);
-            const float r = r2 * invR;
-            const float sinTheta = dx * invR;
+            int pyEnd = static_cast<int>(kPanYBot);
+            if (pyEnd > y1 - 1) {
+                pyEnd = y1 - 1;
+            }
+            if (pyStart <= pyEnd) {
+                const float dy = yB - yA;
+                const float absDy = absf(dy);
+                const float yMid = 0.5f * (yA + yB);
+                const float hornBoost =
+                    1.0f + 0.42f * clampf((kPanZeroRef - yTopSeg) * (1.0f / 56.0f), 0.0f, 1.0f);
+                const float glowAmp = 74.0f * hornBoost;
+                const float invL2 = 1.0f / (1.0f + dy * dy);
+                const bool steepSeg = (absDy > 1.5f);
 
-            float d2 = 0.0f;
-            float taper = 1.0f;
-            if (sinTheta < d0X) {
-                const float ex = pxF - end0X;
-                const float ey = pyF - end0Y;
-                d2 = ex * ex + ey * ey;
-                if (taperEnds) {
-                    taper = 0.35f;
-                }
-            } else if (sinTheta > d1X) {
-                const float ex = pxF - end1X;
-                const float ey = pyF - end1Y;
-                d2 = ex * ex + ey * ey;
-                if (taperEnds) {
-                    taper = 0.35f;
-                }
-            } else {
-                const float dr = r - radius;
-                d2 = dr * dr;
-                if (taperEnds) {
-                    const float e0x = pxF - end0X;
-                    const float e0y = pyF - end0Y;
-                    const float e1x = pxF - end1X;
-                    const float e1y = pyF - end1Y;
-                    const float c0 = e0x * e0x + e0y * e0y;
-                    const float c1 = e1x * e1x + e1y * e1y;
-                    const float minC2 = (c0 < c1) ? c0 : c1;
-                    if (minC2 < 16.0f) {
-                        taper = 0.35f + 0.65f * (minC2 * (1.0f / 16.0f));
+                for (int py = pyStart; py <= pyEnd; ++py) {
+                    const float pyF = static_cast<float>(py);
+                    float subEdge = 0.0f;
+                    if (!steepSeg) {
+                        subEdge = clampf((pyF + 0.5f) - yMid, 0.0f, 1.0f);
+                    } else {
+                        for (int s = 0; s < 4; ++s) {
+                            const float u = (static_cast<float>(s) + 0.5f) * 0.25f;
+                            const float ySub = yA + u * dy;
+                            subEdge += clampf((pyF + 0.5f) - ySub, 0.0f, 1.0f) * 0.25f;
+                        }
+                    }
+                    if (subEdge <= 0.004f) {
+                        continue;
+                    }
+                    const float vy = pyF - yMid;
+                    const float segT = clampf(vy * dy * invL2, -0.5f, 0.5f);
+                    const float ey = vy - dy * segT;
+                    const float d2 = segT * segT + ey * ey;
+                    const float perpDist = d2 * fastInvSqrt(d2 + 0.25f);
+                    const float vDist = (vy > 0.0f) ? vy : 0.0f;
+                    const float effDist = 0.65f * vDist + 0.35f * perpDist;
+                    const float crestGlow = glowAmp * fastExpNeg(effDist * 0.048f);
+                    int alpha = static_cast<int>((22.0f + crestGlow) * colScale * subEdge + 0.5f);
+                    if (alpha > 220) {
+                        alpha = 220;
+                    }
+                    if (alpha > 0) {
+                        uint8_t& dst = lumBuf[static_cast<size_t>(py - y0) * kDisplayWidth + colX];
+                        dst = blendLum8(dst, 240u, static_cast<uint8_t>(alpha));
                     }
                 }
             }
-            if (d2 < 4.5f) {
-                const uint32_t a8 =
-                    static_cast<uint32_t>(effPeak * taper * fastExpNeg(d2 * inv2Sig2) + 0.5f);
-                if (a8 > 0u) {
-                    row[px] =
-                        blendLum8(row[px], 255u, static_cast<uint8_t>((a8 > 255u) ? 255u : a8));
-                }
-            }
         }
+        yA = yB;
     }
 }
 
 } // namespace
 
 void HudGlobalViews::reset() noexcept {
-    panSigned_ = {-0.65f, -0.22f, 0.22f, 0.65f};
-    panBase_ = {-0.65f, -0.22f, 0.22f, 0.65f};
-    panOrbitMin_ = {-0.65f, -0.22f, 0.22f, 0.65f};
-    panOrbitMax_ = {-0.65f, -0.22f, 0.22f, 0.65f};
+    panX_ = {83.0f, 157.0f, 51.0f, 189.0f};
+    panBaseX_ = panX_;
+    orbitXMin_ = panX_;
+    orbitXMax_ = panX_;
     panLfoDepth_.fill(0.0f);
-    rayLen_.fill(80.0f);
-    waveAmp_.fill(0.0f);
+    apexH_.fill(88.0f);
+    invWidth2_ = {0.0029f, 0.0035f, 0.0041f, 0.0049f};
+    focusWeight_.fill(0.0f);
     muteDim_.fill(0.0f);
+    hasFocusSmooth_ = 0.0f;
+    primed_ = false;
     clearImmediate();
 }
 
@@ -238,8 +125,7 @@ bool HudGlobalViews::anyActiveTarget(const HudState& rawHud) const noexcept {
     if (rawHud.opacity <= 0.004f || rawHud.mode == HudMode::None) {
         return false;
     }
-    return isPanStageActive(rawHud) || rawHud.configPageOpen ||
-           (rawHud.mode == HudMode::GlobalConfig && rawHud.opacity >= 0.99f);
+    return isPanStageActive(rawHud) || rawHud.configPageOpen;
 }
 
 bool HudGlobalViews::hasResidualPhase() const noexcept {
@@ -271,9 +157,14 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
 
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
     const float panScale = control.global.monoCollapse ? 0.0f : 1.0f;
-    const float alphaPos = snapPan ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.032f)));
-    const float alphaAtk = snapPan ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.024f)));
-    const float alphaRel = snapPan ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.125f)));
+    const float alphaPos = snapPan ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.034f)));
+    const float alphaFocus = snapPan ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.042f)));
+
+    const bool spotlightActive = (rawHud.knobBank == KnobBankMode::Panning) &&
+                                 (rawHud.focusedKnob < kNumOscillators) &&
+                                 !control.global.monoCollapse;
+    hasFocusSmooth_ =
+        slewScalar(hasFocusSmooth_, spotlightActive ? 1.0f : 0.0f, alphaFocus, 0.002f);
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         const VoiceParams& vp = control.voices[v];
@@ -305,241 +196,132 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         }
         modDepth *= panScale;
 
-        const float peakRaw = silentMute ? 0.0f : clampf(voicePeak[v], 0.0f, 1.50f);
-        const float peakNorm = clampf(peakRaw * (1.0f / 1.15f), 0.0f, 1.0f);
-        const float drvNorm =
-            (effAmp > kCleanAmpKnee)
-                ? clampf((effAmp - kCleanAmpKnee) * (1.0f / (1.0f - kCleanAmpKnee)), 0.0f, 1.0f)
-                : 0.0f;
+        const float peakNorm =
+            silentMute ? 0.0f : clampf(voicePeak[v] * (1.0f / 1.15f), 0.0f, 1.0f);
+        const float tgtApexH =
+            silentMute ? 22.0f : clampf(46.0f + 78.0f * effAmp + 10.0f * peakNorm, 42.0f, 134.0f);
 
-        const float tgtRayLen =
-            silentMute ? 42.0f : clampf(46.0f + 48.0f * effAmp + 13.0f * peakNorm, 42.0f, 108.0f);
-        const float audibleScale = 1.0f - aud.subAudioBlend;
-        const float tgtWaveAmp =
-            (silentMute || peakRaw < 0.005f)
-                ? 0.0f
-                : ((1.50f + 2.15f * peakNorm + 1.35f * drvNorm) * audibleScale);
+        // Psychoacoustic localization width: bass (~55 Hz) warmer/wider, highs (~440 Hz+) tighter
+        const float octAboveBass = clampf(
+            fastLog2(clampf(vp.frequencyHz, 20.0f, 20000.0f) * (1.0f / 55.0f)) * (1.0f / 3.0f),
+            0.0f, 1.0f);
+        const float halfW = 18.5f - 6.0f * octAboveBass;
+        const float tgtInvW2 = 1.0f / (halfW * halfW);
+        const float tgtFocus = (spotlightActive && rawHud.focusedKnob == v) ? 1.0f : 0.0f;
 
-        panSigned_[v] = slewScalar(panSigned_[v], livePan, alphaPos, 0.001f);
-        panBase_[v] = slewScalar(panBase_[v], basePan, alphaPos, 0.001f);
-        panOrbitMin_[v] = slewScalar(panOrbitMin_[v], pLo, alphaPos, 0.001f);
-        panOrbitMax_[v] = slewScalar(panOrbitMax_[v], pHi, alphaPos, 0.001f);
+        panX_[v] = slewScalar(panX_[v], kPanCenterX + livePan * kPanHalfSpanX, alphaPos, 0.02f);
+        panBaseX_[v] =
+            slewScalar(panBaseX_[v], kPanCenterX + basePan * kPanHalfSpanX, alphaPos, 0.02f);
+        orbitXMin_[v] =
+            slewScalar(orbitXMin_[v], kPanCenterX + pLo * kPanHalfSpanX, alphaPos, 0.02f);
+        orbitXMax_[v] =
+            slewScalar(orbitXMax_[v], kPanCenterX + pHi * kPanHalfSpanX, alphaPos, 0.02f);
         panLfoDepth_[v] = slewScalar(panLfoDepth_[v], modDepth, alphaPos, 0.002f);
-        rayLen_[v] = slewScalar(rayLen_[v], tgtRayLen, alphaPos, 0.02f);
-
-        const float aWave = (tgtWaveAmp >= waveAmp_[v]) ? alphaAtk : alphaRel;
-        waveAmp_[v] = slewScalar(waveAmp_[v], tgtWaveAmp, aWave, 0.01f);
+        apexH_[v] = slewScalar(apexH_[v], tgtApexH, alphaPos, 0.02f);
+        invWidth2_[v] = slewScalar(invWidth2_[v], tgtInvW2, alphaPos, 0.00002f);
+        focusWeight_[v] = slewScalar(focusWeight_[v], tgtFocus, alphaFocus, 0.002f);
         muteDim_[v] = slewScalar(muteDim_[v], aud.inaudibleDim, alphaPos, 0.005f);
     }
 }
 
-void HudGlobalViews::compositePanStageStrip(
-    int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint16_t* linScratch,
-    float effPanAlpha01, uint8_t alpha8, const HudState& hud,
-    const OverdriveHairTable& overdriveHair) const noexcept {
-    if (alpha8 == 0u || y1 <= 36 || y0 >= 176) {
+void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
+                                            uint16_t* linScratch, float effPanAlpha01,
+                                            uint8_t alpha8, const HudState& hud) const noexcept {
+    (void)hud;
+    if (alpha8 == 0u || y1 <= 24 || y0 >= 192) {
         return;
     }
 
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
 
-    // 1. Restrained optical stage reticle (zero text labels; matches HudAmpGraph 22..30 lum guides)
-    drawPolarArcFilament(cv, kStageRadius, -1.0f, 1.0f, 30.0f, 0.52f, true);
-    cv.drawVerticalSlit(kOriginX, kOriginY - kStageRadius, kOriginY - kRayInnerR, 24.0f);
+    // 1. Edge-to-edge baseline filament (y = 184, matching FX) + phantom-center slit (x = 120)
+    cv.drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kPanYBot, 32.0f, 0.50f,
+                              false);
+    cv.drawVerticalSlit(kPanCenterX, 36.0f, kPanYBot, 22.0f);
+    cv.drawVerticalSlit(kPanCenterX - 53.0f, kPanYBot - 2.5f, kPanYBot + 2.5f, 34.0f);
+    cv.drawVerticalSlit(kPanCenterX + 53.0f, kPanYBot - 2.5f, kPanYBot + 2.5f, 34.0f);
 
-    float leftDirX = 0.0f;
-    float leftDirY = -1.0f;
-    fastPolarDir(-1.0f, leftDirX, leftDirY);
-    drawPolarSegmentFilament(cv, kOriginX + leftDirX * kRayInnerR, kOriginY + leftDirY * kRayInnerR,
-                             kOriginX + leftDirX * kStageRadius, kOriginY + leftDirY * kStageRadius,
-                             22.0f, 0.50f);
-    drawPolarSegmentFilament(cv, kOriginX - leftDirX * kRayInnerR, kOriginY + leftDirY * kRayInnerR,
-                             kOriginX - leftDirX * kStageRadius, kOriginY + leftDirY * kStageRadius,
-                             22.0f, 0.50f);
-    cv.drawOpticalBead(kOriginX, kOriginY, 0.44f, 1.50f);
+    const float hF = clampf(hasFocusSmooth_, 0.0f, 1.0f);
 
-    // 2. 4 Polar Live-Audio Voice Filaments (1px CRT focus matching HudAmpGraph 3A, zero fog bloom)
-    const bool globalPanAll = (hud.knobBank == KnobBankMode::GlobalAmp) && (hud.focusedKnob == 3u);
-    const int pyStart = (y0 > 38) ? y0 : 38;
-    const int pyEnd = (y1 < 172) ? y1 : 172;
-    if (effPanAlpha01 > 0.004f && pyStart < pyEnd) {
-        std::memset(linScratch, 0,
-                    static_cast<size_t>(stripHeight) * kDisplayWidth * sizeof(uint16_t));
-        const float masterE = clampf(effPanAlpha01, 0.0f, 1.0f);
-        constexpr float kHairMaxIdx = static_cast<float>(kOverdriveHairPoints - 1u);
-
-        for (size_t v = 0u; v < kNumOscillators; ++v) {
-            const float dim = clampf(muteDim_[v], 0.0f, 1.0f);
-            const float activeW = 1.0f - 0.78f * dim;
-            const bool focused = globalPanAll || (hud.focusedKnob == static_cast<uint8_t>(v));
-            const float effFoc = (focused ? 1.0f : 0.0f) * (1.0f - dim);
-            const float focBoost = 1.0f + 0.24f * effFoc;
-
-            float dirX = 0.0f;
-            float dirY = -1.0f;
-            fastPolarDir(panSigned_[v], dirX, dirY);
-            const float normX = -dirY;
-            const float normY = dirX;
-
-            const float rEnd = rayLen_[v];
-            const float spanR = rEnd - kRayInnerR;
-            if (spanR <= 1.0f) {
-                continue;
-            }
-            int nPts = static_cast<int>(spanR * 0.62f + 0.5f);
-            if (nPts < 18) {
-                nPts = 18;
-            } else if (nPts > 60) {
-                nPts = 60;
-            }
-            const float invNPts = 1.0f / static_cast<float>(nPts);
-            const float wAmp = waveAmp_[v];
-            const bool liveWave = (wAmp > 0.02f) && (dim < 0.92f);
-
-            OverdriveHairArray companion{};
-            if (liveWave) {
-                smoothZeroPhase(overdriveHair[v].data(), companion.data(), kOverdriveHairPoints,
-                                0.44f, 2u);
-            }
-            const size_t strandCount = liveWave ? 2u : 1u;
-            const float* strands[2] = {overdriveHair[v].data(), companion.data()};
-            const float strandWaveScale[2] = {wAmp, wAmp * 0.48f};
-            const float strandBaseE[2] = {liveWave ? 215.0f : 250.0f, 105.0f};
-
-            for (size_t s = 0u; s < strandCount; ++s) {
-                const float layerE = strandBaseE[s] * activeW * focBoost * masterE;
-                const float wScale = liveWave ? strandWaveScale[s] : 0.0f;
-                float px0 = kOriginX + dirX * kRayInnerR;
-                float py0 = kOriginY + dirY * kRayInnerR;
-
-                for (int i = 1; i <= nPts; ++i) {
-                    const float u = static_cast<float>(i) * invNPts;
-                    const float r = kRayInnerR + u * spanR;
-                    float waveOff = 0.0f;
-                    if (wScale > 0.0f && i < nPts) {
-                        const float idxF = u * kHairMaxIdx;
-                        const size_t i0 = static_cast<size_t>(idxF);
-                        const size_t i1 = (i0 + 1u < kOverdriveHairPoints) ? (i0 + 1u) : i0;
-                        const float rawVal = strands[s][i0] + (idxF - static_cast<float>(i0)) *
-                                                                  (strands[s][i1] - strands[s][i0]);
-                        const float spindleEnv = fastSinPhase01(0.5f * u);
-                        waveOff = clampf(rawVal, -1.0f, 1.0f) * wScale * spindleEnv;
-                    }
-                    const float px1 = kOriginX + dirX * r + normX * waveOff;
-                    const float py1 = kOriginY + dirY * r + normY * waveOff;
-
-                    const float innerTaper =
-                        (u < 0.14f) ? (0.38f + 0.62f * (u * (1.0f / 0.14f))) : 1.0f;
-                    const float segE = layerE * innerTaper;
-
-                    const float yLoF = (py0 < py1) ? py0 : py1;
-                    const float yHiF = (py0 > py1) ? py0 : py1;
-                    int segY0 = static_cast<int>(yLoF) - 2;
-                    int segY1 = static_cast<int>(yHiF) + 3;
-                    if (segY0 < pyStart) {
-                        segY0 = pyStart;
-                    }
-                    if (segY1 > pyEnd) {
-                        segY1 = pyEnd;
-                    }
-                    if (segY0 < segY1) {
-                        const float xLoF = (px0 < px1) ? px0 : px1;
-                        const float xHiF = (px0 > px1) ? px0 : px1;
-                        int segX0 = static_cast<int>(xLoF) - 2;
-                        int segX1 = static_cast<int>(xHiF) + 2;
-                        if (segX0 < 2) {
-                            segX0 = 2;
-                        }
-                        if (segX1 > 237) {
-                            segX1 = 237;
-                        }
-                        const float vx = px1 - px0;
-                        const float vy = py1 - py0;
-                        const float len2 = vx * vx + vy * vy;
-                        const float invLen2 = (len2 > 1.0e-5f) ? (1.0f / len2) : 0.0f;
-
-                        for (int py = segY0; py < segY1; ++py) {
-                            uint16_t* linRow =
-                                linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
-                            const float wy = static_cast<float>(py) - py0;
-                            for (int px = segX0; px <= segX1; ++px) {
-                                const float wx = static_cast<float>(px) - px0;
-                                const float t =
-                                    (invLen2 > 0.0f)
-                                        ? clampf((wx * vx + wy * vy) * invLen2, 0.0f, 1.0f)
-                                        : 0.0f;
-                                const float ddx = wx - t * vx;
-                                const float ddy = wy - t * vy;
-                                const float d2 = ddx * ddx + ddy * ddy;
-                                if (d2 < 3.6f) {
-                                    const uint32_t add =
-                                        static_cast<uint32_t>(segE * fastExpNeg(d2 * 2.05f) + 0.5f);
-                                    if (add > 0u) {
-                                        const uint32_t next =
-                                            static_cast<uint32_t>(linRow[px]) + add;
-                                        linRow[px] =
-                                            static_cast<uint16_t>((next > 4095u) ? 4095u : next);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    px0 = px1;
-                    py0 = py1;
+    // 2. Layer 1: 4x-subsampled vertical-decay skirt shading (companions first, spotlight on top)
+    if (y1 > static_cast<int>(kPanYTop) && y0 <= static_cast<int>(kPanYBot)) {
+        for (int pass = 0; pass < 2; ++pass) {
+            for (size_t v = 0u; v < kNumOscillators; ++v) {
+                const float fW = clampf(focusWeight_[v], 0.0f, 1.0f);
+                const bool isPrimary = (fW >= 0.5f);
+                if ((pass == 0 && isPrimary) || (pass == 1 && !isPrimary)) {
+                    continue;
                 }
+                const float activeW = 1.0f - 0.78f * clampf(muteDim_[v], 0.0f, 1.0f);
+                const float spotScale = 0.16f + 0.76f * fW;
+                const float baseFill = 0.34f + hF * (spotScale - 0.34f);
+                shadePanoramaCurveSkirt(y0, y1, lumBuf, panX_[v], apexH_[v], invWidth2_[v],
+                                        baseFill * activeW * effPanAlpha01);
             }
         }
-
-        screenBlendLinearStrip(stripHeight, 2u, 238u, linScratch, lumBuf);
     }
 
-    // 3. Foreground LFO -> PAN Polar Excursion Brackets & Crisp Tip Focal Beads
-    for (size_t v = 0u; v < kNumOscillators; ++v) {
-        const float dim = clampf(muteDim_[v], 0.0f, 1.0f);
-        const bool focused = globalPanAll || (hud.focusedKnob == static_cast<uint8_t>(v));
-        const float effFoc = (focused ? 1.0f : 0.0f) * (1.0f - dim);
-        const float rEnd = rayLen_[v];
+    // 3. Layer 2: Linear-photon curve spines (additive caustic crossings where voices overlap)
+    if (effPanAlpha01 > 0.004f && y1 > static_cast<int>(kPanYTop) - 4 &&
+        y0 <= static_cast<int>(kPanYBot) + 5) {
+        std::memset(linScratch, 0,
+                    static_cast<size_t>(stripHeight) * kDisplayWidth * sizeof(uint16_t));
+        for (size_t v = 0u; v < kNumOscillators; ++v) {
+            const float activeW = 1.0f - 0.76f * clampf(muteDim_[v], 0.0f, 1.0f);
+            const float fW = clampf(focusWeight_[v], 0.0f, 1.0f);
+            const float spotWgt = 0.28f + 0.76f * fW;
+            const float weight = (0.62f + hF * (spotWgt - 0.62f)) * activeW * effPanAlpha01;
+            if (weight <= 0.004f) {
+                continue;
+            }
+            const float cx = panX_[v];
+            const float apexH = apexH_[v];
+            const float invW2 = invWidth2_[v];
+            float yA = evalPanBellY(0.0f, cx, apexH, invW2);
+            for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                const float yB = evalPanBellY(static_cast<float>(colX + 1u), cx, apexH, invW2);
+                splatPhotonSegment(static_cast<int>(colX), yA, yB, weight, 0.62f, y0, y1,
+                                   linScratch);
+                yA = yB;
+            }
+        }
+        screenBlendLinearStrip(stripHeight, 0u, kDisplayWidth, linScratch, lumBuf);
+    }
 
-        float dirX = 0.0f;
-        float dirY = -1.0f;
-        fastPolarDir(panSigned_[v], dirX, dirY);
-        const float tipX = kOriginX + dirX * rEnd;
-        const float tipY = kOriginY + dirY * rEnd;
+    // 4. Layer 3: LFO -> PAN horizontal excursion bracket + Phase Beacons / Optical Crest Beads
+    for (int pass = 0; pass < 2; ++pass) {
+        for (size_t v = 0u; v < kNumOscillators; ++v) {
+            const float fW = clampf(focusWeight_[v], 0.0f, 1.0f);
+            const bool isPrimary = (fW >= 0.5f);
+            if ((pass == 0 && isPrimary) || (pass == 1 && !isPrimary)) {
+                continue;
+            }
+            const float dim = clampf(muteDim_[v], 0.0f, 1.0f);
+            const float cx = panX_[v];
+            const float apexY = evalPanBellY(cx, cx, apexH_[v], invWidth2_[v]);
+            const float modD = panLfoDepth_[v];
+            const float orbitSpan = orbitXMax_[v] - orbitXMin_[v];
 
-        const float orbSpan = panOrbitMax_[v] - panOrbitMin_[v];
-        if (orbSpan > 0.025f && dim < 0.85f) {
-            const float arcLum = (104.0f + 38.0f * effFoc) * (1.0f - 0.65f * dim);
-            const float tickLum = (128.0f + 42.0f * effFoc) * (1.0f - 0.65f * dim);
-            drawPolarArcFilament(cv, rEnd, panOrbitMin_[v], panOrbitMax_[v], arcLum, 0.54f, false);
-
-            float loX = 0.0f;
-            float loY = -1.0f;
-            float hiX = 0.0f;
-            float hiY = -1.0f;
-            float bsX = 0.0f;
-            float bsY = -1.0f;
-            fastPolarDir(panOrbitMin_[v], loX, loY);
-            fastPolarDir(panOrbitMax_[v], hiX, hiY);
-            fastPolarDir(panBase_[v], bsX, bsY);
-
-            drawPolarSegmentFilament(cv, kOriginX + loX * (rEnd - 2.8f),
-                                     kOriginY + loY * (rEnd - 2.8f), kOriginX + loX * (rEnd + 2.8f),
-                                     kOriginY + loY * (rEnd + 2.8f), tickLum, 0.50f);
-            drawPolarSegmentFilament(cv, kOriginX + hiX * (rEnd - 2.8f),
-                                     kOriginY + hiY * (rEnd - 2.8f), kOriginX + hiX * (rEnd + 2.8f),
-                                     kOriginY + hiY * (rEnd + 2.8f), tickLum, 0.50f);
-            drawPolarSegmentFilament(cv, kOriginX + bsX * (rEnd - 1.8f),
-                                     kOriginY + bsY * (rEnd - 1.8f), kOriginX + bsX * (rEnd + 1.8f),
-                                     kOriginY + bsY * (rEnd + 1.8f), 84.0f * (1.0f - 0.65f * dim),
-                                     0.50f);
-
-            const float beaconInt = (0.82f + 0.18f * effFoc) * (1.0f - 0.60f * dim);
-            cv.drawLfoPhaseBeacon(tipX, tipY, beaconInt, 0.30f + 0.70f * panLfoDepth_[v]);
-        } else {
-            const float beadInt = (0.80f + (0.30f - 0.80f) * dim) + 0.18f * effFoc;
-            const float beadRad = 1.90f + 0.40f * effFoc;
-            cv.drawOpticalBead(tipX, tipY, clampf(beadInt, 0.25f, 1.0f), beadRad);
+            if (modD > 0.01f && orbitSpan > 1.2f && dim < 0.90f) {
+                const float brkVis = (0.55f + 0.45f * fW) * (1.0f - 0.65f * dim);
+                cv.drawHorizontalFilament(orbitXMin_[v], orbitXMax_[v], apexY, 96.0f * brkVis,
+                                          0.54f, true);
+                cv.drawVerticalSlit(orbitXMin_[v], apexY - 3.5f, apexY + 3.5f, 132.0f * brkVis);
+                cv.drawVerticalSlit(orbitXMax_[v], apexY - 3.5f, apexY + 3.5f, 132.0f * brkVis);
+                if (absf(cx - panBaseX_[v]) > 2.5f) {
+                    cv.drawOpticalBead(panBaseX_[v], apexY, 0.34f * brkVis, 1.35f);
+                }
+                const float spotBeacon = 0.52f + 0.48f * fW;
+                const float beaconInt = (0.84f + hF * (spotBeacon - 0.84f)) * (1.0f - 0.58f * dim);
+                cv.drawLfoPhaseBeacon(cx, apexY, beaconInt, 0.35f + 0.65f * modD);
+            } else {
+                const float spotBeadInt = 0.38f + 0.60f * fW;
+                const float beadInt = clampf(
+                    (0.78f + hF * (spotBeadInt - 0.78f)) * (1.0f - 0.60f * dim), 0.22f, 1.0f);
+                const float spotBeadRad = 1.50f + 0.75f * fW;
+                const float beadRad = 1.85f + hF * (spotBeadRad - 1.85f);
+                cv.drawOpticalBead(cx, apexY, beadInt, beadRad);
+            }
         }
     }
 }
@@ -580,7 +362,7 @@ void HudGlobalViews::compositeGlobalConfigStrip(int y0, int y1, uint8_t* lumBuf,
             const int fillTop = (ry < y0) ? y0 : ry;
             const int fillBot = (ry + 24 > y1) ? y1 : (ry + 24);
             const auto fillAlpha =
-                static_cast<uint8_t>((30u * static_cast<uint32_t>(alpha8) + 127u) / 255u);
+                static_cast<uint8_t>((28u * static_cast<uint32_t>(alpha8) + 127u) / 255u);
             if (fillAlpha > 0u && fillTop < fillBot) {
                 for (int py = fillTop; py < fillBot; ++py) {
                     uint8_t* row = lumBuf + static_cast<size_t>(py - y0) * kDisplayWidth;
