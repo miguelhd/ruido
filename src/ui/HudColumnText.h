@@ -71,16 +71,7 @@ inline void formatHeaderPanMode(const EngineControlState& control, const HudStat
         appendStr(rightText, 0u, rightCap, muted ? "MUTED" : "STEREO");
         return;
     }
-    bool anyActive = false;
-    for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
-        if (computeVoiceAudibility(control.voices[vi], control.voicePressure[vi], pitchMode)
-                .muteBlend < 0.999f) {
-            anyActive = true;
-            break;
-        }
-    }
-    appendStr(rightText, 0u, rightCap,
-              !anyActive ? "MUTED" : (control.global.monoCollapse ? "MONO" : "STEREO"));
+    appendStr(rightText, 0u, rightCap, control.global.monoCollapse ? "MONO" : "STEREO");
 }
 
 inline void formatColumnRoleAndValue(const EngineControlState& control, const HudState& hud,

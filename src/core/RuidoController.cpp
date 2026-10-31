@@ -239,7 +239,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
                 publishState();
             }
             hud_.knobBank = KnobBankMode::Panning;
-            triggerHud(HudMode::OutputRouting, hud_.focusedVoice, kNoFocusedKnob);
+            latchSwitchHud(HudMode::Panning, ButtonId::Sel);
             return;
         }
         hud_.lastEncoder = EncoderId::Select;

@@ -1074,7 +1074,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, ruido::kDefaultVoiceAmp));
 
     // (d) SEL (PAN) Edge-to-Edge Stereo Panorama Curve (HudGraphs sister to FX & LFO):
-    //     SELECT switches OUTPUT ROUTING (STEREO <-> MONO) with 1.5 s "OUTPUT ROUTING" header,
+    //     SELECT switches STEREO <-> MONO while keeping the "PAN" title steady,
     //     left/right panorama steering, spotlight vs 30% silver companion contrast, LFO -> PAN
     //     strip equivalence, MONO center convergence + strictly locked KNOB 1-4 + centered
     //     "OUTPUT ROUTING SET TO MONO" bottom message (no OSC 1-4 columns), and 150 ms dissolve!
@@ -1085,21 +1085,17 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
     RTEST_CHECK(nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Sel)], 1.0f));
 
-    // SELECT switches OUTPUT ROUTING cleanly between STEREO (0) and MONO (1) right on SEL,
-    // displaying HudMode::OutputRouting for 1.5 s without altering stored voice pan values!
+    // SELECT switches STEREO (0) <-> MONO (1) right on SEL while keeping HudMode::Panning ("PAN"
+    // title stays steady, never flashing "OUTPUT ROUTING") and preserving stored voice pan values!
     const float preSelectPan0 = ctrl.state().voices[0].pan;
     RTEST_CHECK(!ctrl.state().global.monoCollapse);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // +1 detent -> MONO
     RTEST_CHECK(ctrl.state().global.monoCollapse);
-    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::OutputRouting &&
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Panning &&
                 ctrl.hud().knobBank == ruido::KnobBankMode::Panning &&
                 ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -4); // -1 detent -> STEREO
     RTEST_CHECK(!ctrl.state().global.monoCollapse);
-    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::OutputRouting);
-    for (int i = 0; i < 8; ++i) {
-        ctrl.tick(0.25f, driveTel); // 1.5 s toast returns header cleanly to HudMode::Panning
-    }
     RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Panning &&
                 ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
     RTEST_CHECK(nearF(ctrl.state().voices[0].pan, preSelectPan0));
@@ -1190,8 +1186,8 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     RTEST_CHECK(panPanoramaStripsEq);
 
-    // Turning SELECT CW on SEL switches STEREO -> MONO, momentarily shows "OUTPUT ROUTING · MONO"
-    // in the header (1.5 s) before settling to "PAN · MONO", replaces OSC 1-4 bottom columns with
+    // Turning SELECT CW on SEL switches STEREO -> MONO while keeping the top-left title steady as
+    // "PAN" ("PAN · MONO", x = 48..126 empty immediately!), replaces OSC 1-4 bottom columns with
     // centered "OUTPUT ROUTING SET TO MONO", strictly locks KNOB 1-4 (zero state or pixel change),
     // and preserves stereo pan positions intact when SELECT switches back to STEREO!
     const std::array<float, 4> savedStereoPan = {
@@ -1202,12 +1198,10 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     };
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // Turn SELECT CW -> MONO!
     RTEST_CHECK(ctrl.state().global.monoCollapse);
-    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::OutputRouting &&
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Panning &&
                 ctrl.hud().knobBank == ruido::KnobBankMode::Panning &&
                 ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
 
-    // During SELECT's 1.5 s toast, header shows bold "OUTPUT ROUTING" (x = 48..126 lit!) while
-    // center curve & centered bottom message render live underneath!
     quietSt = ctrl.state();
     quietSt.global.masterRun = false;
     quietSt.global.masterTrim = 0.0f;
@@ -1215,13 +1209,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
     }
     renderer.renderFullScreenStrips(clean16.data());
-    RTEST_CHECK(maxBoxG6(clean16, 48u, 126u, 6u, 21u) >= 55u); // "OUTPUT ROUTING" bold title!
-
-    for (int i = 0; i < 8; ++i) {
-        ctrl.tick(0.25f, driveTel); // After 1.5 s, header settles back to "PAN · MONO"
-    }
-    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::Panning &&
-                ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+    RTEST_CHECK(maxBoxG6(clean16, 48u, 126u, 6u, 21u) == 0u); // Title stays short "PAN"!
 
     const ruido::LfoSignalArray zeroLfo{};
     char hdrSuffix[16]{};
@@ -1308,18 +1296,14 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
 
-    // Turning SELECT CCW on SEL switches MONO -> STEREO ("OUTPUT ROUTING · STEREO") with original
-    // stereo pan positions intact!
+    // Turning SELECT CCW on SEL switches MONO -> STEREO ("PAN · STEREO") with original stereo pan
+    // positions intact!
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
-    RTEST_CHECK(!ctrl.state().global.monoCollapse &&
-                ctrl.hud().mode == ruido::HudMode::OutputRouting);
+    RTEST_CHECK(!ctrl.state().global.monoCollapse && ctrl.hud().mode == ruido::HudMode::Panning);
     for (size_t v = 0u; v < 4u; ++v) {
         RTEST_CHECK(nearF(ctrl.state().voices[v].pan, savedStereoPan[v]));
     }
-    for (int i = 0; i < 8; ++i) {
-        ctrl.tick(0.25f, driveTel); // Return to latched SEL page in STEREO
-    }
-
+    ctrl.tick(0.025f, driveTel);
 
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
