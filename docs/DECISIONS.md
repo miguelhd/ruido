@@ -383,7 +383,7 @@ This file tracks foundational engineering and UX decisions for **Ruido**. Append
 
 ---
 
-## ADR-032: Dedicated `SEL` Latching Stereo Panning Page (`PAN`) & 4-Lane Binaural Constant-Power Soundstage
+## ADR-033: Dedicated `SEL` Latching Stereo Panning Page (`PAN`) & 4-Lane Binaural Constant-Power Soundstage
 - **Date:** 2026-10-30 · **Status:** Implemented (supersedes `OP6` momentary Panning in ADR-027/ADR-029 and `EditTarget::Pan` on `EDIT` in ADR-030)
 - **Context:** Keeping per-oscillator Panning duplicated across both a lone momentary black key (`OP6`, leaving `OP1–OP5` dark while `OP6` was lit) and a 4th mode buried at the tail end of `EDIT` created redundancy while leaving the `SEL` switch directly under `KNOB 1–4` (right next to `FX`) unassigned. Moving Panning onto `SEL` following the standardized right-grid latching page pattern unifies every per-voice synthesis page (`FX`, `SEL`, `EDIT`, `LFO`) directly below `KNOB 1–4` and gives spatial placement its own unmistakable full-screen visualization.
 - **Decision:**
