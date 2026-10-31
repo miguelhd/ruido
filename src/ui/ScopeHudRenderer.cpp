@@ -161,14 +161,14 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         return;
     }
 
-    const bool nowPinnedOrOpen = hud.modifierHeld || hud.fxPageOpen || hud.panPageOpen ||
-                                 hud.lfoPageOpen || hud.editPageOpen || hud.configPageOpen ||
-                                 hud.saveArmed ||
+    const bool nowPinnedOrOpen = hud.modifierHeld || hud.freqPageOpen || hud.fxPageOpen ||
+                                 hud.panPageOpen || hud.lfoPageOpen || hud.editPageOpen ||
+                                 hud.configPageOpen || hud.saveArmed ||
                                  (hud.scopeFrozen && hud.mode == HudMode::ScopeFreeze);
     const bool prevWasPinnedOrOpen =
-        prevRawHud_.modifierHeld || prevRawHud_.fxPageOpen || prevRawHud_.panPageOpen ||
-        prevRawHud_.lfoPageOpen || prevRawHud_.editPageOpen || prevRawHud_.configPageOpen ||
-        prevRawHud_.saveArmed ||
+        prevRawHud_.modifierHeld || prevRawHud_.freqPageOpen || prevRawHud_.fxPageOpen ||
+        prevRawHud_.panPageOpen || prevRawHud_.lfoPageOpen || prevRawHud_.editPageOpen ||
+        prevRawHud_.configPageOpen || prevRawHud_.saveArmed ||
         (prevRawHud_.scopeFrozen && prevRawHud_.mode == HudMode::ScopeFreeze);
     const bool fadingSameMode = !nowPinnedOrOpen && !freqChanged && (hud.opacity > 0.001f) &&
                                 ((prevWasPinnedOrOpen && hud.mode == prevRawHud_.mode &&
@@ -193,6 +193,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.focusedKnob = releaseLatchHud_.focusedKnob;
         effectiveHud.fxVoiceFocus = releaseLatchHud_.fxVoiceFocus;
         effectiveHud.lfoVoiceFocus = releaseLatchHud_.lfoVoiceFocus;
+        effectiveHud.freqPageOpen = releaseLatchHud_.freqPageOpen;
         effectiveHud.fxPageOpen = releaseLatchHud_.fxPageOpen;
         effectiveHud.panPageOpen = releaseLatchHud_.panPageOpen;
         effectiveHud.editPageOpen = releaseLatchHud_.editPageOpen;
@@ -228,7 +229,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     }
 
     globalViews_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_);
-    ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_, frameVoiceDrift_,
+    ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoiceDrift_,
                      traceEngine_.overdriveHair());
     const bool extraCenterView = globalViews_.anyActiveTarget(hud) || ampGraph_.isActive(hud);
     graphs_.update(dtClamped, control, hud, effectiveHud, extraCenterView, frameLfoOutput_,

@@ -51,7 +51,7 @@ inline void formatHeaderEnsembleDrive(const EngineControlState& control,
         }
     }
     if (!anyActive) {
-        appendStr(rightText, 0u, rightCap, "ALL MUTED");
+        appendStr(rightText, 0u, rightCap, "MUTED");
     } else {
         formatHeaderDriveValue(maxAmp, rightText, rightCap);
     }

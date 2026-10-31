@@ -6,6 +6,8 @@
 #include "core/Parameters.h"
 #include "core/RuidoController.h"
 #include "dsp/DroneEngine.h"
+#include "ui/FontSansAA.h"
+#include "ui/HudColumnText.h"
 #include "ui/ScopeHudRenderer.h"
 
 #include <array>
@@ -804,6 +806,26 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(eqStrips);
     RTEST_CHECK(monoOk);
 
+    // Verify 0-70% clean stem (`y = 85..175`, quiet background) stays razor-sharp (`cx = 30`) with
+    // zero wide post-filter `voicePeak` plasma halo in `x = 20..25` / `x = 35..40`!
+    size_t cleanStemSideHaloPx = 0u;
+    for (size_t y = 85u; y <= 175u; ++y) {
+        if (y == 120u) {
+            continue; // quiet scope flatline horizon
+        }
+        for (size_t x = 20u; x <= 25u; ++x) {
+            if (((amp16[y * 240u + x] >> 5u) & 0x3Fu) >= 4u) {
+                ++cleanStemSideHaloPx;
+            }
+        }
+        for (size_t x = 35u; x <= 40u; ++x) {
+            if (((amp16[y * 240u + x] >> 5u) & 0x3Fu) >= 4u) {
+                ++cleanStemSideHaloPx;
+            }
+        }
+    }
+    RTEST_CHECK(cleanStemSideHaloPx == 0u);
+
     // Compare Column 0 upper overdrive zone (y = 36..76) between 100% (4.5x drive, Option 3A
     // narrow triangular hairy CRT cap) and clean 65% VCA:
     //  - Narrow V-triangle lights center hair (`x = 24..36`) while keeping wide outer regions
@@ -933,17 +955,10 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     ctrl.tick(0.100f, driveTel);
     RTEST_CHECK(nearF(ctrl.hud().opacity, 0.0f));
 
-    // Closed EDIT LED flares dynamically with live voicePeak when any active voice > 70% knee
-    driveTel.voicePeak[0].store(0.0f, std::memory_order_relaxed);
-    ctrl.tick(0.016f, driveTel);
-    const float editLedQuietDrive =
-        ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)];
+    // Closed EDIT LED returns strictly to 15% dim (even when Osc 1 is at 100% / 4.5x overdrive)
     driveTel.voicePeak[0].store(0.95f, std::memory_order_relaxed);
     ctrl.tick(0.016f, driveTel);
-    const float editLedHotDrive =
-        ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)];
-    RTEST_CHECK(editLedQuietDrive >= 0.24f && editLedQuietDrive <= 0.28f);
-    RTEST_CHECK(editLedHotDrive > 0.75f && editLedHotDrive <= 0.86f);
+    RTEST_CHECK(nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)], 0.15f));
 
     // 6. 1-to-1 Lower-Rail OSC 1-4 Dimming & 0% / Sub-Audio Alignment (Zero Screen Pulsing):
     ctrl.reset();

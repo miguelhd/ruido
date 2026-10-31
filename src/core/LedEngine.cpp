@@ -1,6 +1,7 @@
 #include "core/LedEngine.h"
 
 #include "core/DspMath.h"
+#include "core/GlobalControl.h"
 #include "core/LfoMath.h"
 
 #include <cstddef>
@@ -74,8 +75,6 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
 
     float maxLfoDepth = 0.0f;
     size_t dominantLfoBankIdx = 0u;
-    float maxOverdriveNorm = 0.0f;
-    float maxOverdrivePeak = 0.0f;
     float maxFilterEngagement = 0.0f;
     float maxPanEngagement = 0.0f;
 
@@ -83,8 +82,6 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
         const VoiceParams& vp = ctx.state.voices[i];
         const float lfoARaw = ctx.telemetry.lfoOutput[i].load(std::memory_order_relaxed);
         const float lfoBRaw = ctx.telemetry.lfoOutput[4u + i].load(std::memory_order_relaxed);
-        const float effAmp = computeLiveVoiceAmplitude(vp, lfoARaw, lfoBRaw);
-        const float vPeak = ctx.telemetry.voicePeak[i].load(std::memory_order_relaxed);
         const float p = clampf(ctx.state.voicePressure[i], 0.0f, 1.0f);
 
         if (vp.lfoDepth > maxLfoDepth) {
@@ -94,16 +91,6 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
         if (vp.lfoBDepth > maxLfoDepth) {
             maxLfoDepth = vp.lfoBDepth;
             dominantLfoBankIdx = 4u + i;
-        }
-        if (!vp.muted && effAmp > kCleanAmpKnee) {
-            const float driveNorm =
-                clampf((effAmp - kCleanAmpKnee) * (1.0f / (1.0f - kCleanAmpKnee)), 0.0f, 1.0f);
-            if (driveNorm > maxOverdriveNorm) {
-                maxOverdriveNorm = driveNorm;
-            }
-            if (vPeak > maxOverdrivePeak) {
-                maxOverdrivePeak = vPeak;
-            }
         }
         if (!vp.muted || p > 0.001f) {
             const ModulatedFilterParams flt =
@@ -210,7 +197,10 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctPlus)] =
         (ctx.hud.knobRate == KnobRate::Coarse) ? 1.0f : 0.15f;
 
-    outLeds.buttonLeds[static_cast<size_t>(ButtonId::Home)] = 0.12f + 0.23f * ctx.hud.opacity;
+    const bool homeFreqActive =
+        ctx.hud.freqPageOpen && !isGlobalKnobBank(ctx.hud.knobBank) && !ctx.hud.scopeFrozen;
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::Home)] =
+        homeFreqActive ? 1.0f : (0.12f + 0.23f * ctx.hud.opacity);
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] = ctx.hud.saveArmed ? 1.0f : 0.15f;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::GloRight)] =
         ctx.hud.configPageOpen ? 1.0f : 0.15f;
@@ -235,16 +225,10 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Sel)] = 0.15f;
     }
 
-    // EDIT button (Channel Level & MS-20 Drive): 100% when open, 15% clean rest, live flare > 70%
-    if (ctx.hud.editPageOpen) {
-        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Edit)] = 1.0f;
-    } else if (maxOverdriveNorm > 1.0e-4f) {
-        const float peakNorm = clampf(maxOverdrivePeak, 0.0f, 1.0f);
-        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Edit)] =
-            clampf(0.15f + (0.10f + 0.60f * peakNorm) * maxOverdriveNorm, 0.15f, 0.85f);
-    } else {
-        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Edit)] = 0.15f;
-    }
+    // EDIT button: 100% strictly while EDIT is active, 15% dim whenever closed or in another mode
+    const bool editActive =
+        ctx.hud.editPageOpen && !isGlobalKnobBank(ctx.hud.knobBank) && !ctx.hud.scopeFrozen;
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::Edit)] = editActive ? 1.0f : 0.15f;
 
     if (ctx.hud.lfoPageOpen) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] = 1.0f;

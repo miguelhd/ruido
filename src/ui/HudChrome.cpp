@@ -194,7 +194,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         return;
     }
     const uint8_t v = hud.focusedVoice & 3u;
-    const VoiceParams& focVp = control.voices[v];
     char leftMain[24]{};
     char leftSuffix[16]{};
     char rightText[32]{};
@@ -220,13 +219,17 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     case HudMode::VoiceFrequency: {
         appendStr(leftMain, 0u, sizeof(leftMain), "FREQUENCY");
-        size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
-        appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
-        const float pitchMul = computeVoicePitchRatio(control.voicePressure[v], hdrPitchMode);
-        const float liveHz = computeLiveVoicePitchHz(focVp, lfoOutput[lfoBankIndex(v, 0u)],
-                                                     lfoOutput[lfoBankIndex(v, 1u)]);
-        voiceLiveHz = liveHz * pitchMul;
-        appendPrecisionHz(rightText, 0u, sizeof(rightText), voiceLiveHz);
+        if (hud.focusedKnob < kNumOscillators) {
+            const uint8_t kv = hud.focusedKnob & 3u;
+            size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
+            appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(kv + 1u));
+            const float pitchMul = computeVoicePitchRatio(control.voicePressure[kv], hdrPitchMode);
+            const float liveHz =
+                computeLiveVoicePitchHz(control.voices[kv], lfoOutput[lfoBankIndex(kv, 0u)],
+                                        lfoOutput[lfoBankIndex(kv, 1u)]);
+            voiceLiveHz = liveHz * pitchMul;
+            appendPrecisionHz(rightText, 0u, sizeof(rightText), voiceLiveHz);
+        }
         break;
     }
     case HudMode::PulseWidth: {
@@ -242,7 +245,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
                           (absf(livePwAt(kv) - 0.50f) <= 0.015f) ? "SQUARE" : "PULSE");
             }
         } else {
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
             bool anyActive = false;
             bool anyPulse = false;
             for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
@@ -254,7 +256,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
                 }
             }
             appendStr(rightText, 0u, sizeof(rightText),
-                      !anyActive ? "ALL MUTED" : (anyPulse ? "PULSE" : "SQUARE"));
+                      !anyActive ? "MUTED" : (anyPulse ? "PULSE" : "SQUARE"));
         }
         break;
     }
@@ -272,7 +274,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
                           (dvp.drift <= 0.004f) ? "LOCKED" : "ANALOG 1/F");
             }
         } else {
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
             bool anyActive = false;
             bool anyDrifting = false;
             for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
@@ -284,7 +285,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
                 }
             }
             appendStr(rightText, 0u, sizeof(rightText),
-                      !anyActive ? "ALL MUTED" : (anyDrifting ? "ANALOG 1/F" : "LOCKED"));
+                      !anyActive ? "MUTED" : (anyDrifting ? "ANALOG 1/F" : "LOCKED"));
         }
         break;
     }
@@ -308,7 +309,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
                 formatHeaderDriveValue(liveAmpAt(kv), rightText, sizeof(rightText));
             }
         } else {
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
             formatHeaderEnsembleDrive(control, lfoOutput, rightText, sizeof(rightText));
         }
         break;
@@ -555,7 +555,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         int badgeRightX = 230;
         char rateValBuf[24]{};
 
-        if (hud.mode == HudMode::VoiceFrequency) {
+        if (hud.mode == HudMode::VoiceFrequency && hud.focusedKnob < kNumOscillators) {
             if (isCoarse) {
                 formatCompactHz(rateValBuf, sizeof(rateValBuf), voiceLiveHz);
             } else {

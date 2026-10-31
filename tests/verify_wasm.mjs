@@ -213,7 +213,7 @@ for (let i = 0; i < editRgbaBytes.length; i += 4) {
 ex.wasm_ui_button(5, 1);
 ex.wasm_ui_button(5, 0);
 ex.wasm_ui_tick_and_render(0.1);
-assert.ok(f32[ledsIdx + 27 + 6] > 0.25); // Closed EDIT LED flares live with 4.5x overdrive!
+assert.ok(Math.abs(f32[ledsIdx + 27 + 6] - 0.15) < 1e-4); // Closed EDIT LED returns to 15% dim!
 
 // Verify 240x240 RGBA frame is strictly 100% neutral monochrome (R === G === B) with rich CRT shades
 const rgbaStart = ex.wasm_ui_get_rgba_ptr();
@@ -236,7 +236,18 @@ ex.wasm_ui_button(8, 1);
 ex.wasm_ui_button(8, 0);
 ex.wasm_ui_tick_and_render(0.2);
 assert.equal(f32[summaryIdx + 39], 0.0);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 0.12) < 1e-4);
 assert.ok(f32[ledsIdx + 27 + 5] >= 0.149 && f32[ledsIdx + 27 + 5] <= 0.61);
+
+// Pressing HOME when no HUD is active latches FREQUENCY HUD open (100% HOME LED); pressing again hides it
+ex.wasm_ui_button(8, 1);
+ex.wasm_ui_button(8, 0);
+ex.wasm_ui_tick_and_render(2.0);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 1.0) < 1e-4);
+ex.wasm_ui_button(8, 1);
+ex.wasm_ui_button(8, 0);
+ex.wasm_ui_tick_and_render(0.2);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 0.12) < 1e-4);
 
 // Verify right-panel GLO opens GLOBAL CONFIG (button 7), ALGORITHM scrolls options, & keybed GLO + SELECT steps GlobalTarget
 ex.wasm_ui_button(7, 1);

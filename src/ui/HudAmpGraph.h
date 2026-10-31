@@ -52,7 +52,6 @@ class HudAmpGraph {
 
     void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                 const LfoSignalArray& lfoOutput,
-                const std::array<float, kNumOscillators>& voicePeak,
                 const std::array<float, kNumOscillators>& voiceDriftNorm,
                 const OverdriveHairTable& overdriveHair) noexcept;
 
@@ -72,7 +71,6 @@ class HudAmpGraph {
 
     std::array<float, kNumOscillators> faderY_{kColYBot, kColYBot, kColYBot, kColYBot};
     std::array<float, kNumOscillators> driveNorm_{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<float, kNumOscillators> peakY_{kColYBot, kColYBot, kColYBot, kColYBot};
     std::array<float, kNumOscillators> pulseWidth_{0.50f, 0.50f, 0.50f, 0.50f};
     std::array<float, kNumOscillators> driftAmt_{0.10f, 0.10f, 0.10f, 0.10f};
     std::array<float, kNumOscillators> driftLive_{0.0f, 0.0f, 0.0f, 0.0f};

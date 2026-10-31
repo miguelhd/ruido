@@ -181,9 +181,10 @@ struct HudState {
     bool rateHoldActive = false; // True whenever OCT- or OCT+ is physically held
     bool scopeFrozen = false;    // Momentary waveform freeze on 11th black key
     bool saveArmed = false;
+    bool freqPageOpen = false;   // Latching Frequency HUD toggle state (ButtonId::Home)
     bool fxPageOpen = false;     // Latching MS-20 Filter page state (ButtonId::Fx)
     bool panPageOpen = false;    // Latching Stereo Panning page state (ButtonId::Sel)
-    bool lfoPageOpen = false;     // Latching LFO page state (ButtonId::Lfo)
+    bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
     bool editPageOpen = false;   // Latching Channel Level & Drive page (ButtonId::Edit)
     bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
 };

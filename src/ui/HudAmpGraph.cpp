@@ -13,7 +13,6 @@ namespace ruido {
 void HudAmpGraph::reset() noexcept {
     faderY_.fill(kColYBot);
     driveNorm_.fill(0.0f);
-    peakY_.fill(kColYBot);
     pulseWidth_.fill(0.50f);
     driftAmt_.fill(kDefaultVoiceDrift);
     driftLive_.fill(0.0f);
@@ -43,7 +42,6 @@ void HudAmpGraph::stepFadeOut(float dtClamped) noexcept {
 
 void HudAmpGraph::update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                          const LfoSignalArray& lfoOutput,
-                         const std::array<float, kNumOscillators>& voicePeak,
                          const std::array<float, kNumOscillators>& voiceDriftNorm,
                          const OverdriveHairTable& overdriveHair) noexcept {
     const bool editVisible = rawHud.opacity > 0.001f && rawHud.editPageOpen && !rawHud.modifierHeld;
@@ -67,8 +65,6 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
 
     const float alphaFader = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.036f)));
     const float alphaDrift = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.065f)));
-    const float alphaPeakAtk = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.022f)));
-    const float alphaPeakRel = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.135f)));
 
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
     for (size_t v = 0u; v < kNumOscillators; ++v) {
@@ -91,18 +87,12 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
         const float tgtDrLive = silentMute ? 0.0f : clampf(voiceDriftNorm[v], -1.0f, 1.0f);
         const float tgtDim = aud.inaudibleDim;
 
-        const float pNorm = clampf(voicePeak[v] * (1.0f / 1.55f), 0.0f, 1.0f);
-        const float tgtPeakY = clampf(kColYBot - pNorm * kColYSpan, kColYTop, kColYBot);
-
         faderY_[v] = slewScalar(faderY_[v], tgtY, alphaFader, 0.01f);
         driveNorm_[v] = slewScalar(driveNorm_[v], tgtDrive, alphaFader, 0.002f);
         pulseWidth_[v] = slewScalar(pulseWidth_[v], tgtPw, alphaFader, 0.002f);
         driftAmt_[v] = slewScalar(driftAmt_[v], tgtDrAmt, alphaFader, 0.002f);
         driftLive_[v] = slewScalar(driftLive_[v], tgtDrLive, alphaDrift, 0.002f);
         muteDim_[v] = slewScalar(muteDim_[v], tgtDim, alphaFader, 0.005f);
-
-        const float alphaPeak = (tgtPeakY <= peakY_[v]) ? alphaPeakAtk : alphaPeakRel;
-        peakY_[v] = slewScalar(peakY_[v], tgtPeakY, alphaPeak, 0.02f);
     }
 }
 

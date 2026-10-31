@@ -230,11 +230,17 @@ void testAllControlsDisplayOnScreen() {
     std::printf("[Test 3] All 27 Keys, 14 Panel Switches & 8 Knobs Display HUD Feedback...\n");
     ruido::RuidoController ctrl;
 
+    const auto clearHudIfActive = [&]() {
+        if (ctrl.hud().mode != ruido::HudMode::None) {
+            ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+            ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+        }
+        CHECK(ctrl.hud().mode == ruido::HudMode::None);
+    };
+
     // 1. Every single Black Key (all 11: OP1..6, PIT, GLO, MONO, POLY, ScopeFreezeKey)
     for (uint8_t b = 0u; b < static_cast<uint8_t>(ruido::BlackKeyId::Count); ++b) {
-        ctrl.onButtonEvent(ruido::ButtonId::Home, true);
-        ctrl.onButtonEvent(ruido::ButtonId::Home, false);
-        CHECK(ctrl.hud().mode == ruido::HudMode::None);
+        clearHudIfActive();
 
         const auto key = static_cast<ruido::BlackKeyId>(b);
         ctrl.onBlackKeyEvent(key, true);
@@ -244,23 +250,17 @@ void testAllControlsDisplayOnScreen() {
 
     // 2. Every single White Key (all 16: Gates 1..4, Pressure Pads 5..8, Snapshots 9..16)
     for (uint8_t w = 0u; w < ruido::kNumWhiteKeys; ++w) {
-        ctrl.onButtonEvent(ruido::ButtonId::Home, true);
-        ctrl.onButtonEvent(ruido::ButtonId::Home, false);
-        CHECK(ctrl.hud().mode == ruido::HudMode::None);
+        clearHudIfActive();
 
         ctrl.onWhiteKeyGate(w, true);
         CHECK(ctrl.hud().mode != ruido::HudMode::None);
         ctrl.onWhiteKeyGate(w, false);
     }
 
-    // 3. Every single Panel Switch (except HOME, whose role is dismissing the HUD)
+    // 3. Every single Panel Switch (all 14, including HOME toggling Frequency HUD from idle)
     for (uint8_t btn = 0u; btn < static_cast<uint8_t>(ruido::ButtonId::Count); ++btn) {
         const auto button = static_cast<ruido::ButtonId>(btn);
-        if (button == ruido::ButtonId::Home) {
-            continue;
-        }
-        ctrl.onButtonEvent(ruido::ButtonId::Home, true);
-        ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+        clearHudIfActive();
         ctrl.onButtonEvent(button, true);
         CHECK(ctrl.hud().mode != ruido::HudMode::None);
         ctrl.onButtonEvent(button, false);
@@ -268,13 +268,11 @@ void testAllControlsDisplayOnScreen() {
 
     // 4. All 7 Encoders + MASTER Potentiometer
     for (uint8_t e = 0u; e < static_cast<uint8_t>(ruido::EncoderId::Count); ++e) {
-        ctrl.onButtonEvent(ruido::ButtonId::Home, true);
-        ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+        clearHudIfActive();
         ctrl.onEncoderDelta(static_cast<ruido::EncoderId>(e), 2);
         CHECK(ctrl.hud().mode != ruido::HudMode::None);
     }
-    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    clearHudIfActive();
     ctrl.onMasterPot(0.42f);
     CHECK(ctrl.hud().mode == ruido::HudMode::MasterLevel);
 }
@@ -414,7 +412,6 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
     ctrl.tick(0.075f, tel); // 50% of 150 ms fade-out -> 0.50
     CHECK(near(ctrl.hud().opacity, 0.50f, 0.03f));
-
     ctrl.tick(0.100f, tel);
     CHECK(near(ctrl.hud().opacity, 0.0f));
     CHECK(ctrl.hud().mode == ruido::HudMode::None);
@@ -443,6 +440,44 @@ void testHudEnvelopeAndVaribrightLeds() {
     ctrl.tick(0.100f, tel);
     CHECK(near(ctrl.hud().opacity, 0.0f));
     CHECK(ctrl.hud().mode == ruido::HudMode::None);
+
+    // Pressing HOME when no HUD is active latches FREQUENCY HUD open; pressing again hides it
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    CHECK(ctrl.hud().freqPageOpen);
+    CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFrequency);
+    CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
+    ctrl.tick(0.075f, tel);
+    CHECK(near(ctrl.hud().opacity, 0.50f, 0.03f));
+    for (int i = 0; i < 30; ++i) {
+        ctrl.tick(0.200f, tel); // 6.0 s elapsed -> stays latched open!
+    }
+    CHECK(ctrl.hud().freqPageOpen);
+    CHECK(near(ctrl.hud().opacity, 1.0f));
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Home)], 1.0f));
+
+    // Turning KNOB 1-4 while FREQUENCY HUD is open keeps it latched (does not auto-hide in 1.5 s)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 2);
+    CHECK(ctrl.hud().freqPageOpen);
+    CHECK(ctrl.hud().focusedKnob == 1u);
+    for (int i = 0; i < 20; ++i) {
+        ctrl.tick(0.200f, tel); // 4.0 s elapsed -> still latched open!
+    }
+    CHECK(ctrl.hud().freqPageOpen);
+    CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFrequency);
+    CHECK(near(ctrl.hud().opacity, 1.0f));
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, -2); // restore default Osc 2 pitch
+
+    // Second HOME tap hides FREQUENCY HUD smoothly over 150 ms
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    CHECK(!ctrl.hud().freqPageOpen);
+    ctrl.tick(0.075f, tel);
+    CHECK(near(ctrl.hud().opacity, 0.50f, 0.03f));
+    ctrl.tick(0.100f, tel);
+    CHECK(near(ctrl.hud().opacity, 0.0f));
+    CHECK(ctrl.hud().mode == ruido::HudMode::None);
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Home)], 0.12f));
 
     // Right 2x6 pages & switches (FX, LFO, EDIT, GLO, SAVE, unassigned SEL/ENV) stay latched until
     // closed or HOME:
@@ -856,8 +891,10 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     // 5. Verify coupled 4-voice caustic ribbon responds to muting Osc 2-4 (solo Osc 1)
     // while keeping open edge-to-edge 240-column coverage and organic frame-to-frame motion.
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
-    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    if (ctrl.hud().mode != ruido::HudMode::None) {
+        ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+        ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    }
     renderer.prepareFrame(0.016f, ctrl.state(), ctrl.hud(), engine.telemetry());
     renderer.renderFullScreenStrips(img24.data()); // Live 4-voice caustic mesh
 
@@ -865,8 +902,10 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
         ctrl.onWhiteKeyGate(w, true);
         ctrl.onWhiteKeyGate(w, false);
     }
-    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    if (ctrl.hud().mode != ruido::HudMode::None) {
+        ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+        ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    }
 
     for (int b = 0; b < 18; ++b) {
         engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
