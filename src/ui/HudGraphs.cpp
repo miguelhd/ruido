@@ -524,8 +524,7 @@ void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8
 
     filterCv.drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kFilterYZeroDb,
                                     22.0f, 0.48f, false);
-    filterCv.drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kFilterYBot,
-                                    32.0f, 0.50f, false);
+    filterCv.drawGraphBaseline();
 
     const float fillScale = multiCurves ? (0.25f + 0.05f * div) : 1.0f;
     if (y1 > static_cast<int>(kFilterYTop) && y0 <= static_cast<int>(kFilterYBot)) {

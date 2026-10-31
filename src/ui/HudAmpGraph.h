@@ -2,6 +2,7 @@
 
 #include "core/ControlSurface.h"
 #include "core/Parameters.h"
+#include "ui/MonoCanvas.h"
 #include "ui/ScopeTraceMath.h"
 
 #include <array>
@@ -10,16 +11,16 @@
 namespace ruido {
 
 // Full-screen (x = 0..239, y = 26..188) 4-channel oscillator visualizations:
-//  - LEVEL: Optical VCA faders, live voicePeak plasma & 3A narrow triangular overdrive cap (> 70%)
+//  - LEVEL: Clean optical VCA stems (0-70%) & 3A narrow triangular overdrive cap (> 70%)
 //           shared across EDIT -> LEVEL, GLOBAL LEVEL (K1-K3), and GLOBAL ALL (K4).
 //  - DUTY:  4-column CMOS Schmitt single-cycle pulse duty cells (5% needle .. 50% sq .. 95% wide)
 //  - DRIFT: 4-column thermal excursion brackets + live Core 1 1/f pitch wander beacons
 class HudAmpGraph {
   public:
     static constexpr float kColYTop = 36.0f;
-    static constexpr float kColYBot = 180.0f;
-    static constexpr float kColYSpan = kColYBot - kColYTop;               // 144.0f
-    static constexpr float kKneeY = kColYBot - kCleanAmpKnee * kColYSpan; // 79.2f
+    static constexpr float kColYBot = kGraphBaselineY;                    // 186.0f
+    static constexpr float kColYSpan = kColYBot - kColYTop;               // 150.0f
+    static constexpr float kKneeY = kColYBot - kCleanAmpKnee * kColYSpan; // 81.0f
 
     void reset() noexcept;
     void clearImmediate() noexcept;

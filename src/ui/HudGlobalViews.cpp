@@ -13,9 +13,9 @@ namespace ruido {
 
 namespace {
 
-constexpr float kPanYTop = 28.0f;
-constexpr float kPanYBot = 184.0f;
-constexpr float kPanZeroRef = 108.0f;
+constexpr float kPanYTop = 26.0f;
+constexpr float kPanYBot = kGraphBaselineY;
+constexpr float kPanZeroRef = 110.0f;
 constexpr float kPanCenterX = 120.0f;
 constexpr float kPanHalfSpanX = 106.0f; // L100 = 14.0f, C = 120.0f, R100 = 226.0f
 
@@ -230,19 +230,16 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
                                             uint16_t* linScratch, float effPanAlpha01,
                                             uint8_t alpha8, const HudState& hud) const noexcept {
     (void)hud;
-    if (alpha8 == 0u || y1 <= 24 || y0 >= 192) {
+    if (alpha8 == 0u || y1 <= 16 || y0 >= 198) {
         return;
     }
 
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
 
-    // 1. Edge-to-edge baseline filament (y = 184, matching FX) + stereo soundstage ticks
-    cv.drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kPanYBot, 32.0f, 0.50f,
-                              false);
+    // 1. Canonical edge-to-edge baseline filament (y = 186, shared with FILTER & LEVEL)
+    cv.drawGraphBaseline();
     if (!monoCollapse_) {
         cv.drawVerticalSlit(kPanCenterX, 36.0f, kPanYBot, 22.0f);
-        cv.drawVerticalSlit(kPanCenterX - 53.0f, kPanYBot - 2.5f, kPanYBot + 2.5f, 34.0f);
-        cv.drawVerticalSlit(kPanCenterX + 53.0f, kPanYBot - 2.5f, kPanYBot + 2.5f, 34.0f);
     }
 
     const float hF = clampf(hasFocusSmooth_, 0.0f, 1.0f);
@@ -284,8 +281,12 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
             float yA = evalPanBellY(0.0f, cx, apexH, invW2);
             for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
                 const float yB = evalPanBellY(static_cast<float>(colX + 1u), cx, apexH, invW2);
-                splatPhotonSegment(static_cast<int>(colX), yA, yB, weight, 0.62f, y0, y1,
-                                   linScratch);
+                const float yTopSeg = (yA < yB) ? yA : yB;
+                const float tailFade = smoothstep01((kPanYBot - yTopSeg) * (1.0f / 2.5f));
+                if (tailFade > 0.004f) {
+                    splatPhotonSegment(static_cast<int>(colX), yA, yB, weight * tailFade, 0.62f, y0,
+                                       y1, linScratch);
+                }
                 yA = yB;
             }
         }

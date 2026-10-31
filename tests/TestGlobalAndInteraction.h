@@ -1146,8 +1146,8 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     const uint32_t leftPanorama = sumBoxG6(amp16, 4u, 108u, 44u, 180u);
     const uint32_t rightPanorama = sumBoxG6(amp16, 132u, 235u, 44u, 180u);
     RTEST_CHECK(leftPanorama > rightPanorama * 4u);
-    // Edge-to-edge y = 184 baseline filament is present on both sides; zero floating top text!
-    RTEST_CHECK(maxBoxG6(amp16, 200u, 235u, 183u, 185u) >= 3u);
+    // Edge-to-edge y = 186 baseline filament is present on both sides; zero floating top text!
+    RTEST_CHECK(maxBoxG6(amp16, 200u, 239u, 185u, 187u) >= 6u);
     RTEST_CHECK(maxBoxG6(amp16, 4u, 235u, 26u, 33u) == 0u);
 
     // Spread Osc 1 -> L100, Osc 2 -> C + LFO->PAN, Osc 3 -> R45, Osc 4 -> R100 (focusedKnob = 3):
@@ -1314,6 +1314,47 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(nearF(ctrl.hud().opacity, 0.0f));
     RTEST_CHECK(nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Sel)], 0.75f));
 
+    // (e) No redundant/confusing "ALL" suffix on any 4-oscillator bottom-ledge screen
+    //     (FREQUENCY, DUTY, DRIFT, LEVEL, PAN): unfocused header stops cleanly after leftMain,
+    //     while focusing a knob appends " OSC 1..4".
+    struct PerOscScreenCase {
+        ruido::HudMode mode;
+        ruido::KnobBankMode bank;
+        const char* title;
+    };
+    const std::array<PerOscScreenCase, 5> perOscScreens{{
+        {ruido::HudMode::VoiceFrequency, ruido::KnobBankMode::Frequency, "FREQUENCY"},
+        {ruido::HudMode::PulseWidth, ruido::KnobBankMode::PulseWidth, "DUTY"},
+        {ruido::HudMode::VoiceDrift, ruido::KnobBankMode::VoiceDrift, "DRIFT"},
+        {ruido::HudMode::Amplitude, ruido::KnobBankMode::Amplitude, "LEVEL"},
+        {ruido::HudMode::Panning, ruido::KnobBankMode::Panning, "PAN"},
+    }};
+    quietSt.global.monoCollapse = false;
+    for (const auto& sc : perOscScreens) {
+        renderer.reset();
+        ruido::HudState testHud{};
+        testHud.mode = sc.mode;
+        testHud.knobBank = sc.bank;
+        testHud.focusedKnob = ruido::kNoFocusedKnob;
+        testHud.panPageOpen = (sc.mode == ruido::HudMode::Panning);
+        testHud.freqPageOpen = (sc.mode == ruido::HudMode::VoiceFrequency);
+        testHud.editPageOpen =
+            (sc.mode != ruido::HudMode::Panning && sc.mode != ruido::HudMode::VoiceFrequency);
+        testHud.opacity = 1.0f;
+        for (int f = 0; f < 8; ++f) {
+            renderer.prepareFrame(0.025f, quietSt, testHud, driveTel);
+        }
+        renderer.renderFullScreenStrips(amp16.data());
+        const auto suffixStart =
+            static_cast<size_t>(10 + ruido::measureSansText(ruido::kFontSansBold, sc.title, 0) + 3);
+        RTEST_CHECK(maxBoxG6(amp16, suffixStart, suffixStart + 36u, 6u, 21u) == 0u);
+
+        testHud.focusedKnob = 0u;
+        renderer.prepareFrame(0.025f, quietSt, testHud, driveTel);
+        renderer.renderFullScreenStrips(amp16.data());
+        RTEST_CHECK(maxBoxG6(amp16, suffixStart, suffixStart + 36u, 6u, 21u) >= 20u);
+    }
+
     // (f) Single pure contour per oscillator on FX (`HudMode::VoiceFilter`): zero fake secondary
     //     echo ridges below the passband spine (monotonic vertical skirt decay on same-phase 4x4
     //     Bayer rows above and below the y = 120 background scope baseline).
@@ -1391,9 +1432,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
             };
             if (li == 0u) {
                 // Lowest audible level (3%): clearly visible bead/stem (>= 28 G6) and thicker
-                // 3-px body at y = 178 (`x = 29, 30, 31` all >= 16 G6; outer `x <= 25` == 0).
+                // 3-px body at y = 184 (`x = 29, 30, 31` all >= 16 G6; outer `x <= 25` == 0).
                 uint16_t lowMaxG6 = 0u;
-                for (size_t y = 172u; y <= 181u; ++y) {
+                for (size_t y = 178u; y <= 187u; ++y) {
                     for (size_t x = 28u; x <= 32u; ++x) {
                         const uint16_t g = pxG6(y, x);
                         if (g > lowMaxG6) {
@@ -1402,9 +1443,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
                     }
                 }
                 RTEST_CHECK(lowMaxG6 >= 28u);
-                RTEST_CHECK(pxG6(178u, 29u) >= 16u && pxG6(178u, 30u) >= 26u &&
-                            pxG6(178u, 31u) >= 16u);
-                RTEST_CHECK(pxG6(178u, 25u) == 0u && pxG6(178u, 35u) == 0u);
+                RTEST_CHECK(pxG6(184u, 29u) >= 16u && pxG6(184u, 30u) >= 26u &&
+                            pxG6(184u, 31u) >= 16u);
+                RTEST_CHECK(pxG6(184u, 25u) == 0u && pxG6(184u, 35u) == 0u);
             }
             if (li == 2u) {
                 // At 68% clean VCA, `x = 29..31` mid-stem (`y = 140`) forms a bright 3-px bar
@@ -1414,7 +1455,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
                 RTEST_CHECK(pxG6(140u, 26u) == 0u && pxG6(140u, 34u) == 0u);
             }
             uint32_t bodySum = 0u;
-            for (size_t y = 177u; y <= 179u; ++y) {
+            for (size_t y = 183u; y <= 185u; ++y) {
                 for (size_t x = 29u; x <= 31u; ++x) {
                     bodySum += pxG6(y, x);
                 }
@@ -1423,6 +1464,86 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         }
         RTEST_CHECK(stemBodySums[0] < stemBodySums[1] && stemBodySums[1] < stemBodySums[2] &&
                     stemBodySums[2] < stemBodySums[3]);
+    }
+
+    // (h) Shared `y = 186` edge-to-edge baseline (`kGraphBaselineY`, `0..239`, `32.0f`, `0.50f`)
+    //     consistency across FILTER (`FX`), PAN (`SEL`), and LEVEL (`EDIT`):
+    {
+        ruido::EngineTelemetry silentTel{};
+        ruido::EngineControlState baseSt = ruido::EngineControlState::makeDefault();
+        baseSt.global.masterRun = false;
+        baseSt.global.masterTrim = 0.0f;
+        for (size_t v = 0u; v < 4u; ++v) {
+            baseSt.voices[v].pan = 1.0f; // Pan R100 so left edge x = 0..20 is unoccluded on PAN
+        }
+
+        // 1. FILTER (`HudMode::VoiceFilter`, open passband)
+        renderer.reset();
+        ruido::HudState fltH{};
+        fltH.mode = ruido::HudMode::VoiceFilter;
+        fltH.knobBank = ruido::KnobBankMode::VoiceFilter;
+        fltH.fxPageOpen = true;
+        fltH.opacity = 1.0f;
+        for (int f = 0; f < 8; ++f) {
+            renderer.prepareFrame(0.025f, baseSt, fltH, silentTel);
+        }
+        renderer.renderFullScreenStrips(amp8.data());
+
+        // 2. PAN (`HudMode::Panning`)
+        renderer.reset();
+        ruido::HudState panH{};
+        panH.mode = ruido::HudMode::Panning;
+        panH.knobBank = ruido::KnobBankMode::Panning;
+        panH.panPageOpen = true;
+        panH.opacity = 1.0f;
+        for (int f = 0; f < 8; ++f) {
+            renderer.prepareFrame(0.025f, baseSt, panH, silentTel);
+        }
+        renderer.renderFullScreenStrips(amp16.data());
+
+        // 3. LEVEL (`HudMode::Amplitude`)
+        renderer.reset();
+        ruido::HudState lvlH{};
+        lvlH.mode = ruido::HudMode::Amplitude;
+        lvlH.knobBank = ruido::KnobBankMode::Amplitude;
+        lvlH.editTarget = ruido::EditTarget::Level;
+        lvlH.editPageOpen = true;
+        lvlH.opacity = 1.0f;
+        for (int f = 0; f < 8; ++f) {
+            renderer.prepareFrame(0.025f, baseSt, lvlH, silentTel);
+        }
+        renderer.renderFullScreenStrips(amp24.data());
+
+        const auto rowSumG6 = [](const std::array<uint16_t, 240u * 240u>& img, size_t y, size_t x0,
+                                 size_t x1) {
+            uint32_t s = 0u;
+            for (size_t x = x0; x <= x1; ++x) {
+                s += (img[y * 240u + x] >> 5u) & 0x3Fu;
+            }
+            return s;
+        };
+
+        // All 3 graphs span full width (x = 0..3 and x = 236..239 lit at y = 186) and peak on row
+        // y = 186 (higher G6 sum than y = 184 and y = 188, zero overhanging slits at y = 189..190).
+        for (const auto* imgPtr : {&amp8, &amp16, &amp24}) {
+            RTEST_CHECK(rowSumG6(*imgPtr, 186u, 0u, 3u) >= 20u);
+            RTEST_CHECK(rowSumG6(*imgPtr, 186u, 236u, 239u) >= 20u);
+            RTEST_CHECK(rowSumG6(*imgPtr, 186u, 0u, 19u) > rowSumG6(*imgPtr, 184u, 0u, 19u) * 2u);
+            RTEST_CHECK(rowSumG6(*imgPtr, 186u, 0u, 19u) > rowSumG6(*imgPtr, 188u, 0u, 19u) * 2u);
+            RTEST_CHECK(rowSumG6(*imgPtr, 189u, 0u, 239u) == 0u);
+        }
+
+        // Unoccluded baseline segment (`x = 0..19, y = 184..189`) is bit-for-bit identical between
+        // PAN (`amp16`) and LEVEL (`amp24`), matching `drawGraphBaseline()` (`32.0f`, `0.50f`).
+        bool panLvlBaselineIdentical = true;
+        for (size_t y = 184u; y <= 189u; ++y) {
+            for (size_t x = 0u; x <= 19u; ++x) {
+                if (amp16[y * 240u + x] != amp24[y * 240u + x]) {
+                    panLvlBaselineIdentical = false;
+                }
+            }
+        }
+        RTEST_CHECK(panLvlBaselineIdentical);
     }
 #undef RTEST_CHECK
 }

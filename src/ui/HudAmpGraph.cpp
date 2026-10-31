@@ -109,7 +109,7 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
 void HudAmpGraph::compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                  uint16_t* linScratch, float hudAlpha01,
                                  const HudState& hud) const noexcept {
-    if (hudAlpha01 <= 0.002f || y1 <= 24 || y0 >= 188) {
+    if (hudAlpha01 <= 0.002f || y1 <= 16 || y0 >= 198) {
         return;
     }
 
@@ -145,25 +145,26 @@ void HudAmpGraph::compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* 
 void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                       uint16_t* linScratch, float effAlpha01, uint8_t alpha8,
                                       const HudState& hud) const noexcept {
-    if (alpha8 == 0u || y1 <= 24 || y0 >= 188) {
+    if (alpha8 == 0u || y1 <= 16 || y0 >= 198) {
         return;
     }
 
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
 
-    // 1. Optical reference horizons: 0% floor (y = 180) and 70% / 1.0x Drive Knee (y = 79.2)
-    cv.drawHorizontalFilament(10.0f, 230.0f, kColYBot, 40.0f, 0.52f, true);
-    cv.drawHorizontalFilament(10.0f, 230.0f, kKneeY, 36.0f, 0.50f, true);
+    // 1. Canonical edge-to-edge 0% baseline (y = 186, shared with FILTER & PAN) + 70% Drive Knee
+    cv.drawGraphBaseline();
+    cv.drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kKneeY, 22.0f, 0.48f,
+                              false);
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         const float cx = 30.0f + static_cast<float>(v) * 60.0f;
-        cv.drawVerticalSlit(cx, kColYTop, kColYBot + 2.5f, 24.0f);
+        cv.drawVerticalSlit(cx, kColYTop, kColYBot, 22.0f);
     }
 
     // 2. Linear-photon columns: clean VCA stem (0-70%) & 3A narrow hairy drive cap (>70%)
     const bool perVoiceFocus = !isGlobalKnobBank(hud.knobBank);
     const int pyStart = (y0 > 32) ? y0 : 32;
-    const int pyEnd = (y1 < 183) ? y1 : 183;
+    const int pyEnd = (y1 < 188) ? y1 : 188;
     if (pyStart < pyEnd) {
         std::memset(linScratch, 0,
                     static_cast<size_t>(stripHeight) * kDisplayWidth * sizeof(uint16_t));

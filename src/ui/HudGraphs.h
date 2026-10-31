@@ -19,7 +19,7 @@ inline constexpr float kFilterLogMin = cxLog2Pos(kFilterCutoffMinHz);
 inline constexpr float kFilterLogSpan = cxLog2Pos(kFilterCutoffMaxHz) - kFilterLogMin;
 inline constexpr float kFilterYTop = 26.0f;
 inline constexpr float kFilterYZeroDb = 86.0f;
-inline constexpr float kFilterYBot = 186.0f;
+inline constexpr float kFilterYBot = kGraphBaselineY;
 inline constexpr float kFilterDbToPx = 3.36f;
 inline constexpr float kFilterBgDimDepth = 0.72f; // 72% BG waveform dimming behind active graphs
 
