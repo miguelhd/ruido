@@ -45,11 +45,11 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
 
     // 2. Discrete notched detents (SELECT, TARGET, GLOBAL CONFIG) step 1 item per 4 ticks
-    //    across all 3 gears (Standard, Fine, Coarse) across all 8 LFO slots (OSC 1A..4B)
+    //    across all 3 gears (Standard, Fine, Coarse) across all 8 LFO slots (LFO A/B OSC 1..4)
     ctrl.reset();
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
-    RTEST_CHECK(ctrl.hud().lfoVoiceFocus == 0u); // OSC 1A
+    RTEST_CHECK(ctrl.hud().lfoVoiceFocus == 0u); // LFO A OSC 1
 
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -4); // LpCutoff(2) - 1 -> PulseWidth(1)
     RTEST_CHECK(ctrl.state().voices[0].lfoTarget == ruido::LfoTarget::PulseWidth);
@@ -57,16 +57,16 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     RTEST_CHECK(ctrl.state().voices[0].lfoTarget == ruido::LfoTarget::Pitch);
 
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true); // FINE
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);    // 0 (1A) -> 1 (1B)
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);    // 0 (LFO A OSC 1) -> 1 (LFO B OSC 1)
     RTEST_CHECK(ctrl.hud().lfoVoiceFocus == 1u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4); // 1B: LpCutoff(2) + 1 -> LpResonance(3)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4); // LFO B OSC 1: LpCutoff(2) + 1 -> LpRes(3)
     RTEST_CHECK(ctrl.state().voices[0].lfoBTarget == ruido::LfoTarget::LpResonance);
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, false);
 
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true); // COARSE
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);   // 1 (1B) -> 2 (2A)
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);   // 1 (LFO B OSC 1) -> 2 (LFO A OSC 2)
     RTEST_CHECK(ctrl.hud().lfoVoiceFocus == 2u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4); // 2A: LpCutoff(2) + 1 -> LpResonance(3)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4); // LFO A OSC 2: LpCutoff(2) + 1 -> LpRes(3)
     RTEST_CHECK(ctrl.state().voices[1].lfoTarget == ruido::LfoTarget::LpResonance);
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
 

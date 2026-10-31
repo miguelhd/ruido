@@ -31,7 +31,7 @@ Each milestone has a strict verification gate before advancing to the next phase
 ---
 
 ## Milestone 3: Per-Voice LFO, Config Menu & Drone Snapshots
-- [x] Implement dedicated dual per-voice LFO engine (`8` LFOs: `OSC 1A..4B`) & `LFO` HUD page (`ADR-022`, `ADR-031`: `SELECT` = `OSC 1A..4B`, `KNOB 1–4` = `TARGET | SHAPE | RATE | DEPTH` with continuous `Sine -> Tri -> Saw -> Slewed Square -> Smooth Drift` morphing, `WIDTH` PWM target, `LFO B -> LFO A` `A RATE` / `A DEPTH` cross-modulation, companion sibling curve HUD, and smart `GLOBAL LFO` scaling).
+- [x] Implement dedicated dual per-voice LFO engine (`8` LFOs: `LFO A/B OSC 1..4`) & `LFO` HUD page (`ADR-022`, `ADR-031`: `SELECT` = `LFO A OSC 1 · LFO B OSC 1 .. LFO B OSC 4`, `KNOB 1–4` = `TARGET | SHAPE | RATE | DEPTH` with continuous `Sine -> Tri -> Saw -> Slewed Square -> Smooth Drift` morphing, `WIDTH` PWM target, `LFO B -> LFO A` `A RATE` / `A DEPTH` cross-modulation, companion sibling curve HUD, and smart `GLOBAL LFO` scaling).
 - [x] Implement focused Configuration Menu behind right-grid `GLO` button (`ADR-027`, `ADR-030`: housing `GLO RELEASE` (`LATCH` / `SNAP BACK`) and `OUTPUT ROUTING` (`STEREO` / `DUAL MONO`)).
 - [ ] Implement compact binary snapshot struct (`<= 128 bytes` per snapshot) for the 8 snapshot keys (`White Keys 9-16`).
 - [ ] Implement smooth glide on tap, continuous macro scrub/crossfade via the `PRESETS` encoder, and **rubber-band pressure morphing** when leaning into a snapshot key (`White Keys 9-16`).

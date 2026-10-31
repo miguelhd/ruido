@@ -1598,8 +1598,8 @@ void testPerVoiceLfoPageAndHudGraph() {
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)], 1.0f));
 
     // 2. SELECT encoder steps across all 8 Dual-LFO slots:
-    //    OSC 1A(0) · 1B(1) · 2A(2) · 2B(3) · 3A(4) · 3B(5) · 4A(6) · 4B(7), clamped with 0 windup!
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // -> 1 (OSC 1B)
+    //    LFO A OSC 1(0) · LFO B OSC 1(1) .. LFO A OSC 4(6) · LFO B OSC 4(7), clamped with 0 windup!
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // -> 1 (LFO B OSC 1)
     CHECK(ctrl.hud().lfoVoiceFocus == 1u);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
     // Verify LFO B reaches exclusive A RATE (8) & A DEPTH (9) targets while LFO A clamps at Pan (7)
@@ -1610,18 +1610,18 @@ void testPerVoiceLfoPageAndHudGraph() {
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -24); // Back to LpCutoff (2)
     CHECK(ctrl.state().voices[0].lfoBTarget == ruido::LfoTarget::LpCutoff);
 
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 24); // -> 7 (OSC 4B)
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 24); // -> 7 (LFO B OSC 4)
     CHECK(ctrl.hud().lfoVoiceFocus == 7u);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
 
-    // Wind +200 extra CW ticks at OSC 4B rail -> stays at 7, single -4 CCW detent steps to 6 (4A)
+    // Wind +200 extra CW ticks at LFO B OSC 4 rail -> stays at 7, -4 CCW detent steps to 6
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 200);
     CHECK(ctrl.hud().lfoVoiceFocus == 7u);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
     CHECK(ctrl.hud().lfoVoiceFocus == 6u);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
 
-    // Wind -200 CCW ticks past OSC 1A -> clamps at 0, +8 CW steps to 2 (OSC 2A)
+    // Wind -200 CCW ticks past LFO A OSC 1 -> clamps at 0, +8 CW steps to 2 (LFO A OSC 2)
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -200);
     CHECK(ctrl.hud().lfoVoiceFocus == 0u);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1,
@@ -1630,11 +1630,11 @@ void testPerVoiceLfoPageAndHudGraph() {
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -20); // Back to LpCutoff (2)
     CHECK(ctrl.state().voices[0].lfoTarget == ruido::LfoTarget::LpCutoff);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 8);
-    CHECK(ctrl.hud().lfoVoiceFocus == 2u); // OSC 2A
+    CHECK(ctrl.hud().lfoVoiceFocus == 2u); // LFO A OSC 2
 
-    // 3. Per-slot editing on OSC 2A (KNOB 1-4 = TARGET | SHAPE | RATE | DEPTH) leaves OSC 1/3/4
-    //    and OSC 2B untouched; Keybed GLO -> GLOBAL LFO scales only active LFOs when any > 0%,
-    //    and wakes 1A..4A when all 8 LFOs are at 0%!
+    // 3. Per-slot editing on LFO A OSC 2 (KNOB 1-4 = TARGET | SHAPE | RATE | DEPTH) leaves OSC
+    // 1/3/4 and LFO B OSC 2 untouched; Keybed GLO -> GLOBAL LFO scales only active LFOs when any >
+    // 0%, and wakes LFO A (OSC 1..4) when all 8 LFOs are at 0%!
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16);  // +4 steps from LpCutoff(2) -> Amplitude(6)
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 60);  // SHAPE
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 40);  // RATE
@@ -1837,11 +1837,12 @@ void testPerVoiceLfoPageAndHudGraph() {
     }
     CHECK(monotonicShade);
 
-    // Verify companion sibling trace renders dimmed behind focused OSC 1A when OSC 1B depth > 0!
+    // Verify companion sibling trace renders dimmed behind focused LFO A OSC 1 when LFO B > 0,
+    // and verify header renders "LFO A OSC 1" / "LFO B OSC 1" / "LFO A OSC 2" cleanly!
     {
         ruido::EngineControlState sibCtrl = beadCtrl;
         sibCtrl.voices[0].lfoBDepth = 0.85f;
-        sibCtrl.voices[0].lfoBShape = 0.75f; // Square sibling trace (differs from 1A Sine!)
+        sibCtrl.voices[0].lfoBShape = 0.75f; // Square sibling trace (differs from LFO A Sine!)
         customTel.lfoPhase[4].store(0.62f, std::memory_order_relaxed);
         for (int f = 0; f < 8; ++f) {
             beadRenderer.prepareFrame(0.050f, sibCtrl, ctrl.hud(), customTel);
@@ -1856,6 +1857,48 @@ void testPerVoiceLfoPageAndHudGraph() {
             }
         }
         CHECK(companionDiffPixels > 120u);
+
+        // Compare top header (y = 6..20) across LFO A OSC 1 (slot 0), LFO B OSC 1 (slot 1),
+        // and LFO A OSC 2 (slot 2):
+        ruido::HudState hudA1 = ctrl.hud();
+        hudA1.lfoVoiceFocus = 0u;
+        ruido::HudState hudB1 = ctrl.hud();
+        hudB1.lfoVoiceFocus = 1u;
+        ruido::HudState hudA2 = ctrl.hud();
+        hudA2.lfoVoiceFocus = 2u;
+
+        std::array<uint16_t, 240u * 24u> stripA1{};
+        std::array<uint16_t, 240u * 24u> stripB1{};
+        std::array<uint16_t, 240u * 24u> stripA2{};
+        beadRenderer.prepareFrame(0.016f, sibCtrl, hudA1, customTel);
+        beadRenderer.renderStrip(0u, 24u, stripA1.data());
+        beadRenderer.prepareFrame(0.016f, sibCtrl, hudB1, customTel);
+        beadRenderer.renderStrip(0u, 24u, stripB1.data());
+        beadRenderer.prepareFrame(0.016f, sibCtrl, hudA2, customTel);
+        beadRenderer.renderStrip(0u, 24u, stripA2.data());
+
+        bool lfoAMainMatchesA1A2 = true;
+        size_t lfoABMainDiff = 0u;
+        size_t osc12SuffixDiff = 0u;
+        for (size_t y = 6u; y <= 20u; ++y) {
+            for (size_t x = 10u; x <= 46u; ++x) {
+                const size_t idx = y * 240u + x;
+                if (stripA1[idx] != stripA2[idx]) {
+                    lfoAMainMatchesA1A2 = false;
+                }
+                if (stripA1[idx] != stripB1[idx]) {
+                    ++lfoABMainDiff;
+                }
+            }
+            for (size_t x = 50u; x <= 105u; ++x) {
+                if (stripA1[y * 240u + x] != stripA2[y * 240u + x]) {
+                    ++osc12SuffixDiff;
+                }
+            }
+        }
+        CHECK(lfoAMainMatchesA1A2);
+        CHECK(lfoABMainDiff > 8u);
+        CHECK(osc12SuffixDiff > 8u);
     }
 
     // 6. Close LFO Page via LFO tap (or HOME): active LFOs keep running and LFO LED pulses live!

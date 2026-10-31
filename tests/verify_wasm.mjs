@@ -125,21 +125,22 @@ assert.equal(f32[summaryIdx + 37], 0.0);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.0) < 1e-6);
 assert.ok(f32[ledsIdx + 27 + 2] > 0.30 && f32[ledsIdx + 27 + 2] <= 0.85);
 
-// Open Dual Per-Voice LFO Page (button 5), step SELECT (encoder 0) across 1A -> 1B -> 2A,
-// edit KNOB1-4 (including 1B -> A RATE), and verify 46-float Dual-LFO telemetry roundtrip!
+// Open Dual Per-Voice LFO Page (button 5), step SELECT (encoder 0) across
+// LFO A OSC 1 -> LFO B OSC 1 -> LFO A OSC 2, edit KNOB1-4 (including LFO B -> A DEPTH),
+// and verify 46-float Dual-LFO telemetry roundtrip!
 ex.wasm_ui_button(5, 1);
 ex.wasm_ui_button(5, 0);
 assert.equal(f32[summaryIdx + 39], 1.0); // lfoPageOpen === true
-assert.equal(f32[summaryIdx + 40], 0.0); // lfoVoiceFocus === 0 (OSC 1A)
+assert.equal(f32[summaryIdx + 40], 0.0); // lfoVoiceFocus === 0 (LFO A OSC 1)
 
-ex.wasm_ui_encoder(0, 4); // SELECT -> 1 (OSC 1B)
+ex.wasm_ui_encoder(0, 4); // SELECT -> 1 (LFO B OSC 1)
 assert.equal(f32[summaryIdx + 40], 1.0);
 assert.equal(f32[summaryIdx + 41], 2.0); // Default TARGET === LPF (2)
 ex.wasm_ui_encoder(3, 28);  // KNOB1 TARGET -> A DEPTH (9, exclusive to LFO B!)
 assert.equal(f32[summaryIdx + 41], 9.0);
-ex.wasm_ui_encoder(6, 120); // KNOB4 DEPTH on 1B
+ex.wasm_ui_encoder(6, 120); // KNOB4 DEPTH on LFO B OSC 1
 
-ex.wasm_ui_encoder(0, 4); // SELECT -> 2 (OSC 2A)
+ex.wasm_ui_encoder(0, 4); // SELECT -> 2 (LFO A OSC 2)
 assert.equal(f32[summaryIdx + 40], 2.0);
 assert.equal(f32[summaryIdx + 41], 2.0); // Default TARGET === LPF (2)
 ex.wasm_ui_encoder(3, -8);  // KNOB1 TARGET -> PITCH (0, past WIDTH=1)

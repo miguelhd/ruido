@@ -176,7 +176,7 @@ struct HudState {
     uint8_t focusedVoice = 0u;            // 0..3 oscillator index
     uint8_t focusedKnob = kNoFocusedKnob; // 0..3 active column highlight, or kNoFocusedKnob
     uint8_t fxVoiceFocus = 0u;            // 0..3 = OSC 1..4 (SELECT encoder on FX Filter Page)
-    uint8_t lfoVoiceFocus = 0u;           // 0..7 = OSC 1A..4B (SELECT encoder on LFO Page)
+    uint8_t lfoVoiceFocus = 0u;           // 0..7 = LFO A/B OSC 1..4 (SELECT encoder on LFO Page)
     uint8_t configCursor = 0u;            // 0..kNumGlobalConfigItems-1 (SELECT in GLOBAL CONFIG)
     uint8_t snapshotSlot = 0u;            // 0..7 for White Keys 9..16
     float morphPosition = 0.0f;           // [0.0f, 1.0f] snapshot pressure morph position

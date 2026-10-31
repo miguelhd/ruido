@@ -431,10 +431,9 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         const uint8_t lv = lfoFocusVoice(slot);
         const uint8_t sub = lfoFocusSub(slot);
         const VoiceParams& lvp = control.voices[lv];
-        appendStr(leftMain, 0u, sizeof(leftMain), "LFO");
+        appendStr(leftMain, 0u, sizeof(leftMain), (sub == 0u) ? "LFO A" : "LFO B");
         size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
-        p = appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(lv + 1u));
-        appendStr(leftSuffix, p, sizeof(leftSuffix), (sub == 0u) ? "A" : "B");
+        appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(lv + 1u));
         appendStr(rightText, 0u, sizeof(rightText),
                   (lfoSlotDepth(lvp, sub) > 0.002f) ? "ACTIVE" : "BYPASSED");
         break;

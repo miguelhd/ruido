@@ -35,7 +35,7 @@ using LfoDriftArray = std::array<uint32_t, kNumVoiceLfos>;
 inline constexpr size_t lfoBankIndex(size_t voiceIdx, size_t subIdx) noexcept {
     return (subIdx & 1u) * kNumOscillators + (voiceIdx & 3u);
 }
-// Decode SELECT focus slot 0..7 (OSC 1A, 1B, 2A, 2B, 3A, 3B, 4A, 4B)
+// Decode SELECT focus slot 0..7 (LFO A OSC 1, LFO B OSC 1 .. LFO A OSC 4, LFO B OSC 4)
 inline constexpr uint8_t lfoFocusVoice(uint8_t slotFocus) noexcept {
     return static_cast<uint8_t>((slotFocus >> 1u) & 3u);
 }
