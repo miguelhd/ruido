@@ -314,7 +314,8 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     }
     case HudMode::Panning:
-        appendStr(leftMain, 0u, sizeof(leftMain), "PAN");
+        appendStr(leftMain, 0u, sizeof(leftMain),
+                  (control.global.monoCollapse && hud.panLockedNotice) ? "OUTPUT ROUTING" : "PAN");
         formatHeaderPanMode(control, hud, leftSuffix, sizeof(leftSuffix), rightText,
                             sizeof(rightText));
         break;
@@ -445,14 +446,18 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     }
     case HudMode::GlobalAmp:
-        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " LEVEL");
-        if (hud.focusedKnob == 3u) {
-            appendStr(rightText, 0u, sizeof(rightText),
-                      control.global.monoCollapse ? (hud.panLockedNotice ? "MONO LOCKED" : "MONO")
-                                                  : "STEREO");
+        if (hud.focusedKnob == 3u && control.global.monoCollapse && hud.panLockedNotice) {
+            appendStr(leftMain, 0u, sizeof(leftMain), "OUTPUT ROUTING");
+            appendStr(rightText, 0u, sizeof(rightText), "MONO");
         } else {
-            formatHeaderEnsembleDrive(control, lfoOutput, rightText, sizeof(rightText));
+            appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
+            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " LEVEL");
+            if (hud.focusedKnob == 3u) {
+                appendStr(rightText, 0u, sizeof(rightText),
+                          control.global.monoCollapse ? "MONO" : "STEREO");
+            } else {
+                formatHeaderEnsembleDrive(control, lfoOutput, rightText, sizeof(rightText));
+            }
         }
         break;
     case HudMode::GlobalAll:
@@ -613,12 +618,18 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
 
         const float dim = clampf(knobDimSmooth[k], 0.0f, 1.0f);
         if (gs.disabled) {
-            const auto disLbl = static_cast<uint8_t>(88.0f + (64.0f - 88.0f) * dim + 0.5f);
-            const auto disVal = static_cast<uint8_t>(104.0f + (76.0f - 104.0f) * dim + 0.5f);
+            const bool lockedTouch =
+                control.global.monoCollapse && hud.panLockedNotice && (hud.panLockedKnob == k);
+            const float baseDisLbl = lockedTouch ? 148.0f : 88.0f;
+            const float baseDisVal = lockedTouch ? 212.0f : 104.0f;
+            const float disTrack = lockedTouch ? 34.0f : 22.0f;
+            const auto disLbl = static_cast<uint8_t>(baseDisLbl + (64.0f - baseDisLbl) * dim + 0.5f);
+            const auto disVal = static_cast<uint8_t>(baseDisVal + (76.0f - baseDisVal) * dim + 0.5f);
             cv.drawSansCentered(kFontSansSmall, cx, 191, roleLbl, disLbl, 1);
             cv.drawHorizontalFilament(static_cast<float>(cx) - 20.0f,
-                                      static_cast<float>(cx) + 20.0f, 207.5f, 22.0f, 0.58f, true);
-            cv.drawSansCentered(kFontSansMedium, cx, 214, valStr, disVal, 0);
+                                      static_cast<float>(cx) + 20.0f, 207.5f, disTrack, 0.58f,
+                                      true);
+            cv.drawSansCentered(kFontSansSmall, cx, 216, valStr, disVal, 0);
             continue;
         }
         const float foc = clampf(knobFocusSmooth[k], 0.0f, 1.0f);

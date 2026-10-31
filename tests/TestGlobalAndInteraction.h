@@ -1076,8 +1076,8 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     // (d) SEL (PAN) Edge-to-Edge Stereo Panorama Curve (HudGraphs sister to FX & LFO):
     //     SELECT focus stepping (PAN <-> OSC 1..4), left/right panorama steering,
     //     spotlight vs 30% silver companion contrast, LFO -> PAN strip equivalence,
-    //     MONO center convergence + locked knobs + disabled "MONO" bottom rail + "MONO LOCKED"
-    //     turn confirmation, and 150 ms 2nd-tap dissolve + 75% wide-stereo LED glow!
+    //     MONO center convergence + locked knobs + disabled "LOCKED" bottom rail +
+    //     "OUTPUT ROUTING · MONO" turn confirmation, and 150 ms 2nd-tap dissolve!
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
     ctrl.tick(0.016f, driveTel);
@@ -1158,8 +1158,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(panPanoramaStripsEq);
 
     // MONO mode locks KNOB 1-4 & SELECT on SEL (and KNOB 4 = PAN in GLOBAL LEVEL), shows explicit
-    // disabled "MONO" bottom readouts (never "C", zero optical bead), flashes "MONO LOCKED" for
-    // 1.5 s on attempted turn, and preserves stereo pan values intact when returning to POLY!
+    // disabled "LOCKED" bottom readouts (never "C", zero optical bead), momentarily flips the
+    // header title from "PAN" to "OUTPUT ROUTING · MONO" for 1.5 s on attempted turn (brightening
+    // the touched column's "LOCKED" readout), and preserves stereo pan values intact!
     const std::array<float, 4> savedStereoPan = {
         ctrl.state().voices[0].pan,
         ctrl.state().voices[1].pan,
@@ -1169,7 +1170,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, true);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
     RTEST_CHECK(ctrl.state().global.monoCollapse);
-    RTEST_CHECK(!ctrl.hud().panLockedNotice);
+    RTEST_CHECK(!ctrl.hud().panLockedNotice && ctrl.hud().panLockedKnob == ruido::kNoFocusedKnob);
     for (int i = 0; i < 8; ++i) {
         ctrl.tick(0.25f, driveTel); // Let OUTPUT ROUTING · MONO toast return to latched SEL page
     }
@@ -1184,7 +1185,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, k, roleBuf,
                                         sizeof(roleBuf), valBuf, sizeof(valBuf), colGs);
         RTEST_CHECK(colGs.disabled && !colGs.bipolar);
-        RTEST_CHECK(std::strcmp(valBuf, "MONO") == 0);
+        RTEST_CHECK(std::strcmp(valBuf, "LOCKED") == 0);
     }
     char hdrSuffix[16]{};
     char hdrRight[24]{};
@@ -1192,11 +1193,24 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
                                sizeof(hdrRight));
     RTEST_CHECK(hdrSuffix[0] == '\0' && std::strcmp(hdrRight, "MONO") == 0);
 
-    // Attempted turns on KNOB 1-4 and SELECT in MONO leave pan 100% untouched & trigger MONO LOCKED
+    // At rest in MONO, left header is short "PAN" (x = 48..126 is empty black)
+    quietSt = ctrl.state();
+    quietSt.global.masterRun = false;
+    quietSt.global.masterTrim = 0.0f;
+    for (int f = 0; f < 16; ++f) {
+        renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
+    }
+    renderer.renderFullScreenStrips(clean16.data());
+    RTEST_CHECK(maxBoxG6(clean16, 48u, 126u, 6u, 21u) == 0u);
+
+    // Turning KNOB 2 in MONO leaves pan 100% untouched, triggers OUTPUT ROUTING · MONO header
+    // (x = 48..126 lights up bold white!), and brightens column 2's "LOCKED" readout!
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 120);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -120);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 8);
-    RTEST_CHECK(ctrl.hud().panLockedNotice);
+    RTEST_CHECK(ctrl.hud().panLockedNotice && ctrl.hud().panLockedKnob == ruido::kNoFocusedKnob);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 64);
+    RTEST_CHECK(ctrl.hud().panLockedNotice && ctrl.hud().panLockedKnob == 1u);
     RTEST_CHECK(ctrl.hud().focusedKnob == ruido::kNoFocusedKnob);
     for (size_t v = 0u; v < 4u; ++v) {
         RTEST_CHECK(nearF(ctrl.state().voices[v].pan, savedStereoPan[v]));
@@ -1205,17 +1219,16 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     hdrRight[0] = '\0';
     ruido::formatHeaderPanMode(ctrl.state(), ctrl.hud(), hdrSuffix, sizeof(hdrSuffix), hdrRight,
                                sizeof(hdrRight));
-    RTEST_CHECK(std::strcmp(hdrRight, "MONO LOCKED") == 0);
+    RTEST_CHECK(std::strcmp(hdrRight, "MONO") == 0);
 
-    // Render MONO locked SEL view: centered curve, zero optical slider bead on y=207.5, and
-    // bit-identical 240x8 == 240x16 == 240x24 strip equivalence
-    quietSt = ctrl.state();
-    quietSt.global.masterRun = false;
-    quietSt.global.masterTrim = 0.0f;
-    for (int f = 0; f < 16; ++f) {
-        renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
-    }
+    // Render MONO locked SEL view: OUTPUT ROUTING left title, centered curve, zero optical slider
+    // bead on y=207.5, brightened col-2 LOCKED > col-1 LOCKED, and 240x8 == 240x16 == 240x24!
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
     renderer.renderFullScreenStrips(clean16.data());
+    RTEST_CHECK(maxBoxG6(clean16, 48u, 126u, 6u, 21u) >= 55u); // "OUTPUT ROUTING" bold title!
+    const uint32_t col1LockedSum = sumBoxG6(clean16, 6u, 54u, 215u, 228u);
+    const uint32_t col2LockedSum = sumBoxG6(clean16, 66u, 114u, 215u, 228u);
+    RTEST_CHECK(col2LockedSum > col1LockedSum + 100u);
     const uint32_t monoLeftHalf = sumBoxG6(clean16, 10u, 96u, 50u, 180u);
     const uint32_t monoRightHalf = sumBoxG6(clean16, 143u, 229u, 50u, 180u);
     const uint32_t monoCenterPeak = sumBoxG6(clean16, 98u, 142u, 50u, 180u);
@@ -1223,9 +1236,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         static_cast<int32_t>(monoLeftHalf) - static_cast<int32_t>(monoRightHalf);
     RTEST_CHECK(std::abs(monoHalfDiff) <= 16);
     RTEST_CHECK(monoCenterPeak > monoLeftHalf * 3u);
-    // Disabled bottom slider tracks (y = 205..210) have only subtle 22-lum hairline (g6 <= 8), no
-    // bright optical slider bead!
-    RTEST_CHECK(maxBoxG6(clean16, 8u, 232u, 205u, 210u) <= 8u);
+    // Disabled bottom slider tracks (y = 205..210) have only subtle hairline (g6 <= 10), no bright
+    // optical slider bead!
+    RTEST_CHECK(maxBoxG6(clean16, 8u, 232u, 205u, 210u) <= 10u);
     for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 8u)) {
         renderer.renderStrip(y, 8u, amp8.data() + static_cast<size_t>(y) * 240u);
     }
@@ -1240,19 +1253,22 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     RTEST_CHECK(monoPanStripsEq);
 
-    // 1.5 s decay clears panLockedNotice automatically (tick clamps dt <= 0.25 s)
+    // 1.5 s decay clears panLockedNotice & panLockedKnob automatically, returning header to "PAN"
     for (int i = 0; i < 7; ++i) {
         ctrl.tick(0.25f, driveTel);
     }
-    RTEST_CHECK(!ctrl.hud().panLockedNotice);
+    RTEST_CHECK(!ctrl.hud().panLockedNotice && ctrl.hud().panLockedKnob == ruido::kNoFocusedKnob);
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
+    renderer.renderFullScreenStrips(clean16.data());
+    RTEST_CHECK(maxBoxG6(clean16, 48u, 126u, 6u, 21u) == 0u);
 
-    // Hold GLO -> GLOBAL LEVEL -> KNOB 4 (PAN) in MONO is also locked & labeled "MONO"
+    // Hold GLO -> GLOBAL LEVEL -> KNOB 4 (PAN) in MONO is also locked & labeled "LOCKED"
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -20); // Home to GlobalTarget::Freq (0)
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 12);  // Step +3 detents -> GlobalTarget::Amp (3)
     RTEST_CHECK(ctrl.hud().globalTarget == ruido::GlobalTarget::Amp);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -80);
-    RTEST_CHECK(ctrl.hud().panLockedNotice);
+    RTEST_CHECK(ctrl.hud().panLockedNotice && ctrl.hud().panLockedKnob == 3u);
     for (size_t v = 0u; v < 4u; ++v) {
         RTEST_CHECK(nearF(ctrl.state().voices[v].pan, savedStereoPan[v]));
     }
@@ -1263,7 +1279,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, 3u, roleBuf,
                                         sizeof(roleBuf), valBuf, sizeof(valBuf), colGs);
         RTEST_CHECK(colGs.disabled && std::strcmp(roleBuf, "PAN") == 0 &&
-                    std::strcmp(valBuf, "MONO") == 0);
+                    std::strcmp(valBuf, "LOCKED") == 0);
     }
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
 

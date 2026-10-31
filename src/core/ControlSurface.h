@@ -169,9 +169,10 @@ struct HudState {
     ButtonId lastButton = ButtonId::Count;
     BlackKeyId lastBlackKey = BlackKeyId::Count;
     EncoderId lastEncoder = EncoderId::Select;
-    uint8_t focusedVoice = 0u;            // 0..3 oscillator index
-    uint8_t focusedKnob = kNoFocusedKnob; // 0..3 active column highlight, or kNoFocusedKnob
-    uint8_t fxVoiceFocus = 0u;            // 0..3 = OSC 1..4 (SELECT encoder on FX Filter Page)
+    uint8_t focusedVoice = 0u;              // 0..3 oscillator index
+    uint8_t focusedKnob = kNoFocusedKnob;   // 0..3 active column highlight, or kNoFocusedKnob
+    uint8_t panLockedKnob = kNoFocusedKnob; // 0..3 touched disabled PAN column in MONO
+    uint8_t fxVoiceFocus = 0u;              // 0..3 = OSC 1..4 (SELECT encoder on FX Filter Page)
     uint8_t lfoVoiceFocus = 0u;           // 0..7 = LFO A/B OSC 1..4 (SELECT encoder on LFO Page)
     uint8_t configCursor = 0u;            // 0..kNumGlobalConfigItems-1 (SELECT in GLOBAL CONFIG)
     uint8_t snapshotSlot = 0u;            // 0..7 for White Keys 9..16
@@ -186,7 +187,7 @@ struct HudState {
     bool lfoPageOpen = false;     // Latching LFO page state (ButtonId::Lfo)
     bool editPageOpen = false;    // Latching Channel Level & Drive page (ButtonId::Edit)
     bool configPageOpen = false;  // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
-    bool panLockedNotice = false; // 1.5 s "MONO LOCKED" header feedback when turning PAN in MONO
+    bool panLockedNotice = false; // 1.5 s "OUTPUT ROUTING · MONO" notice when turning PAN in MONO
 };
 
 // Software-PWM brightness [0.0f, 1.0f] across all 42 physical LED channels on the M-VAVE FM-1:

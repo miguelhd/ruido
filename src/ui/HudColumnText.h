@@ -72,7 +72,7 @@ inline void formatHeaderPanMode(const EngineControlState& control, const HudStat
         return;
     }
     if (control.global.monoCollapse && hud.panLockedNotice) {
-        appendStr(rightText, 0u, rightCap, "MONO LOCKED");
+        appendStr(rightText, 0u, rightCap, "MONO");
         return;
     }
     bool anyActive = false;
@@ -161,7 +161,7 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
             } else {
                 appendStr(roleLbl, 0u, roleCap, "PAN");
                 if (control.global.monoCollapse) {
-                    appendStr(valStr, 0u, valCap, "MONO");
+                    appendStr(valStr, 0u, valCap, "LOCKED");
                 } else {
                     formatPanValue(valStr, valCap, outGlobal.primaryValue);
                 }
@@ -253,7 +253,7 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
         if (control.global.monoCollapse) {
             outGlobal.disabled = true;
-            appendStr(valStr, 0u, valCap, "MONO");
+            appendStr(valStr, 0u, valCap, "LOCKED");
         } else {
             outGlobal.bipolar = true;
             const float livePan = computeLiveVoicePan(vp, lfoA, lfoB);

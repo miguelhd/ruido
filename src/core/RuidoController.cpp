@@ -53,12 +53,18 @@ KnobBankMode RuidoController::baseKnobBank() const noexcept {
 void RuidoController::closeAllPages() noexcept {
     hud_.freqPageOpen = hud_.fxPageOpen = hud_.panPageOpen = false;
     hud_.lfoPageOpen = hud_.editPageOpen = hud_.configPageOpen = false;
+    clearPanLocked();
+}
+
+void RuidoController::clearPanLocked() noexcept {
     hud_.panLockedNotice = false;
+    hud_.panLockedKnob = kNoFocusedKnob;
     panLockedSec_ = 0.0f;
 }
 
-void RuidoController::notePanLocked() noexcept {
+void RuidoController::notePanLocked(uint8_t knobIdx) noexcept {
     hud_.panLockedNotice = true;
+    hud_.panLockedKnob = (knobIdx < kNumOscillators) ? knobIdx : kNoFocusedKnob;
     panLockedSec_ = kHudToastHoldSec;
 }
 
@@ -179,8 +185,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
                 stepClampedDetent(curVal, maxVal, ticks, rate, configTickAccum_);
             if (globalConfigSetIndex(item, nextVal, hud_.config, state_.global)) {
                 if (!state_.global.monoCollapse) {
-                    hud_.panLockedNotice = false;
-                    panLockedSec_ = 0.0f;
+                    clearPanLocked();
                 }
                 publishState();
             }
@@ -202,8 +207,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
                                                       maxTgt, ticks, rate, selectTickAccum_);
             hud_.globalTarget = static_cast<GlobalTarget>(nextTgt);
             targetTickAccum_ = 0;
-            hud_.panLockedNotice = false;
-            panLockedSec_ = 0.0f;
+            clearPanLocked();
             hud_.knobBank = knobBankForGlobalTarget(hud_.globalTarget);
             triggerHud(hudModeForGlobalTarget(hud_.globalTarget), hud_.focusedVoice,
                        kNoFocusedKnob);
@@ -279,10 +283,9 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
 
     if (mod == HeldModifier::Global) {
         if (hud_.globalTarget == GlobalTarget::Amp && kIdx == 3u && state_.global.monoCollapse) {
-            notePanLocked();
+            notePanLocked(3u);
         } else {
-            hud_.panLockedNotice = false;
-            panLockedSec_ = 0.0f;
+            clearPanLocked();
             applyGlobalKnobDelta(hud_.globalTarget, kIdx, ticks, rate, targetTickAccum_, state_);
             publishState();
         }
@@ -304,7 +307,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         latchKnobEdit(KnobBankMode::Lfo, HudMode::VoiceLfo, kIdx, static_cast<uint8_t>(vIdx));
     } else if (hud_.panPageOpen) {
         if (state_.global.monoCollapse) {
-            notePanLocked();
+            notePanLocked(kIdx);
             latchKnobEdit(KnobBankMode::Panning, HudMode::Panning, kNoFocusedKnob,
                           hud_.focusedVoice);
             return;
@@ -550,8 +553,7 @@ void RuidoController::onBlackKeyEvent(BlackKeyId key, bool pressed) noexcept {
 
     if (key == BlackKeyId::Mono || key == BlackKeyId::Poly) {
         state_.global.monoCollapse = (key == BlackKeyId::Mono);
-        hud_.panLockedNotice = false;
-        panLockedSec_ = 0.0f;
+        clearPanLocked();
         triggerHud(HudMode::OutputRouting, hud_.focusedVoice, kNoFocusedKnob);
         publishState();
     } else {
@@ -644,15 +646,10 @@ void RuidoController::onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) 
 
 void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexcept {
     const float dt = clampf(dtSec, 0.0f, 0.25f);
-    if (panLockedSec_ > 0.0f && state_.global.monoCollapse) {
-        panLockedSec_ -= dt;
-        if (panLockedSec_ <= 0.0f) {
-            panLockedSec_ = 0.0f;
-            hud_.panLockedNotice = false;
-        }
+    if (panLockedSec_ > 0.0f && state_.global.monoCollapse && (panLockedSec_ -= dt) > 0.0f) {
+        hud_.panLockedNotice = true;
     } else {
-        panLockedSec_ = 0.0f;
-        hud_.panLockedNotice = false;
+        clearPanLocked();
     }
     const bool modPinned = (keys_.activeModifier() != HeldModifier::None) || hud_.rateHoldActive;
     const bool momentaryPinned = keys_.isAnyMomentaryHudHoldActive(hud_.scopeFrozen);
