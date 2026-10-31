@@ -1067,8 +1067,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(!ctrl.state().voices[0].muted);
     RTEST_CHECK(nearF(ctrl.state().voices[0].amplitude, ruido::kDefaultVoiceAmp));
 
-    // (d) SEL (PAN) 4-Lane Binaural Constant-Power Soundstage: L100/R100 speaker-rail asymmetry,
-    //     DUAL MONO center equalization, and 150 ms 2nd-tap dissolve + 75% wide-stereo LED glow!
+    // (d) SEL (PAN) Polar Listener Soundstage: polar sector steering, zero text/fog clutter,
+    //     LFO -> PAN polar bracket strip equivalence, DUAL MONO 0-deg spine convergence,
+    //     and 150 ms 2nd-tap dissolve + 75% wide-stereo LED glow!
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
     ctrl.tick(0.016f, driveTel);
@@ -1098,21 +1099,72 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         }
         return sum;
     };
-    const uint32_t lane1LeftRail = sumBoxG6(amp16, 22u, 30u, 42u, 66u);
-    const uint32_t lane1RightRail = sumBoxG6(amp16, 210u, 218u, 42u, 66u);
-    const uint32_t lane4LeftRail = sumBoxG6(amp16, 22u, 30u, 144u, 168u);
-    const uint32_t lane4RightRail = sumBoxG6(amp16, 210u, 218u, 144u, 168u);
-    RTEST_CHECK(lane1LeftRail > lane1RightRail * 3u);
-    RTEST_CHECK(lane4RightRail > lane4LeftRail * 3u);
+    const auto maxBoxG6 = [&](const std::array<uint16_t, 240u * 240u>& img, size_t x0, size_t x1,
+                              size_t y0, size_t y1) {
+        uint16_t maxG = 0u;
+        for (size_t y = y0; y <= y1; ++y) {
+            for (size_t x = x0; x <= x1; ++x) {
+                const uint16_t g6 = (img[y * 240u + x] >> 5u) & 0x3Fu;
+                if (g6 > maxG) {
+                    maxG = g6;
+                }
+            }
+        }
+        return maxG;
+    };
 
+    const uint32_t leftPolarSector = sumBoxG6(amp16, 36u, 110u, 96u, 162u);
+    const uint32_t rightPolarSector = sumBoxG6(amp16, 130u, 204u, 96u, 162u);
+    RTEST_CHECK(leftPolarSector > rightPolarSector * 3u);
+    // Zero "L C R" floating text (y = 26..35), zero "1..4" left numerals (x = 4..20 above/below
+    // the background scope's y = 120 silent horizon), and zero wide Gaussian fog bloom!
+    RTEST_CHECK(maxBoxG6(amp16, 4u, 235u, 26u, 35u) == 0u);
+    RTEST_CHECK(maxBoxG6(amp16, 4u, 20u, 44u, 112u) == 0u);
+    RTEST_CHECK(maxBoxG6(amp16, 4u, 20u, 128u, 166u) == 0u);
+    RTEST_CHECK(maxBoxG6(amp16, 20u, 52u, 40u, 68u) == 0u);
+
+    // Spread Osc 3 -> R45 & Osc 4 -> R100 (+1.0), plus active LFO A -> PAN on Osc 2:
+    // verify 240x8 == 240x16 == 240x24 bit-identical strip equivalence with polar orbit bracket!
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 90);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 180);
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 260);
+    RTEST_CHECK(nearF(ctrl.state().voices[3].pan, 1.0f));
+    quietSt = ctrl.state();
+    quietSt.global.masterRun = false;
+    quietSt.global.masterTrim = 0.0f;
+    quietSt.voices[1].lfoTarget = ruido::LfoTarget::Pan;
+    quietSt.voices[1].lfoDepth = 0.55f;
+    for (int f = 0; f < 16; ++f) {
+        renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
+    }
+    renderer.renderFullScreenStrips(amp16.data());
+    for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 8u)) {
+        renderer.renderStrip(y, 8u, amp8.data() + static_cast<size_t>(y) * 240u);
+    }
+    for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 24u)) {
+        renderer.renderStrip(y, 24u, amp24.data() + static_cast<size_t>(y) * 240u);
+    }
+    bool panPolarStripsEq = true;
+    for (size_t i = 0u; i < amp16.size(); ++i) {
+        if (amp16[i] != amp8[i] || amp16[i] != amp24[i]) {
+            panPolarStripsEq = false;
+        }
+    }
+    RTEST_CHECK(panPolarStripsEq);
+
+    // DUAL MONO collapses all 4 polar rays onto the 0-deg vertical center spine (x = 114..126)
     quietSt.global.monoCollapse = true;
     for (int f = 0; f < 16; ++f) {
         renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), driveTel);
     }
     renderer.renderFullScreenStrips(clean16.data());
-    const int32_t monoRailDiff = static_cast<int32_t>(sumBoxG6(clean16, 22u, 30u, 42u, 66u)) -
-                                 static_cast<int32_t>(sumBoxG6(clean16, 210u, 218u, 42u, 66u));
-    RTEST_CHECK(std::abs(monoRailDiff) <= 18);
+    const uint32_t monoLeftSector = sumBoxG6(clean16, 36u, 110u, 96u, 162u);
+    const uint32_t monoRightSector = sumBoxG6(clean16, 130u, 204u, 96u, 162u);
+    const uint32_t monoCenterSpine = sumBoxG6(clean16, 114u, 126u, 72u, 160u);
+    const int32_t monoSectorDiff =
+        static_cast<int32_t>(monoLeftSector) - static_cast<int32_t>(monoRightSector);
+    RTEST_CHECK(std::abs(monoSectorDiff) <= 16);
+    RTEST_CHECK(monoCenterSpine > monoLeftSector * 2u);
 
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);

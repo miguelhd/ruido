@@ -2,13 +2,14 @@
 
 #include "core/ControlSurface.h"
 #include "core/Parameters.h"
+#include "ui/ScopeTraceMath.h"
 
 #include <array>
 #include <cstdint>
 
 namespace ruido {
 
-// 4-lane Binaural Constant-Power Stereo Soundstage (SEL -> PAN, GLOBAL LEVEL K4)
+// Polar Listener Stereo Soundstage (SEL -> PAN, GLOBAL LEVEL K4)
 // and flat vertical GLOBAL CONFIG list menu (right GLO).
 class HudGlobalViews {
   public:
@@ -28,7 +29,8 @@ class HudGlobalViews {
 
     void compositePanStageStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                 uint16_t* linScratch, float effPanAlpha01, uint8_t alpha8,
-                                const HudState& hud) const noexcept;
+                                const HudState& hud,
+                                const OverdriveHairTable& overdriveHair) const noexcept;
     void compositeGlobalConfigStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
                                     const EngineControlState& control,
                                     const HudState& hud) const noexcept;
@@ -45,11 +47,13 @@ class HudGlobalViews {
     std::array<float, kNumOscillators> panOrbitMin_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> panOrbitMax_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> panLfoDepth_{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<float, kNumOscillators> voicePresence_{0.5f, 0.5f, 0.5f, 0.5f};
+    std::array<float, kNumOscillators> rayLen_{80.0f, 80.0f, 80.0f, 80.0f};
+    std::array<float, kNumOscillators> waveAmp_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> muteDim_{0.0f, 0.0f, 0.0f, 0.0f};
 
     float panPhase_ = 0.0f;
     float configPhase_ = 0.0f;
+    bool primed_ = false;
 };
 
 } // namespace ruido
