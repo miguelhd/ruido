@@ -314,8 +314,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     }
     case HudMode::Panning:
-        appendStr(leftMain, 0u, sizeof(leftMain),
-                  (control.global.monoCollapse && hud.panLockedNotice) ? "OUTPUT ROUTING" : "PAN");
+        appendStr(leftMain, 0u, sizeof(leftMain), "PAN");
         formatHeaderPanMode(control, hud, leftSuffix, sizeof(leftSuffix), rightText,
                             sizeof(rightText));
         break;
@@ -446,18 +445,13 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     }
     case HudMode::GlobalAmp:
-        if (hud.focusedKnob == 3u && control.global.monoCollapse && hud.panLockedNotice) {
-            appendStr(leftMain, 0u, sizeof(leftMain), "OUTPUT ROUTING");
-            appendStr(rightText, 0u, sizeof(rightText), "MONO");
+        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
+        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " LEVEL");
+        if (hud.focusedKnob == 3u) {
+            appendStr(rightText, 0u, sizeof(rightText),
+                      control.global.monoCollapse ? "MONO" : "STEREO");
         } else {
-            appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " LEVEL");
-            if (hud.focusedKnob == 3u) {
-                appendStr(rightText, 0u, sizeof(rightText),
-                          control.global.monoCollapse ? "MONO" : "STEREO");
-            } else {
-                formatHeaderEnsembleDrive(control, lfoOutput, rightText, sizeof(rightText));
-            }
+            formatHeaderEnsembleDrive(control, lfoOutput, rightText, sizeof(rightText));
         }
         break;
     case HudMode::GlobalAll:
@@ -529,12 +523,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             }
             dstCv.drawOpticalBead(barXf + barNorm * barWf, 13.5f, 0.95f, 2.1f);
         } else if (rightText[0] != '\0') {
-            const uint8_t rightGray = (control.global.monoCollapse && hud.panLockedNotice &&
-                                       (hud.mode == HudMode::Panning ||
-                                        (hud.mode == HudMode::GlobalAmp && hud.focusedKnob == 3u)))
-                                          ? 236u
-                                          : 168u;
-            dstCv.drawSansRight(kFontSansSmall, 230, 6, rightText, rightGray, 1);
+            dstCv.drawSansRight(kFontSansSmall, 230, 6, rightText, 168u, 1);
         }
     };
 
@@ -606,6 +595,10 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
     if (cv.y1 <= 188 || hud.knobBank == KnobBankMode::None) {
         return;
     }
+    if (hud.knobBank == KnobBankMode::Panning && control.global.monoCollapse) {
+        cv.drawSansCentered(kFontSansSmall, 120, 205, "OUTPUT ROUTING SET TO MONO", 154u, 1);
+        return;
+    }
 
     for (uint8_t k = 0u; k < 4u; ++k) {
         const int cx = 30 + static_cast<int>(k) * 60;
@@ -618,17 +611,11 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
 
         const float dim = clampf(knobDimSmooth[k], 0.0f, 1.0f);
         if (gs.disabled) {
-            const bool lockedTouch =
-                control.global.monoCollapse && hud.panLockedNotice && (hud.panLockedKnob == k);
-            const float baseDisLbl = lockedTouch ? 148.0f : 88.0f;
-            const float baseDisVal = lockedTouch ? 212.0f : 104.0f;
-            const float disTrack = lockedTouch ? 34.0f : 22.0f;
-            const auto disLbl = static_cast<uint8_t>(baseDisLbl + (64.0f - baseDisLbl) * dim + 0.5f);
-            const auto disVal = static_cast<uint8_t>(baseDisVal + (76.0f - baseDisVal) * dim + 0.5f);
+            const auto disLbl = static_cast<uint8_t>(88.0f + (64.0f - 88.0f) * dim + 0.5f);
+            const auto disVal = static_cast<uint8_t>(104.0f + (76.0f - 104.0f) * dim + 0.5f);
             cv.drawSansCentered(kFontSansSmall, cx, 191, roleLbl, disLbl, 1);
             cv.drawHorizontalFilament(static_cast<float>(cx) - 20.0f,
-                                      static_cast<float>(cx) + 20.0f, 207.5f, disTrack, 0.58f,
-                                      true);
+                                      static_cast<float>(cx) + 20.0f, 207.5f, 22.0f, 0.58f, true);
             cv.drawSansCentered(kFontSansSmall, cx, 216, valStr, disVal, 0);
             continue;
         }

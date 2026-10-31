@@ -54,8 +54,6 @@ class RuidoController {
   private:
     KnobBankMode baseKnobBank() const noexcept;
     void closeAllPages() noexcept;
-    void clearPanLocked() noexcept;
-    void notePanLocked(uint8_t knobIdx = kNoFocusedKnob) noexcept;
     void syncModifierHud() noexcept;
     void restoreOrDissolveHud() noexcept;
     void triggerHud(HudMode mode, uint8_t voiceIndex = 0u,
@@ -79,7 +77,6 @@ class RuidoController {
     bool dismissedByHome_ = false;
     float masterPot_ = 0.85f;
     float masterPotHudAnchor_ = 0.85f;
-    float panLockedSec_ = 0.0f;
     HudMode latchedHudMode_ = HudMode::None;
     ButtonId latchedButton_ = ButtonId::Count;
     int32_t selectTickAccum_ = 0;

@@ -200,8 +200,6 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.globalTarget = releaseLatchHud_.globalTarget;
         effectiveHud.configCursor = releaseLatchHud_.configCursor;
         effectiveHud.config = releaseLatchHud_.config;
-        effectiveHud.panLockedNotice = releaseLatchHud_.panLockedNotice;
-        effectiveHud.panLockedKnob = releaseLatchHud_.panLockedKnob;
         if (releaseLatchHud_.mode == HudMode::KnobRate) {
             effectiveHud.rateHoldActive = releaseLatchHud_.rateHoldActive;
             effectiveHud.knobRate = releaseLatchHud_.knobRate;

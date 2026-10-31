@@ -71,10 +71,6 @@ inline void formatHeaderPanMode(const EngineControlState& control, const HudStat
         appendStr(rightText, 0u, rightCap, muted ? "MUTED" : "STEREO");
         return;
     }
-    if (control.global.monoCollapse && hud.panLockedNotice) {
-        appendStr(rightText, 0u, rightCap, "MONO");
-        return;
-    }
     bool anyActive = false;
     for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
         if (computeVoiceAudibility(control.voices[vi], control.voicePressure[vi], pitchMode)
