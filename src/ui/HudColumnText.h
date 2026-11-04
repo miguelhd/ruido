@@ -4,6 +4,7 @@
 #include "core/DspMath.h"
 #include "core/GlobalControl.h"
 #include "core/LfoMath.h"
+#include "core/VoiceCircuit.h"
 #include "ui/HudFormat.h"
 #include "ui/HudGraphs.h"
 
@@ -32,19 +33,32 @@ inline void formatHeaderDriveValue(float ampVal, char* rightText, size_t rightCa
     }
 }
 
+constexpr const char* unassignedButtonName(ButtonId button) noexcept {
+    switch (button) {
+    case ButtonId::Env:
+        return "ENV";
+    case ButtonId::Arp:
+        return "ARP";
+    case ButtonId::Seq:
+        return "SEQ";
+    case ButtonId::Rec:
+        return "REC";
+    default:
+        return "PANEL";
+    }
+}
+
 inline void formatHeaderEnsembleDrive(const EngineControlState& control,
-                                      const LfoSignalArray& lfoOutput, char* rightText,
-                                      size_t rightCap) noexcept {
-    const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
+                                      const LfoSignalArray& lfoOutput, uint8_t stutterGateMask,
+                                      char* rightText, size_t rightCap) noexcept {
     bool anyActive = false;
     float maxAmp = 0.0f;
     for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
-        if (computeVoiceAudibility(control.voices[vi], control.voicePressure[vi], pitchMode)
-                .muteBlend < 0.999f) {
+        if (!evaluateVoiceCircuit(control, vi, stutterGateMask).isMuted) {
             anyActive = true;
             const float la =
-                computeLiveVoiceAmplitude(control.voices[vi], lfoOutput[lfoBankIndex(vi, 0u)],
-                                          lfoOutput[lfoBankIndex(vi, 1u)]);
+                evaluateLiveOscAmplitude(control, vi, lfoOutput[lfoBankIndex(vi, 0u)],
+                                         lfoOutput[lfoBankIndex(vi, 1u)], stutterGateMask);
             if (la > maxAmp) {
                 maxAmp = la;
             }
@@ -57,17 +71,38 @@ inline void formatHeaderEnsembleDrive(const EngineControlState& control,
     }
 }
 
+inline void formatSnapshotHeader(const HudState& hud, char* leftMain, size_t leftMainCap,
+                                 char* leftSuffix, size_t suffixCap, char* rightText,
+                                 size_t rightCap, bool& outShowBar, float& outBarNorm) noexcept {
+    outShowBar = false;
+    outBarNorm = 0.0f;
+    if (hud.mode == HudMode::SaveArmed) {
+        appendStr(leftMain, 0u, leftMainCap, "STORE SCENE");
+        appendStr(rightText, 0u, rightCap, hud.saveArmed ? "TAP SCENE 1-4" : "CANCELLED");
+        return;
+    }
+    appendStr(leftMain, 0u, leftMainCap, "SCENE");
+    size_t sp = appendStr(leftSuffix, 0u, suffixCap, " ");
+    appendUInt(leftSuffix, sp, suffixCap, static_cast<uint32_t>((hud.snapshotSlot & 3u) + 1u));
+    if (hud.snapshotSavedToast) {
+        appendStr(rightText, 0u, rightCap, "SAVED");
+    } else if (hud.snapshotGliding) {
+        outBarNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
+        formatPercent(rightText, rightCap, outBarNorm);
+        outShowBar = true;
+    } else {
+        appendStr(rightText, 0u, rightCap, hud.snapshotDirty ? "EDITED" : "ACTIVE");
+    }
+}
+
 inline void formatHeaderPanMode(const EngineControlState& control, const HudState& hud,
-                                char* leftSuffix, size_t suffixCap, char* rightText,
-                                size_t rightCap) noexcept {
-    const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
+                                uint8_t stutterGateMask, char* leftSuffix, size_t suffixCap,
+                                char* rightText, size_t rightCap) noexcept {
     if (!control.global.monoCollapse && hud.focusedKnob < kNumOscillators) {
         const uint8_t kv = hud.focusedKnob & 3u;
         size_t lp = appendStr(leftSuffix, 0u, suffixCap, " OSC ");
         appendUInt(leftSuffix, lp, suffixCap, static_cast<uint32_t>(kv + 1u));
-        const bool muted =
-            computeVoiceAudibility(control.voices[kv], control.voicePressure[kv], pitchMode)
-                .muteBlend >= 0.999f;
+        const bool muted = evaluateVoiceCircuit(control, kv, stutterGateMask).isMuted;
         appendStr(rightText, 0u, rightCap, muted ? "MUTED" : "STEREO");
         return;
     }
@@ -75,15 +110,14 @@ inline void formatHeaderPanMode(const EngineControlState& control, const HudStat
 }
 
 inline void formatColumnRoleAndValue(const EngineControlState& control, const HudState& hud,
-                                     const LfoSignalArray& lfoOutput, uint8_t k, char* roleLbl,
-                                     size_t roleCap, char* valStr, size_t valCap,
-                                     GlobalColumnSummary& outGlobal) noexcept {
+                                     const LfoSignalArray& lfoOutput, uint8_t stutterGateMask,
+                                     uint8_t k, char* roleLbl, size_t roleCap, char* valStr,
+                                     size_t valCap, GlobalColumnSummary& outGlobal) noexcept {
     outGlobal = {};
-    const float panScale = control.global.monoCollapse ? 0.0f : 1.0f;
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
 
     if (isGlobalKnobBank(hud.knobBank)) {
-        outGlobal = evaluateGlobalColumn(hud.knobBank, k, control, lfoOutput);
+        outGlobal = evaluateGlobalColumn(hud.knobBank, k, control, lfoOutput, stutterGateMask);
         switch (hud.knobBank) {
         case KnobBankMode::GlobalFreq:
             if (k == 0u) {
@@ -182,8 +216,11 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         const VoiceParams& vp = control.voices[k];
         size_t p = appendStr(roleLbl, 0u, roleCap, "OSC ");
         appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
-        const float pMul = computeVoicePitchRatio(control.voicePressure[k], pitchMode);
-        formatCompactHz(valStr, valCap, computeLiveVoicePitchHz(vp, lfoA, lfoB) * pMul);
+        const float pMul = computeVoicePitchRatio(control.voicePressure[k], pitchMode) *
+                           control.keyMod.voicePitchMul[k];
+        formatCompactHz(
+            valStr, valCap,
+            clampf(computeLiveVoicePitchHz(vp, lfoA, lfoB) * pMul, 0.005f, kAudioFreqMaxHz * 4.0f));
         break;
     }
     case KnobBankMode::PulseWidth: {
@@ -193,7 +230,8 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         outGlobal.bipolar = true;
         formatPercent(
             valStr, valCap,
-            clampf(computeLiveVoicePulseWidth(vp, lfoA, lfoB), kPulseWidthMin, kPulseWidthMax));
+            clampf(computeLiveVoicePulseWidth(vp, lfoA, lfoB, control.keyMod.voicePwDelta[k]),
+                   kPulseWidthMin, kPulseWidthMax));
         break;
     }
     case KnobBankMode::VoiceDrift: {
@@ -204,11 +242,11 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         break;
     }
     case KnobBankMode::VoiceFilter: {
-        const uint8_t refV = (hud.mode == HudMode::VoicePressure) ? (hud.focusedVoice & 3u)
-                                                                  : (hud.fxVoiceFocus & 3u);
+        const uint8_t refV = resolveFilterViewVoice(hud);
         const ModulatedFilterParams mod = computeLiveVoiceFilter(
             control.voices[refV], control.voicePressure[refV], pitchMode,
-            lfoOutput[lfoBankIndex(refV, 0u)], lfoOutput[lfoBankIndex(refV, 1u)]);
+            lfoOutput[lfoBankIndex(refV, 0u)], lfoOutput[lfoBankIndex(refV, 1u)],
+            control.keyMod.dubLpfDrop, control.keyMod.overloadSurge);
         if (k == 0u) {
             appendStr(roleLbl, 0u, roleCap, "HPF");
             formatCompactHz(valStr, valCap, mod.hpCutoffHz);
@@ -225,26 +263,25 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         break;
     }
     case KnobBankMode::Amplitude: {
-        const VoiceParams& vp = control.voices[k];
         size_t p = appendStr(roleLbl, 0u, roleCap, "OSC ");
         appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
-        const VoiceAudibility aud = computeVoiceAudibility(vp, control.voicePressure[k], pitchMode);
-        const float liveAmp = computeLiveVoiceAmplitude(vp, lfoA, lfoB);
         formatPercent(valStr, valCap,
-                      (aud.muteBlend >= 0.999f) ? 0.0f : clampf(liveAmp, 0.0f, 1.0f));
+                      evaluateLiveOscAmplitude(control, k, lfoA, lfoB, stutterGateMask));
         break;
     }
     case KnobBankMode::Panning: {
         const VoiceParams& vp = control.voices[k];
         size_t p = appendStr(roleLbl, 0u, roleCap, "OSC ");
         appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
-        if (control.global.monoCollapse) {
+        if (control.global.monoCollapse && control.keyMod.spatialFocus <= 0.001f) {
             outGlobal.disabled = true;
             appendStr(valStr, 0u, valCap, "LOCKED");
         } else {
             outGlobal.bipolar = true;
-            const float livePan = computeLiveVoicePan(vp, lfoA, lfoB);
-            formatPanValue(valStr, valCap, clampf(livePan * panScale, -1.0f, 1.0f));
+            const float effPan =
+                applySpatialFocusPan(computeLiveVoicePan(vp, lfoA, lfoB), k,
+                                     control.global.monoCollapse, control.keyMod.spatialFocus);
+            formatPanValue(valStr, valCap, effPan);
         }
         break;
     }
@@ -269,6 +306,12 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
             const float liveDepth = (sub == 0u) ? computeLiveLfoADepth(vp, lfoBRaw) : vp.lfoBDepth;
             formatPercent(valStr, valCap, liveDepth);
         }
+        break;
+    }
+    case KnobBankMode::Snapshot: {
+        size_t p = appendStr(roleLbl, 0u, roleCap, "SCENE ");
+        appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
+        formatPercent(valStr, valCap, clampf(hud.snapshotWeights[k], 0.0f, 1.0f));
         break;
     }
     default:

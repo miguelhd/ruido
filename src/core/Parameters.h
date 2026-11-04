@@ -157,19 +157,23 @@ inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpRes
         return {hpBase, hpResBase, lpBase, lpResBase, effGate};
     }
 
-    // 1. Active Voice: Uncapped MS-20 Filter Accent + Full Korg35 HP/LP Resonance
-    // log2(2500 Hz) = 11.287712f; 3.5-octave transition up to 28,000 Hz
+    // 1. Active Voice: Full-Throw [0..1] MS-20 Vocal Formant + Korg35 HP/LP Resonance
+    // Avoids wasting the first 50% of pressure below 24 Hz when HPF is parked at 2.0 Hz,
+    // and sweeps open 28 kHz LPF down into the vocal formant band across the entire throw.
     const float lpOpenness = smoothstep01((fastLog2(lpBase) - 11.287712f) * (1.0f / 3.5f));
-    const float lpOctDelta = (4.8f * (1.0f - lpOpenness) - 1.65f * lpOpenness) * fp;
+    const float lpOctDelta = (4.8f * (1.0f - lpOpenness) - 3.80f * lpOpenness) * fp;
     const float lpAccent =
         clampf(lpBase * fastExp2(lpOctDelta), kFilterCutoffMinHz, kFilterCutoffMaxHz);
 
-    const float hpOctDelta = 7.2f * lpOpenness * fp;
+    const float hpFloorHz =
+        (hpBase < 22.0f) ? (hpBase + (22.0f - hpBase) * smoothstep01(fp * 4.5f)) : hpBase;
+    const float hpOctDelta = 4.65f * lpOpenness * fp;
     const float hpAccent =
-        clampf(hpBase * fastExp2(hpOctDelta), kFilterCutoffMinHz, kFilterCutoffMaxHz);
+        clampf(hpFloorHz * fastExp2(hpOctDelta), kFilterCutoffMinHz, kFilterCutoffMaxHz);
 
-    const float hpResAccent = clampf(hpResBase + 0.72f * fp, 0.0f, 1.0f);
-    const float lpResAccent = clampf(lpResBase + 0.78f * fp, 0.0f, 1.0f);
+    const float resCurve = fp * (0.65f + 0.35f * fp);
+    const float hpResAccent = clampf(hpResBase + 0.80f * resCurve, 0.0f, 1.0f);
+    const float lpResAccent = clampf(lpResBase + 0.85f * resCurve, 0.0f, 1.0f);
 
     // 2. Muted Voice: Vactrol Low-Pass Gate (warm 85 Hz sub murmur -> full base LPF harmonics)
     const float lpgCeil = (lpBase > 85.0f) ? lpBase : 85.0f;
@@ -189,12 +193,37 @@ inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpRes
     };
 }
 
+// Live performance keyboard interaction models selected via SEL button + SELECT encoder.
+enum class KeyboardModel : uint8_t {
+    LiveMixer = 0,  // 1/3: 4-Oscillator Live Mixer, FX & 4-Slot Snapshots (default)
+    Harmonium = 1,  // 2/3: Just-Intonation Harmonium / Monochord (framework slot)
+    CircuitLab = 2, // 3/3: Circuit-Bent CMOS Touch-Plate Lab (framework slot)
+    Count = 3
+};
+
+// Non-destructive momentary punch-in modulation overlaid onto the steady knob patch (Core 0 -> 1).
+struct KeyboardModState {
+    std::array<float, kNumOscillators> voiceGainMul{1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, kNumOscillators> voicePitchMul{1.0f, 1.0f, 1.0f, 1.0f};
+    std::array<float, kNumOscillators> voicePwDelta{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, kNumOscillators> voiceFormant{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, kNumOscillators> stutterRateHz{6.0f, 6.0f, 6.0f, 6.0f};
+    std::array<float, kNumOscillators> stutterDepth{0.0f, 0.0f, 0.0f, 0.0f};
+    float overloadSurge = 0.0f;   // OP5: [0, 1] -> 4.5x MS-20 drive + 100% starved-rail sync
+    float dubLpfDrop = 0.0f;      // GLO key: [0, 1] -> master resonant MS-20 LPF curtain
+    float spatialFocus = 0.0f;    // MONO key = -1.0 (center), POLY key = +1.0 (hyper-wide)
+    float ratioLockAmount = 0.0f; // PIT / MONO key: [0, 1] thermal drift damping
+    uint8_t soloMask = 0u;        // 4-bit mask of soloed oscillators (bit v = OSC v+1 solo active)
+    bool stasisFreeze = false;    // 11th tall key: freezes 8 LFOs + thermal drift + scope
+};
+
 // Complete patch state + momentary SARADC finger-pressure modulation from Core 0 -> Core 1.
 struct EngineControlState {
     std::array<VoiceParams, kNumOscillators> voices{};
     GlobalParams global{};
-    // White Keys 5-8 per-voice continuous SARADC carbon-pill pressure in [0.0, 1.0]
+    // Per-voice MS-20 formant/LPG pressure in [0.0, 1.0] (driven by KeyboardEngine)
     std::array<float, kNumOscillators> voicePressure{0.0f, 0.0f, 0.0f, 0.0f};
+    KeyboardModState keyMod{};
 
     static EngineControlState makeDefault() noexcept {
         EngineControlState s{};
@@ -399,6 +428,8 @@ struct EngineTelemetry {
         std::atomic<float>{0.0f},
         std::atomic<float>{0.0f},
     };
+    // Sample-accurate 4-voice stutter chopper open-gate mask (bit v = 1 open, 0 chopped silent)
+    std::atomic<uint8_t> stutterGateMask{0x0Fu};
 };
 
 } // namespace ruido

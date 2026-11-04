@@ -442,6 +442,74 @@ struct MonoStripCanvas {
         const int w = measureSansText(font, str, tracking);
         drawSans(font, rightX - w, ty, str, gray, tracking);
     }
+
+    // Two-tier tertiary monochrome indicator slot (HOME / FREQUENCY per-osc FX + LFO A/B row):
+    //  - Inactive (!active): crisp 1x1 integer pixel dot at 26% (zero anti-alias fringe)
+    //  - Active (active): solid circle (r = 1.55) capped in tertiary range (40%-66%) + subtle halo
+    void drawModulatorSlot(int cx, int cy, bool active, float sync01,
+                           float colDim01) const noexcept {
+        if (masterAlpha8 == 0u || cx < 0 || cx >= static_cast<int>(kDisplayWidth)) {
+            return;
+        }
+        const float masterF = static_cast<float>(masterAlpha8) * (1.0f / 255.0f);
+        const float dim = clampf(colDim01, 0.0f, 1.0f);
+        if (!active) {
+            if (cy < y0 || cy >= y1) {
+                return;
+            }
+            const float phAlpha = 0.26f * (1.0f - 0.35f * dim) * masterF;
+            const auto a8 = static_cast<uint8_t>(phAlpha * 255.0f + 0.5f);
+            if (a8 > 0u) {
+                uint8_t* row = lum + static_cast<size_t>(cy - y0) * kDisplayWidth;
+                row[cx] = blendLum8(row[cx], 255u, a8);
+            }
+            return;
+        }
+
+        constexpr int kReach = 4;
+        if (cy + kReach < y0 || cy - kReach >= y1) {
+            return;
+        }
+        const int pxStart = (cx - kReach < 0) ? 0 : (cx - kReach);
+        const int pxEnd = (cx + kReach >= static_cast<int>(kDisplayWidth))
+                              ? (static_cast<int>(kDisplayWidth) - 1)
+                              : (cx + kReach);
+        const int pyStart = (cy - kReach < y0) ? y0 : (cy - kReach);
+        const int pyEnd = (cy + kReach >= y1) ? (y1 - 1) : (cy + kReach);
+
+        const float s = clampf(sync01, 0.0f, 1.0f);
+        const float effSync = s * (1.0f - dim) + 0.35f * dim;
+        const float dimKeep = 1.0f - 0.45f * dim;
+        const float circleAlpha = (0.40f + 0.26f * effSync) * dimKeep;
+        const float haloPeak = effSync * 0.19f * dimKeep;
+
+        constexpr float kCircleR = 1.55f;
+        constexpr float kHaloInnerR = 1.45f;
+        constexpr float kHaloOuterR = 3.15f;
+        constexpr float kInvHaloSpan = 1.0f / (kHaloOuterR - kHaloInnerR);
+
+        for (int py = pyStart; py <= pyEnd; ++py) {
+            const float dy = static_cast<float>(py - cy);
+            const float dy2 = dy * dy;
+            uint8_t* row = lum + static_cast<size_t>(py - y0) * kDisplayWidth;
+            for (int px = pxStart; px <= pxEnd; ++px) {
+                const float dx = static_cast<float>(px - cx);
+                const float r2 = dx * dx + dy2;
+                if (r2 >= kHaloOuterR * kHaloOuterR) {
+                    continue;
+                }
+                const float r = (r2 > 1.0e-8f) ? (r2 * fastInvSqrt(r2)) : 0.0f;
+                const float circleCov = 1.0f - smoothstep01(r - (kCircleR - 0.50f));
+                const float haloT = clampf((r - kHaloInnerR) * kInvHaloSpan, 0.0f, 1.0f);
+                const float haloA = haloPeak * (1.0f - haloT) * (1.0f - 0.65f * haloT);
+                const float a = (circleCov * circleAlpha + (1.0f - circleCov) * haloA) * masterF;
+                const auto a8 = static_cast<uint8_t>(clampf(a, 0.0f, 1.0f) * 255.0f + 0.5f);
+                if (a8 > 0u) {
+                    row[px] = blendLum8(row[px], 255u, a8);
+                }
+            }
+        }
+    }
 };
 
 // Splat a single anti-aliased 1-px horizontal Gaussian photon segment into `linScratch`

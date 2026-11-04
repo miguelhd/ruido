@@ -37,7 +37,7 @@ class VoiceLfoBank {
 
     void updateTargets(const EngineControlState& state, bool snapImmediate) noexcept;
 
-    std::array<VoiceLfoFrame, kNumVoiceLfos> stepFrame() noexcept;
+    std::array<VoiceLfoFrame, kNumVoiceLfos> stepFrame(bool freeze = false) noexcept;
 
     void writeInitialTelemetry(EngineTelemetry& telemetry) const noexcept;
 
@@ -67,7 +67,7 @@ class VoiceLfoBank {
     static float nextUniformBipolar(uint32_t& rng) noexcept;
     static int8_t nextDriftKnot(VoiceState& v) noexcept;
     void stepSlot(size_t idx, float rateModDepth, float depthModDepth, float modBipolar,
-                  VoiceLfoFrame& out) noexcept;
+                  bool freeze, VoiceLfoFrame& out) noexcept;
 
     std::array<VoiceState, kNumVoiceLfos> voices_{};
     float sampleRate_ = kBaseSampleRate;

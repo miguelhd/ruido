@@ -5,6 +5,7 @@
 #include "ui/HudAmpGraph.h"
 #include "ui/HudGlobalViews.h"
 #include "ui/HudGraphs.h"
+#include "ui/HudKeybedView.h"
 #include "ui/ScopeTraceEngine.h"
 
 #include <array>
@@ -52,6 +53,7 @@ class ScopeHudRenderer {
     HudGraphs graphs_{};
     HudAmpGraph ampGraph_{};
     HudGlobalViews globalViews_{};
+    HudKeybedView keybedView_{};
 
     EngineControlState frameControl_{};
     HudState frameHud_{};
@@ -74,6 +76,7 @@ class ScopeHudRenderer {
     float smoothedPeakR_ = 0.0f;
     HudMode prevHeaderBarMode_ = HudMode::None;
     KnobBankMode prevKnobBank_ = KnobBankMode::Frequency;
+    uint8_t frameStutterGateMask_ = 0x0Fu;
     bool releaseLatchActive_ = false;
     bool hudGaugesPrimed_ = false;
 };

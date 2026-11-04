@@ -27,6 +27,9 @@ inline constexpr int kHudBotLabelY = 191;
 inline constexpr float kHudBotTrackY = 207.5f;
 inline constexpr int kHudBotValueY = 214;
 inline constexpr int kHudBotDisabledValueY = 216;
+inline constexpr int kHudHomeModRowY = 234;
+inline constexpr int kHudHomeFxLfoGapPx = 10;
+inline constexpr int kHudHomeLfoPairGapPx = 6;
 
 inline constexpr int hudColumnCenterX(size_t col) noexcept {
     return kHudColStartX + static_cast<int>(col) * kHudColStrideX;

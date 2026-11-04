@@ -303,26 +303,33 @@ inline float computeLiveVoicePitchHz(const VoiceParams& vp, float lfoARaw, float
     return hz;
 }
 
-inline float computeLiveVoicePulseWidth(const VoiceParams& vp, float lfoARaw,
-                                        float lfoBRaw) noexcept {
+inline float computeLiveVoicePulseWidth(const VoiceParams& vp, float lfoARaw, float lfoBRaw,
+                                        float keyPwDelta = 0.0f) noexcept {
+    const float basePw = clampf(vp.pulseWidth + keyPwDelta, kPulseWidthMin, kPulseWidthMax);
     const float dA = computeLiveLfoADepth(vp, lfoBRaw);
-    float pw = (vp.lfoTarget == LfoTarget::PulseWidth)
-                   ? applyLfoPulseWidth(vp.pulseWidth, dA, lfoARaw)
-                   : vp.pulseWidth;
+    float pw =
+        (vp.lfoTarget == LfoTarget::PulseWidth) ? applyLfoPulseWidth(basePw, dA, lfoARaw) : basePw;
     if (vp.lfoBTarget == LfoTarget::PulseWidth) {
         pw = applyLfoPulseWidth(pw, vp.lfoBDepth, lfoBRaw);
     }
     return pw;
 }
 
-inline float computeLiveVoiceAmplitude(const VoiceParams& vp, float lfoARaw,
-                                       float lfoBRaw) noexcept {
+inline constexpr std::array<float, kNumOscillators> kKeyWideFanPans = {-1.0f, -0.52f, 0.52f, 1.0f};
+
+inline float computeLiveVoiceAmplitude(const VoiceParams& vp, float lfoARaw, float lfoBRaw,
+                                       float overloadSurge = 0.0f) noexcept {
     const float dA = computeLiveLfoADepth(vp, lfoBRaw);
     float amp = (vp.lfoTarget == LfoTarget::Amplitude)
                     ? applyLfoAmplitude(vp.amplitude, dA, lfoARaw)
                     : vp.amplitude;
     if (vp.lfoBTarget == LfoTarget::Amplitude) {
         amp = applyLfoAmplitude(amp, vp.lfoBDepth, lfoBRaw);
+    }
+    if (overloadSurge > 1.0e-4f) {
+        const float s = clampf(overloadSurge, 0.0f, 1.0f);
+        const float sCurve = s * (0.62f + 0.38f * s);
+        amp = clampf(amp + (1.0f - amp) * sCurve, 0.0f, 1.0f);
     }
     return amp;
 }
@@ -336,9 +343,49 @@ inline float computeLiveVoicePan(const VoiceParams& vp, float lfoARaw, float lfo
     return pan;
 }
 
+inline float computeEffectivePanScale(bool monoCollapse, float spatialFocus) noexcept {
+    const float baseScale = monoCollapse ? 0.0f : 1.0f;
+    const float sf = clampf(spatialFocus, -1.0f, 1.0f);
+    return (sf < 0.0f) ? (baseScale * (1.0f + sf)) : (baseScale + (1.0f - baseScale) * sf);
+}
+
+inline float applySpatialFocusPan(float pan, size_t voiceIdx, bool monoCollapse,
+                                  float spatialFocus) noexcept {
+    const float sf = clampf(spatialFocus, -1.0f, 1.0f);
+    float p = pan;
+    if (sf > 0.0f) {
+        p += (kKeyWideFanPans[voiceIdx & 3u] - p) * sf;
+    }
+    return clampf(p * computeEffectivePanScale(monoCollapse, sf), -1.0f, 1.0f);
+}
+
+inline ModulatedFilterParams applyKeyDubLowPass(ModulatedFilterParams mod, float dubLpfDrop,
+                                                float overloadSurge = 0.0f) noexcept {
+    const float surge = clampf(overloadSurge, 0.0f, 1.0f);
+    if (surge > 0.22f) {
+        const float u = (surge - 0.22f) * (1.0f / 0.78f);
+        const float driveCeilHz = 28000.0f * fastExp2(-3.05f * u); // 28 kHz -> 3.38 kHz OTA scream
+        if (driveCeilHz < mod.lpCutoffHz) {
+            mod.lpCutoffHz = clampf(driveCeilHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
+        }
+        mod.lpResonance = clampf(mod.lpResonance + 0.54f * u * u, 0.0f, 0.90f);
+    }
+    const float dubDrop = clampf(dubLpfDrop, 0.0f, 1.0f);
+    if (dubDrop > 1.0e-4f) {
+        const float dubCeilHz = 28000.0f * fastExp2(-9.8f * dubDrop); // 28 kHz -> 31.4 Hz
+        if (dubCeilHz < mod.lpCutoffHz) {
+            mod.lpCutoffHz = clampf(dubCeilHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
+        }
+        const float dubResBump = 0.76f * dubDrop * (0.55f + 0.45f * dubDrop);
+        mod.lpResonance = clampf(mod.lpResonance + dubResBump, 0.0f, 0.92f);
+    }
+    return mod;
+}
+
 inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float pressure,
                                                     float pitchMode, float lfoARaw,
-                                                    float lfoBRaw = 0.0f) noexcept {
+                                                    float lfoBRaw = 0.0f, float dubLpfDrop = 0.0f,
+                                                    float overloadSurge = 0.0f) noexcept {
     const float dA = computeLiveLfoADepth(vp, lfoBRaw);
     float hpBase = (vp.lfoTarget == LfoTarget::HpCutoff)
                        ? applyLfoCutoffHz(vp.hpCutoffHz, dA, lfoARaw)
@@ -364,44 +411,58 @@ inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float
     if (vp.lfoBTarget == LfoTarget::LpResonance) {
         lpResBase = applyLfoResonance(lpResBase, vp.lfoBDepth, lfoBRaw);
     }
-    return computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase, pressure,
-                                     vp.muted ? 0.0f : 1.0f, pitchMode);
+    return applyKeyDubLowPass(computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase,
+                                                        pressure, vp.muted ? 0.0f : 1.0f,
+                                                        pitchMode),
+                              dubLpfDrop, overloadSurge);
+}
+
+inline constexpr bool isFilterLfoTarget(LfoTarget t) noexcept {
+    return t == LfoTarget::LpCutoff || t == LfoTarget::LpResonance || t == LfoTarget::HpCutoff ||
+           t == LfoTarget::HpResonance;
+}
+
+inline bool isVoiceFilterActive(const VoiceParams& vp, float pressure, float pitchMode) noexcept {
+    if (vp.hpCutoffHz > 2.05f || vp.lpCutoffHz < 27900.0f || vp.hpResonance > 0.002f ||
+        vp.lpResonance > 0.002f) {
+        return true;
+    }
+    if ((vp.lfoDepth > 0.002f && isFilterLfoTarget(vp.lfoTarget)) ||
+        (vp.lfoBDepth > 0.002f && isFilterLfoTarget(vp.lfoBTarget))) {
+        return true;
+    }
+    const float fp = clampf(pressure, 0.0f, 1.0f) * (1.0f - clampf(pitchMode, 0.0f, 1.0f));
+    return fp > 0.002f;
+}
+
+inline float computeVoiceFilterEngagement(const VoiceParams& vp, float pressure, float pitchMode,
+                                          float lfoARaw, float lfoBRaw = 0.0f) noexcept {
+    const ModulatedFilterParams flt =
+        computeLiveVoiceFilter(vp, pressure, pitchMode, lfoARaw, lfoBRaw);
+    constexpr float kHpMinOct = cxLog2Pos(kFilterCutoffMinHz);
+    constexpr float kLpMaxOct = cxLog2Pos(kFilterCutoffMaxHz);
+    const float hpEng =
+        (flt.hpCutoffHz > 2.05f)
+            ? clampf((fastLog2(flt.hpCutoffHz) - kHpMinOct) * (1.0f / 11.0f), 0.0f, 1.0f)
+            : 0.0f;
+    const float lpEng =
+        (flt.lpCutoffHz < 27900.0f)
+            ? clampf((kLpMaxOct - fastLog2(flt.lpCutoffHz)) * (1.0f / 11.0f), 0.0f, 1.0f)
+            : 0.0f;
+    const float cutEng = (hpEng > lpEng) ? hpEng : lpEng;
+    const float resEng =
+        clampf((flt.hpResonance > flt.lpResonance) ? flt.hpResonance : flt.lpResonance, 0.0f, 1.0f);
+    const float fltEng = clampf(
+        (cutEng > resEng) ? (cutEng + 0.35f * resEng) : (resEng + 0.35f * cutEng), 0.0f, 1.0f);
+    if (fltEng > 0.02f || !isVoiceFilterActive(vp, pressure, pitchMode)) {
+        return fltEng;
+    }
+    return 0.02f;
 }
 
 inline constexpr float kSubAudioLoOct = cxLog2Pos(15.0f);
 inline constexpr float kInvSubAudioSpanOct = 1.0f / (cxLog2Pos(25.0f) - cxLog2Pos(15.0f));
 inline constexpr float kSilentAmpThreshold = 1.0e-4f;
-
-// Shared 1-to-1 audibility state used by both White Keys 1-4 LEDs and HUD OSC 1-4 dimming.
-// Evaluates strictly steady circuit state (never LFO/animation phase) so HUD dimming never pulses.
-struct VoiceAudibility {
-    float subAudioBlend; // 0.0 >= 25 Hz -> 1.0 <= 15 Hz (sub-audio below hearing range)
-    float muteBlend;     // 1.0 when user-muted or 0% silent VCA, lifting smoothly on LPG swell
-    float inaudibleDim;  // max(muteBlend, subAudioBlend) in [0.0, 1.0]
-};
-
-inline VoiceAudibility computeVoiceAudibility(const VoiceParams& vp, float voicePressure,
-                                              float pitchMode) noexcept {
-    const float p = clampf(voicePressure, 0.0f, 1.0f);
-    const float effHz = clampf(vp.frequencyHz * computeVoicePitchRatio(p, pitchMode),
-                               kAudioFreqMinHz * 0.5f, kAudioFreqMaxHz);
-    const float subAudioBlend =
-        1.0f - smoothstep01((fastLog2(effHz) - kSubAudioLoOct) * kInvSubAudioSpanOct);
-
-    const bool hasAudibleAmp =
-        (vp.amplitude > kSilentAmpThreshold) ||
-        (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > kSilentAmpThreshold) ||
-        (vp.lfoBTarget == LfoTarget::Amplitude && vp.lfoBDepth > kSilentAmpThreshold);
-    float muteBlend = 0.0f;
-    if (!hasAudibleAmp) {
-        muteBlend = 1.0f;
-    } else if (vp.muted) {
-        const float lpgGate = p * (0.65f + 0.35f * p);
-        muteBlend = clampf(1.0f - lpgGate, 0.0f, 1.0f);
-    }
-    const float inaudibleDim = (muteBlend > subAudioBlend) ? muteBlend : subAudioBlend;
-    return {subAudioBlend, muteBlend, inaudibleDim};
-}
 
 inline constexpr const char* lfoTargetName(LfoTarget target) noexcept {
     switch (target) {

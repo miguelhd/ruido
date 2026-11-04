@@ -32,7 +32,7 @@ class RuidoAudioProcessor extends AudioWorkletProcessor {
     try {
       const memory = new WebAssembly.Memory({ initial: 16, maximum: 16 });
       const stackPointer = new WebAssembly.Global({ value: 'i32', mutable: true }, 16 * 65536);
-      const table = new WebAssembly.Table({ initial: 8, element: 'anyfunc' });
+      const table = new WebAssembly.Table({ initial: 32, element: 'anyfunc' });
 
       const result = await WebAssembly.instantiate(wasmBytes, {
         env: {
@@ -98,7 +98,7 @@ class RuidoAudioProcessor extends AudioWorkletProcessor {
     if (this.blockCounter === 0) {
       const nScope = this.ex.wasm_dsp_pop_scope(256);
       const telPtr = this.ex.wasm_dsp_read_telemetry() >> 2;
-      const telemetry = this.f32.slice(telPtr, telPtr + 46);
+      const telemetry = this.f32.slice(telPtr, telPtr + 47);
 
       let scopeBuffer = null;
       if (nScope > 0) {

@@ -13,21 +13,41 @@ enum class GloReleaseMode : uint8_t {
     SnapBack = 1 // Temporary performance twist: restore pre-GLO voice state on release
 };
 
+// Action mode for console MUTE, SOLO, and SNAP keys in GLOBAL CONFIG.
+enum class KeySwitchMode : uint8_t {
+    Momentary = 0, // Active only while key is held
+    Latching = 1   // Key press latches state / recalls slot
+};
+
 // Scalable descriptor IDs for the right-panel GLO vertical GLOBAL CONFIG list menu.
-enum class ConfigItemId : uint8_t { GloRelease = 0, OutputRouting = 1, Count = 2 };
+// (4-voice GLO macro & GLO RELEASE are tabled pending post-playtest roadmap evaluation.)
+enum class ConfigItemId : uint8_t {
+    OutputRouting = 0,
+    MuteMode = 1,
+    SoloMode = 2,
+    SnapMode = 3,
+    Count = 4
+};
 
 inline constexpr size_t kNumGlobalConfigItems = static_cast<size_t>(ConfigItemId::Count);
 
 struct GlobalConfigState {
     GloReleaseMode gloRelease = GloReleaseMode::Latch;
+    KeySwitchMode muteMode = KeySwitchMode::Momentary;
+    KeySwitchMode soloMode = KeySwitchMode::Momentary;
+    KeySwitchMode snapMode = KeySwitchMode::Latching;
 };
 
 constexpr const char* globalConfigItemLabel(ConfigItemId id) noexcept {
     switch (id) {
-    case ConfigItemId::GloRelease:
-        return "GLOBAL RELEASE";
     case ConfigItemId::OutputRouting:
         return "OUTPUT ROUTING";
+    case ConfigItemId::MuteMode:
+        return "MUTE MODE";
+    case ConfigItemId::SoloMode:
+        return "SOLO MODE";
+    case ConfigItemId::SnapMode:
+        return "SCENE MODE";
     case ConfigItemId::Count:
         break;
     }
@@ -36,9 +56,10 @@ constexpr const char* globalConfigItemLabel(ConfigItemId id) noexcept {
 
 constexpr int32_t globalConfigMaxIndex(ConfigItemId id) noexcept {
     switch (id) {
-    case ConfigItemId::GloRelease:
-        return 1;
     case ConfigItemId::OutputRouting:
+    case ConfigItemId::MuteMode:
+    case ConfigItemId::SoloMode:
+    case ConfigItemId::SnapMode:
         return 1;
     case ConfigItemId::Count:
         break;
@@ -46,32 +67,48 @@ constexpr int32_t globalConfigMaxIndex(ConfigItemId id) noexcept {
     return 0;
 }
 
-constexpr int32_t globalConfigGetIndex(ConfigItemId id, const GlobalConfigState& cfg,
+constexpr int32_t globalConfigGetIndex(ConfigItemId id, const GlobalConfigState& config,
                                        const GlobalParams& global) noexcept {
     switch (id) {
-    case ConfigItemId::GloRelease:
-        return (cfg.gloRelease == GloReleaseMode::SnapBack) ? 1 : 0;
     case ConfigItemId::OutputRouting:
         return global.monoCollapse ? 1 : 0;
+    case ConfigItemId::MuteMode:
+        return (config.muteMode == KeySwitchMode::Latching) ? 1 : 0;
+    case ConfigItemId::SoloMode:
+        return (config.soloMode == KeySwitchMode::Latching) ? 1 : 0;
+    case ConfigItemId::SnapMode:
+        return (config.snapMode == KeySwitchMode::Latching) ? 1 : 0;
     case ConfigItemId::Count:
         break;
     }
     return 0;
 }
 
-inline bool globalConfigSetIndex(ConfigItemId id, int32_t idx, GlobalConfigState& cfg,
+inline bool globalConfigSetIndex(ConfigItemId id, int32_t idx, GlobalConfigState& config,
                                  GlobalParams& global) noexcept {
     switch (id) {
-    case ConfigItemId::GloRelease: {
-        const auto next = (idx > 0) ? GloReleaseMode::SnapBack : GloReleaseMode::Latch;
-        const bool changed = (cfg.gloRelease != next);
-        cfg.gloRelease = next;
-        return changed;
-    }
     case ConfigItemId::OutputRouting: {
         const bool nextMono = (idx > 0);
         const bool changed = (global.monoCollapse != nextMono);
         global.monoCollapse = nextMono;
+        return changed;
+    }
+    case ConfigItemId::MuteMode: {
+        const KeySwitchMode next = (idx > 0) ? KeySwitchMode::Latching : KeySwitchMode::Momentary;
+        const bool changed = (config.muteMode != next);
+        config.muteMode = next;
+        return changed;
+    }
+    case ConfigItemId::SoloMode: {
+        const KeySwitchMode next = (idx > 0) ? KeySwitchMode::Latching : KeySwitchMode::Momentary;
+        const bool changed = (config.soloMode != next);
+        config.soloMode = next;
+        return changed;
+    }
+    case ConfigItemId::SnapMode: {
+        const KeySwitchMode next = (idx > 0) ? KeySwitchMode::Latching : KeySwitchMode::Momentary;
+        const bool changed = (config.snapMode != next);
+        config.snapMode = next;
         return changed;
     }
     case ConfigItemId::Count:
@@ -80,13 +117,17 @@ inline bool globalConfigSetIndex(ConfigItemId id, int32_t idx, GlobalConfigState
     return false;
 }
 
-constexpr const char* globalConfigValueLabel(ConfigItemId id, const GlobalConfigState& cfg,
+constexpr const char* globalConfigValueLabel(ConfigItemId id, const GlobalConfigState& config,
                                              const GlobalParams& global) noexcept {
     switch (id) {
-    case ConfigItemId::GloRelease:
-        return (cfg.gloRelease == GloReleaseMode::SnapBack) ? "SNAP BACK" : "LATCH";
     case ConfigItemId::OutputRouting:
         return global.monoCollapse ? "MONO" : "STEREO";
+    case ConfigItemId::MuteMode:
+        return (config.muteMode == KeySwitchMode::Latching) ? "LATCHING" : "MOMENTARY";
+    case ConfigItemId::SoloMode:
+        return (config.soloMode == KeySwitchMode::Latching) ? "LATCHING" : "MOMENTARY";
+    case ConfigItemId::SnapMode:
+        return (config.snapMode == KeySwitchMode::Latching) ? "LATCHING" : "MOMENTARY";
     case ConfigItemId::Count:
         break;
     }

@@ -4,6 +4,7 @@
 #include "core/GlobalConfig.h"
 #include "core/HudEnvelope.h"
 #include "core/LfoMath.h"
+#include "core/VoiceCircuit.h"
 #include "ui/FontSansAA.h"
 #include "ui/GraphStyle.h"
 #include "ui/MonoCanvas.h"
@@ -81,7 +82,8 @@ bool HudGlobalViews::hasResidualPhase() const noexcept {
 
 void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
                             const HudState& rawHud, const LfoSignalArray& lfoOutput,
-                            const std::array<float, kNumOscillators>& voicePeak) noexcept {
+                            const std::array<float, kNumOscillators>& voicePeak,
+                            uint8_t stutterGateMask) noexcept {
     const bool hudVisible = (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None);
     const bool panActive = isPanStageActive(rawHud);
     const bool cfgActive =
@@ -101,16 +103,16 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
 
     const bool snapPan = !primed_ || wasPanInvisible;
     primed_ = true;
-    monoCollapse_ = control.global.monoCollapse;
+    const float sf = control.keyMod.spatialFocus;
+    const float panScale = computeEffectivePanScale(control.global.monoCollapse, sf);
+    monoCollapse_ = (panScale <= 0.001f);
 
-    const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
-    const float panScale = control.global.monoCollapse ? 0.0f : 1.0f;
     const float alphaPos = snapPan ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.034f)));
+    const float alphaChop = snapPan ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.004f)));
     const float alphaFocus = snapPan ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.042f)));
 
     const bool spotlightActive = (rawHud.knobBank == KnobBankMode::Panning) &&
-                                 (rawHud.focusedKnob < kNumOscillators) &&
-                                 !control.global.monoCollapse;
+                                 (rawHud.focusedKnob < kNumOscillators) && !monoCollapse_;
     hasFocusSmooth_ =
         slewScalar(hasFocusSmooth_, spotlightActive ? 1.0f : 0.0f, alphaFocus, 0.002f);
 
@@ -118,13 +120,12 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         const VoiceParams& vp = control.voices[v];
         const float lfoA = lfoOutput[lfoBankIndex(v, 0u)];
         const float lfoB = lfoOutput[lfoBankIndex(v, 1u)];
-        const VoiceAudibility aud = computeVoiceAudibility(vp, control.voicePressure[v], pitchMode);
-        const bool silentMute = aud.muteBlend >= 0.999f;
-
-        const float liveAmpRaw = computeLiveVoiceAmplitude(vp, lfoA, lfoB);
-        const float effAmp = silentMute ? 0.0f : clampf(liveAmpRaw, 0.0f, 1.0f);
-        const float livePan = clampf(computeLiveVoicePan(vp, lfoA, lfoB) * panScale, -1.0f, 1.0f);
-        const float basePan = clampf(vp.pan * panScale, -1.0f, 1.0f);
+        const VoiceCircuitState vc = evaluateVoiceCircuit(control, v, stutterGateMask);
+        const bool silentMute = vc.isMuted;
+        const float effAmp = evaluateLiveOscAmplitude(control, v, lfoA, lfoB, stutterGateMask);
+        const float livePan = applySpatialFocusPan(computeLiveVoicePan(vp, lfoA, lfoB), v,
+                                                   control.global.monoCollapse, sf);
+        const float basePan = applySpatialFocusPan(vp.pan, v, control.global.monoCollapse, sf);
 
         const float dA = computeLiveLfoADepth(vp, lfoB);
         float pLo = (vp.lfoTarget == LfoTarget::Pan) ? applyLfoPan(vp.pan, dA, -1.0f) : vp.pan;
@@ -135,8 +136,8 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
             pHi = applyLfoPan(pHi, vp.lfoBDepth, +1.0f);
             modDepth = clampf(modDepth + vp.lfoBDepth, 0.0f, 1.0f);
         }
-        pLo = clampf(pLo * panScale, -1.0f, 1.0f);
-        pHi = clampf(pHi * panScale, -1.0f, 1.0f);
+        pLo = applySpatialFocusPan(pLo, v, control.global.monoCollapse, sf);
+        pHi = applySpatialFocusPan(pHi, v, control.global.monoCollapse, sf);
         if (pLo > pHi) {
             const float tmp = pLo;
             pLo = pHi;
@@ -156,6 +157,7 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         const float halfW = 18.5f - 6.0f * octAboveBass;
         const float tgtInvW2 = 1.0f / (halfW * halfW);
         const float tgtFocus = (spotlightActive && rawHud.focusedKnob == v) ? 1.0f : 0.0f;
+        const float aGate = (control.keyMod.stutterDepth[v] > 1.0e-4f) ? alphaChop : alphaPos;
 
         panX_[v] = slewScalar(panX_[v], kPanCenterX + livePan * kPanHalfSpanX, alphaPos, 0.02f);
         panBaseX_[v] =
@@ -165,10 +167,10 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         orbitXMax_[v] =
             slewScalar(orbitXMax_[v], kPanCenterX + pHi * kPanHalfSpanX, alphaPos, 0.02f);
         panLfoDepth_[v] = slewScalar(panLfoDepth_[v], modDepth, alphaPos, 0.002f);
-        apexH_[v] = slewScalar(apexH_[v], tgtApexH, alphaPos, 0.02f);
+        apexH_[v] = slewScalar(apexH_[v], tgtApexH, aGate, 0.02f);
         invWidth2_[v] = slewScalar(invWidth2_[v], tgtInvW2, alphaPos, 0.00002f);
         focusWeight_[v] = slewScalar(focusWeight_[v], tgtFocus, alphaFocus, 0.002f);
-        muteDim_[v] = slewScalar(muteDim_[v], aud.inaudibleDim, alphaPos, 0.005f);
+        muteDim_[v] = slewScalar(muteDim_[v], vc.inaudibleDim, aGate, 0.005f);
     }
 }
 

@@ -5,16 +5,16 @@
 | Subsystem | Hardware Component | Key Constraints & Notes |
 | :--- | :--- | :--- |
 | **SoC** | Zhuhai JieLi **AC791N** (`WL82`) | AIoT multimedia + BLE SoC |
-| **CPU** | **Dual-core 32-bit `pi32v2`** @ **240-320 MHz** | Proprietary Blackfin-derived RISC/DSP ISA; hardware **single-precision FPU** (`float`), 32 KB I-Cache, 24 KB D-Cache, MMU |
-| **SRAM** | **~578 KB internal SRAM** | Shared across FreeRTOS SMP kernel, `jlstream` audio, USB/BLE stacks, and our static/heap allocations |
-| **Flash** | **1 MB XIP NOR Flash** (`0x02000000`) | Code executes in-place; **~600 KB strict ceiling** for our compiled `.fwsc` application + assets |
-| **Audio I/O** | **44,118 Hz** stereo, **64-frame blocks** | `~1.45 ms` block callback budget. Stereo 3.5mm TRS headphone/line out (AC-coupled, ~1-2 Vpp), auto-muting internal speaker, plus USB-C digital stereo audio |
-| **Display** | **1.54" `240x240` RGB565 TFT LCD** | Driven over high-speed SPI with DMA |
+| **CPU** | **Dual-core 32-bit `pi32v2`** @ **240-320 MHz** | Proprietary Blackfin-derived RISC/DSP ISA; hardware **single-precision FPU** (`-mcpu=r3 -mfprev1`: single-cycle `fadds`/`fsubs`/`fmuls`, 2-step NR reciprocals avoiding `__divsf3`, strict IEEE-754 `-fno-math-errno -ffp-contract=off`, never `-ffast-math`), shared cache, MMU |
+| **SRAM** | **~578 KB internal SRAM** | Hosts `Core 1` `.c1_text` DSP code + `.rodata` (`~28–36 KB`, zero XIP stall/cache contention) + DSP state (`47.19 KB`), uncached `Core 0 <-> Core 1` shared bus, `Core 0` UI renderer (`86.98 KB` + `15.36 KB` strips), and `dinghy`/`felucca-bsp` USB/audio buffers |
+| **Flash** | **1 MB XIP NOR Flash** (`0x02000000`) | Code executes in-place on `Core 0`; **~600 KB strict ceiling** for our compiled `.fwsc` application + assets, plus `dinghy` (`felucca-bsp`) CRC-verified `settings_*` / `slot_*` flash partitions |
+| **Audio I/O** | **~44.1 kHz (`44,118 Hz`)** stereo, **64-frame blocks** | `~1.45 ms` block budget paced strictly by hardware **`ALNK0` I2S `24 MHz` crystal DMA** (`±1.45f`-calibrated 16-bit `int16_t` headroom + **1-LSB TPDF dither** -> zero hard clipping or truncation fuzz into pedals). Stereo 3.5mm TRS out (~1-2 Vpp), auto-muting internal speaker, plus fractional-interpolated USB-C digital stereo audio (`44.1 / 48 kHz`) |
+| **Display** | **1.54" `240x240` RGB565 TFT LCD** | Driven over high-speed `SPI1` with non-blocking DMA (`LCD_IDLE` strip streaming via `zvenson/dinghy`) |
 | **Rotary Controls** | **1x `MASTER` analog pot + 7x endless encoders** | Left: `SELECT`, `PRESETS`, `ALGORITHM` (no push switches); Right: `KNOB1`-`KNOB4` |
 | **Buttons & Keys** | **14 tactile buttons + 27 silicone keys (`F3-G5`)** | Left `OCT-`/`OCT+`, right `2x6` button matrix, 11 labeled black keys + 16 white keys |
-| **Keybed Pressure** | **Carbon-pill `SARADC` resistance sensing** | Matrix rows tied to `AC791N` SARADC pins (`PA7`/`PA8` technique) yield continuous per-key analog pressure without hardware mods |
-| **LEDs** | **42 physical LED channels (27 keys + 14 buttons)** | `2 × 74HC595` software-PWM matrix: 27 white key LEDs, 12 white button LEDs (`OCT-/+`, `FX`..`SEQ`), dual-channel **Green `PLAY` + Red/Orange `STOP`** under `PLAY/STOP` (mixes to Yellow), and **Red** under `REC` |
-| **Connectivity** | **USB-C** (MIDI + Audio + SysEx OTA), **BLE MIDI**, **3.5mm TRS MIDI IN** | Protected USB-MIDI SysEx bootloader allows safe `.fwsc` flashing & stock recovery |
+| **Keybed Pressure** | **Carbon-pill `SARADC` resistance sensing** | Matrix rows `PA7`/`PA8` (`SARADC` ch 0 & 1, with mux settling guard against `MASTER` pot crosstalk) yield continuous `[0..1]` pressure on `White Keys 5–16` without hardware mods |
+| **LEDs** | **42 physical LED channels (27 keys + 14 buttons)** | Multiplexed `2 × 74HC595` (16-pin) scan driven via EMI-safe `5/6-bit` gamma PWM / 1st-order `ΔΣ` modulation (zero BAM `127 <-> 128` glitch or `1–4 kHz` ground whine): 27 white key LEDs, 12 white button LEDs, dual **Green `PLAY` + Red `STOP`**, and **Red `REC`** |
+| **Connectivity & Shell** | **`zvenson/dinghy` + `felucca-bsp` (`MPL-2.0`)**, **USB-C** (MIDI + Stereo Audio + SysEx), **3.5mm TRS MIDI IN** | Composite community HAL (`ADR-034`) strictly isolated in `platforms/fm1/`: power-on **`Hold OCT-` USB rescue mode**, `fm1_cpu1` `Core 1` SRAM offload, `LCD_IDLE` `SPI1` DMA, CRC `slot_*` / `settings_*` flash NVS, and `.fwsc` packaging |
 
 > **Electrical Routing Note for Pedals & Eurorack:** Because the 3.5mm output is a **stereo TRS** headphone/line driver, users should use a **3.5mm TRS stereo breakout** (never a mono TS patch cable directly, which shorts the Right ring to ground). Output is AC-coupled (~1-2 Vpp), ideal for pedals and suited for Eurorack via an input boost/VCA module.
 
@@ -22,20 +22,19 @@
 
 ## 2. Dual-Core Execution Model
 
-Ruido pins real-time DSP and UI/control scanning to separate `pi32v2` cores communicating strictly via **lock-free atomic snapshots and SPSC ring buffers**:
+Ruido pins real-time DSP and UI/control scanning to separate `pi32v2` cores (`Core 1` executing out of internal `.c1_text` SRAM to prevent XIP Flash sector-erase stalls and cache contention), communicating strictly via **uncached / D-Cache-coherent lock-free triple-buffered snapshots and SPSC ring buffers**:
 
 ```text
-┌─────────────────────────────────────────────┐       Lock-Free        ┌─────────────────────────────────────────────┐
-│             CORE 0 (UI & I/O)               │    Control Snapshot    │          CORE 1 (Hard Real-Time DSP)        │
+┌─────────────────────────────────────────────┐       Uncached         ┌─────────────────────────────────────────────┐
+│        CORE 0 (UI & I/O — XIP Flash)        │    Lock-Free Bus       │      CORE 1 (Hard Real-Time DSP — SRAM)     │
 │                                             │ ─────────────────────> │                                             │
-│ • GPIO + SARADC Key Matrix (Gate + Pressure)│                        │ • 44.118 kHz Modulation: 8x Dual Voice LFOs │
-│ • 7x Encoder Quadrature + 3-Gear Rate Scale │    Lock-Free SPSC +    │ • 4x Oversampled Domain (176,472 Hz):       │
-│ • 42-Channel Hardware LED PWM Refresh       │  LFO/Gate Telemetry    │   - 4x Schmitt PolyBLEP Oscillators         │
-│ • 240x16 Ping-Pong Scanline Strip Renderer  │ <───────────────────── │   - Shared Power-Rail Coupling (`ALGORITHM`)│
-│ • SPI DMA Display Transfer (~45-55 FPS)     │                        │   - 4x Series ZDF MS-20 (HPF -> LPF)        │
-│ • Snapshot Rubber-Band / Slew & Flash NVS   │                        │   - Clickless Mute/Pressure + Sin/Cos Pan   │
-└─────────────────────────────────────────────┘                        │ • Nonlinear Sum + 4x -> 1x FIR Decimator    │
-                                                                       └─────────────────────────────────────────────┘
+│ • GPIO + Settled PA7/PA8 SARADC Pressure    │                        │ • ALNK0 24 MHz Crystal DMA Master Clock     │
+│ • 7x Encoder Quadrature + 3-Gear Rate Scale │    Uncached SPSC +     │ • 44.118 kHz Modulation: 8x Dual Voice LFOs │
+│ • 2x 74HC595 42-Ch Gamma/ΔΣ LED Multiplexer │  LFO/Gate Telemetry    │ • 4x Oversampled Domain (176,472 Hz):       │
+│ • 240x16 Ping-Pong Scanline Strip Renderer  │ <───────────────────── │   - 4x Schmitt PolyBLEP + Rail Coupling     │
+│ • LCD_IDLE SPI1 DMA Transfer (~50-60 FPS)   │                        │   - 8x Nodal ZDF MS-20 (HPF -> LPF)         │
+│ • Snapshot Morph & CRC Flash NVS (slot_*)   │                        │ • Bus Sag + FIR + 1-LSB TPDF 16-Bit DAC Out │
+└─────────────────────────────────────────────┘                        └─────────────────────────────────────────────┘
 ```
 
 ---
@@ -91,7 +90,7 @@ Available cycles per `44.118 kHz` stereo frame: **`~5,440 - 7,250` cycles**.
 ## 5. Modular Codebase Hygiene & Cross-Platform Portability (`src/` <-> `platforms/`)
 
 All handwritten files in `src/` are strictly capped at **`<= 700` lines**, organized as a one-way subsystem DAG (`src/core` <- `src/dsp` and `src/core` <- `src/ui`, zero cross-includes between `dsp` and `ui`), and verified automatically on every `make test` via `tools/check_hygiene.py`:
-- **`src/core/` (`sizeof(RuidoController) = 952 B`):** `RuidoController` (orchestration across latching right-grid `FX`, `SEL` Stereo Panning, 3-mode `EDIT`, 8-slot `LFO A/B OSC 1..4`, and `GLOBAL CONFIG` pages + momentary `GLO` hold), `ModifierTracker` (`GLO` & `OCT-/+` holds), `HudEnvelope` (`150 ms` centralized S-curve timer), `EncoderMath` (3-gear linear X4 scaling + gear-invariant `4`-tick detents), `LfoMath` (shared zero-`libm` LFO waveform, `B -> A` cross-modulation, `computeLiveVoiceFilter`, and `computeVoiceAudibility` helpers), `GlobalControl` (orthogonal `GLOBAL FREQ/FILTER/LFO/LEVEL/ALL` transforms + RMS `SPREAD` & linear `PAN` shift + smart 8-LFO scaling + `SNAP BACK` snapshot), `GlobalConfig` (data-driven `GLOBAL CONFIG` table), `LedEngine` (`42`-channel hardware PWM mapper + `LedSmoothState` slews for `1.50 Hz` Muted beacon, `0.35 Hz` `< 20 Hz` sub-audio breathing, `FX` filter glow, `SEL` stereo spread glow, `EDIT` overdrive flare, and `LFO` breath).
+- **`src/core/` (`sizeof(RuidoController) = 1,984 B`):** Controller orchestration (`FX`, 2-page `EDIT`, 8-slot `LFO A/B OSC 1..4`, `SEL` 3-model keyboard selector, and `GLOBAL CONFIG` pages), 3-model `KeyboardEngine` (`LIVE MIXER`, `HARMONIUM`, `CIRCUIT LAB`) + unified per-oscillator circuit audibility/mute truth, 4-slot `128-byte` CRC-32 `SnapshotBank` (log-octave glide, multi-slot pressure blend, and bit-exact momentary morph), 3-gear linear quadrature encoder math, zero-`libm` LFO/filter helpers, and 42-channel varibright LED engine.
 - **`src/ui/` (`sizeof(ScopeHudRenderer) = 86,976 B`):** `ScopeHudRenderer` (chunk pipeline & tonemap), `ScopeTraceEngine` (trigger lock, `60x60` bloom & `OverdriveHairTable`), `HudAmpGraph` (`EDIT` 4-column `DUTY` / `DRIFT` / `LEVEL`, shared `GLOBAL LEVEL` / `GLOBAL ALL` `LEVEL` & Option `3A` narrow hairy CRT overdrive cap), `HudGraphs` (full-screen `FX` / `GLOBAL FILTER` / `GLOBAL ALL` MS-20 passbands & dual-slot `LFO` + companion sibling plots), `HudGlobalViews` (`SEL` & `GLOBAL LEVEL K4` Edge-to-Edge Stereo Panorama Curve + divider-free `GLOBAL CONFIG` list), `HudChrome` + `HudColumnText` + `HudFormat` (divider-free top/bottom chrome, steady 1-to-1 `OSC 1–4` audibility dimming, `FINE`/`COARSE` status badge, 4-voice micro-beads, zero-`snprintf` formatters).
 
 ```text
@@ -99,18 +98,18 @@ All handwritten files in `src/` are strictly capped at **`<= 700` lines**, organ
           │     Portable Modular Engine (src/)       │
           │  • src/dsp/  DroneEngine (47.19 KB)      │
           │  • src/ui/   ScopeHudRenderer (84.94 KB) │
-          │  • src/core/ RuidoController (952 B)     │
+          │  • src/core/ RuidoController (1.94 KB)   │
           └────────────────────┬─────────────────────┘
                                │  Pure C++17 Structs (Zero OS/SDK Headers)
              ┌─────────────────┴─────────────────┐
              ▼                                   ▼
 ┌──────────────────────────┐       ┌──────────────────────────┐
 │     platforms/sim/       │       │     platforms/fm1/       │
-│ • WebAudio / CoreAudio   │       │ • JieLi AC791N / FreeRTOS│
-│ • Exact FM-1 Panel UI    │       │ • jlstream 64-smp Audio  │
-│   (7 Encoders + Master + │       │ • SPI LCD DMA + Key/LEDs │
-│    27 Pressure Keys +    │       │ • SARADC Carbon Pressure │
-│    14 Buttons + 240x240) │       │ • .fwsc SysEx Packaging  │
+│ • WebAudio / CoreAudio   │       │ • dinghy + felucca-bsp   │
+│ • Exact FM-1 Panel UI    │       │ • fm1_cpu1 Core 1 SRAM   │
+│   (7 Encoders + Master + │       │ • ALNK0 + TPDF + USB Aud │
+│    27 Pressure Keys +    │       │ • LCD_IDLE DMA + ΔΣ LEDs │
+│    14 Buttons + 240x240) │       │ • Velo SARADC + .fwsc    │
 └──────────────────────────┘       └──────────────────────────┘
 ```
 

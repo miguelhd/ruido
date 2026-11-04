@@ -47,8 +47,10 @@ let audioStarting = false;
 
 let masterPotValue = 0.85;
 const encoderAngles = new Float32Array(7);
+const activeBlackPressures = new Float32Array(11);
 const activeWhitePressures = new Float32Array(16);
 const heldKeyboardCodes = new Set();
+const heldKeyboardBlackPads = new Set();
 const heldKeyboardPressurePads = new Set();
 
 let announceTimer = null;
@@ -71,7 +73,7 @@ async function bootUiWasm() {
 
   uiMem = new WebAssembly.Memory({ initial: 16, maximum: 16 });
   const stackPointer = new WebAssembly.Global({ value: 'i32', mutable: true }, 16 * 65536);
-  const table = new WebAssembly.Table({ initial: 8, element: 'anyfunc' });
+  const table = new WebAssembly.Table({ initial: 32, element: 'anyfunc' });
 
   const inst = await WebAssembly.instantiate(wasmBytes, {
     env: {
@@ -102,9 +104,9 @@ async function bootUiWasm() {
 
 function flushControlToWorklet(snap = false) {
   if (!uiWasm) return;
+  if (!snap && uiWasm.wasm_ui_consume_dirty() === 0) return;
   syncAriaFromSummary();
   if (!workletNode) return;
-  if (!snap && uiWasm.wasm_ui_consume_dirty() === 0) return;
 
   const copy = uiU8.slice(uiPtrs.control, uiPtrs.control + uiPtrs.controlSize).buffer;
   workletNode.port.postMessage({ type: 'control', bytes: copy, snap }, [copy]);
@@ -150,7 +152,7 @@ async function ensureAudioRunning() {
       } else if (msg.type === 'telemetry') {
         const t = msg.telemetry;
         if (t && t.length >= 26) {
-          uiF32.set(t.subarray(0, Math.min(t.length, 46)), uiPtrs.telemetryIn);
+          uiF32.set(t.subarray(0, Math.min(t.length, 47)), uiPtrs.telemetryIn);
           uiWasm.wasm_ui_apply_telemetry();
         }
         if (msg.scopeBuffer && msg.scopeCount > 0) {
@@ -408,10 +410,11 @@ function bindKnobs() {
       (e) => {
         e.preventDefault();
         const knobBank = uiWasm && uiPtrs ? Math.round(uiF32[uiPtrs.summary + 47]) : 0;
-        // KnobBankMode: Lfo = 6, GlobalLfo = 9, None (GlobalConfig) = 12
+        // KnobBankMode: Lfo = 6, GlobalLfo = 9, None (GlobalConfig / SEL) = 13
         const isDiscrete =
           encId === 0 ||
-          (encId === 2 && knobBank === 12) ||
+          encId === 1 ||
+          (encId === 2 && knobBank === 13) ||
           (encId === 3 && (knobBank === 6 || knobBank === 9));
 
         if (isDiscrete) {
@@ -514,9 +517,17 @@ function bindButtonsAndKeybed() {
     });
   });
 
-  // 11 Raised Black Silicone Keys (OP1..6, PIT, GLO, MONO, POLY, F#5 — strictly momentary)
+  // 11 Raised Black Silicone Keys (OP1..6, PIT, GLO, MONO, POLY, 11th — momentary + pressure)
   document.querySelectorAll('.black-key').forEach((keyEl) => {
     const keyId = Number(keyEl.dataset.black);
+
+    const setBlackPressure = (p) => {
+      const clamped = clamp01(p);
+      activeBlackPressures[keyId] = clamped;
+      keyEl.style.setProperty('--pressure', clamped.toFixed(3));
+      uiWasm.wasm_ui_black_pressure(keyId, clamped);
+      flushControlToWorklet();
+    };
 
     keyEl.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
@@ -524,8 +535,19 @@ function bindButtonsAndKeybed() {
 
       keyEl.setPointerCapture(e.pointerId);
       keyEl.classList.add('is-held');
+
+      const rect = keyEl.getBoundingClientRect();
+      const hitNorm = 1 - clamp01((e.clientY - rect.top) / Math.max(1, rect.height));
+      const basePressure = 0.16 + 0.22 * hitNorm;
+      const startY = e.clientY;
+
       uiWasm.wasm_ui_black_key(keyId, 1);
-      flushControlToWorklet();
+      setBlackPressure(basePressure);
+
+      const onMove = (ev) => {
+        const dy = startY - ev.clientY;
+        setBlackPressure(basePressure + dy / 115);
+      };
 
       let released = false;
       const onRelease = () => {
@@ -533,16 +555,31 @@ function bindButtonsAndKeybed() {
         released = true;
         keyEl.classList.remove('is-held');
         keyEl.blur();
+        activeBlackPressures[keyId] = 0;
+        keyEl.style.setProperty('--pressure', '0');
         uiWasm.wasm_ui_black_key(keyId, 0);
         flushControlToWorklet();
+        keyEl.removeEventListener('pointermove', onMove);
         keyEl.removeEventListener('pointerup', onRelease);
         keyEl.removeEventListener('pointercancel', onRelease);
         keyEl.removeEventListener('lostpointercapture', onRelease);
       };
+      keyEl.addEventListener('pointermove', onMove);
       keyEl.addEventListener('pointerup', onRelease);
       keyEl.addEventListener('pointercancel', onRelease);
       keyEl.addEventListener('lostpointercapture', onRelease);
     });
+
+    keyEl.addEventListener(
+      'wheel',
+      (e) => {
+        if (activeBlackPressures[keyId] <= 0 && !heldKeyboardBlackPads.has(keyId)) return;
+        e.preventDefault();
+        const nextP = clamp01(activeBlackPressures[keyId] + (e.deltaY < 0 ? 0.06 : -0.06));
+        setBlackPressure(nextP);
+      },
+      { passive: false }
+    );
 
     keyEl.addEventListener('click', (e) => {
       if (e.detail === 0) {
@@ -554,10 +591,9 @@ function bindButtonsAndKeybed() {
     });
   });
 
-  // 16 Bottom White Silicone Keys (0..3 Mutes, 4..7 Pressure Pads, 8..15 Snapshots)
+  // 16 Bottom White Silicone Keys (all 16 momentary + continuous pressure)
   document.querySelectorAll('.white-key').forEach((keyEl) => {
     const wIdx = Number(keyEl.dataset.white);
-    const hasPressure = wIdx >= 4;
 
     const setPadPressure = (p) => {
       const clamped = clamp01(p);
@@ -568,59 +604,56 @@ function bindButtonsAndKeybed() {
     };
 
     keyEl.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
       ensureAudioRunning();
       keyEl.setPointerCapture(e.pointerId);
       keyEl.classList.add('is-held');
 
       const rect = keyEl.getBoundingClientRect();
       const hitNorm = 1 - clamp01((e.clientY - rect.top) / Math.max(1, rect.height));
-      let basePressure = 0.22 + 0.68 * hitNorm;
+      const basePressure = 0.16 + 0.22 * hitNorm;
       const startY = e.clientY;
 
       uiWasm.wasm_ui_white_gate(wIdx, 1);
-      if (hasPressure) {
-        setPadPressure(basePressure);
-      } else {
-        flushControlToWorklet();
-      }
+      setPadPressure(basePressure);
 
       const onMove = (ev) => {
-        if (!hasPressure) return;
         const dy = startY - ev.clientY;
-        setPadPressure(basePressure + dy / 95);
+        setPadPressure(basePressure + dy / 115);
       };
 
+      let released = false;
       const onRelease = () => {
+        if (released) return;
+        released = true;
         keyEl.classList.remove('is-held');
         keyEl.blur();
-        if (hasPressure) {
-          activeWhitePressures[wIdx] = 0;
-          keyEl.style.setProperty('--pressure', '0');
-        }
+        activeWhitePressures[wIdx] = 0;
+        keyEl.style.setProperty('--pressure', '0');
         uiWasm.wasm_ui_white_gate(wIdx, 0);
         flushControlToWorklet();
         keyEl.removeEventListener('pointermove', onMove);
         keyEl.removeEventListener('pointerup', onRelease);
         keyEl.removeEventListener('pointercancel', onRelease);
+        keyEl.removeEventListener('lostpointercapture', onRelease);
       };
 
       keyEl.addEventListener('pointermove', onMove);
       keyEl.addEventListener('pointerup', onRelease);
       keyEl.addEventListener('pointercancel', onRelease);
+      keyEl.addEventListener('lostpointercapture', onRelease);
     });
 
-    if (hasPressure) {
-      keyEl.addEventListener(
-        'wheel',
-        (e) => {
-          if (activeWhitePressures[wIdx] <= 0 && !heldKeyboardPressurePads.has(wIdx)) return;
-          e.preventDefault();
-          const nextP = clamp01(activeWhitePressures[wIdx] + (e.deltaY < 0 ? 0.06 : -0.06));
-          setPadPressure(nextP);
-        },
-        { passive: false }
-      );
-    }
+    keyEl.addEventListener(
+      'wheel',
+      (e) => {
+        if (activeWhitePressures[wIdx] <= 0 && !heldKeyboardPressurePads.has(wIdx)) return;
+        e.preventDefault();
+        const nextP = clamp01(activeWhitePressures[wIdx] + (e.deltaY < 0 ? 0.06 : -0.06));
+        setPadPressure(nextP);
+      },
+      { passive: false }
+    );
 
     keyEl.addEventListener('click', (e) => {
       if (e.detail === 0) {
@@ -653,33 +686,49 @@ function bindComputerKeyboard() {
     BracketRight: 1, // OCT+ (momentary Coarse knob rate)
     Equal: 1,        // OCT+ (momentary Coarse knob rate)
     KeyQ: 2,         // FX (Per-Voice MS-20 Dual Filter Page toggle)
-    KeyW: 3,         // SEL (Per-Voice Stereo Panning Page toggle)
+    KeyW: 3,         // SEL (Stateless Keyboard Model Toast)
     KeyL: 5,         // LFO (Per-Voice LFO Page toggle)
-    KeyE: 6,         // EDIT (Duty, Drift & Channel Level/Drive Page toggle)
+    KeyE: 6,         // EDIT (Page 1 Mix -> Page 2 Pan -> Close)
     Semicolon: 7,    // GLO right grid (GLOBAL CONFIG menu toggle)
     KeyH: 8,         // HOME
     Escape: 8,       // HOME
   };
-  const keyToMuteWhite = {
+  const keyToWhite = {
     KeyZ: 0,
     KeyX: 1,
     KeyC: 2,
     KeyV: 3,
-  };
-  const keyToPressureWhite = {
     KeyA: 4,
     KeyS: 5,
     KeyD: 6,
     KeyF: 7,
+    KeyR: 8,
+    KeyT: 9,
+    KeyY: 10,
+    KeyU: 11,
+    KeyJ: 12,
+    KeyK: 13,
+    KeyI: 14,
+    KeyO: 15,
   };
 
   window.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-    // Allow ArrowUp / ArrowDown to lean harder/softer while holding A/S/D/F pressure pads
-    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && heldKeyboardPressurePads.size > 0) {
+    // Allow ArrowUp / ArrowDown to lean harder/softer while holding any keybed punch-in pad
+    if (
+      (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
+      (heldKeyboardPressurePads.size > 0 || heldKeyboardBlackPads.size > 0)
+    ) {
       e.preventDefault();
       const delta = e.key === 'ArrowUp' ? 0.08 : -0.08;
+      for (const bId of heldKeyboardBlackPads) {
+        const nextP = clamp01(activeBlackPressures[bId] + delta);
+        activeBlackPressures[bId] = nextP;
+        const el = document.querySelector(`[data-black="${bId}"]`);
+        if (el) el.style.setProperty('--pressure', nextP.toFixed(3));
+        uiWasm.wasm_ui_black_pressure(bId, nextP);
+      }
       for (const wIdx of heldKeyboardPressurePads) {
         const nextP = clamp01(activeWhitePressures[wIdx] + delta);
         activeWhitePressures[wIdx] = nextP;
@@ -719,9 +768,15 @@ function bindComputerKeyboard() {
       ensureAudioRunning();
       heldKeyboardCodes.add(e.code);
       const bId = keyToBlack[e.code];
+      heldKeyboardBlackPads.add(bId);
+      activeBlackPressures[bId] = 0.45;
       const el = document.querySelector(`[data-black="${bId}"]`);
-      if (el) el.classList.add('is-held');
+      if (el) {
+        el.classList.add('is-held');
+        el.style.setProperty('--pressure', '0.450');
+      }
       uiWasm.wasm_ui_black_key(bId, 1);
+      uiWasm.wasm_ui_black_pressure(bId, 0.45);
       flushControlToWorklet();
     } else if (e.code in keyToButton) {
       ensureAudioRunning();
@@ -731,27 +786,19 @@ function bindComputerKeyboard() {
       if (el) el.classList.add('is-held');
       uiWasm.wasm_ui_button(btnId, 1);
       flushControlToWorklet();
-    } else if (e.code in keyToMuteWhite) {
+    } else if (e.code in keyToWhite) {
       ensureAudioRunning();
       heldKeyboardCodes.add(e.code);
-      const wIdx = keyToMuteWhite[e.code];
-      const el = document.querySelector(`[data-white="${wIdx}"]`);
-      if (el) el.classList.add('is-held');
-      uiWasm.wasm_ui_white_gate(wIdx, 1);
-      flushControlToWorklet();
-    } else if (e.code in keyToPressureWhite) {
-      ensureAudioRunning();
-      heldKeyboardCodes.add(e.code);
-      const wIdx = keyToPressureWhite[e.code];
+      const wIdx = keyToWhite[e.code];
       heldKeyboardPressurePads.add(wIdx);
-      activeWhitePressures[wIdx] = 0.52;
+      activeWhitePressures[wIdx] = 0.45;
       const el = document.querySelector(`[data-white="${wIdx}"]`);
       if (el) {
         el.classList.add('is-held');
-        el.style.setProperty('--pressure', '0.520');
+        el.style.setProperty('--pressure', '0.450');
       }
       uiWasm.wasm_ui_white_gate(wIdx, 1);
-      uiWasm.wasm_ui_white_pressure(wIdx, 0.52);
+      uiWasm.wasm_ui_white_pressure(wIdx, 0.45);
       flushControlToWorklet();
     }
   });
@@ -767,8 +814,13 @@ function bindComputerKeyboard() {
       flushControlToWorklet();
     } else if (e.code in keyToBlack) {
       const bId = keyToBlack[e.code];
+      heldKeyboardBlackPads.delete(bId);
+      activeBlackPressures[bId] = 0;
       const el = document.querySelector(`[data-black="${bId}"]`);
-      if (el) el.classList.remove('is-held');
+      if (el) {
+        el.classList.remove('is-held');
+        el.style.setProperty('--pressure', '0');
+      }
       uiWasm.wasm_ui_black_key(bId, 0);
       flushControlToWorklet();
     } else if (e.code in keyToButton) {
@@ -777,14 +829,8 @@ function bindComputerKeyboard() {
       if (el) el.classList.remove('is-held');
       uiWasm.wasm_ui_button(btnId, 0);
       flushControlToWorklet();
-    } else if (e.code in keyToMuteWhite) {
-      const wIdx = keyToMuteWhite[e.code];
-      const el = document.querySelector(`[data-white="${wIdx}"]`);
-      if (el) el.classList.remove('is-held');
-      uiWasm.wasm_ui_white_gate(wIdx, 0);
-      flushControlToWorklet();
-    } else if (e.code in keyToPressureWhite) {
-      const wIdx = keyToPressureWhite[e.code];
+    } else if (e.code in keyToWhite) {
+      const wIdx = keyToWhite[e.code];
       heldKeyboardPressurePads.delete(wIdx);
       activeWhitePressures[wIdx] = 0;
       const el = document.querySelector(`[data-white="${wIdx}"]`);
@@ -807,21 +853,20 @@ function bindComputerKeyboard() {
         uiWasm.wasm_ui_button(12, 0);
       } else if (code in keyToBlack) {
         const bId = keyToBlack[code];
+        activeBlackPressures[bId] = 0;
         const el = document.querySelector(`[data-black="${bId}"]`);
-        if (el) el.classList.remove('is-held');
+        if (el) {
+          el.classList.remove('is-held');
+          el.style.setProperty('--pressure', '0');
+        }
         uiWasm.wasm_ui_black_key(bId, 0);
       } else if (code in keyToButton) {
         const btnId = keyToButton[code];
         const el = document.querySelector(`[data-button="${btnId}"]`);
         if (el) el.classList.remove('is-held');
         uiWasm.wasm_ui_button(btnId, 0);
-      } else if (code in keyToMuteWhite) {
-        const wIdx = keyToMuteWhite[code];
-        const el = document.querySelector(`[data-white="${wIdx}"]`);
-        if (el) el.classList.remove('is-held');
-        uiWasm.wasm_ui_white_gate(wIdx, 0);
-      } else if (code in keyToPressureWhite) {
-        const wIdx = keyToPressureWhite[code];
+      } else if (code in keyToWhite) {
+        const wIdx = keyToWhite[code];
         activeWhitePressures[wIdx] = 0;
         const el = document.querySelector(`[data-white="${wIdx}"]`);
         if (el) {
@@ -832,6 +877,7 @@ function bindComputerKeyboard() {
       }
     }
     heldKeyboardCodes.clear();
+    heldKeyboardBlackPads.clear();
     heldKeyboardPressurePads.clear();
     flushControlToWorklet();
   });
@@ -846,6 +892,7 @@ async function initWebMidi() {
 
   try {
     const midi = await navigator.requestMIDIAccess({ sysex: false });
+    const heldMidiBlackPads = new Set();
     const heldMidiWhitePads = new Set();
     const lastCcValues = new Int16Array(128).fill(-1);
 
@@ -867,41 +914,61 @@ async function initWebMidi() {
           uiWasm.wasm_ui_black_key(entry.idx, pressed ? 1 : 0);
           const el = document.querySelector(`[data-black="${entry.idx}"]`);
           if (el) el.classList.toggle('is-held', pressed);
+          if (pressed) {
+            heldMidiBlackPads.add(entry.idx);
+            const velP = clamp01(d2 / 127);
+            activeBlackPressures[entry.idx] = velP;
+            if (el) el.style.setProperty('--pressure', velP.toFixed(3));
+            uiWasm.wasm_ui_black_pressure(entry.idx, velP);
+          } else {
+            heldMidiBlackPads.delete(entry.idx);
+            activeBlackPressures[entry.idx] = 0;
+            if (el) el.style.setProperty('--pressure', '0');
+          }
         } else {
           uiWasm.wasm_ui_white_gate(entry.idx, pressed ? 1 : 0);
           const el = document.querySelector(`[data-white="${entry.idx}"]`);
           if (el) el.classList.toggle('is-held', pressed);
-          if (entry.idx >= 4) {
-            if (pressed) {
-              heldMidiWhitePads.add(entry.idx);
-              const velP = clamp01(d2 / 127);
-              activeWhitePressures[entry.idx] = velP;
-              if (el) el.style.setProperty('--pressure', velP.toFixed(3));
-              uiWasm.wasm_ui_white_pressure(entry.idx, velP);
-            } else {
-              heldMidiWhitePads.delete(entry.idx);
-              activeWhitePressures[entry.idx] = 0;
-              if (el) el.style.setProperty('--pressure', '0');
-            }
+          if (pressed) {
+            heldMidiWhitePads.add(entry.idx);
+            const velP = clamp01(d2 / 127);
+            activeWhitePressures[entry.idx] = velP;
+            if (el) el.style.setProperty('--pressure', velP.toFixed(3));
+            uiWasm.wasm_ui_white_pressure(entry.idx, velP);
+          } else {
+            heldMidiWhitePads.delete(entry.idx);
+            activeWhitePressures[entry.idx] = 0;
+            if (el) el.style.setProperty('--pressure', '0');
           }
         }
         flushControlToWorklet();
       } else if (status === 0xa0) {
-        // Polyphonic Key Pressure (Aftertouch per note)
+        // Polyphonic Key Pressure (Aftertouch per note) across all 27 keys
         const entry = MIDI_KEYBED_MAP[d1 - 53];
-        if (entry && entry.kind === 'white' && entry.idx >= 4) {
-          const p = clamp01(d2 / 127);
+        if (!entry) return;
+        const p = clamp01(d2 / 127);
+        if (entry.kind === 'black') {
+          activeBlackPressures[entry.idx] = p;
+          const el = document.querySelector(`[data-black="${entry.idx}"]`);
+          if (el) el.style.setProperty('--pressure', p.toFixed(3));
+          uiWasm.wasm_ui_black_pressure(entry.idx, p);
+        } else {
           activeWhitePressures[entry.idx] = p;
           const el = document.querySelector(`[data-white="${entry.idx}"]`);
           if (el) el.style.setProperty('--pressure', p.toFixed(3));
           uiWasm.wasm_ui_white_pressure(entry.idx, p);
-          flushControlToWorklet();
         }
+        flushControlToWorklet();
       } else if (status === 0xd0) {
-        // Channel Aftertouch -> applies to any held pressure pads (or all 4 pressure pads)
+        // Channel Aftertouch -> applies to any held keybed pads
         const p = clamp01(d1 / 127);
-        const targets = heldMidiWhitePads.size > 0 ? heldMidiWhitePads : [4, 5, 6, 7];
-        for (const wIdx of targets) {
+        for (const bIdx of heldMidiBlackPads) {
+          activeBlackPressures[bIdx] = p;
+          const el = document.querySelector(`[data-black="${bIdx}"]`);
+          if (el) el.style.setProperty('--pressure', p.toFixed(3));
+          uiWasm.wasm_ui_black_pressure(bIdx, p);
+        }
+        for (const wIdx of heldMidiWhitePads) {
           activeWhitePressures[wIdx] = p;
           const el = document.querySelector(`[data-white="${wIdx}"]`);
           if (el) el.style.setProperty('--pressure', p.toFixed(3));
@@ -912,8 +979,13 @@ async function initWebMidi() {
         // MIDI CC: CC 1 / 74 = Pressure, CC 7 = Master, CC 16..19 / 70..73 = KNOB1..4
         if (d1 === 1 || d1 === 74) {
           const p = clamp01(d2 / 127);
-          const targets = heldMidiWhitePads.size > 0 ? heldMidiWhitePads : [4, 5, 6, 7];
-          for (const wIdx of targets) {
+          for (const bIdx of heldMidiBlackPads) {
+            activeBlackPressures[bIdx] = p;
+            const el = document.querySelector(`[data-black="${bIdx}"]`);
+            if (el) el.style.setProperty('--pressure', p.toFixed(3));
+            uiWasm.wasm_ui_black_pressure(bIdx, p);
+          }
+          for (const wIdx of heldMidiWhitePads) {
             activeWhitePressures[wIdx] = p;
             const el = document.querySelector(`[data-white="${wIdx}"]`);
             if (el) el.style.setProperty('--pressure', p.toFixed(3));
@@ -982,6 +1054,7 @@ function startDisplayAndLedLoop() {
     lastFrameMs = nowMs;
 
     uiWasm.wasm_ui_tick_and_render(dtSec);
+    flushControlToWorklet();
     ctx.putImageData(imageData, 0, 0);
 
     const webAudioActive = Boolean((audioCtx && audioCtx.state === 'running') || audioStarting);

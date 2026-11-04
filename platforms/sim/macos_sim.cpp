@@ -149,10 +149,10 @@ int main(int argc, char** argv) {
     }
 
     std::printf("=== Ruido Native macOS CoreAudio Auditioner (44,118 Hz / 4x OS) ===\n");
-    std::printf("  [j] FX Filter  | [b] SEL Pan    | [k] EDIT Page  | [l] LFO | [;] CONFIG\n");
-    std::printf("  [g] GLO Global | [,/.] SELECT   | [h] HOME       | [m] MONO/STEREO\n");
+    std::printf("  [j] FX Filter  | [b] SEL Model  | [k] EDIT/PAN   | [l] LFO | [;] CONFIG\n");
+    std::printf("  [1-6,g,m,0] Top Key Punch-Ins   | [,/.] SELECT   | [h] HOME\n");
     std::printf("  [q/w/e/r] KNOB 1-4 +            | [u/i/o/p] KNOB 1-4 -\n");
-    std::printf("  [z/x/c/v] Osc 1-4 Mutes         | [a/s/d/f] Pulse Pad Pressure\n");
+    std::printf("  [z/x/c/v] Kill Cut 1-4          | [a/s/d/f] Formant Bite 1-4\n");
     std::printf("  [ [ / ] ] ALGORITHM Coupling    | [ - / = ] Knob Rate (Fine/Coarse)\n");
     std::printf("  [Space] PLAY/STOP               | [ESC] or [Q] Quit\n\n");
 
@@ -243,42 +243,28 @@ int main(int argc, char** argv) {
                 break;
             case ',': controller.onEncoderDelta(ruido::EncoderId::Select, -4); break;
             case '.': controller.onEncoderDelta(ruido::EncoderId::Select, 4); break;
-            case 'm': {
-                const auto nextKey = controller.state().global.monoCollapse ?
-                                         ruido::BlackKeyId::Poly :
-                                         ruido::BlackKeyId::Mono;
-                controller.onBlackKeyEvent(nextKey, true);
-                controller.onBlackKeyEvent(nextKey, false);
-                break;
-            }
+            case 'm': toggleMod(ruido::BlackKeyId::Mono); break;
+            case '0': toggleMod(ruido::BlackKeyId::ScopeFreezeKey); break;
             case ' ':
                 controller.onButtonEvent(ruido::ButtonId::PlayStop, true);
                 controller.onButtonEvent(ruido::ButtonId::PlayStop, false);
                 break;
             case 'z':
-                controller.onWhiteKeyGate(0u, true);
-                controller.onWhiteKeyGate(0u, false);
-                break;
             case 'x':
-                controller.onWhiteKeyGate(1u, true);
-                controller.onWhiteKeyGate(1u, false);
-                break;
             case 'c':
-                controller.onWhiteKeyGate(2u, true);
-                controller.onWhiteKeyGate(2u, false);
+            case 'v': {
+                const uint8_t idx = (ch == 'z') ? 0u : (ch == 'x') ? 1u : (ch == 'c') ? 2u : 3u;
+                const bool cur = (controller.hud().heldWhiteMask & (1u << idx)) != 0u;
+                controller.onWhiteKeyPressure(idx, cur ? 0.0f : 0.85f);
                 break;
-            case 'v':
-                controller.onWhiteKeyGate(3u, true);
-                controller.onWhiteKeyGate(3u, false);
-                break;
+            }
             case 'a':
             case 's':
             case 'd':
             case 'f': {
                 const uint8_t idx = (ch == 'a') ? 4u : (ch == 's') ? 5u : (ch == 'd') ? 6u : 7u;
-                const float cur = controller.state().voicePressure[idx - 4u];
-                const float next = (cur > 0.1f) ? 0.0f : 0.78f;
-                controller.onWhiteKeyPressure(idx, next);
+                const bool cur = (controller.hud().heldWhiteMask & (1u << idx)) != 0u;
+                controller.onWhiteKeyPressure(idx, cur ? 0.0f : 0.78f);
                 break;
             }
             default:

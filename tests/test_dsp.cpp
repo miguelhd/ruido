@@ -2353,6 +2353,140 @@ void testPulseWidthAndVoiceDriftPhysics() {
                 static_cast<double>(maxWideNorm));
 }
 
+// 15. Live Mixer, Circuit Lab Stutter, PWM Swarm & Clickless Snapshot Morph DSP
+void testLiveMixerAndSnapshotMorphDsp() {
+    std::printf(
+        "[Test 15] Live Mixer / Circuit Lab punch-ins, PWM swarm & clickless snapshot morph...\n");
+    static ruido::DroneEngine engine;
+    engine.init(ruido::kBaseSampleRate);
+
+    std::array<float, ruido::kBlockFrames> outL{};
+    std::array<float, ruido::kBlockFrames> outR{};
+    std::array<ruido::ScopeFrame, ruido::kBlockFrames> drain{};
+
+    ruido::EngineControlState baseSt = ruido::EngineControlState::makeDefault();
+    baseSt.voices[0].frequencyHz = 220.0f;
+    baseSt.voices[0].lfoRateHz = 6.0f;
+    baseSt.voices[0].lfoDepth = 0.50f;
+    engine.controlBus().publish(baseSt);
+    engine.snapParametersToLatest();
+    for (int b = 0; b < 32; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+    }
+
+    // (a) Sample-accurate 2.2ms-slewed Gate Stutter + stutterGateMask telemetry
+    ruido::EngineControlState stutSt = baseSt;
+    stutSt.keyMod.stutterDepth[0] = 1.0f;
+    stutSt.keyMod.stutterRateHz[0] = 14.0f;
+    engine.controlBus().publish(stutSt);
+
+    bool sawOpen = false;
+    bool sawClosed = false;
+    float maxDelta = 0.0f;
+    float prevSample = outL[ruido::kBlockFrames - 1u];
+    for (int b = 0; b < 60; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        const uint8_t mask = engine.telemetry().stutterGateMask.load(std::memory_order_relaxed);
+        if ((mask & 1u) != 0u) {
+            sawOpen = true;
+        } else {
+            sawClosed = true;
+        }
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            EXPECT_TRUE(std::isfinite(outL[i]) && std::isfinite(outR[i]),
+                        "Non-finite output during gate stutter");
+            maxDelta = std::max(maxDelta, std::fabs(outL[i] - prevSample));
+            prevSample = outL[i];
+        }
+    }
+    EXPECT_TRUE(sawOpen && sawClosed, "Stutter chopper failed to alternate gate open/closed");
+    EXPECT_TRUE(maxDelta < 0.35f, "Stutter edge slew produced harsh discontinuity (%.4f)",
+                static_cast<double>(maxDelta));
+
+    // (b) Master Dub LPF Drop (28 kHz -> 55 Hz) + Overload Surge + Sub Drop + Spatial Focus
+    ruido::EngineControlState dubSt = baseSt;
+    dubSt.keyMod.overloadSurge = 1.0f;
+    dubSt.keyMod.dubLpfDrop = 0.92f;
+    dubSt.keyMod.spatialFocus = -1.0f; // Momentary mono collapse
+    for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
+        dubSt.keyMod.voicePitchMul[v] = 0.5f; // -1 Oct Sub Drop
+    }
+    engine.controlBus().publish(dubSt);
+    for (int b = 0; b < 80; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+    }
+    float monoDiff = 0.0f;
+    double dubRms = 0.0;
+    for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+        monoDiff = std::max(monoDiff, std::fabs(outL[i] - outR[i]));
+        dubRms += static_cast<double>(outL[i]) * static_cast<double>(outL[i]);
+    }
+    dubRms = std::sqrt(dubRms / static_cast<double>(ruido::kBlockFrames));
+    EXPECT_TRUE(monoDiff < 1.0e-4f, "spatialFocus=-1 failed to collapse stereo field (diff=%.6f)",
+                static_cast<double>(monoDiff));
+    EXPECT_TRUE(dubRms > 0.02 && dubRms < 1.5, "Dub LPF + Sub Drop RMS out of range (%.4f)",
+                dubRms);
+
+    // (c) Stasis Freeze: halts LFO phase advance completely while audio drones cleanly
+    ruido::EngineControlState freezeSt = baseSt;
+    freezeSt.keyMod.stasisFreeze = true;
+    engine.controlBus().publish(freezeSt);
+    engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+    const float phaseFrozenA = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
+    for (int b = 0; b < 20; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+    }
+    const float phaseFrozenB = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
+    EXPECT_TRUE(std::fabs(phaseFrozenB - phaseFrozenA) < 1.0e-7f,
+                "Stasis Freeze failed to hold LFO phase stationary (%.6f -> %.6f)",
+                static_cast<double>(phaseFrozenA), static_cast<double>(phaseFrozenB));
+
+    // Release -> LFO resumes advancing immediately
+    engine.controlBus().publish(baseSt);
+    for (int b = 0; b < 20; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+    }
+    const float phaseResumed = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
+    EXPECT_TRUE(std::fabs(phaseResumed - phaseFrozenB) > 0.05f,
+                "LFO failed to resume after releasing Stasis Freeze");
+
+    // (d) POLY Swarm voicePwDelta shifts harmonic timbre even in MONO output + clickless morph
+    ruido::EngineControlState monoBase = baseSt;
+    monoBase.global.monoCollapse = true;
+    engine.controlBus().publish(monoBase);
+    engine.snapParametersToLatest();
+    for (int b = 0; b < 24; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+    }
+    ruido::EngineControlState swarmSt = monoBase;
+    swarmSt.keyMod.voicePwDelta = {-0.18f, 0.16f, -0.26f, 0.24f};
+    swarmSt.keyMod.voicePitchMul = {0.969f, 1.034f, 0.936f, 1.075f};
+    engine.controlBus().publish(swarmSt);
+    float maxMorphStep = 0.0f;
+    float prevM = outL[ruido::kBlockFrames - 1u];
+    for (int b = 0; b < 40; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            EXPECT_TRUE(std::isfinite(outL[i]) && std::abs(outL[i] - outR[i]) < 1.0e-5f,
+                        "Non-finite or asymmetric MONO output during POLY swarm");
+            maxMorphStep = std::max(maxMorphStep, std::fabs(outL[i] - prevM));
+            prevM = outL[i];
+        }
+    }
+    EXPECT_TRUE(maxMorphStep < 0.45f, "POLY voicePwDelta produced harsh step (%.4f)",
+                static_cast<double>(maxMorphStep));
+
+    std::printf("  Stutter maxDelta=%.4f, Dub RMS=%.3f, Swarm maxStep=%.4f\n",
+                static_cast<double>(maxDelta), dubRms, static_cast<double>(maxMorphStep));
+}
+
 } // namespace
 
 int main() {
@@ -2372,6 +2506,7 @@ int main() {
     testRev2OtaSallenKeyPhysics();
     testUnbrokenExtremesSubBassOverdriveSyncAndAudioLfo();
     testPulseWidthAndVoiceDriftPhysics();
+    testLiveMixerAndSnapshotMorphDsp();
 
     if (gFailures == 0) {
         std::printf("\n[PASS] All Milestone 1 DSP verification gates passed!\n");

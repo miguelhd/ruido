@@ -10,8 +10,8 @@ namespace ruido {
 
 enum class HeldModifier : uint8_t { None = 0, Global = 1 };
 
-constexpr bool isModifierBlackKey(BlackKeyId k) noexcept {
-    return k == BlackKeyId::Glo;
+constexpr bool isModifierBlackKey(BlackKeyId) noexcept {
+    return false; // All 11 black keys belong to the momentary Keyboard Performance surface
 }
 
 // LIFO momentary key & knob-rate tracker for two-hand chording without dynamic containers.
@@ -67,18 +67,20 @@ struct ModifierKeyTracker {
 
     bool isRateHeld() const noexcept { return octMinusHeld || octPlusHeld; }
 
-    HeldModifier activeModifier() const noexcept {
-        uint32_t bestOrder = 0u;
-        HeldModifier best = HeldModifier::None;
-        const auto check = [&](BlackKeyId k, HeldModifier mod) {
-            const size_t idx = static_cast<size_t>(k);
-            if (blackKeyHeld[idx] && blackKeyOrder[idx] >= bestOrder) {
-                bestOrder = blackKeyOrder[idx];
-                best = mod;
+    HeldModifier activeModifier() const noexcept { return HeldModifier::None; }
+
+    bool isAnyPerformanceKeyHeld() const noexcept {
+        for (size_t i = 0u; i < kNumBlackKeys; ++i) {
+            if (blackKeyHeld[i]) {
+                return true;
             }
-        };
-        check(BlackKeyId::Glo, HeldModifier::Global);
-        return best;
+        }
+        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+            if (whiteKeyHeld[i]) {
+                return true;
+            }
+        }
+        return false;
     }
 
     KnobRate activeKnobRate() const noexcept {
@@ -95,15 +97,7 @@ struct ModifierKeyTracker {
     }
 
     bool isAnyMomentaryHudHoldActive(bool scopeFrozen) const noexcept {
-        if (activeModifier() != HeldModifier::None || scopeFrozen || isRateHeld()) {
-            return true;
-        }
-        for (size_t i = 4u; i < kNumWhiteKeys; ++i) {
-            if (whiteKeyHeld[i]) {
-                return true;
-            }
-        }
-        return false;
+        return scopeFrozen || isRateHeld() || isAnyPerformanceKeyHeld();
     }
 };
 

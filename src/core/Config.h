@@ -17,7 +17,7 @@ inline constexpr size_t kOversampledBlockFrames = kBlockFrames * kOversampleFact
 inline constexpr size_t kNumOscillators = 4u;
 inline constexpr size_t kLfosPerVoice = 2u;
 inline constexpr size_t kNumVoiceLfos = kNumOscillators * kLfosPerVoice; // 8 LFOs (0..3=A, 4..7=B)
-inline constexpr size_t kNumSnapshots = 8u;
+inline constexpr size_t kNumSnapshots = 4u;
 
 // Oscillator & per-voice LFO frequency bounds (unbroken sub-cycle -> ultrasonic continuum)
 inline constexpr float kAudioFreqMinHz = 0.05f;

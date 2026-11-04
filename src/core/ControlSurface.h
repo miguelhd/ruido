@@ -87,7 +87,8 @@ enum class KnobBankMode : uint8_t {
     GlobalLfo = 9,
     GlobalAmp = 10,
     GlobalAll = 11,
-    None = 12
+    Snapshot = 12,
+    None = 13
 };
 
 // Encoder sweep rate selected via OCT- (Fine) and OCT+ (Coarse: ~1.3 turns full sweep)
@@ -121,8 +122,58 @@ enum class HudMode : uint8_t {
     GlobalLfo = 23,
     GlobalAmp = 24,
     GlobalAll = 25,
-    GlobalConfig = 26
+    GlobalConfig = 26,
+    KeyboardModel = 27, // Latching SEL Keyboard Model status & guidance screen
+    KeyboardPlay = 28   // Momentary live punch-in routed 1-to-1 to native Ruido views
 };
+
+// Active momentary punch-in family displayed in the top header during HudMode::KeyboardPlay
+enum class KeyPunchKind : uint8_t {
+    None = 0,
+    SpotlightSolo = 1,  // OP1-OP4: Solo OSC 1-4
+    OverloadSurge = 2,  // OP5: Drive (4.5x MS-20 overdrive + rail coupling)
+    SubDrop = 3,        // OP6: Sub Octave (-1 / -2 Oct)
+    RatioMagnet = 4,    // PIT: Ratio Lock (Just Intonation)
+    DubLpfDrop = 5,     // GLO key: Low Pass sweep (28 kHz -> 31 Hz)
+    MonoFocus = 6,      // MONO key: 4-oscillator unison pitch collapse
+    PolySpread = 7,     // POLY key: Detuned + PWM swarm spread
+    StasisFreeze = 8,   // 11th tall key: Freeze (8 LFOs + Drift + Scope)
+    VoiceCut = 9,       // White Keys 1-4: Mute OSC 1-4
+    VoiceFormant = 10,  // White Keys 5-8: Filter OSC 1-4
+    VoiceStutter = 11,  // Reserved for Circuit Lab: Stutter OSC 1-4
+    VoiceSiren = 12,    // White Keys 9-12: Octave OSC 1-4 (+1 / +2 Oct)
+    SnapshotRecall = 13 // White Keys 13-16: Snapshot 1-4 recall / pressure morph
+};
+
+struct PureRatioEntry {
+    float ratio;
+    uint8_t num;
+    uint8_t den;
+};
+
+inline constexpr size_t kNumJustRatios = 19u;
+
+inline constexpr std::array<PureRatioEntry, kNumJustRatios> kJustRatioTable = {{
+    {0.2500000f, 1u, 4u}, {0.3333333f, 1u, 3u}, {0.3750000f, 3u, 8u}, {0.5000000f, 1u, 2u},
+    {0.6250000f, 5u, 8u}, {0.6666667f, 2u, 3u}, {0.7500000f, 3u, 4u}, {0.8750000f, 7u, 8u},
+    {1.0000000f, 1u, 1u}, {1.1250000f, 9u, 8u}, {1.2500000f, 5u, 4u}, {1.3333333f, 4u, 3u},
+    {1.5000000f, 3u, 2u}, {1.6666667f, 5u, 3u}, {1.7500000f, 7u, 4u}, {2.0000000f, 2u, 1u},
+    {2.5000000f, 5u, 2u}, {3.0000000f, 3u, 1u}, {4.0000000f, 4u, 1u},
+}};
+
+constexpr const char* keyboardModelTitle(KeyboardModel model) noexcept {
+    switch (model) {
+    case KeyboardModel::LiveMixer:
+        return "LIVE MIXER";
+    case KeyboardModel::Harmonium:
+        return "HARMONIUM";
+    case KeyboardModel::CircuitLab:
+        return "CIRCUIT LAB";
+    case KeyboardModel::Count:
+        break;
+    }
+    return "LIVE MIXER";
+}
 
 constexpr KnobBankMode knobBankForEditTarget(EditTarget target) noexcept {
     switch (target) {
@@ -174,20 +225,68 @@ struct HudState {
     uint8_t fxVoiceFocus = 0u;            // 0..3 = OSC 1..4 (SELECT encoder on FX Filter Page)
     uint8_t lfoVoiceFocus = 0u;           // 0..7 = LFO A/B OSC 1..4 (SELECT encoder on LFO Page)
     uint8_t configCursor = 0u;            // 0..kNumGlobalConfigItems-1 (SELECT in GLOBAL CONFIG)
-    uint8_t snapshotSlot = 0u;            // 0..7 for White Keys 9..16
-    float morphPosition = 0.0f;           // [0.0f, 1.0f] snapshot pressure morph position
-    float opacity = 0.0f;                 // [0.0f, 1.0f] smooth 150 ms S-curve alpha envelope
+    uint8_t snapshotSlot = 0u;            // 0..3 active/selected Snapshot 1..4
+    std::array<float, kNumSnapshots> snapshotWeights{1.0f, 0.0f, 0.0f, 0.0f};
+    KeyboardModel keyboardModel = KeyboardModel::LiveMixer;
+    KeyPunchKind activePunch = KeyPunchKind::None;
+    uint8_t activePunchVoice = 0u; // 0..3 voice/slot index
+    float activePunchValue = 0.0f; // Live acoustic readout (pressure 0..1, Hz, or octave/ratio)
+    uint16_t heldBlackMask = 0u;   // Bitmask of held raised keys (bits 0..10)
+    uint16_t heldWhiteMask = 0u;   // Bitmask of held bottom keys (bits 0..15)
+    std::array<uint8_t, kNumBlackKeys> blackPressureQ8{};
+    std::array<uint8_t, kNumWhiteKeys> whitePressureQ8{};
+    float morphPosition = 1.0f; // [0.0f, 1.0f] snapshot glide/pressure morph progress
+    float opacity = 0.0f;       // [0.0f, 1.0f] smooth 150 ms S-curve alpha envelope
+    float fxLedSync01 = 0.5f;   // [0.0f, 1.0f] Core 0 FX button breath/flare sync
+    float lfoLedSync01 = 0.5f;  // [0.0f, 1.0f] Core 0 LFO button wave sync
     bool modifierHeld = false;
     bool rateHoldActive = false; // True whenever OCT- or OCT+ is physically held
     bool scopeFrozen = false;    // Momentary waveform freeze on 11th black key
     bool saveArmed = false;
-    bool freqPageOpen = false;   // Latching Frequency HUD toggle state (ButtonId::Home)
-    bool fxPageOpen = false;     // Latching MS-20 Filter page state (ButtonId::Fx)
-    bool panPageOpen = false;    // Latching Stereo Panning page state (ButtonId::Sel)
+    bool snapshotDirty = false;      // True when knobs diverged from the recalled snapshot
+    bool snapshotSavedToast = false; // True right after SAVE + Key 13-16 stores a slot
+    bool snapshotGliding = false;    // True while actively gliding/morphing into a snapshot
+    bool freqPageOpen = false;       // Latching Frequency HUD toggle state (ButtonId::Home)
+    bool fxPageOpen = false;         // Latching MS-20 Filter page state (ButtonId::Fx)
+    bool panPageOpen = false;    // Latching EDIT Page 2 Stereo Panning state (ButtonId::Edit x2)
     bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
-    bool editPageOpen = false;   // Latching Channel Level & Drive page (ButtonId::Edit)
+    bool editPageOpen = false;   // Latching EDIT Page 1 Channel Mix state (ButtonId::Edit x1)
     bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
+    bool selPageOpen = false;    // Latching KEYBOARD MODEL status & guidance page (ButtonId::Sel)
 };
+
+constexpr uint8_t resolveFilterViewVoice(const HudState& hud) noexcept {
+    if (hud.mode == HudMode::KeyboardPlay && hud.activePunch == KeyPunchKind::VoiceFormant) {
+        return hud.activePunchVoice & 3u;
+    }
+    return (hud.mode == HudMode::VoicePressure) ? (hud.focusedVoice & 3u) : (hud.fxVoiceFocus & 3u);
+}
+
+constexpr KnobBankMode knobBankForKeyPunch(KeyPunchKind punch, KnobBankMode fallback) noexcept {
+    switch (punch) {
+    case KeyPunchKind::VoiceFormant:
+        return KnobBankMode::VoiceFilter;
+    case KeyPunchKind::DubLpfDrop:
+        return KnobBankMode::GlobalFilter;
+    case KeyPunchKind::OverloadSurge:
+        return KnobBankMode::Amplitude;
+    case KeyPunchKind::SnapshotRecall:
+        return KnobBankMode::Snapshot;
+    case KeyPunchKind::MonoFocus:
+    case KeyPunchKind::PolySpread:
+    case KeyPunchKind::SpotlightSolo:
+    case KeyPunchKind::SubDrop:
+    case KeyPunchKind::RatioMagnet:
+    case KeyPunchKind::StasisFreeze:
+    case KeyPunchKind::VoiceCut:
+    case KeyPunchKind::VoiceStutter:
+    case KeyPunchKind::VoiceSiren:
+        return KnobBankMode::Frequency;
+    case KeyPunchKind::None:
+        break;
+    }
+    return fallback;
+}
 
 // Software-PWM brightness [0.0f, 1.0f] across all 42 physical LED channels on the M-VAVE FM-1:
 // - blackKeyLeds[0..10] & whiteKeyLeds[0..15]: 27 monochrome white silicone key LEDs

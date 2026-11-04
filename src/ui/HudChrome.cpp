@@ -4,16 +4,19 @@
 #include "core/GlobalConfig.h"
 #include "core/GlobalControl.h"
 #include "core/LfoMath.h"
+#include "core/VoiceCircuit.h"
 #include "ui/FontSansAA.h"
 #include "ui/GraphStyle.h"
 #include "ui/HudColumnText.h"
 #include "ui/HudFormat.h"
 #include "ui/HudGraphs.h"
+#include "ui/HudKeybedView.h"
 
 namespace ruido {
 
 HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
-                                       const LfoSignalArray& lfoOutput) noexcept {
+                                       const LfoSignalArray& lfoOutput,
+                                       uint8_t stutterGateMask) noexcept {
     HudGaugeTargets out{};
 
     switch (hud.mode) {
@@ -25,10 +28,33 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
         out.headerBarNorm = clampf(control.global.circuitCoupling, 0.0f, 1.0f);
         out.hasHeaderBar = true;
         break;
-    case HudMode::VoicePressure:
+    case HudMode::VoicePressure: {
         out.headerBarNorm = clampf(control.voicePressure[hud.focusedVoice & 3u], 0.0f, 1.0f);
         out.hasHeaderBar = true;
         break;
+    }
+    case HudMode::SnapshotSlot:
+        if (hud.snapshotGliding) {
+            out.headerBarNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
+            out.hasHeaderBar = true;
+        }
+        break;
+    case HudMode::KeyboardPlay: {
+        if (hud.activePunch == KeyPunchKind::SnapshotRecall) {
+            if (hud.snapshotGliding) {
+                out.headerBarNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
+                out.hasHeaderBar = true;
+            }
+        } else if (hud.activePunch == KeyPunchKind::SpotlightSolo ||
+                   hud.activePunch == KeyPunchKind::OverloadSurge ||
+                   hud.activePunch == KeyPunchKind::VoiceFormant ||
+                   hud.activePunch == KeyPunchKind::MonoFocus ||
+                   hud.activePunch == KeyPunchKind::PolySpread) {
+            out.headerBarNorm = clampf(hud.activePunchValue, 0.0f, 1.0f);
+            out.hasHeaderBar = true;
+        }
+        break;
+    }
     default:
         break;
     }
@@ -37,15 +63,14 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
         return out;
     }
 
-    const float panScale = control.global.monoCollapse ? 0.0f : 1.0f;
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
     ModulatedFilterParams voiceFlt{};
     if (hud.knobBank == KnobBankMode::VoiceFilter) {
-        const uint8_t refV = (hud.mode == HudMode::VoicePressure) ? (hud.focusedVoice & 3u)
-                                                                  : (hud.fxVoiceFocus & 3u);
+        const uint8_t refV = resolveFilterViewVoice(hud);
         voiceFlt = computeLiveVoiceFilter(control.voices[refV], control.voicePressure[refV],
                                           pitchMode, lfoOutput[lfoBankIndex(refV, 0u)],
-                                          lfoOutput[lfoBankIndex(refV, 1u)]);
+                                          lfoOutput[lfoBankIndex(refV, 1u)],
+                                          control.keyMod.dubLpfDrop, control.keyMod.overloadSurge);
     }
 
     for (uint8_t k = 0u; k < 4u; ++k) {
@@ -53,7 +78,7 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
 
         if (isGlobalKnobBank(hud.knobBank)) {
             const GlobalColumnSummary gs =
-                evaluateGlobalColumn(hud.knobBank, k, control, lfoOutput);
+                evaluateGlobalColumn(hud.knobBank, k, control, lfoOutput, stutterGateMask);
             out.posSigned[k] = gs.posSigned;
             out.dimAmount[k] = 0.0f;
             if (gs.disabled) {
@@ -61,21 +86,22 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
             }
             continue;
         }
-        if (hud.knobBank == KnobBankMode::Panning && control.global.monoCollapse) {
+        if (hud.knobBank == KnobBankMode::Panning && control.global.monoCollapse &&
+            control.keyMod.spatialFocus <= 0.001f) {
             out.focused[k] = false;
         }
 
-        const VoiceAudibility aud =
-            isPerOscKnobBank(hud.knobBank)
-                ? computeVoiceAudibility(control.voices[k], control.voicePressure[k], pitchMode)
-                : VoiceAudibility{0.0f, 0.0f, 0.0f};
+        const VoiceCircuitState vc = isPerOscKnobBank(hud.knobBank)
+                                         ? evaluateVoiceCircuit(control, k, stutterGateMask)
+                                         : VoiceCircuitState{};
         const float lfoA = lfoOutput[lfoBankIndex(k, 0u)];
         const float lfoB = lfoOutput[lfoBankIndex(k, 1u)];
         float tgtSigned = 0.0f;
         switch (hud.knobBank) {
         case KnobBankMode::Frequency: {
             const VoiceParams& vp = control.voices[k];
-            const float pMul = computeVoicePitchRatio(control.voicePressure[k], pitchMode);
+            const float pMul = computeVoicePitchRatio(control.voicePressure[k], pitchMode) *
+                               control.keyMod.voicePitchMul[k];
             const float lfoHz = computeLiveVoicePitchHz(vp, lfoA, lfoB);
             const float norm = clampf((fastLog2(lfoHz * pMul) - fastLog2(kAudioFreqMinHz)) /
                                           (fastLog2(kAudioFreqMaxHz) - fastLog2(kAudioFreqMinHz)),
@@ -85,7 +111,8 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
         }
         case KnobBankMode::PulseWidth: {
             const VoiceParams& vp = control.voices[k];
-            const float livePw = computeLiveVoicePulseWidth(vp, lfoA, lfoB);
+            const float livePw =
+                computeLiveVoicePulseWidth(vp, lfoA, lfoB, control.keyMod.voicePwDelta[k]);
             tgtSigned = clampf((livePw - 0.50f) * (1.0f / 0.45f), -1.0f, 1.0f);
             break;
         }
@@ -113,16 +140,15 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
             break;
         }
         case KnobBankMode::Amplitude: {
-            const VoiceParams& vp = control.voices[k];
-            const float liveAmp = computeLiveVoiceAmplitude(vp, lfoA, lfoB);
-            const float norm = (aud.muteBlend >= 0.999f) ? 0.0f : clampf(liveAmp, 0.0f, 1.0f);
+            const float norm = evaluateLiveOscAmplitude(control, k, lfoA, lfoB, stutterGateMask);
             tgtSigned = 2.0f * norm - 1.0f;
             break;
         }
         case KnobBankMode::Panning: {
             const VoiceParams& vp = control.voices[k];
-            const float livePan = computeLiveVoicePan(vp, lfoA, lfoB);
-            tgtSigned = clampf(livePan * panScale, -1.0f, 1.0f);
+            tgtSigned =
+                applySpatialFocusPan(computeLiveVoicePan(vp, lfoA, lfoB), k,
+                                     control.global.monoCollapse, control.keyMod.spatialFocus);
             break;
         }
         case KnobBankMode::Lfo: {
@@ -152,12 +178,19 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
             tgtSigned = 2.0f * norm - 1.0f;
             break;
         }
+        case KnobBankMode::Snapshot: {
+            const float w = clampf(hud.snapshotWeights[k], 0.0f, 1.0f);
+            out.posSigned[k] = 2.0f * w - 1.0f;
+            out.focused[k] = (k == (hud.snapshotSlot & 3u));
+            out.dimAmount[k] = hud.saveArmed ? 0.20f : (0.72f * (1.0f - w));
+            continue;
+        }
         default:
             break;
         }
 
         out.posSigned[k] = tgtSigned;
-        out.dimAmount[k] = aud.inaudibleDim;
+        out.dimAmount[k] = vc.inaudibleDim;
     }
 
     return out;
@@ -190,7 +223,8 @@ void compositeIdlePeakMeters(const MonoStripCanvas& idleCv, float smoothedPeakL,
 
 void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState& control,
                              const HudState& hud, const LfoSignalArray& lfoOutput,
-                             float headerBarSmooth, float finePhase, float coarsePhase) noexcept {
+                             uint8_t stutterGateMask, float headerBarSmooth, float finePhase,
+                             float coarsePhase) noexcept {
     if (cv.y0 >= 26) {
         return;
     }
@@ -204,15 +238,16 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
 
     const float hdrPitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
     const auto voiceAud = [&](size_t vi) noexcept {
-        return computeVoiceAudibility(control.voices[vi], control.voicePressure[vi], hdrPitchMode);
+        return evaluateVoiceCircuit(control, vi, stutterGateMask);
     };
     const auto livePwAt = [&](size_t vi) noexcept {
         return computeLiveVoicePulseWidth(control.voices[vi], lfoOutput[lfoBankIndex(vi, 0u)],
-                                          lfoOutput[lfoBankIndex(vi, 1u)]);
+                                          lfoOutput[lfoBankIndex(vi, 1u)],
+                                          control.keyMod.voicePwDelta[vi]);
     };
     const auto liveAmpAt = [&](size_t vi) noexcept {
-        return computeLiveVoiceAmplitude(control.voices[vi], lfoOutput[lfoBankIndex(vi, 0u)],
-                                         lfoOutput[lfoBankIndex(vi, 1u)]);
+        return evaluateLiveOscAmplitude(control, vi, lfoOutput[lfoBankIndex(vi, 0u)],
+                                        lfoOutput[lfoBankIndex(vi, 1u)], stutterGateMask);
     };
 
     switch (hud.mode) {
@@ -304,20 +339,21 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             const uint8_t kv = hud.focusedKnob & 3u;
             size_t lp = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
             appendUInt(leftSuffix, lp, sizeof(leftSuffix), static_cast<uint32_t>(kv + 1u));
-            if (voiceAud(kv).muteBlend >= 0.999f) {
+            if (voiceAud(kv).isMuted) {
                 appendStr(rightText, 0u, sizeof(rightText), "MUTED");
             } else {
                 formatHeaderDriveValue(liveAmpAt(kv), rightText, sizeof(rightText));
             }
         } else {
-            formatHeaderEnsembleDrive(control, lfoOutput, rightText, sizeof(rightText));
+            formatHeaderEnsembleDrive(control, lfoOutput, stutterGateMask, rightText,
+                                      sizeof(rightText));
         }
         break;
     }
     case HudMode::Panning:
         appendStr(leftMain, 0u, sizeof(leftMain), "PAN");
-        formatHeaderPanMode(control, hud, leftSuffix, sizeof(leftSuffix), rightText,
-                            sizeof(rightText));
+        formatHeaderPanMode(control, hud, stutterGateMask, leftSuffix, sizeof(leftSuffix),
+                            rightText, sizeof(rightText));
         break;
     case HudMode::MasterLevel:
         appendStr(leftMain, 0u, sizeof(leftMain), "MASTER LEVEL");
@@ -344,10 +380,9 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         appendStr(leftMain, 0u, sizeof(leftMain), "GATE");
         size_t p = appendStr(leftSuffix, 0u, sizeof(leftSuffix), " OSC ");
         appendUInt(leftSuffix, p, sizeof(leftSuffix), static_cast<uint32_t>(v + 1u));
-        const VoiceAudibility ga = voiceAud(v);
-        const char* gateStatus = (ga.muteBlend >= 0.999f)
-                                     ? "MUTED"
-                                     : ((ga.subAudioBlend >= 0.5f) ? "SUB-AUDIO" : "ACTIVE");
+        const VoiceCircuitState ga = voiceAud(v);
+        const char* gateStatus =
+            ga.isMuted ? "MUTED" : ((ga.subAudioBlend >= 0.5f) ? "SUB-AUDIO" : "ACTIVE");
         appendStr(rightText, 0u, sizeof(rightText), gateStatus);
         break;
     }
@@ -361,25 +396,15 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         showHeaderBar = true;
         break;
     }
-    case HudMode::SnapshotSlot: {
-        size_t p = appendStr(leftMain, 0u, sizeof(leftMain), "SNAPSHOT ");
-        appendUInt(leftMain, p, sizeof(leftMain),
-                   static_cast<uint32_t>((hud.snapshotSlot & 7u) + 1u));
-        appendStr(rightText, 0u, sizeof(rightText), "EMPTY SLOT");
+    case HudMode::SnapshotSlot:
+    case HudMode::SaveArmed:
+        formatSnapshotHeader(hud, leftMain, sizeof(leftMain), leftSuffix, sizeof(leftSuffix),
+                             rightText, sizeof(rightText), showHeaderBar, headerBarNorm);
         break;
-    }
-    case HudMode::UnassignedKey: {
-        if (hud.lastBlackKey <= BlackKeyId::Op6) {
-            size_t p = appendStr(leftMain, 0u, sizeof(leftMain), "OP");
-            p = appendUInt(leftMain, p, sizeof(leftMain),
-                           static_cast<uint32_t>(hud.lastBlackKey) + 1u);
-            appendStr(leftMain, p, sizeof(leftMain), " KEY");
-        } else {
-            appendStr(leftMain, 0u, sizeof(leftMain), "PIT KEY");
-        }
+    case HudMode::UnassignedKey:
+        appendStr(leftMain, 0u, sizeof(leftMain), "KEY");
         appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
         break;
-    }
     case HudMode::OutputRouting:
         appendStr(leftMain, 0u, sizeof(leftMain), "OUTPUT ROUTING");
         appendStr(rightText, 0u, sizeof(rightText),
@@ -388,10 +413,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     case HudMode::AudioOutput:
         appendStr(leftMain, 0u, sizeof(leftMain), "AUDIO OUTPUT");
         appendStr(rightText, 0u, sizeof(rightText), control.global.masterRun ? "ON" : "OFF");
-        break;
-    case HudMode::SaveArmed:
-        appendStr(leftMain, 0u, sizeof(leftMain), "STORE SNAPSHOT");
-        appendStr(rightText, 0u, sizeof(rightText), hud.saveArmed ? "TAP KEY 9-16" : "CANCELLED");
         break;
     case HudMode::ScopeFreeze:
         appendStr(leftMain, 0u, sizeof(leftMain), "SCOPE FREEZE");
@@ -413,7 +434,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
         appendStr(leftSuffix, 0u, sizeof(leftSuffix), " FREQ");
         const GlobalColumnSummary gs =
-            evaluateGlobalColumn(KnobBankMode::GlobalFreq, 0u, control, lfoOutput);
+            evaluateGlobalColumn(KnobBankMode::GlobalFreq, 0u, control, lfoOutput, stutterGateMask);
         char hzBuf[16]{};
         formatCompactHz(hzBuf, sizeof(hzBuf), gs.primaryValue);
         size_t p = appendStr(rightText, 0u, sizeof(rightText), "MEAN ");
@@ -452,7 +473,8 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             appendStr(rightText, 0u, sizeof(rightText),
                       control.global.monoCollapse ? "MONO" : "STEREO");
         } else {
-            formatHeaderEnsembleDrive(control, lfoOutput, rightText, sizeof(rightText));
+            formatHeaderEnsembleDrive(control, lfoOutput, stutterGateMask, rightText,
+                                      sizeof(rightText));
         }
         break;
     case HudMode::GlobalAll:
@@ -472,28 +494,16 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     }
     case HudMode::UnassignedButton: {
-        const char* swName = "PANEL";
-        switch (hud.lastButton) {
-        case ButtonId::Env:
-            swName = "ENV";
-            break;
-        case ButtonId::Arp:
-            swName = "ARP";
-            break;
-        case ButtonId::Seq:
-            swName = "SEQ";
-            break;
-        case ButtonId::Rec:
-            swName = "REC";
-            break;
-        default:
-            break;
-        }
-        size_t p = appendStr(leftMain, 0u, sizeof(leftMain), swName);
+        size_t p = appendStr(leftMain, 0u, sizeof(leftMain), unassignedButtonName(hud.lastButton));
         appendStr(leftMain, p, sizeof(leftMain), " SWITCH");
         appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
         break;
     }
+    case HudMode::KeyboardModel:
+    case HudMode::KeyboardPlay:
+        formatKeybedTopHeader(hud, leftMain, sizeof(leftMain), leftSuffix, sizeof(leftSuffix),
+                              rightText, sizeof(rightText), showHeaderBar, headerBarNorm);
+        break;
     }
 
     if (hud.mode != HudMode::None && !showHeaderBar && rightText[0] == '\0') {
@@ -590,13 +600,15 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
 
 void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlState& control,
                               const HudState& hud, const LfoSignalArray& lfoOutput,
+                              uint8_t stutterGateMask,
                               const std::array<float, kNumOscillators>& knobPosSignedSmooth,
                               const std::array<float, kNumOscillators>& knobDimSmooth,
                               const std::array<float, kNumOscillators>& knobFocusSmooth) noexcept {
     if (cv.y1 <= 188 || hud.knobBank == KnobBankMode::None) {
         return;
     }
-    if (hud.knobBank == KnobBankMode::Panning && control.global.monoCollapse) {
+    if (hud.knobBank == KnobBankMode::Panning && control.global.monoCollapse &&
+        control.keyMod.spatialFocus <= 0.001f) {
         cv.drawSansCentered(kFontSansSmall, 120, 205, "OUTPUT ROUTING SET TO MONO", 154u, 1);
         return;
     }
@@ -606,8 +618,8 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
         char roleLbl[12]{};
         char valStr[16]{};
         GlobalColumnSummary gs{};
-        formatColumnRoleAndValue(control, hud, lfoOutput, k, roleLbl, sizeof(roleLbl), valStr,
-                                 sizeof(valStr), gs);
+        formatColumnRoleAndValue(control, hud, lfoOutput, stutterGateMask, k, roleLbl,
+                                 sizeof(roleLbl), valStr, sizeof(valStr), gs);
         const bool bipolar = gs.bipolar;
 
         const float dim = clampf(knobDimSmooth[k], 0.0f, 1.0f);
@@ -667,6 +679,21 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
         const float baseVal = 224.0f + (96.0f - 224.0f) * dim;
         const auto valGray = static_cast<uint8_t>(baseVal + (255.0f - baseVal) * effFoc + 0.5f);
         cv.drawSansCentered(kFontSansMedium, cx, kHudBotValueY, valStr, valGray, 0);
+
+        if (hud.knobBank == KnobBankMode::Frequency) {
+            constexpr int kTotalSpan = kHudHomeFxLfoGapPx + kHudHomeLfoPairGapPx;
+            const int fxX = cx - (kTotalSpan / 2);
+            const int lfoAX = fxX + kHudHomeFxLfoGapPx;
+            const int lfoBX = lfoAX + kHudHomeLfoPairGapPx;
+            const VoiceParams& vp = control.voices[k];
+            const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
+            const bool fxOn = isVoiceFilterActive(vp, control.voicePressure[k], pitchMode);
+            cv.drawModulatorSlot(fxX, kHudHomeModRowY, fxOn, hud.fxLedSync01, dim);
+            cv.drawModulatorSlot(lfoAX, kHudHomeModRowY, vp.lfoDepth > 0.002f, hud.lfoLedSync01,
+                                 dim);
+            cv.drawModulatorSlot(lfoBX, kHudHomeModRowY, vp.lfoBDepth > 0.002f, hud.lfoLedSync01,
+                                 dim);
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 #include "ui/ScopeTraceEngine.h"
 
 #include "core/DspMath.h"
+#include "core/VoiceCircuit.h"
 #include "ui/ScopeTraceMath.h"
 
 #include <cstring>
@@ -157,7 +158,7 @@ void ScopeTraceEngine::rebuildTilesAndBloom() noexcept {
 }
 
 void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState& control,
-                                          bool scopeFrozen) noexcept {
+                                          bool scopeFrozen, uint8_t stutterGateMask) noexcept {
     if (scopeFrozen && scopeValid_) {
         return;
     }
@@ -166,18 +167,11 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
 
     size_t anchorVoice = 0u;
     bool hasAudioAnchor = false;
-    for (size_t v = 0u; v < kNumOscillators; ++v) {
-        const VoiceParams& vp = control.voices[v];
-        if (!vp.muted && vp.amplitude > 1.0e-4f && vp.frequencyHz >= 20.0f) {
-            anchorVoice = v;
-            hasAudioAnchor = true;
-            break;
-        }
-    }
-    if (!hasAudioAnchor) {
+    for (size_t pass = 0u; pass < 2u && !hasAudioAnchor; ++pass) {
+        const float minHz = (pass == 0u) ? 20.0f : kAudioFreqMinHz;
         for (size_t v = 0u; v < kNumOscillators; ++v) {
-            const VoiceParams& vp = control.voices[v];
-            if (!vp.muted && vp.amplitude > 1.0e-4f && vp.frequencyHz >= kAudioFreqMinHz) {
+            if (!evaluateVoiceCircuit(control, v, stutterGateMask).isMuted &&
+                control.voices[v].frequencyHz >= minHz) {
                 anchorVoice = v;
                 hasAudioAnchor = true;
                 break;
@@ -386,7 +380,10 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
         monoCollapseSmooth_ = control.global.monoCollapse ? 1.0f : 0.0f;
     } else {
         for (size_t v = 0u; v < kNumOscillators; ++v) {
-            const float tauV = (rawVoicePres[v] >= voicePresenceSmooth_[v]) ? 0.065f : 0.210f;
+            const bool chopAct = (control.keyMod.stutterDepth[v] > 1.0e-4f);
+            const float tauV = (rawVoicePres[v] >= voicePresenceSmooth_[v])
+                                   ? (chopAct ? 0.008f : 0.065f)
+                                   : (chopAct ? 0.018f : 0.210f);
             voicePresenceSmooth_[v] =
                 slewScalar(voicePresenceSmooth_[v], rawVoicePres[v],
                            1.0f - fastExpNeg(dtClamped * (1.0f / tauV)), 0.002f);

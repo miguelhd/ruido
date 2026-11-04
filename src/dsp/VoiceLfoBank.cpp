@@ -137,7 +137,7 @@ void VoiceLfoBank::updateTargets(const EngineControlState& state, bool snapImmed
 }
 
 void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth, float modBipolar,
-                            VoiceLfoFrame& out) noexcept {
+                            bool freeze, VoiceLfoFrame& out) noexcept {
     VoiceState& v = voices_[idx];
 
     const float baseRate = v.rateHz.next();
@@ -148,7 +148,7 @@ void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth,
     const float curDepth = applyLfoModDepth(baseDepth, depthModDepth, modBipolar);
 
     if (enableDrift_) {
-        if ((v.thermalCounter++ & 255u) == 0u) {
+        if (!freeze && ((v.thermalCounter++ & 255u) == 0u)) {
             const float n = nextUniformBipolar(v.thermalRng);
             v.thermalState = sanitizeState(v.thermalState + 0.002f * (n - v.thermalState));
             v.cachedRateScale = kCapTolerance[idx] * (1.0f + 0.0025f * v.thermalState);
@@ -178,6 +178,9 @@ void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth,
         out.targetDepths[v.activeTarget] = curDepth;
     }
 
+    if (freeze) {
+        return;
+    }
     const float effHz = clampf(curRate * v.cachedRateScale, 0.005f, kLfoFreqMaxHz * 1.1f);
     const uint32_t inc = static_cast<uint32_t>(effHz * hzToPhaseU32_ + 0.5f);
     const uint32_t nextPhase = v.phase + inc;
@@ -192,18 +195,19 @@ void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth,
     v.phase = nextPhase;
 }
 
-std::array<VoiceLfoFrame, kNumVoiceLfos> VoiceLfoBank::stepFrame() noexcept {
+std::array<VoiceLfoFrame, kNumVoiceLfos> VoiceLfoBank::stepFrame(bool freeze) noexcept {
     std::array<VoiceLfoFrame, kNumVoiceLfos> frames{};
 
     // 1. Step LFO B [4..7] first so LFO B -> LFO A Rate/Depth cross-modulation has zero delay
     for (size_t i = 0u; i < kNumOscillators; ++i) {
-        stepSlot(4u + i, 0.0f, 0.0f, 0.0f, frames[4u + i]);
+        stepSlot(4u + i, 0.0f, 0.0f, 0.0f, freeze, frames[4u + i]);
     }
     // 2. Step LFO A [0..3] with instantaneous LFO B Rate/Depth cross-modulation
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceLfoFrame& bOut = frames[4u + i];
         stepSlot(i, bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoARate)],
-                 bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoADepth)], bOut.raw, frames[i]);
+                 bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoADepth)], bOut.raw, freeze,
+                 frames[i]);
     }
 
     return frames;

@@ -265,21 +265,26 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
         if (rawHud.knobBank == KnobBankMode::VoiceFilter ||
             (rawHud.mode == HudMode::VoicePressure && !control.global.pitchPressureMode)) {
             const uint8_t v =
-                (rawHud.mode == HudMode::VoicePressure && !control.global.pitchPressureMode)
+                (rawHud.mode == HudMode::KeyboardPlay &&
+                 rawHud.activePunch == KeyPunchKind::VoiceFormant)
+                    ? (rawHud.activePunchVoice & 3u)
+                : (rawHud.mode == HudMode::VoicePressure && !control.global.pitchPressureMode)
                     ? (rawHud.focusedVoice & 3u)
                     : (effectiveHud.fxVoiceFocus & 3u);
             const VoiceParams& vp = control.voices[v];
             const ModulatedFilterParams mod = computeLiveVoiceFilter(
                 vp, control.voicePressure[v], pitchMode, lfoOutput[lfoBankIndex(v, 0u)],
-                lfoOutput[lfoBankIndex(v, 1u)]);
+                lfoOutput[lfoBankIndex(v, 1u)], control.keyMod.dubLpfDrop,
+                control.keyMod.overloadSurge);
             mods = {mod, mod, mod, mod};
             unified = true;
         } else {
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 const VoiceParams& vp = control.voices[i];
-                mods[i] = computeLiveVoiceFilter(vp, control.voicePressure[i], pitchMode,
-                                                 lfoOutput[lfoBankIndex(i, 0u)],
-                                                 lfoOutput[lfoBankIndex(i, 1u)]);
+                mods[i] = computeLiveVoiceFilter(
+                    vp, control.voicePressure[i], pitchMode, lfoOutput[lfoBankIndex(i, 0u)],
+                    lfoOutput[lfoBankIndex(i, 1u)], control.keyMod.dubLpfDrop,
+                    control.keyMod.overloadSurge);
             }
             for (size_t i = 1u; i < kNumOscillators; ++i) {
                 if (absf(mods[i].hpCutoffHz - mods[0].hpCutoffHz) >

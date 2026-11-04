@@ -89,6 +89,7 @@ void applyGlobalKnobDelta(GlobalTarget target, uint8_t knobIdx, int32_t ticks, K
 // for column `knobIdx` (0..3) of any Global* KnobBankMode.
 GlobalColumnSummary evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx,
                                          const EngineControlState& control,
-                                         const LfoSignalArray& lfoOutput) noexcept;
+                                         const LfoSignalArray& lfoOutput,
+                                         uint8_t stutterGateMask = 0x0Fu) noexcept;
 
 } // namespace ruido

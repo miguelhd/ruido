@@ -41,12 +41,16 @@ DSP_SRCS := \
 
 UI_SRCS := \
 	src/core/GlobalControl.cpp \
+	src/core/KeyboardLiveMixer.cpp \
+	src/core/KeyboardEngine.cpp \
 	src/core/LedEngine.cpp \
+	src/core/SnapshotBank.cpp \
 	src/core/RuidoController.cpp \
 	src/ui/ScopeTraceEngine.cpp \
 	src/ui/HudAmpGraph.cpp \
 	src/ui/HudGraphs.cpp \
 	src/ui/HudGlobalViews.cpp \
+	src/ui/HudKeybedView.cpp \
 	src/ui/HudChrome.cpp \
 	src/ui/ScopeHudRenderer.cpp
 

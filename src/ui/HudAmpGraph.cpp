@@ -4,6 +4,7 @@
 #include "core/GlobalControl.h"
 #include "core/HudEnvelope.h"
 #include "core/LfoMath.h"
+#include "core/VoiceCircuit.h"
 #include "ui/MonoCanvas.h"
 
 #include <cstring>
@@ -43,7 +44,8 @@ void HudAmpGraph::stepFadeOut(float dtClamped) noexcept {
 void HudAmpGraph::update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                          const LfoSignalArray& lfoOutput,
                          const std::array<float, kNumOscillators>& voiceDriftNorm,
-                         const OverdriveHairTable& overdriveHair) noexcept {
+                         const OverdriveHairTable& overdriveHair,
+                         uint8_t stutterGateMask) noexcept {
     const bool editVisible = rawHud.opacity > 0.001f && rawHud.editPageOpen && !rawHud.modifierHeld;
     const bool levelAct = isLevelViewActive(rawHud);
     const bool widthAct = editVisible && (rawHud.knobBank == KnobBankMode::PulseWidth);
@@ -64,17 +66,16 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
     overdriveHair_ = overdriveHair;
 
     const float alphaFader = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.036f)));
+    const float alphaChop = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.004f)));
     const float alphaDrift = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.065f)));
 
-    const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         const VoiceParams& vp = control.voices[v];
         const float lfoA = lfoOutput[lfoBankIndex(v, 0u)];
         const float lfoB = lfoOutput[lfoBankIndex(v, 1u)];
-        const VoiceAudibility aud = computeVoiceAudibility(vp, control.voicePressure[v], pitchMode);
-        const bool silentMute = aud.muteBlend >= 0.999f;
-        const float liveAmp = computeLiveVoiceAmplitude(vp, lfoA, lfoB);
-        const float effAmp = silentMute ? 0.0f : clampf(liveAmp, 0.0f, 1.0f);
+        const VoiceCircuitState vc = evaluateVoiceCircuit(control, v, stutterGateMask);
+        const bool silentMute = vc.isMuted;
+        const float effAmp = evaluateLiveOscAmplitude(control, v, lfoA, lfoB, stutterGateMask);
 
         const float tgtY = clampf(kColYBot - effAmp * kColYSpan, kColYTop, kColYBot);
         const float tgtDrive =
@@ -82,17 +83,19 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
                 ? clampf((effAmp - kCleanAmpKnee) * (1.0f / (1.0f - kCleanAmpKnee)), 0.0f, 1.0f)
                 : 0.0f;
         const float tgtPw =
-            clampf(computeLiveVoicePulseWidth(vp, lfoA, lfoB), kPulseWidthMin, kPulseWidthMax);
+            clampf(computeLiveVoicePulseWidth(vp, lfoA, lfoB, control.keyMod.voicePwDelta[v]),
+                   kPulseWidthMin, kPulseWidthMax);
         const float tgtDrAmt = clampf(vp.drift, 0.0f, 1.0f);
         const float tgtDrLive = silentMute ? 0.0f : clampf(voiceDriftNorm[v], -1.0f, 1.0f);
-        const float tgtDim = aud.inaudibleDim;
+        const float tgtDim = vc.inaudibleDim;
+        const float aGate = (control.keyMod.stutterDepth[v] > 1.0e-4f) ? alphaChop : alphaFader;
 
-        faderY_[v] = slewScalar(faderY_[v], tgtY, alphaFader, 0.01f);
-        driveNorm_[v] = slewScalar(driveNorm_[v], tgtDrive, alphaFader, 0.002f);
+        faderY_[v] = slewScalar(faderY_[v], tgtY, aGate, 0.01f);
+        driveNorm_[v] = slewScalar(driveNorm_[v], tgtDrive, aGate, 0.002f);
         pulseWidth_[v] = slewScalar(pulseWidth_[v], tgtPw, alphaFader, 0.002f);
         driftAmt_[v] = slewScalar(driftAmt_[v], tgtDrAmt, alphaFader, 0.002f);
         driftLive_[v] = slewScalar(driftLive_[v], tgtDrLive, alphaDrift, 0.002f);
-        muteDim_[v] = slewScalar(muteDim_[v], tgtDim, alphaFader, 0.005f);
+        muteDim_[v] = slewScalar(muteDim_[v], tgtDim, aGate, 0.005f);
     }
 }
 

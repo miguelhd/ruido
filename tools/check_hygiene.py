@@ -118,14 +118,26 @@ def main() -> int:
                     )
                 elif layer == "dsp" and (
                     inc.startswith("ui/")
-                    or inc in {"core/RuidoController.h", "core/LedEngine.h"}
+                    or inc
+                    in {
+                        "core/RuidoController.h",
+                        "core/LedEngine.h",
+                        "core/KeyboardEngine.h",
+                        "core/KeyboardModel.h",
+                    }
                 ):
                     errors.append(
                         f"[layer-dag] {rel} (dsp) must not include '{inc}'"
                     )
                 elif layer == "ui" and (
                     inc.startswith("dsp/")
-                    or inc in {"core/RuidoController.h", "core/LedEngine.h"}
+                    or inc
+                    in {
+                        "core/RuidoController.h",
+                        "core/LedEngine.h",
+                        "core/KeyboardEngine.h",
+                        "core/KeyboardModel.h",
+                    }
                 ):
                     errors.append(
                         f"[layer-dag] {rel} (ui) must not include '{inc}'"

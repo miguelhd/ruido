@@ -46,8 +46,11 @@ size_t strlen(const char* s) {
 
 // Unity-include the 100% platform-independent Ruido C++17 sources
 #include "core/GlobalControl.cpp"
+#include "core/KeyboardEngine.cpp"
+#include "core/KeyboardLiveMixer.cpp"
 #include "core/LedEngine.cpp"
 #include "core/RuidoController.cpp"
+#include "core/SnapshotBank.cpp"
 #include "dsp/DroneEngine.cpp"
 #include "dsp/HalfBandDecimator.cpp"
 #include "dsp/Ms20Filter.cpp"
@@ -57,6 +60,7 @@ size_t strlen(const char* s) {
 #include "ui/HudChrome.cpp"
 #include "ui/HudGlobalViews.cpp"
 #include "ui/HudGraphs.cpp"
+#include "ui/HudKeybedView.cpp"
 #include "ui/ScopeHudRenderer.cpp"
 #include "ui/ScopeTraceEngine.cpp"
 
@@ -81,7 +85,7 @@ static_assert(kRgbaArenaAddr + (ruido::kDisplayWidth * ruido::kDisplayHeight * 4
 // --- Core 1 (AudioWorklet) Static Storage ---
 ruido::DroneEngine* gDsp = nullptr;
 
-constexpr size_t kTelemetryFloats = 46u;
+constexpr size_t kTelemetryFloats = 47u;
 
 alignas(16) ruido::EngineControlState gDspStagedControl{};
 alignas(16) float gAudioLeft[kMaxWorkletFrames]{};
@@ -100,7 +104,7 @@ alignas(16) ruido::ScopeFrame gScopeBatchIn[kMaxScopeBatch]{};
 alignas(16) float gTelemetryIn[kTelemetryFloats]{};
 alignas(16) uint16_t gScanlineStripRgb565[ruido::kDisplayWidth * ruido::kScanlineStripHeight]{};
 uint8_t* const gScreenRgba = reinterpret_cast<uint8_t*>(kRgbaArenaAddr);
-alignas(16) float gSummaryOut[53]{};
+alignas(16) float gSummaryOut[55]{};
 bool gControlDirty = true;
 
 void refreshSummary() noexcept {
@@ -145,6 +149,8 @@ void refreshSummary() noexcept {
     gSummaryOut[50u] = static_cast<float>(gCtrl->hud().fxVoiceFocus);
     gSummaryOut[51u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().editTarget));
     gSummaryOut[52u] = gCtrl->hud().panPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[53u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().keyboardModel));
+    gSummaryOut[54u] = gCtrl->hud().selPageOpen ? 1.0f : 0.0f;
 }
 
 } // namespace
@@ -260,6 +266,7 @@ const float* wasm_dsp_read_telemetry() {
             gTelemetryOut[38u + i * 2u] = static_cast<float>(packedB & 0x7FFFu);
             gTelemetryOut[39u + i * 2u] = static_cast<float>((packedB >> 15u) & 0x7FFFu);
         }
+        gTelemetryOut[46u] = static_cast<float>(t.stutterGateMask.load(std::memory_order_relaxed));
     }
     return gTelemetryOut;
 }
@@ -277,6 +284,7 @@ void wasm_ui_init() {
     gCtrl = new (ctrlMem) ruido::RuidoController();
     gRenderer = new (rendMem) ruido::ScopeHudRenderer();
     gUiTelemetry = new (gUiTelemetryStorage) ruido::EngineTelemetry();
+    gTelemetryIn[46u] = 15.0f;
     gControlDirty = true;
     refreshSummary();
 }
@@ -317,6 +325,16 @@ void wasm_ui_black_key(uint32_t keyId, int32_t pressed) {
         return;
     }
     gCtrl->onBlackKeyEvent(static_cast<ruido::BlackKeyId>(keyId), pressed != 0);
+    gControlDirty = true;
+    refreshSummary();
+}
+
+RUIDO_EXPORT("wasm_ui_black_pressure")
+void wasm_ui_black_pressure(uint32_t keyId, float pressure) {
+    if (gCtrl == nullptr || keyId >= static_cast<uint32_t>(ruido::BlackKeyId::Count)) {
+        return;
+    }
+    gCtrl->onBlackKeyPressure(static_cast<ruido::BlackKeyId>(keyId), pressure);
     gControlDirty = true;
     refreshSummary();
 }
@@ -383,6 +401,9 @@ void wasm_ui_apply_telemetry() {
         gUiTelemetry->lfoDriftPacked[4u + i].store((hi15B << 15u) | lo15B,
                                                    std::memory_order_relaxed);
     }
+    gUiTelemetry->stutterGateMask.store(
+        static_cast<uint8_t>(static_cast<uint32_t>(gTelemetryIn[46u]) & 0x0Fu),
+        std::memory_order_relaxed);
 }
 
 RUIDO_EXPORT("wasm_ui_tick_and_render")
@@ -391,6 +412,10 @@ void wasm_ui_tick_and_render(float dtSec) {
         return;
     }
     gCtrl->tick(dtSec, *gUiTelemetry);
+    if (gCtrl->consumeStateDirty()) {
+        gControlDirty = true;
+        refreshSummary();
+    }
     gRenderer->prepareFrame(dtSec, gCtrl->state(), gCtrl->hud(), *gUiTelemetry);
 
     // Render authentic 240x16 RGB565 hardware strips and expand to RGBA8888 for HTML5 Canvas

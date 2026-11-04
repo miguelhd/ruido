@@ -31,6 +31,8 @@ class HudAmpGraph {
         return rawHud.opacity > 0.001f &&
                ((rawHud.editPageOpen && !rawHud.modifierHeld &&
                  rawHud.knobBank == KnobBankMode::Amplitude) ||
+                (rawHud.mode == HudMode::KeyboardPlay &&
+                 rawHud.knobBank == KnobBankMode::Amplitude) ||
                 (rawHud.knobBank == KnobBankMode::GlobalAmp && rawHud.focusedKnob != 3u) ||
                 (rawHud.knobBank == KnobBankMode::GlobalAll && rawHud.focusedKnob == 3u));
     }
@@ -54,7 +56,7 @@ class HudAmpGraph {
     void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                 const LfoSignalArray& lfoOutput,
                 const std::array<float, kNumOscillators>& voiceDriftNorm,
-                const OverdriveHairTable& overdriveHair) noexcept;
+                const OverdriveHairTable& overdriveHair, uint8_t stutterGateMask) noexcept;
 
     void compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint16_t* linScratch,
                         float hudAlpha01, const HudState& hud) const noexcept;

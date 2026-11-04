@@ -34,7 +34,7 @@ You are working on **Ruido**, a custom embedded drone synthesizer firmware for t
   - Format all C/C++ code according to `.clang-format` (`make format`; verified by `make check`).
 - **Binary & Memory Discipline:**
   - Target firmware + read-only lookup tables must stay well below the **600 KB XIP Flash** ceiling (`-Oz` / `-Os` + LTO).
-  - Total runtime static + stack + heap RAM usage by our app layer must leave generous headroom within the **578 KB total SoC SRAM** (shared with FreeRTOS + USB/MIDI + `jlstream`). Never allocate a full `240x240` framebuffer (use `240x16` ping-pong scanline strips, passing strip buffers by pointer/reference with `0 B` extra stack copies).
+  - Total runtime static + stack + heap RAM usage by our app layer must leave generous headroom within the **578 KB total SoC SRAM** (shared with `Core 1` `.c1_text` SRAM DSP code, uncached inter-core buses, and `dinghy`/`felucca-bsp` USB/MIDI/DMA buffers). Never allocate a full `240x240` framebuffer (use `240x16` ping-pong scanline strips, passing strip buffers by pointer/reference with `0 B` extra stack copies).
 - **Fast Domain-Scoped Verification (`make test-ui` vs `make test`):**
   - For UI, HUD, LED, or controller-only changes, verify with `make test-ui` (~1.5s: runs `make check`, `./build/test_ui`, `ruido.wasm`, and `verify_wasm.mjs`). Run `make ubsan-ui` only when modifying pointer/buffer indexing or fixed-point math.
   - For DSP or audio-engine changes, run `make test-dsp` (and `make tsan` / `make ubsan` when touching concurrency or DSP math). Run the full `make test` suite at milestone boundaries or cross-layer changes.

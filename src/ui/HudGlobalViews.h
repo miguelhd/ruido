@@ -17,7 +17,8 @@ class HudGlobalViews {
 
     void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                 const LfoSignalArray& lfoOutput,
-                const std::array<float, kNumOscillators>& voicePeak) noexcept;
+                const std::array<float, kNumOscillators>& voicePeak,
+                uint8_t stutterGateMask) noexcept;
 
     float panPhase() const noexcept { return panPhase_; }
 

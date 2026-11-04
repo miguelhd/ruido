@@ -37,7 +37,7 @@ class SchmittOscillatorBank {
     OscillatorBankOutput processSample(const std::array<float, kNumOscillators>& freqHz,
                                        const std::array<float, kNumOscillators>& pulseWidth,
                                        const std::array<float, kNumOscillators>& drift,
-                                       float circuitCoupling) noexcept;
+                                       float circuitCoupling, bool freezeDrift = false) noexcept;
 
     OscillatorBankOutput processSample(const std::array<float, kNumOscillators>& freqHz,
                                        float circuitCoupling) noexcept {

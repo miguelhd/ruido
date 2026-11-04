@@ -43,8 +43,8 @@ class ScopeTraceEngine {
     void ingestScopeRing(ScopeRingBuffer& ring, bool scopeFrozen) noexcept;
     void pushScopeSamples(const ScopeFrame* frames, size_t count, bool scopeFrozen) noexcept;
 
-    void buildWaveformTrace(float dtSec, const EngineControlState& control,
-                            bool scopeFrozen) noexcept;
+    void buildWaveformTrace(float dtSec, const EngineControlState& control, bool scopeFrozen,
+                            uint8_t stutterGateMask = 0x0Fu) noexcept;
 
     // Rasterize <= 8-row strip chunk of 14 caustic strands + bilinear 60x60 bloom + tonemap.
     void renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t bgKeepQ8, uint16_t* linBuf,

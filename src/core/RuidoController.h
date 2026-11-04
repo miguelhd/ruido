@@ -2,9 +2,11 @@
 
 #include "core/ControlSurface.h"
 #include "core/HudEnvelope.h"
+#include "core/KeyboardEngine.h"
 #include "core/LedEngine.h"
 #include "core/ModifierTracker.h"
 #include "core/Parameters.h"
+#include "core/SnapshotBank.h"
 
 #include <array>
 #include <cstdint>
@@ -35,8 +37,9 @@ class RuidoController {
     // Tactile panel buttons (14 physical switches: OCT-/OCT+ + right 2x6 grid)
     void onButtonEvent(ButtonId button, bool pressed) noexcept;
 
-    // Raised black keys (OP1-OP6, PIT, GLO, MONO, POLY, ScopeFreezeKey)
+    // Raised black keys (OP1-OP6, PIT, GLO, MONO, POLY, 11th key): gate + continuous pressure
     void onBlackKeyEvent(BlackKeyId key, bool pressed) noexcept;
+    void onBlackKeyPressure(BlackKeyId key, float pressure) noexcept;
 
     // Bottom 16 white keys: digital gate + continuous SARADC carbon-pill pressure [0.0f, 1.0f]
     void onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexcept;
@@ -51,9 +54,19 @@ class RuidoController {
 
     const LedState& leds() const noexcept { return leds_; }
 
+    const SnapshotBank& snapshots() const noexcept { return snapshots_; }
+
+    bool consumeStateDirty() noexcept {
+        const bool dirty = stateDirty_;
+        stateDirty_ = false;
+        return dirty;
+    }
+
   private:
     KnobBankMode baseKnobBank() const noexcept;
     void closeAllPages() noexcept;
+    bool tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active) noexcept;
+    void applyKeyboardPerformanceChange() noexcept;
     void syncModifierHud() noexcept;
     void restoreOrDissolveHud() noexcept;
     void triggerHud(HudMode mode, uint8_t voiceIndex = 0u,
@@ -67,19 +80,22 @@ class RuidoController {
     EngineControlState state_{};
     HudState hud_{};
     LedState leds_{};
-    std::array<VoiceParams, kNumOscillators> gloPreHoldVoices_{};
 
+    KeyboardEngine keyboard_{};
+    SnapshotBank snapshots_{};
     ModifierKeyTracker keys_{};
     HudEnvelopeTracker env_{};
     LedSmoothState ledSmooth_{};
     bool knobTurnedDuringRateHold_ = false;
-    bool gloSnapshotValid_ = false;
     bool dismissedByHome_ = false;
+    bool stateDirty_ = false;
+    uint8_t saveSwallowedMask_ = 0u;
     float masterPot_ = 0.85f;
     float masterPotHudAnchor_ = 0.85f;
     HudMode latchedHudMode_ = HudMode::None;
     ButtonId latchedButton_ = ButtonId::Count;
     int32_t selectTickAccum_ = 0;
+    int32_t presetTickAccum_ = 0;
     int32_t targetTickAccum_ = 0;
     int32_t configTickAccum_ = 0;
 };

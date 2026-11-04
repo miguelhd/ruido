@@ -3,6 +3,7 @@
 #include "core/DspMath.h"
 #include "core/EncoderMath.h"
 #include "core/LfoMath.h"
+#include "core/VoiceCircuit.h"
 
 namespace ruido {
 
@@ -347,23 +348,27 @@ void applyGlobalKnobDelta(GlobalTarget target, uint8_t knobIdx, int32_t ticks, K
 
 GlobalColumnSummary evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx,
                                          const EngineControlState& control,
-                                         const LfoSignalArray& lfoOutput) noexcept {
+                                         const LfoSignalArray& lfoOutput,
+                                         uint8_t stutterGateMask) noexcept {
     GlobalColumnSummary s{};
     const uint8_t k = knobIdx & 3u;
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
-    const float panScale = control.global.monoCollapse ? 0.0f : 1.0f;
 
     if (bank == KnobBankMode::GlobalAll) {
         if (k == 0u) {
-            return evaluateGlobalColumn(KnobBankMode::GlobalFreq, 0u, control, lfoOutput);
+            return evaluateGlobalColumn(KnobBankMode::GlobalFreq, 0u, control, lfoOutput,
+                                        stutterGateMask);
         }
         if (k == 1u) {
-            return evaluateGlobalColumn(KnobBankMode::GlobalFilter, 2u, control, lfoOutput);
+            return evaluateGlobalColumn(KnobBankMode::GlobalFilter, 2u, control, lfoOutput,
+                                        stutterGateMask);
         }
         if (k == 2u) {
-            return evaluateGlobalColumn(KnobBankMode::GlobalLfo, 3u, control, lfoOutput);
+            return evaluateGlobalColumn(KnobBankMode::GlobalLfo, 3u, control, lfoOutput,
+                                        stutterGateMask);
         }
-        return evaluateGlobalColumn(KnobBankMode::GlobalAmp, 0u, control, lfoOutput);
+        return evaluateGlobalColumn(KnobBankMode::GlobalAmp, 0u, control, lfoOutput,
+                                    stutterGateMask);
     }
 
     if (bank == KnobBankMode::GlobalFreq) {
@@ -373,7 +378,8 @@ GlobalColumnSummary evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx,
         float maxLog = -100.0f;
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             const VoiceParams& vp = control.voices[i];
-            const float pMul = computeVoicePitchRatio(control.voicePressure[i], pitchMode);
+            const float pMul = computeVoicePitchRatio(control.voicePressure[i], pitchMode) *
+                               control.keyMod.voicePitchMul[i];
             const float lfoHz = computeLiveVoicePitchHz(vp, lfoOutput[i], lfoOutput[4u + i]);
             const float liveHz = clampf(lfoHz * pMul, kAudioFreqMinHz, kAudioFreqMaxHz);
             logs[i] = fastLog2(liveHz);
@@ -421,7 +427,8 @@ GlobalColumnSummary evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx,
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             const VoiceParams& vp = control.voices[i];
             const ModulatedFilterParams mod = computeLiveVoiceFilter(
-                vp, control.voicePressure[i], pitchMode, lfoOutput[i], lfoOutput[4u + i]);
+                vp, control.voicePressure[i], pitchMode, lfoOutput[i], lfoOutput[4u + i],
+                control.keyMod.dubLpfDrop, control.keyMod.overloadSurge);
             float vNorm = 0.0f;
             if (k == 0u) {
                 const float lg = fastLog2(mod.hpCutoffHz);
@@ -573,10 +580,11 @@ GlobalColumnSummary evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx,
     std::array<float, kNumOscillators> pans{};
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceParams& vp = control.voices[i];
-        const float liveAmp = computeLiveVoiceAmplitude(vp, lfoOutput[i], lfoOutput[4u + i]);
-        amps[i] = vp.muted ? 0.0f : clampf(liveAmp, 0.0f, 1.0f);
+        amps[i] =
+            evaluateLiveOscAmplitude(control, i, lfoOutput[i], lfoOutput[4u + i], stutterGateMask);
         const float livePan = computeLiveVoicePan(vp, lfoOutput[i], lfoOutput[4u + i]);
-        pans[i] = clampf(livePan * panScale, -1.0f, 1.0f);
+        pans[i] = applySpatialFocusPan(livePan, i, control.global.monoCollapse,
+                                       control.keyMod.spatialFocus);
     }
 
     if (k == 0u) {

@@ -105,7 +105,7 @@ OscillatorBankOutput
 SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& freqHz,
                                      const std::array<float, kNumOscillators>& pulseWidth,
                                      const std::array<float, kNumOscillators>& drift,
-                                     float circuitCoupling) noexcept {
+                                     float circuitCoupling, bool freezeDrift) noexcept {
     OscillatorBankOutput out{};
     const float coupling = clampf(circuitCoupling, 0.0f, 1.0f);
     // Two-regime ALGORITHM coupling:
@@ -135,7 +135,7 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
         VoiceState& v = voices_[i];
 
         // Subsampled thermal pitch drift update every 64 oversampled ticks (~2.75 kHz rate)
-        if ((v.driftCounter++ & 63u) == 0u) {
+        if (!freezeDrift && ((v.driftCounter++ & 63u) == 0u)) {
             const float dAmt = clampf(drift[i], 0.0f, 1.0f);
             if (enableDrift_) {
                 const float wn = nextWhiteNoise(v.rngState);

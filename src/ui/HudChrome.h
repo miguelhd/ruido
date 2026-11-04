@@ -19,17 +19,20 @@ struct HudGaugeTargets {
 
 // Pure target-gauge calculator for top header bar & bottom 4-knob physical bead strip.
 HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const HudState& hud,
-                                       const LfoSignalArray& lfoOutput) noexcept;
+                                       const LfoSignalArray& lfoOutput,
+                                       uint8_t stutterGateMask) noexcept;
 
 void compositeIdlePeakMeters(const MonoStripCanvas& idleCv, float smoothedPeakL,
                              float smoothedPeakR) noexcept;
 
 void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState& control,
                              const HudState& hud, const LfoSignalArray& lfoOutput,
-                             float headerBarSmooth, float finePhase, float coarsePhase) noexcept;
+                             uint8_t stutterGateMask, float headerBarSmooth, float finePhase,
+                             float coarsePhase) noexcept;
 
 void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlState& control,
                               const HudState& hud, const LfoSignalArray& lfoOutput,
+                              uint8_t stutterGateMask,
                               const std::array<float, kNumOscillators>& knobPosSignedSmooth,
                               const std::array<float, kNumOscillators>& knobDimSmooth,
                               const std::array<float, kNumOscillators>& knobFocusSmooth) noexcept;

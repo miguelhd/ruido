@@ -60,6 +60,12 @@ class DroneEngine {
         CriticallyDampedSmoother pan;
         OnePoleSmoother vactrolGate;
         VactrolSmoother pressure;
+        OnePoleSmoother keyGainMul;
+        LogFreqSmoother keyPitchMul;
+        OnePoleSmoother stutterDepth;
+        OnePoleSmoother stutterGate;
+        uint32_t stutterPhase = 0x80000000u;
+        float stutterRateHz = 6.0f;
     };
 
     struct VoiceCoeffCache {
@@ -78,6 +84,7 @@ class DroneEngine {
     float baseSampleRate_ = kBaseSampleRate;
     float oversampledRate_ = kOversampledRate;
     float invOversampledRate_ = kInvOversampledRate;
+    float hzToBasePhaseU32_ = 4294967296.0f / kBaseSampleRate;
 
     LockFreeControlBus controlBus_{};
     ScopeRingBuffer scopeBuffer_{};
@@ -96,7 +103,11 @@ class DroneEngine {
     CriticallyDampedSmoother masterTrimSmoother_{};
     OnePoleSmoother monoMixSmoother_{};   // 0.0 = Stereo (POLY), 1.0 = Dual-Mono (MONO)
     OnePoleSmoother masterRunSmoother_{}; // 0.0 = Muted (STOP), 1.0 = Active (PLAY)
-    OnePoleSmoother pitchModeSmoother_{}; // 0.0 = MS-20 Filter/LPG, 1.0 = Pitch Bend (SEL)
+    OnePoleSmoother pitchModeSmoother_{}; // 0.0 = MS-20 Filter/LPG, 1.0 = Pitch Bend
+    OnePoleSmoother overloadSurgeSmoother_{};
+    OnePoleSmoother dubLpfDropSmoother_{};
+    OnePoleSmoother spatialFocusSmoother_{};
+    bool stasisFreeze_ = false;
 
     // 36-frame delay aligning 4-voice rising edges & scope taps with PolyBLEP + FIR delay
     std::array<uint64_t, kNumOscillators> voiceEdgeDelayLines_{0u, 0u, 0u, 0u};
