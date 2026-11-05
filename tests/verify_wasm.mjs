@@ -83,10 +83,11 @@ assert.ok(energyL > 1.0 && energyR > 1.0);
 
 const telIdx = ex.wasm_dsp_read_telemetry() >> 2;
 const telInIdx = ex.wasm_ui_get_telemetry_in_ptr() >> 2;
-for (let i = 0; i < 47; i++) {
+for (let i = 0; i < 48; i++) {
   f32[telInIdx + i] = f32[telIdx + i];
 }
 assert.equal(f32[telIdx + 46], 15.0); // stutterGateMask === 0x0F when idle
+assert.ok(f32[telIdx + 47] >= 0.0 && f32[telIdx + 47] < 1.0); // rhythmPhase in [0, 1)
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.2);
 
@@ -124,7 +125,7 @@ for (let i = 0; i < 4; i++) {
 }
 
 // Tapping SEL (button 3) opens persistent Keyboard Model Status & Guidance screen (closing FX page),
-// lets SELECT encoder swap LiveMixer(0) <-> Harmonium(1) <-> CircuitLab(2), and dismisses on 2nd SEL tap!
+// lets SELECT encoder swap LiveMixer(0) <-> CircuitLab(1) <-> RhythmLab(2), and dismisses on 2nd SEL tap!
 ex.wasm_ui_button(3, 1);
 ex.wasm_ui_button(3, 0);
 ex.wasm_ui_tick_and_render(0.2);
@@ -142,7 +143,7 @@ for (let i = 0; i < selRgbaBytes.length; i += 4) {
 }
 ex.wasm_ui_encoder(0, 4); // SELECT -> CircuitLab (1)
 assert.equal(f32[summaryIdx + 53], 1.0);
-ex.wasm_ui_encoder(0, 4); // SELECT -> Harmonium (2)
+ex.wasm_ui_encoder(0, 4); // SELECT -> RhythmLab (2)
 assert.equal(f32[summaryIdx + 53], 2.0);
 ex.wasm_ui_encoder(0, -8); // SELECT -> back to LiveMixer (0)
 assert.equal(f32[summaryIdx + 53], 0.0);
@@ -197,7 +198,7 @@ for (let b = 0; b < 8; b++) {
 }
 
 const tel47Idx = ex.wasm_dsp_read_telemetry() >> 2;
-for (let i = 0; i < 47; i++) {
+for (let i = 0; i < 48; i++) {
   f32[telInIdx + i] = f32[tel47Idx + i];
 }
 ex.wasm_ui_apply_telemetry();
@@ -355,12 +356,12 @@ for (let i = 0; i < 6; i++) {
 }
 assert.ok(Math.abs(f32[summaryIdx + 0] - osc1HzBeforeSave) < 0.1);
 
-// Switch across 4-model SEL carousel (0..3 -> RhythmLab at end) then select 2/4 CIRCUIT LAB (1)
+// Switch across 3-model SEL carousel (0..2 -> RhythmLab at end) then select 2/3 CIRCUIT LAB (1)
 ex.wasm_ui_button(3, 1);
 ex.wasm_ui_button(3, 0);
-ex.wasm_ui_encoder(0, 12); // -> RhythmLab (3)
-assert.equal(f32[summaryIdx + 53], 3.0);
-ex.wasm_ui_encoder(0, -8); // -> CircuitLab (1)
+ex.wasm_ui_encoder(0, 12); // -> RhythmLab (2)
+assert.equal(f32[summaryIdx + 53], 2.0);
+ex.wasm_ui_encoder(0, -4); // -> CircuitLab (1)
 assert.equal(f32[summaryIdx + 53], 1.0);
 ex.wasm_ui_button(3, 1);
 ex.wasm_ui_button(3, 0);
@@ -404,6 +405,59 @@ for (let i = 0; i < playRgba.length; i += 4) {
 }
 ex.wasm_ui_white_gate(12, 0);
 ex.wasm_ui_tick_and_render(0.2);
+
+// Switch to 3/3 RHYTHM LAB (2), lock external 24-PPQN MIDI Clock @ 135 BPM via wasm_ui_midi_realtime,
+// engage EUCLID + PLUCK + SWING, verify DSP rhythmPhase + 42-LED bounds + B&W RGBA strips, then MIDI Stop!
+ex.wasm_ui_button(3, 1);
+ex.wasm_ui_button(3, 0);
+ex.wasm_ui_encoder(0, 8); // -> RhythmLab (2)
+assert.equal(f32[summaryIdx + 53], 2.0);
+ex.wasm_ui_button(3, 1);
+ex.wasm_ui_button(3, 0);
+
+assert.equal(f32[summaryIdx + 55], 120.0); // Default internal 120 BPM
+assert.equal(f32[summaryIdx + 56], 0.0);   // midiClockSynced === false
+ex.wasm_ui_midi_realtime(0xFA, 5.0);       // MIDI Start (seconds)
+const tickSec135 = 60.0 / (135.0 * 24.0);
+for (let k = 0; k < 32; k++) {
+  ex.wasm_ui_midi_realtime(0xF8, 5.0 + k * tickSec135);
+}
+assert.equal(f32[summaryIdx + 56], 1.0);   // midiClockSynced === true
+assert.ok(Math.abs(f32[summaryIdx + 55] - 135.0) < 0.5);
+
+ex.wasm_ui_white_pressure(12, 0.70); // EUCLID 1
+ex.wasm_ui_black_pressure(7, 0.85);  // GLO PLUCK
+ex.wasm_ui_black_pressure(9, 0.75);  // POLY SWING
+u8.copyWithin(
+  ex.wasm_dsp_get_control_ptr(),
+  ex.wasm_ui_get_control_ptr(),
+  ex.wasm_ui_get_control_ptr() + ctrlSize
+);
+ex.wasm_dsp_publish_control(0);
+for (let b = 0; b < 20; b++) {
+  ex.wasm_dsp_process_block(128);
+}
+const rhyTelIdx = ex.wasm_dsp_read_telemetry() >> 2;
+for (let i = 0; i < 48; i++) {
+  f32[telInIdx + i] = f32[rhyTelIdx + i];
+}
+assert.ok(f32[rhyTelIdx + 47] > 0.01 && f32[rhyTelIdx + 47] < 1.0);
+ex.wasm_ui_apply_telemetry();
+ex.wasm_ui_tick_and_render(0.1);
+for (let i = 0; i < 42; i++) {
+  assert.ok(f32[ledsIdx + i] >= 0.0 && f32[ledsIdx + i] <= 1.0);
+}
+const rhyRgba = u8.subarray(rgbaStart, rgbaStart + 240 * 240 * 4);
+for (let i = 0; i < rhyRgba.length; i += 4) {
+  assert.equal(rhyRgba[i], rhyRgba[i + 1]);
+  assert.equal(rhyRgba[i + 1], rhyRgba[i + 2]);
+}
+ex.wasm_ui_white_gate(12, 0);
+ex.wasm_ui_black_key(7, 0);
+ex.wasm_ui_black_key(9, 0);
+ex.wasm_ui_midi_realtime(0xFC, 6.0); // MIDI Stop -> back to 120 BPM internal
+assert.equal(f32[summaryIdx + 56], 0.0);
+assert.equal(f32[summaryIdx + 55], 120.0);
 
 // Toggle PLAY/STOP -> AUDIO OUTPUT OFF (quiet): PLAY (Green) -> 100%, STOP (Red) -> 0%
 ex.wasm_ui_button(12, 1);

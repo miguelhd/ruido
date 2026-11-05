@@ -49,6 +49,7 @@ size_t strlen(const char* s) {
 #include "core/KeyboardCircuitLab.cpp"
 #include "core/KeyboardEngine.cpp"
 #include "core/KeyboardLiveMixer.cpp"
+#include "core/KeyboardRhythmLab.cpp"
 #include "core/LedEngine.cpp"
 #include "core/RuidoController.cpp"
 #include "core/SnapshotBank.cpp"
@@ -86,7 +87,7 @@ static_assert(kRgbaArenaAddr + (ruido::kDisplayWidth * ruido::kDisplayHeight * 4
 // --- Core 1 (AudioWorklet) Static Storage ---
 ruido::DroneEngine* gDsp = nullptr;
 
-constexpr size_t kTelemetryFloats = 47u;
+constexpr size_t kTelemetryFloats = 48u;
 
 alignas(16) ruido::EngineControlState gDspStagedControl{};
 alignas(16) float gAudioLeft[kMaxWorkletFrames]{};
@@ -105,7 +106,7 @@ alignas(16) ruido::ScopeFrame gScopeBatchIn[kMaxScopeBatch]{};
 alignas(16) float gTelemetryIn[kTelemetryFloats]{};
 alignas(16) uint16_t gScanlineStripRgb565[ruido::kDisplayWidth * ruido::kScanlineStripHeight]{};
 uint8_t* const gScreenRgba = reinterpret_cast<uint8_t*>(kRgbaArenaAddr);
-alignas(16) float gSummaryOut[55]{};
+alignas(16) float gSummaryOut[57]{};
 bool gControlDirty = true;
 
 void refreshSummary() noexcept {
@@ -152,6 +153,8 @@ void refreshSummary() noexcept {
     gSummaryOut[52u] = gCtrl->hud().panPageOpen ? 1.0f : 0.0f;
     gSummaryOut[53u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().keyboardModel));
     gSummaryOut[54u] = gCtrl->hud().selPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[55u] = gCtrl->hud().effectiveClockBpm;
+    gSummaryOut[56u] = gCtrl->hud().midiClockSynced ? 1.0f : 0.0f;
 }
 
 } // namespace
@@ -268,6 +271,7 @@ const float* wasm_dsp_read_telemetry() {
             gTelemetryOut[39u + i * 2u] = static_cast<float>((packedB >> 15u) & 0x7FFFu);
         }
         gTelemetryOut[46u] = static_cast<float>(t.stutterGateMask.load(std::memory_order_relaxed));
+        gTelemetryOut[47u] = t.rhythmPhase.load(std::memory_order_relaxed);
     }
     return gTelemetryOut;
 }
@@ -360,6 +364,18 @@ void wasm_ui_white_pressure(uint32_t whiteIdx, float pressure) {
     refreshSummary();
 }
 
+RUIDO_EXPORT("wasm_ui_midi_realtime")
+void wasm_ui_midi_realtime(uint32_t statusByte, float timestampSec) {
+    if (gCtrl == nullptr) {
+        return;
+    }
+    gCtrl->onMidiRealtime(static_cast<uint8_t>(statusByte & 0xFFu), timestampSec);
+    if (gCtrl->consumeStateDirty()) {
+        gControlDirty = true;
+    }
+    refreshSummary();
+}
+
 RUIDO_EXPORT("wasm_ui_get_scope_in_ptr")
 void* wasm_ui_get_scope_in_ptr() {
     return gScopeBatchIn;
@@ -405,6 +421,7 @@ void wasm_ui_apply_telemetry() {
     gUiTelemetry->stutterGateMask.store(
         static_cast<uint8_t>(static_cast<uint32_t>(gTelemetryIn[46u]) & 0x0Fu),
         std::memory_order_relaxed);
+    gUiTelemetry->rhythmPhase.store(gTelemetryIn[47u], std::memory_order_relaxed);
 }
 
 RUIDO_EXPORT("wasm_ui_tick_and_render")

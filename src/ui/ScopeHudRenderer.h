@@ -74,6 +74,7 @@ class ScopeHudRenderer {
     float renderedOpacityLevel_ = 0.0f;
     float smoothedPeakL_ = 0.0f;
     float smoothedPeakR_ = 0.0f;
+    float frameRhythmPhase_ = 0.0f;
     HudMode prevHeaderBarMode_ = HudMode::None;
     KnobBankMode prevKnobBank_ = KnobBankMode::Frequency;
     uint8_t frameStutterGateMask_ = 0x0Fu;

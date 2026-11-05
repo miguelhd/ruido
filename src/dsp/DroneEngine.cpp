@@ -42,6 +42,8 @@ void DroneEngine::init(float baseSampleRate) noexcept {
     coeffCache_ = {};
     filterCoeffs_ = {};
     crushStates_ = {};
+    rhythmState_.init(baseSampleRate_, kPunchBusSlewSec);
+    stutterPhases_.fill(0x80000000u);
     prevOscSamples_ = {0.0f, 0.0f, 0.0f, 0.0f};
     prevCapRamp_ = {0.0f, 0.0f, 0.0f, 0.0f};
     voiceEdgeDelayLines_ = {0u, 0u, 0u, 0u};
@@ -54,27 +56,29 @@ void DroneEngine::init(float baseSampleRate) noexcept {
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         VoiceSmoothers& sm = voiceSmoothers_[i];
         sm.freqHz.init(initState.voices[i].frequencyHz, kPotPoleTauSec, baseSampleRate_);
-        sm.pulseWidth.init(initState.voices[i].pulseWidth, kPotPoleTauSec, baseSampleRate_);
-        sm.drift.init(initState.voices[i].drift, kPotPoleTauSec, baseSampleRate_);
         sm.hpCutoffHz.init(initState.voices[i].hpCutoffHz, kPotPoleTauSec, baseSampleRate_);
-        sm.hpResonance.init(initState.voices[i].hpResonance, kPotPoleTauSec, baseSampleRate_);
         sm.lpCutoffHz.init(initState.voices[i].lpCutoffHz, kPotPoleTauSec, baseSampleRate_);
-        sm.lpResonance.init(initState.voices[i].lpResonance, kPotPoleTauSec, baseSampleRate_);
-        sm.amplitude.init(initState.voices[i].amplitude, kPotPoleTauSec, baseSampleRate_);
-        sm.pan.init(initState.voices[i].pan, kPotPoleTauSec, baseSampleRate_);
-        sm.vactrolGate.init(initState.voices[i].muted ? 0.0f : 1.0f, kVactrolSlewSec,
-                            baseSampleRate_);
+        sm.keyPitchMul.init(initState.keyMod.voicePitchMul[i], kPotPoleTauSec, baseSampleRate_);
+        sm.potSmoothers.setTimeConstant(kPotPoleTauSec, baseSampleRate_);
+        sm.potSmoothers.snapChannel(0u, initState.voices[i].pulseWidth);
+        sm.potSmoothers.snapChannel(1u, initState.voices[i].drift);
+        sm.potSmoothers.snapChannel(2u, initState.voices[i].hpResonance);
+        sm.potSmoothers.snapChannel(3u, initState.voices[i].lpResonance);
+        sm.potSmoothers.snapChannel(4u, initState.voices[i].amplitude);
+        sm.potSmoothers.snapChannel(5u, initState.voices[i].pan);
         sm.pressure.init(initState.voicePressure[i], kPressureAttackSec, kPressureReleaseSec,
                          baseSampleRate_);
-        sm.keyGainMul.init(initState.keyMod.voiceGainMul[i], kVactrolSlewSec, baseSampleRate_);
-        sm.keyPitchMul.init(initState.keyMod.voicePitchMul[i], kPotPoleTauSec, baseSampleRate_);
-        sm.stutterDepth.init(initState.keyMod.stutterDepth[i], kVactrolSlewSec, baseSampleRate_);
         sm.stutterGate.init(1.0f, kStutterEdgeSec, baseSampleRate_);
-        sm.xmodDepth.init(initState.keyMod.xmodDepth[i], kPunchBusSlewSec, baseSampleRate_);
-        sm.foldDepth.init(initState.keyMod.foldDepth[i], kPunchBusSlewSec, baseSampleRate_);
-        sm.crushDepth.init(initState.keyMod.crushDepth[i], kPunchBusSlewSec, baseSampleRate_);
-        sm.stutterPhase = 0x80000000u;
-        sm.stutterRateHz = initState.keyMod.stutterRateHz[i];
+        sm.vactrolMods.setTimeConstant(kVactrolSlewSec, baseSampleRate_);
+        sm.vactrolMods.snapChannel(0u, initState.voices[i].muted ? 0.0f : 1.0f);
+        sm.vactrolMods.snapChannel(1u, initState.keyMod.voiceGainMul[i]);
+        sm.vactrolMods.snapChannel(2u, initState.keyMod.stutterDepth[i]);
+        sm.circuitDepths.setTimeConstant(kPunchBusSlewSec, baseSampleRate_);
+        sm.circuitDepths.snapChannel(0u, initState.keyMod.xmodDepth[i]);
+        sm.circuitDepths.snapChannel(1u, initState.keyMod.foldDepth[i]);
+        sm.circuitDepths.snapChannel(2u, initState.keyMod.crushDepth[i]);
+        stutterPhases_[i] = 0x80000000u;
+        stutterRatesHz_[i] = initState.keyMod.stutterRateHz[i];
     }
 
     couplingSmoother_.init(initState.global.circuitCoupling, kPotPoleTauSec, baseSampleRate_);
@@ -85,14 +89,16 @@ void DroneEngine::init(float baseSampleRate) noexcept {
                             baseSampleRate_);
     pitchModeSmoother_.init(initState.global.pitchPressureMode ? 1.0f : 0.0f, kControlSlewSec,
                             baseSampleRate_);
-    overloadSurgeSmoother_.init(initState.keyMod.overloadSurge, kPunchBusSlewSec, baseSampleRate_);
-    dubLpfDropSmoother_.init(initState.keyMod.dubLpfDrop, kPunchBusSlewSec, baseSampleRate_);
-    spatialFocusSmoother_.init(initState.keyMod.spatialFocus, kPunchBusSlewSec, baseSampleRate_);
-    ringModSmoother_.init(initState.keyMod.ringModMix, kPunchBusSlewSec, baseSampleRate_);
-    hardSyncSmoother_.init(initState.keyMod.hardSyncAmount, kPunchBusSlewSec, baseSampleRate_);
-    filterScreamSmoother_.init(initState.keyMod.filterScream, kPunchBusSlewSec, baseSampleRate_);
+    punchBusSmoothers_.setTimeConstant(kPunchBusSlewSec, baseSampleRate_);
+    punchBusSmoothers_.snapChannel(0u, initState.keyMod.overloadSurge);
+    punchBusSmoothers_.snapChannel(1u, initState.keyMod.dubLpfDrop);
+    punchBusSmoothers_.snapChannel(2u, initState.keyMod.spatialFocus);
+    punchBusSmoothers_.snapChannel(3u, initState.keyMod.ringModMix);
+    punchBusSmoothers_.snapChannel(4u, initState.keyMod.hardSyncAmount);
+    punchBusSmoothers_.snapChannel(5u, initState.keyMod.filterScream);
     stasisFreeze_ = initState.keyMod.stasisFreeze;
     telemetry_.stutterGateMask.store(0x0Fu, std::memory_order_relaxed);
+    telemetry_.rhythmPhase.store(0.0f, std::memory_order_relaxed);
 
     updateTargetsFromState(initState, true);
     lfoBank_.writeInitialTelemetry(telemetry_);
@@ -108,6 +114,8 @@ void DroneEngine::reset() noexcept {
     coeffCache_ = {};
     filterCoeffs_ = {};
     crushStates_ = {};
+    rhythmState_.init(baseSampleRate_, kPunchBusSlewSec);
+    stutterPhases_.fill(0x80000000u);
     prevOscSamples_ = {0.0f, 0.0f, 0.0f, 0.0f};
     prevCapRamp_ = {0.0f, 0.0f, 0.0f, 0.0f};
     voiceEdgeDelayLines_ = {0u, 0u, 0u, 0u};
@@ -147,56 +155,56 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
         const float kXMod = clampf(state.keyMod.xmodDepth[i], 0.0f, 1.0f);
         const float kFold = clampf(state.keyMod.foldDepth[i], 0.0f, 1.0f);
         const float kCrush = clampf(state.keyMod.crushDepth[i], 0.0f, 1.0f);
-        sm.stutterRateHz = clampf(state.keyMod.stutterRateHz[i], 1.0f, 30.0f);
+        stutterRatesHz_[i] = clampf(state.keyMod.stutterRateHz[i], 1.0f, 30.0f);
 
         if (snapImmediate) {
             sm.freqHz.snapTo(clampedBaseHz);
-            sm.pulseWidth.snapTo(pw);
-            sm.drift.snapTo(dr);
             sm.hpCutoffHz.snapTo(hpHz);
-            sm.hpResonance.snapTo(hpRes);
             sm.lpCutoffHz.snapTo(lpHz);
-            sm.lpResonance.snapTo(lpRes);
-            sm.amplitude.snapTo(amp);
-            sm.pan.snapTo(pan);
-            sm.vactrolGate.snapTo(gateTarget);
+            sm.potSmoothers.snapChannel(0u, pw);
+            sm.potSmoothers.snapChannel(1u, dr);
+            sm.potSmoothers.snapChannel(2u, hpRes);
+            sm.potSmoothers.snapChannel(3u, lpRes);
+            sm.potSmoothers.snapChannel(4u, amp);
+            sm.potSmoothers.snapChannel(5u, pan);
             sm.pressure.snapTo(press);
-            sm.keyGainMul.snapTo(kGain);
             sm.keyPitchMul.snapTo(kPitch);
-            sm.stutterDepth.snapTo(kStutDepth);
             sm.stutterGate.snapTo(1.0f);
-            sm.xmodDepth.snapTo(kXMod);
-            sm.foldDepth.snapTo(kFold);
-            sm.crushDepth.snapTo(kCrush);
-            sm.stutterPhase = 0x80000000u;
+            sm.vactrolMods.snapChannel(0u, gateTarget);
+            sm.vactrolMods.snapChannel(1u, kGain);
+            sm.vactrolMods.snapChannel(2u, kStutDepth);
+            sm.circuitDepths.snapChannel(0u, kXMod);
+            sm.circuitDepths.snapChannel(1u, kFold);
+            sm.circuitDepths.snapChannel(2u, kCrush);
+            stutterPhases_[i] = 0x80000000u;
             const float pm = state.global.pitchPressureMode ? 1.0f : 0.0f;
             prevOscFreqHz_[i] = clampf(clampedBaseHz * kPitch * computeVoicePitchRatio(press, pm),
                                        0.005f, kAudioFreqMaxHz * 4.0f);
         } else {
             sm.freqHz.setTarget(clampedBaseHz);
-            sm.pulseWidth.setTarget(pw);
-            sm.drift.setTarget(dr);
             sm.hpCutoffHz.setTarget(hpHz);
-            sm.hpResonance.setTarget(hpRes);
             sm.lpCutoffHz.setTarget(lpHz);
-            sm.lpResonance.setTarget(lpRes);
-            if (sm.vactrolGate.current() <= 1.0e-4f && sm.pressure.current() <= 1.0e-4f &&
+            sm.potSmoothers.setTarget(0u, pw);
+            sm.potSmoothers.setTarget(1u, dr);
+            sm.potSmoothers.setTarget(2u, hpRes);
+            sm.potSmoothers.setTarget(3u, lpRes);
+            if (sm.vactrolMods.current(0u) <= 1.0e-4f && sm.pressure.current() <= 1.0e-4f &&
                 gateTarget > 0.5f) {
                 // Voice is currently completely silent: snap remembered amplitude to new target
                 // before opening vactrol gate so fading in from 0% never blips upward.
-                sm.amplitude.snapTo(amp);
+                sm.potSmoothers.snapChannel(4u, amp);
             } else {
-                sm.amplitude.setTarget(amp);
+                sm.potSmoothers.setTarget(4u, amp);
             }
-            sm.pan.setTarget(pan);
-            sm.vactrolGate.setTarget(gateTarget);
+            sm.potSmoothers.setTarget(5u, pan);
             sm.pressure.setTarget(press);
-            sm.keyGainMul.setTarget(kGain);
             sm.keyPitchMul.setTarget(kPitch);
-            sm.stutterDepth.setTarget(kStutDepth);
-            sm.xmodDepth.setTarget(kXMod);
-            sm.foldDepth.setTarget(kFold);
-            sm.crushDepth.setTarget(kCrush);
+            sm.vactrolMods.setTarget(0u, gateTarget);
+            sm.vactrolMods.setTarget(1u, kGain);
+            sm.vactrolMods.setTarget(2u, kStutDepth);
+            sm.circuitDepths.setTarget(0u, kXMod);
+            sm.circuitDepths.setTarget(1u, kFold);
+            sm.circuitDepths.setTarget(2u, kCrush);
         }
     }
 
@@ -205,12 +213,14 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
     const float monoTarget = state.global.monoCollapse ? 1.0f : 0.0f;
     const float runTarget = state.global.masterRun ? 1.0f : 0.0f;
     const float pitchTarget = state.global.pitchPressureMode ? 1.0f : 0.0f;
-    const float surgeTarget = clampf(state.keyMod.overloadSurge, 0.0f, 1.0f);
-    const float dubLpfTarget = clampf(state.keyMod.dubLpfDrop, 0.0f, 1.0f);
-    const float spatialTarget = clampf(state.keyMod.spatialFocus, -1.0f, 1.0f);
-    const float ringTarget = clampf(state.keyMod.ringModMix, 0.0f, 1.0f);
-    const float syncTarget = clampf(state.keyMod.hardSyncAmount, 0.0f, 1.0f);
-    const float screamTarget = clampf(state.keyMod.filterScream, 0.0f, 1.0f);
+    const std::array<float, 6> punchTargets = {
+        clampf(state.keyMod.overloadSurge, 0.0f, 1.0f),
+        clampf(state.keyMod.dubLpfDrop, 0.0f, 1.0f),
+        clampf(state.keyMod.spatialFocus, -1.0f, 1.0f),
+        clampf(state.keyMod.ringModMix, 0.0f, 1.0f),
+        clampf(state.keyMod.hardSyncAmount, 0.0f, 1.0f),
+        clampf(state.keyMod.filterScream, 0.0f, 1.0f),
+    };
     stasisFreeze_ = state.keyMod.stasisFreeze;
 
     if (snapImmediate) {
@@ -219,26 +229,21 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
         monoMixSmoother_.snapTo(monoTarget);
         masterRunSmoother_.snapTo(runTarget);
         pitchModeSmoother_.snapTo(pitchTarget);
-        overloadSurgeSmoother_.snapTo(surgeTarget);
-        dubLpfDropSmoother_.snapTo(dubLpfTarget);
-        spatialFocusSmoother_.snapTo(spatialTarget);
-        ringModSmoother_.snapTo(ringTarget);
-        hardSyncSmoother_.snapTo(syncTarget);
-        filterScreamSmoother_.snapTo(screamTarget);
+        for (size_t k = 0u; k < 6u; ++k) {
+            punchBusSmoothers_.snapChannel(k, punchTargets[k]);
+        }
     } else {
         couplingSmoother_.setTarget(coupling);
         masterTrimSmoother_.setTarget(trim);
         monoMixSmoother_.setTarget(monoTarget);
         masterRunSmoother_.setTarget(runTarget);
         pitchModeSmoother_.setTarget(pitchTarget);
-        overloadSurgeSmoother_.setTarget(surgeTarget);
-        dubLpfDropSmoother_.setTarget(dubLpfTarget);
-        spatialFocusSmoother_.setTarget(spatialTarget);
-        ringModSmoother_.setTarget(ringTarget);
-        hardSyncSmoother_.setTarget(syncTarget);
-        filterScreamSmoother_.setTarget(screamTarget);
+        for (size_t k = 0u; k < 6u; ++k) {
+            punchBusSmoothers_.setTarget(k, punchTargets[k]);
+        }
     }
 
+    rhythmState_.updateTargets(state, snapImmediate);
     lfoBank_.updateTargets(state, snapImmediate);
 }
 
@@ -264,13 +269,13 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             lfoBank_.stepFrame(stasisFreeze_);
         lastLfo = lfoFrames;
 
-        const float surge = overloadSurgeSmoother_.next();
+        const float surge = punchBusSmoothers_.next(0u);
         const float surgeDrive = surge * (0.62f + 0.38f * surge);
-        const float dubDrop = dubLpfDropSmoother_.next();
-        const float spatialFocus = spatialFocusSmoother_.next();
-        const float ringModMix = ringModSmoother_.next();
-        const float hardSync = hardSyncSmoother_.next();
-        const float filterScream = filterScreamSmoother_.next();
+        const float dubDrop = punchBusSmoothers_.next(1u);
+        const float spatialFocus = punchBusSmoothers_.next(2u);
+        const float ringModMix = punchBusSmoothers_.next(3u);
+        const float hardSync = punchBusSmoothers_.next(4u);
+        const float filterScream = punchBusSmoothers_.next(5u);
         const float baseCoupling = couplingSmoother_.next();
         const float coupling = baseCoupling + (1.0f - baseCoupling) * (surge * surge);
         const float masterTrim = masterTrimSmoother_.next();
@@ -287,6 +292,7 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         std::array<float, kNumOscillators> oscFreqs{};
         std::array<float, kNumOscillators> oscPulseWidths{};
         std::array<float, kNumOscillators> oscDrifts{};
+        std::array<float, kNumOscillators> stutDepths{};
         std::array<float, kNumOscillators> xmodDepths{};
         std::array<float, kNumOscillators> foldDepths{};
         std::array<float, kNumOscillators> crushDepths{};
@@ -294,6 +300,13 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         std::array<float, kNumOscillators> gainL{};
         std::array<float, kNumOscillators> gainR{};
         std::array<float, kNumOscillators> voiceScopeScale{};
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            stutDepths[i] = voiceSmoothers_[i].vactrolMods.next(2u);
+        }
+        const RhythmFrameResult rhythmFrame =
+            stepRhythmFrame(rhythmState_, stutterPhases_, stutterRatesHz_, stutDepths,
+                            hzToBasePhaseU32_, stasisFreeze_);
+        frameStutterMask = rhythmFrame.gateMask;
 
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             VoiceSmoothers& sm = voiceSmoothers_[i];
@@ -304,32 +317,14 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             const auto& tdB = lfoB.targetDepths;
 
             const float p = sm.pressure.next();
-            const float baseGate = sm.vactrolGate.next();
-            const float kGainMul = sm.keyGainMul.next();
+            const float baseGate = sm.vactrolMods.next(0u);
+            const float kGainMul = sm.vactrolMods.next(1u);
             const float kPitchMul = sm.keyPitchMul.next();
-            const float stutDepth = sm.stutterDepth.next();
-            xmodDepths[i] = sm.xmodDepth.next();
-            foldDepths[i] = sm.foldDepth.next();
-            crushDepths[i] = sm.crushDepth.next();
-            float stutMul = 1.0f;
-            if (stutDepth > 1.0e-4f) {
-                if (!stasisFreeze_) {
-                    const uint32_t stutInc =
-                        static_cast<uint32_t>(sm.stutterRateHz * hzToBasePhaseU32_ + 0.5f);
-                    sm.stutterPhase += stutInc;
-                }
-                const bool chopOpen = (sm.stutterPhase < 0x80000000u);
-                if (!chopOpen) {
-                    frameStutterMask &= static_cast<uint8_t>(~(1u << i));
-                }
-                sm.stutterGate.setTarget(chopOpen ? 1.0f : 0.0f);
-                const float gateEnv = sm.stutterGate.next();
-                stutMul = 1.0f - stutDepth * (1.0f - gateEnv);
-            } else {
-                sm.stutterPhase = 0x80000000u;
-                sm.stutterGate.setTarget(1.0f);
-                (void)sm.stutterGate.next();
-            }
+            xmodDepths[i] = sm.circuitDepths.next(0u);
+            foldDepths[i] = sm.circuitDepths.next(1u);
+            crushDepths[i] = sm.circuitDepths.next(2u);
+            sm.stutterGate.setTarget(rhythmFrame.vcaGateTarget[i]);
+            const float stutMul = sm.stutterGate.next();
 
             float baseHz = applyLfoPitchHz(sm.freqHz.next(),
                                            tdA[static_cast<size_t>(LfoTarget::Pitch)], lfoA.raw);
@@ -339,36 +334,39 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
                               ? clampf(baseHz * pitchMul, 0.005f, kAudioFreqMaxHz * 4.0f)
                               : baseHz;
 
-            float modPw = applyLfoPulseWidth(
-                sm.pulseWidth.next(), tdA[static_cast<size_t>(LfoTarget::PulseWidth)], lfoA.raw);
+            float modPw =
+                applyLfoPulseWidth(sm.potSmoothers.next(0u),
+                                   tdA[static_cast<size_t>(LfoTarget::PulseWidth)], lfoA.raw);
             oscPulseWidths[i] = applyLfoPulseWidth(
                 modPw, tdB[static_cast<size_t>(LfoTarget::PulseWidth)], lfoB.raw);
-            oscDrifts[i] = sm.drift.next();
+            oscDrifts[i] = sm.potSmoothers.next(1u);
 
             float hpBase = applyLfoCutoffHz(
                 sm.hpCutoffHz.next(), tdA[static_cast<size_t>(LfoTarget::HpCutoff)], lfoA.raw);
             hpBase =
                 applyLfoCutoffHz(hpBase, tdB[static_cast<size_t>(LfoTarget::HpCutoff)], lfoB.raw);
-            float hpResBase = applyLfoResonance(
-                sm.hpResonance.next(), tdA[static_cast<size_t>(LfoTarget::HpResonance)], lfoA.raw);
+            float hpResBase =
+                applyLfoResonance(sm.potSmoothers.next(2u),
+                                  tdA[static_cast<size_t>(LfoTarget::HpResonance)], lfoA.raw);
             hpResBase = applyLfoResonance(
                 hpResBase, tdB[static_cast<size_t>(LfoTarget::HpResonance)], lfoB.raw);
             float lpBase = applyLfoCutoffHz(
                 sm.lpCutoffHz.next(), tdA[static_cast<size_t>(LfoTarget::LpCutoff)], lfoA.raw);
             lpBase =
                 applyLfoCutoffHz(lpBase, tdB[static_cast<size_t>(LfoTarget::LpCutoff)], lfoB.raw);
-            float lpResBase = applyLfoResonance(
-                sm.lpResonance.next(), tdA[static_cast<size_t>(LfoTarget::LpResonance)], lfoA.raw);
+            float lpResBase =
+                applyLfoResonance(sm.potSmoothers.next(3u),
+                                  tdA[static_cast<size_t>(LfoTarget::LpResonance)], lfoA.raw);
             lpResBase = applyLfoResonance(
                 lpResBase, tdB[static_cast<size_t>(LfoTarget::LpResonance)], lfoB.raw);
 
-            ModulatedFilterParams mod =
-                applyKeyDubLowPass(computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase,
-                                                             p, baseGate, pitchMode),
-                                   dubDrop, surge, filterScream);
+            ModulatedFilterParams mod = applyKeyDubLowPass(
+                computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase, p, baseGate,
+                                          pitchMode),
+                dubDrop, surge, filterScream, rhythmFrame.pluckDepth, rhythmFrame.pluckEnv01[i]);
 
             float modAmp = applyLfoAmplitude(
-                sm.amplitude.next(), tdA[static_cast<size_t>(LfoTarget::Amplitude)], lfoA.raw);
+                sm.potSmoothers.next(4u), tdA[static_cast<size_t>(LfoTarget::Amplitude)], lfoA.raw);
             modAmp =
                 applyLfoAmplitude(modAmp, tdB[static_cast<size_t>(LfoTarget::Amplitude)], lfoB.raw);
             modAmp = clampf(modAmp + (1.0f - modAmp) * surgeDrive, 0.0f, 1.0f);
@@ -391,12 +389,13 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             vcaGates[i] = ampGate;
             const float voiceGain = ampGate * kVoiceSumScale;
             voiceScopeScale[i] = ampGate * finalScale * 0.25f;
-            float modPan =
-                applyLfoPan(sm.pan.next(), tdA[static_cast<size_t>(LfoTarget::Pan)], lfoA.raw);
+            float modPan = applyLfoPan(sm.potSmoothers.next(5u),
+                                       tdA[static_cast<size_t>(LfoTarget::Pan)], lfoA.raw);
             modPan = applyLfoPan(modPan, tdB[static_cast<size_t>(LfoTarget::Pan)], lfoB.raw);
             if (spatialFocus > 0.0f) {
                 modPan += (kWideFanPans[i] - modPan) * spatialFocus;
             }
+            modPan = clampf(modPan + rhythmFrame.swingPanOffset, -1.0f, 1.0f);
             const float panEff = clampf(modPan * panScale, -1.0f, 1.0f);
             if (panEff != cache.panEff) {
                 cache.panEff = panEff;
@@ -516,6 +515,7 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         telemetry_.voiceDriftNorm[i].store(lastDriftNorm[i], std::memory_order_relaxed);
     }
     telemetry_.stutterGateMask.store(lastStutterMask, std::memory_order_relaxed);
+    telemetry_.rhythmPhase.store(rhythmState_.warpedBar01, std::memory_order_relaxed);
     for (size_t s = 0u; s < kNumVoiceLfos; ++s) {
         telemetry_.lfoOutput[s].store(lastLfo[s].raw, std::memory_order_relaxed);
         telemetry_.lfoPhase[s].store(lastLfo[s].phase01, std::memory_order_relaxed);

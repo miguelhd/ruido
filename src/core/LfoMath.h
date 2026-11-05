@@ -361,7 +361,8 @@ inline float applySpatialFocusPan(float pan, size_t voiceIdx, bool monoCollapse,
 
 inline ModulatedFilterParams applyKeyDubLowPass(ModulatedFilterParams mod, float dubLpfDrop,
                                                 float overloadSurge = 0.0f,
-                                                float filterScream = 0.0f) noexcept {
+                                                float filterScream = 0.0f, float rhythmPluck = 0.0f,
+                                                float pluckEnv01 = 0.0f) noexcept {
     const float surge = clampf(overloadSurge, 0.0f, 1.0f);
     if (surge > 0.22f) {
         const float u = (surge - 0.22f) * (1.0f / 0.78f);
@@ -403,14 +404,29 @@ inline ModulatedFilterParams applyKeyDubLowPass(ModulatedFilterParams mod, float
             mod.lpResonance = screamRes;
         }
     }
+    const float pluck = clampf(rhythmPluck, 0.0f, 1.0f);
+    if (pluck > 1.0e-4f) {
+        const float env = clampf(pluckEnv01, 0.0f, 1.0f);
+        const float engage = smoothstep01(pluck * 4.5f);
+        const float floorHz = 250.0f * fastExp2(-1.18f * pluck); // 250 Hz -> 110 Hz woody floor
+        const float peakHz = 3200.0f * fastExp2(3.12f * pluck);  // 3.2 kHz -> 27.8 kHz snap
+        const float spanOct = fastLog2(peakHz / floorHz);
+        const float pluckHz =
+            clampf(floorHz * fastExp2(spanOct * env), kFilterCutoffMinHz, kFilterCutoffMaxHz);
+        mod.lpCutoffHz =
+            clampf(mod.lpCutoffHz * fastExp2(engage * fastLog2(pluckHz / mod.lpCutoffHz)),
+                   kFilterCutoffMinHz, kFilterCutoffMaxHz);
+        const float pluckRes = engage * 0.72f * pluck * (0.35f + 0.65f * env);
+        mod.lpResonance = clampf(mod.lpResonance + pluckRes, 0.0f, 0.90f);
+    }
     return mod;
 }
 
-inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float pressure,
-                                                    float pitchMode, float lfoARaw,
-                                                    float lfoBRaw = 0.0f, float dubLpfDrop = 0.0f,
-                                                    float overloadSurge = 0.0f,
-                                                    float filterScream = 0.0f) noexcept {
+inline ModulatedFilterParams
+computeLiveVoiceFilter(const VoiceParams& vp, float pressure, float pitchMode, float lfoARaw,
+                       float lfoBRaw = 0.0f, float dubLpfDrop = 0.0f, float overloadSurge = 0.0f,
+                       float filterScream = 0.0f, float rhythmPluck = 0.0f,
+                       float pluckEnv01 = 0.0f) noexcept {
     const float dA = computeLiveLfoADepth(vp, lfoBRaw);
     float hpBase = (vp.lfoTarget == LfoTarget::HpCutoff)
                        ? applyLfoCutoffHz(vp.hpCutoffHz, dA, lfoARaw)
@@ -439,7 +455,7 @@ inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float
     return applyKeyDubLowPass(computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase,
                                                         pressure, vp.muted ? 0.0f : 1.0f,
                                                         pitchMode),
-                              dubLpfDrop, overloadSurge, filterScream);
+                              dubLpfDrop, overloadSurge, filterScream, rhythmPluck, pluckEnv01);
 }
 
 inline constexpr bool isFilterLfoTarget(LfoTarget t) noexcept {

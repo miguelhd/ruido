@@ -426,10 +426,11 @@ GlobalColumnSummary evaluateGlobalColumn(KnobBankMode bank, uint8_t knobIdx,
         float sumVal = 0.0f;
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             const VoiceParams& vp = control.voices[i];
-            const ModulatedFilterParams mod =
-                computeLiveVoiceFilter(vp, control.voicePressure[i], pitchMode, lfoOutput[i],
-                                       lfoOutput[4u + i], control.keyMod.dubLpfDrop,
-                                       control.keyMod.overloadSurge, control.keyMod.filterScream);
+            const float pluckEnv = (((stutterGateMask >> i) & 1u) != 0u) ? 0.55f : 0.0f;
+            const ModulatedFilterParams mod = computeLiveVoiceFilter(
+                vp, control.voicePressure[i], pitchMode, lfoOutput[i], lfoOutput[4u + i],
+                control.keyMod.dubLpfDrop, control.keyMod.overloadSurge,
+                control.keyMod.filterScream, control.keyMod.rhythmPluck, pluckEnv);
             float vNorm = 0.0f;
             if (k == 0u) {
                 const float lg = fastLog2(mod.hpCutoffHz);

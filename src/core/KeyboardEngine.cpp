@@ -15,47 +15,11 @@ inline uint8_t quantizePressureU8(float p) noexcept {
     return static_cast<uint8_t>(clampf(p, 0.0f, 1.0f) * 255.0f + 0.5f);
 }
 
-void onScaffoldKeyPress(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
-                        KeyboardLatchState& latch) noexcept {
-    (void)isBlack;
-    (void)keyIdx;
-    (void)config;
-    (void)latch;
-}
-
-void evaluateScaffoldModel(const KeyboardInputView& input, EngineControlState& state,
-                           HudState& hud) noexcept {
-    (void)input;
-    (void)state;
-    (void)hud;
-}
-
-void choreographScaffoldLeds(const KeyboardInputView& input, float animPhase, float subBreathWave01,
-                             const EngineControlState& state, const HudState& hud,
-                             uint8_t stutterGateMask, LedState& outLeds) noexcept {
-    (void)animPhase;
-    (void)subBreathWave01;
-    (void)state;
-    (void)hud;
-    (void)stutterGateMask;
-    for (size_t i = 0u; i < kNumBlackKeys; ++i) {
-        if (input.blackHeld[i]) {
-            outLeds.blackKeyLeds[i] = 1.0f;
-        }
-    }
-    for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-        if (input.whiteHeld[i]) {
-            outLeds.whiteKeyLeds[i] = 1.0f;
-        }
-    }
-}
-
 constexpr std::array<KeyboardModelOps, static_cast<size_t>(KeyboardModel::Count)> kModelOpsTable = {
     {
         {&onLiveMixerKeyPress, &evaluateLiveMixerModel, &choreographLiveMixerLeds},
         {&onCircuitLabKeyPress, &evaluateCircuitLabModel, &choreographCircuitLabLeds},
-        {&onScaffoldKeyPress, &evaluateScaffoldModel, &choreographScaffoldLeds},
-        {&onScaffoldKeyPress, &evaluateScaffoldModel, &choreographScaffoldLeds},
+        {&onRhythmLabKeyPress, &evaluateRhythmLabModel, &choreographRhythmLabLeds},
     }};
 
 } // namespace
@@ -238,6 +202,7 @@ void KeyboardEngine::stepAndComputeKeyLeds(float dtSec, float animPhase, float s
     }
 
     const uint8_t stutMask = telemetry.stutterGateMask.load(std::memory_order_relaxed);
+    const float rhythmPhase = telemetry.rhythmPhase.load(std::memory_order_relaxed);
     const float savePulse01 = 0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(animPhase * 2.5f)));
     computeKeyboardModelRestLeds(model_, state, hud, stutMask, subBreathWave01, savePulse01,
                                  outLeds.blackKeyLeds, outLeds.whiteKeyLeds);
@@ -247,7 +212,7 @@ void KeyboardEngine::stepAndComputeKeyLeds(float dtSec, float animPhase, float s
                                      blackPressSeq_, whitePressSeq_, heldBlackMask_, heldWhiteMask_,
                                      latch_,         config_};
         keyboardModelOps(model_).choreographActiveLeds(view, animPhase, subBreathWave01, state, hud,
-                                                       stutMask, outLeds);
+                                                       stutMask, rhythmPhase, outLeds);
     }
 
     // Signature 220 ms Mode-Select LED Sweep across BOTH the 27-key bed & top panel switches!
@@ -255,9 +220,7 @@ void KeyboardEngine::stepAndComputeKeyLeds(float dtSec, float animPhase, float s
         const float prog = 1.0f - wipePhase_;
         for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
             float pos01 = static_cast<float>(i) * (1.0f / 15.0f);
-            if (model_ == KeyboardModel::Harmonium) {
-                pos01 = absf(static_cast<float>(i) - 7.5f) * (1.0f / 7.5f);
-            } else if (model_ == KeyboardModel::CircuitLab) {
+            if (model_ == KeyboardModel::CircuitLab) {
                 pos01 = static_cast<float>((i * 7u + 3u) & 15u) * (1.0f / 15.0f);
             } else if (model_ == KeyboardModel::RhythmLab) {
                 pos01 = static_cast<float>(((i & 3u) * 4u) + (i >> 2u)) * (1.0f / 15.0f);

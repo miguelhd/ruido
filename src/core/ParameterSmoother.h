@@ -2,6 +2,9 @@
 
 #include "core/DspMath.h"
 
+#include <array>
+#include <cstddef>
+
 namespace ruido {
 
 // Clickless one-pole exponential smoother with automatic snap-to-target to prevent
@@ -57,6 +60,52 @@ class OnePoleSmoother {
   private:
     float state_ = 0.0f;
     float target_ = 0.0f;
+    float coeff_ = 1.0f;
+};
+
+// Multi-channel one-pole smoother sharing a single time-constant coefficient across N channels
+// to eliminate duplicate `coeff_` storage inside Core 1's 48 KB SRAM budget.
+template <size_t N> class OnePoleSmootherBank {
+  public:
+    constexpr OnePoleSmootherBank() noexcept = default;
+
+    void setTimeConstant(float timeConstantSec, float sampleRate) noexcept {
+        if (!(timeConstantSec > 0.0f) || !(sampleRate > 0.0f)) {
+            coeff_ = 1.0f;
+            return;
+        }
+        coeff_ = clampf(1.0f - fastExp(-1.0f / (timeConstantSec * sampleRate)), 1.0e-6f, 1.0f);
+    }
+
+    void snapChannel(size_t idx, float value) noexcept {
+        const float clean = sanitizeState(value);
+        state_[idx] = clean;
+        target_[idx] = clean;
+    }
+
+    void setTarget(size_t idx, float target) noexcept { target_[idx] = sanitizeState(target); }
+
+    float current(size_t idx) const noexcept { return state_[idx]; }
+
+    float next(size_t idx) noexcept {
+        const float cur = state_[idx];
+        const float tgt = target_[idx];
+        if (cur == tgt) {
+            return cur;
+        }
+        const float nextState = cur + coeff_ * (tgt - cur);
+        const float snapTol = 1.0e-5f * (1.0f + absf(tgt));
+        if (nextState == cur || absf(tgt - nextState) <= snapTol) {
+            state_[idx] = tgt;
+            return tgt;
+        }
+        state_[idx] = nextState;
+        return nextState;
+    }
+
+  private:
+    std::array<float, N> state_{};
+    std::array<float, N> target_{};
     float coeff_ = 1.0f;
 };
 
@@ -175,6 +224,56 @@ class CriticallyDampedSmoother {
     float s1_ = 0.0f;
     float s2_ = 0.0f;
     float target_ = 0.0f;
+    float coeff_ = 1.0f;
+};
+
+// Multi-channel 2-pole critically-damped smoother sharing a single `coeff_` across N channels.
+template <size_t N> class CriticallyDampedSmootherBank {
+  public:
+    constexpr CriticallyDampedSmootherBank() noexcept = default;
+
+    void setTimeConstant(float poleTimeConstantSec, float sampleRate) noexcept {
+        if (!(poleTimeConstantSec > 0.0f) || !(sampleRate > 0.0f)) {
+            coeff_ = 1.0f;
+            return;
+        }
+        coeff_ = clampf(1.0f - fastExp(-1.0f / (poleTimeConstantSec * sampleRate)), 1.0e-6f, 1.0f);
+    }
+
+    void snapChannel(size_t idx, float value) noexcept {
+        const float clean = sanitizeState(value);
+        s1_[idx] = clean;
+        s2_[idx] = clean;
+        target_[idx] = clean;
+    }
+
+    void setTarget(size_t idx, float target) noexcept { target_[idx] = sanitizeState(target); }
+
+    float next(size_t idx) noexcept {
+        const float cur2 = s2_[idx];
+        const float cur1 = s1_[idx];
+        const float tgt = target_[idx];
+        if (cur2 == tgt && cur1 == tgt) {
+            return cur2;
+        }
+        const float next1 = cur1 + coeff_ * (tgt - cur1);
+        const float next2 = cur2 + coeff_ * (next1 - cur2);
+        const float snapTol = 1.0e-5f * (1.0f + absf(tgt));
+        if ((next1 == cur1 && next2 == cur2) ||
+            (absf(tgt - next2) <= snapTol && absf(tgt - next1) <= snapTol)) {
+            s1_[idx] = tgt;
+            s2_[idx] = tgt;
+            return tgt;
+        }
+        s1_[idx] = next1;
+        s2_[idx] = next2;
+        return next2;
+    }
+
+  private:
+    std::array<float, N> s1_{};
+    std::array<float, N> s2_{};
+    std::array<float, N> target_{};
     float coeff_ = 1.0f;
 };
 

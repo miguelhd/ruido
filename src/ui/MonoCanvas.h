@@ -77,11 +77,6 @@ constexpr std::array<uint8_t, 1024> makeTonemapLut() noexcept {
 inline constexpr std::array<uint16_t, 64> kGaussLut = makeGaussLut();
 inline constexpr std::array<uint8_t, 1024> kTonemapLut = makeTonemapLut();
 
-inline float fastExpNeg(float x) noexcept {
-    const float u = (x > 0.0f) ? x : 0.0f;
-    return 1.0f / (1.0f + u + 0.48f * u * u + 0.235f * u * u * u);
-}
-
 inline float slewScalar(float cur, float tgt, float alpha, float snapEps = 1.0e-4f) noexcept {
     const float diff = tgt - cur;
     if (absf(diff) <= snapEps) {

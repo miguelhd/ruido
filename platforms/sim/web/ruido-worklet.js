@@ -98,7 +98,7 @@ class RuidoAudioProcessor extends AudioWorkletProcessor {
     if (this.blockCounter === 0) {
       const nScope = this.ex.wasm_dsp_pop_scope(256);
       const telPtr = this.ex.wasm_dsp_read_telemetry() >> 2;
-      const telemetry = this.f32.slice(telPtr, telPtr + 47);
+      const telemetry = this.f32.slice(telPtr, telPtr + 48);
 
       let scopeBuffer = null;
       if (nScope > 0) {

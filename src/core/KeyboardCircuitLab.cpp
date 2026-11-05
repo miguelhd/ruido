@@ -159,7 +159,8 @@ void evaluateCircuitLabModel(const KeyboardInputView& in, EngineControlState& st
 
 void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, float subBreathWave01,
                                const EngineControlState& state, const HudState& hud,
-                               uint8_t stutMask, LedState& outLeds) noexcept {
+                               uint8_t stutMask, float rhythmPhase01, LedState& outLeds) noexcept {
+    (void)rhythmPhase01;
     // LIFO black-key show selection across OP5..POLY (indices 4..9): matches HUD header 1-to-1
     // when chording multiple global bends, while keeping every physically held black key at 100%.
     int topBlackShow = -1;

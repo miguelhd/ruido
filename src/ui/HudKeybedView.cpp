@@ -4,6 +4,7 @@
 #include "core/HudEnvelope.h"
 #include "core/KeyboardModelSpec.h"
 #include "core/LfoMath.h"
+#include "core/RhythmMath.h"
 #include "ui/FontSansAA.h"
 #include "ui/GraphStyle.h"
 #include "ui/HudColumnText.h"
@@ -273,7 +274,8 @@ void formatKeybedTopHeader(const HudState& hud, char* leftMain, size_t leftMainC
         appendStr(leftMain, 0u, leftMainCap, "STUTTER");
         size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
         appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-        formatCompactHz(rightText, rightCap, hud.activePunchValue);
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatCompactHz(rightText, rightCap, computeStutterRateHz(outBarNorm));
         break;
     }
     case KeyPunchKind::VoiceSiren: {
@@ -349,6 +351,60 @@ void formatKeybedTopHeader(const HudState& hud, char* leftMain, size_t leftMainC
         outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
         formatPercent(rightText, rightCap, outBarNorm);
         break;
+    case KeyPunchKind::VoiceDivide: {
+        appendStr(leftMain, 0u, leftMainCap, "DIVIDE");
+        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
+        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        appendStr(rightText, 0u, rightCap,
+                  clockDivisionLabel(selectVoiceClockDivIndex(hud.activePunchVoice, outBarNorm)));
+        break;
+    }
+    case KeyPunchKind::VoiceEuclid: {
+        appendStr(leftMain, 0u, leftMainCap, "EUCLID");
+        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
+        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        const uint8_t hits = kEuclidHitCounts[selectEuclidTierIndex(outBarNorm)];
+        size_t rp = appendUInt(rightText, 0u, rightCap, hits);
+        appendStr(rightText, rp, rightCap, "/16");
+        break;
+    }
+    case KeyPunchKind::RhythmPump:
+        appendStr(leftMain, 0u, leftMainCap, "PUMP");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
+    case KeyPunchKind::RhythmChase:
+        appendStr(leftMain, 0u, leftMainCap, "CHASE");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
+    case KeyPunchKind::RhythmTempo: {
+        appendStr(leftMain, 0u, leftMainCap, "TEMPO");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        const auto bpmInt = static_cast<uint32_t>(
+            clampf(hud.effectiveClockBpm * computeTempoMultiplier(outBarNorm), 30.0f, 1200.0f) +
+            0.5f);
+        size_t rp = appendUInt(rightText, 0u, rightCap, bpmInt);
+        appendStr(rightText, rp, rightCap, hud.midiClockSynced ? " BPM EXT" : " BPM");
+        break;
+    }
+    case KeyPunchKind::RhythmPluck:
+        appendStr(leftMain, 0u, leftMainCap, "PLUCK");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
+    case KeyPunchKind::RhythmShort:
+        appendStr(leftMain, 0u, leftMainCap, "SHORT");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
+    case KeyPunchKind::RhythmSwing:
+        appendStr(leftMain, 0u, leftMainCap, "SWING");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, computeSwingRatio(outBarNorm));
+        break;
     case KeyPunchKind::None:
         appendStr(leftMain, 0u, leftMainCap, keyboardModelTitle(hud.keyboardModel));
         appendStr(rightText, 0u, rightCap, "PREVIEW");
@@ -395,34 +451,14 @@ void HudKeybedView::update(float dtClamped, const EngineControlState& control,
     computeKeyboardModelRestLeds(rawHud.keyboardModel, control, rawHud, stutterGateMask,
                                  subBreath01, savePulse01, tgtBlack, tgtWhite);
 
-    if (rawHud.keyboardModel == KeyboardModel::LiveMixer ||
-        rawHud.keyboardModel == KeyboardModel::CircuitLab) {
-        for (size_t i = kNumOscillators; i < kNumBlackKeys; ++i) {
-            if (((rawHud.heldBlackMask >> i) & 1u) != 0u) {
-                tgtBlack[i] = 1.0f;
-            }
+    for (size_t i = kNumOscillators; i < kNumBlackKeys; ++i) {
+        if (((rawHud.heldBlackMask >> i) & 1u) != 0u) {
+            tgtBlack[i] = 1.0f;
         }
-        for (size_t v = 0u; v < kNumOscillators; ++v) {
-            if (((rawHud.heldWhiteMask >> (4u + v)) & 1u) != 0u) {
-                tgtWhite[4u + v] = 1.0f;
-            }
-            if (((rawHud.heldWhiteMask >> (8u + v)) & 1u) != 0u) {
-                tgtWhite[8u + v] = 1.0f;
-            }
-            if (((rawHud.heldWhiteMask >> (12u + v)) & 1u) != 0u) {
-                tgtWhite[12u + v] = 1.0f;
-            }
-        }
-    } else {
-        for (size_t i = 0u; i < kNumBlackKeys; ++i) {
-            if (((rawHud.heldBlackMask >> i) & 1u) != 0u) {
-                tgtBlack[i] = 1.0f;
-            }
-        }
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-            if (((rawHud.heldWhiteMask >> i) & 1u) != 0u) {
-                tgtWhite[i] = 1.0f;
-            }
+    }
+    for (size_t i = kNumOscillators; i < kNumWhiteKeys; ++i) {
+        if (((rawHud.heldWhiteMask >> i) & 1u) != 0u) {
+            tgtWhite[i] = 1.0f;
         }
     }
 
@@ -436,9 +472,7 @@ void HudKeybedView::update(float dtClamped, const EngineControlState& control,
         blackGlow_[i] = slewScalar(blackGlow_[i], tgtBlack[i], a, 0.002f);
     }
     for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-        const bool isChopKey =
-            (i < kNumOscillators && control.keyMod.stutterDepth[i] > 1.0e-4f) ||
-            (i >= 8u && i < 12u && control.keyMod.stutterDepth[i - 8u] > 1.0e-4f);
+        const bool isChopKey = (control.keyMod.stutterDepth[i & 3u] > 1.0e-4f);
         whiteGlow_[i] =
             slewScalar(whiteGlow_[i], tgtWhite[i], isChopKey ? alphaChop : alpha, 0.002f);
     }

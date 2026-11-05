@@ -1,6 +1,7 @@
 #include "ui/HudGraphs.h"
 
 #include "core/HudEnvelope.h"
+#include "core/RhythmMath.h"
 
 #include <cstring>
 
@@ -237,8 +238,8 @@ void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate, bool showAll
 
 void HudGraphs::update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                        const HudState& effectiveHud, bool extraCenterViewActive,
-                       const LfoSignalArray& lfoOutput,
-                       const LfoDriftArray& lfoDriftPacked) noexcept {
+                       const LfoSignalArray& lfoOutput, const LfoDriftArray& lfoDriftPacked,
+                       float rhythmPhase01, uint8_t stutterGateMask) noexcept {
     const bool hudVisible = (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None);
     const bool globalAllFilter =
         (rawHud.knobBank == KnobBankMode::GlobalAll) &&
@@ -272,19 +273,29 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
                     ? (rawHud.focusedVoice & 3u)
                     : (effectiveHud.fxVoiceFocus & 3u);
             const VoiceParams& vp = control.voices[v];
+            const float pluckEnv =
+                evalVoicePluckPreviewEnv01(control.keyMod.rhythmPluck, control.keyMod.rhythmMode[v],
+                                           control.keyMod.rhythmParam[v], v, rhythmPhase01,
+                                           ((stutterGateMask >> v) & 1u) != 0u);
             const ModulatedFilterParams mod = computeLiveVoiceFilter(
                 vp, control.voicePressure[v], pitchMode, lfoOutput[lfoBankIndex(v, 0u)],
                 lfoOutput[lfoBankIndex(v, 1u)], control.keyMod.dubLpfDrop,
-                control.keyMod.overloadSurge, control.keyMod.filterScream);
+                control.keyMod.overloadSurge, control.keyMod.filterScream,
+                control.keyMod.rhythmPluck, pluckEnv);
             mods = {mod, mod, mod, mod};
             unified = true;
         } else {
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 const VoiceParams& vp = control.voices[i];
+                const float pluckEnv = evalVoicePluckPreviewEnv01(
+                    control.keyMod.rhythmPluck, control.keyMod.rhythmMode[i],
+                    control.keyMod.rhythmParam[i], static_cast<uint8_t>(i), rhythmPhase01,
+                    ((stutterGateMask >> i) & 1u) != 0u);
                 mods[i] = computeLiveVoiceFilter(
                     vp, control.voicePressure[i], pitchMode, lfoOutput[lfoBankIndex(i, 0u)],
                     lfoOutput[lfoBankIndex(i, 1u)], control.keyMod.dubLpfDrop,
-                    control.keyMod.overloadSurge, control.keyMod.filterScream);
+                    control.keyMod.overloadSurge, control.keyMod.filterScream,
+                    control.keyMod.rhythmPluck, pluckEnv);
             }
             for (size_t i = 1u; i < kNumOscillators; ++i) {
                 if (absf(mods[i].hpCutoffHz - mods[0].hpCutoffHz) >

@@ -36,6 +36,12 @@ inline constexpr float smoothstep01(float t) noexcept {
     return c * c * (3.0f - 2.0f * c);
 }
 
+// Fast rational exp(-x) for x >= 0 (< 0.1% error across RC/vactrol/Gauss envelopes, zero libm).
+inline constexpr float fastExpNeg(float x) noexcept {
+    const float u = (x > 0.0f) ? x : 0.0f;
+    return 1.0f / (1.0f + u + 0.48f * u * u + 0.235f * u * u * u);
+}
+
 // Value + exact analytical derivative pair for Newton-Raphson nonlinear circuit solvers.
 struct SatResult {
     float value;

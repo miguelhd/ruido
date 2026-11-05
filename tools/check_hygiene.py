@@ -120,10 +120,20 @@ def main() -> int:
                     inc.startswith("ui/")
                     or inc
                     in {
-                        "core/RuidoController.h",
-                        "core/LedEngine.h",
+                        "core/ControlSurface.h",
+                        "core/EncoderMath.h",
+                        "core/GlobalConfig.h",
+                        "core/GlobalControl.h",
+                        "core/HudEnvelope.h",
                         "core/KeyboardEngine.h",
                         "core/KeyboardModel.h",
+                        "core/KeyboardModelSpec.h",
+                        "core/LedEngine.h",
+                        "core/MidiClock.h",
+                        "core/ModifierTracker.h",
+                        "core/RuidoController.h",
+                        "core/SnapshotBank.h",
+                        "core/VoiceCircuit.h",
                     }
                 ):
                     errors.append(
@@ -133,10 +143,13 @@ def main() -> int:
                     inc.startswith("dsp/")
                     or inc
                     in {
-                        "core/RuidoController.h",
-                        "core/LedEngine.h",
                         "core/KeyboardEngine.h",
                         "core/KeyboardModel.h",
+                        "core/LedEngine.h",
+                        "core/MidiClock.h",
+                        "core/ModifierTracker.h",
+                        "core/RuidoController.h",
+                        "core/SnapshotBank.h",
                     }
                 ):
                     errors.append(

@@ -6,6 +6,7 @@
 #include "dsp/CircuitPatchMatrix.h"
 #include "dsp/HalfBandDecimator.h"
 #include "dsp/Ms20Filter.h"
+#include "dsp/RhythmGateMatrix.h"
 #include "dsp/SchmittOscillatorBank.h"
 #include "dsp/VoiceLfoBank.h"
 
@@ -51,25 +52,14 @@ class DroneEngine {
   private:
     struct VoiceSmoothers {
         LogFreqSmoother freqHz;
-        CriticallyDampedSmoother pulseWidth;
-        CriticallyDampedSmoother drift;
         LogFreqSmoother hpCutoffHz;
-        CriticallyDampedSmoother hpResonance;
         LogFreqSmoother lpCutoffHz;
-        CriticallyDampedSmoother lpResonance;
-        CriticallyDampedSmoother amplitude;
-        CriticallyDampedSmoother pan;
-        OnePoleSmoother vactrolGate;
-        VactrolSmoother pressure;
-        OnePoleSmoother keyGainMul;
         LogFreqSmoother keyPitchMul;
-        OnePoleSmoother stutterDepth;
+        CriticallyDampedSmootherBank<6> potSmoothers; // [0..5] pw, drift, hpRes, lpRes, amp, pan
+        VactrolSmoother pressure;
         OnePoleSmoother stutterGate;
-        OnePoleSmoother xmodDepth;
-        OnePoleSmoother foldDepth;
-        OnePoleSmoother crushDepth;
-        uint32_t stutterPhase = 0x80000000u;
-        float stutterRateHz = 6.0f;
+        OnePoleSmootherBank<3> vactrolMods;   // [0]=vactrolGate, [1]=keyGainMul, [2]=stutterDepth
+        OnePoleSmootherBank<3> circuitDepths; // [0]=xmodDepth, [1]=foldDepth, [2]=crushDepth
     };
 
     struct VoiceCoeffCache {
@@ -105,20 +95,19 @@ class DroneEngine {
     std::array<VoiceSmoothers, kNumOscillators> voiceSmoothers_{};
     std::array<VoiceCoeffCache, kNumOscillators> coeffCache_{};
     std::array<VoiceCrushState, kNumOscillators> crushStates_{};
+    RhythmClockState rhythmState_{};
+    std::array<uint32_t, kNumOscillators> stutterPhases_{0x80000000u, 0x80000000u, 0x80000000u,
+                                                         0x80000000u};
+    std::array<float, kNumOscillators> stutterRatesHz_{6.0f, 6.0f, 6.0f, 6.0f};
     std::array<float, kNumOscillators> prevOscFreqHz_{55.0f, 82.41f, 110.15f, 164.81f};
     std::array<float, kNumOscillators> prevOscSamples_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> prevCapRamp_{0.0f, 0.0f, 0.0f, 0.0f};
     CriticallyDampedSmoother couplingSmoother_{};
     CriticallyDampedSmoother masterTrimSmoother_{};
-    OnePoleSmoother monoMixSmoother_{};   // 0.0 = Stereo (POLY), 1.0 = Dual-Mono (MONO)
-    OnePoleSmoother masterRunSmoother_{}; // 0.0 = Muted (STOP), 1.0 = Active (PLAY)
-    OnePoleSmoother pitchModeSmoother_{}; // 0.0 = MS-20 Filter/LPG, 1.0 = Pitch Bend
-    OnePoleSmoother overloadSurgeSmoother_{};
-    OnePoleSmoother dubLpfDropSmoother_{};
-    OnePoleSmoother spatialFocusSmoother_{};
-    OnePoleSmoother ringModSmoother_{};
-    OnePoleSmoother hardSyncSmoother_{};
-    OnePoleSmoother filterScreamSmoother_{};
+    OnePoleSmoother monoMixSmoother_{};          // 0.0 = Stereo (POLY), 1.0 = Dual-Mono (MONO)
+    OnePoleSmoother masterRunSmoother_{};        // 0.0 = Muted (STOP), 1.0 = Active (PLAY)
+    OnePoleSmoother pitchModeSmoother_{};        // 0.0 = MS-20 Filter/LPG, 1.0 = Pitch Bend
+    OnePoleSmootherBank<6> punchBusSmoothers_{}; // [0..5] surge, dubLpf, spatial, ring, sync, scrm
     bool stasisFreeze_ = false;
 
     // 36-frame delay aligning 4-voice rising edges & scope taps with PolyBLEP + FIR delay

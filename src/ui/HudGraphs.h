@@ -132,7 +132,8 @@ class HudGraphs {
 
     void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                 const HudState& effectiveHud, bool extraCenterViewActive,
-                const LfoSignalArray& lfoOutput, const LfoDriftArray& lfoDriftPacked) noexcept;
+                const LfoSignalArray& lfoOutput, const LfoDriftArray& lfoDriftPacked,
+                float rhythmPhase01 = 0.0f, uint8_t stutterGateMask = 0x0Fu) noexcept;
 
     float filterGraphPhase() const noexcept { return filterGraphPhase_; }
 

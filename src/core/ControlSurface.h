@@ -151,7 +151,15 @@ enum class KeyPunchKind : uint8_t {
     FilterScream = 19,   // CircuitLab GLO: Twin Korg35 HPF + LPF self-oscillation
     HardSync = 20,       // CircuitLab MONO: Band-limited OSC 1 -> 2..4 hard sync
     PhaseScatter = 21,   // CircuitLab POLY: Duty, pitch, filter & stereo scatter
-    VoiceCrush = 22      // CircuitLab Keys 13-16: CD4013 S&H clock crush + CD4040 ripple XOR
+    VoiceCrush = 22,     // CircuitLab Keys 13-16: CD4013 S&H clock crush + CD4040 ripple XOR
+    VoiceDivide = 23,    // RhythmLab Keys 9-12: Master-clock-locked divider OSC 1-4 (/2..x8)
+    VoiceEuclid = 24,    // RhythmLab Keys 13-16: 16-step Euclidean groove OSC 1-4 (2/16..16/16)
+    RhythmPump = 25,     // RhythmLab OP5: 4-on-the-floor sidechain ducking pump
+    RhythmChase = 26,    // RhythmLab OP6: 1->2->3->4 round-robin step loop
+    RhythmTempo = 27,    // RhythmLab PIT: 1x -> 4x master clock speed
+    RhythmPluck = 28,    // RhythmLab GLO: Percussive MS-20 low-pass filter pluck
+    RhythmShort = 29,    // RhythmLab MONO: Pinpoint short gate duty
+    RhythmSwing = 30     // RhythmLab POLY: 50% -> 72% shuffle swing + stereo bounce
 };
 
 struct PureRatioEntry {
@@ -176,8 +184,6 @@ constexpr const char* keyboardModelTitle(KeyboardModel model) noexcept {
         return "LIVE MIXER";
     case KeyboardModel::CircuitLab:
         return "CIRCUIT LAB";
-    case KeyboardModel::Harmonium:
-        return "HARMONIUM";
     case KeyboardModel::RhythmLab:
         return "RHYTHM LAB";
     case KeyboardModel::Count:
@@ -246,10 +252,12 @@ struct HudState {
     uint16_t heldWhiteMask = 0u;   // Bitmask of held bottom keys (bits 0..15)
     std::array<uint8_t, kNumBlackKeys> blackPressureQ8{};
     std::array<uint8_t, kNumWhiteKeys> whitePressureQ8{};
-    float morphPosition = 1.0f; // [0.0f, 1.0f] snapshot glide/pressure morph progress
-    float opacity = 0.0f;       // [0.0f, 1.0f] smooth 150 ms S-curve alpha envelope
-    float fxLedSync01 = 0.5f;   // [0.0f, 1.0f] Core 0 FX button breath/flare sync
-    float lfoLedSync01 = 0.5f;  // [0.0f, 1.0f] Core 0 LFO button wave sync
+    float morphPosition = 1.0f;       // [0.0f, 1.0f] snapshot glide/pressure morph progress
+    float opacity = 0.0f;             // [0.0f, 1.0f] smooth 150 ms S-curve alpha envelope
+    float fxLedSync01 = 0.5f;         // [0.0f, 1.0f] Core 0 FX button breath/flare sync
+    float lfoLedSync01 = 0.5f;        // [0.0f, 1.0f] Core 0 LFO button wave sync
+    float effectiveClockBpm = 120.0f; // Live master clock BPM (internal 120 or synced MIDI BPM)
+    bool midiClockSynced = false;     // True when locked to external 24-PPQN MIDI Clock
     bool modifierHeld = false;
     bool rateHoldActive = false; // True whenever OCT- or OCT+ is physically held
     bool scopeFrozen = false;    // Momentary waveform freeze on 11th black key
@@ -279,6 +287,7 @@ constexpr KnobBankMode knobBankForKeyPunch(KeyPunchKind punch, KnobBankMode fall
         return KnobBankMode::VoiceFilter;
     case KeyPunchKind::DubLpfDrop:
     case KeyPunchKind::FilterScream:
+    case KeyPunchKind::RhythmPluck:
         return KnobBankMode::GlobalFilter;
     case KeyPunchKind::OverloadSurge:
         return KnobBankMode::Amplitude;
@@ -301,6 +310,13 @@ constexpr KnobBankMode knobBankForKeyPunch(KeyPunchKind punch, KnobBankMode fall
     case KeyPunchKind::LfoTurbo:
     case KeyPunchKind::HardSync:
     case KeyPunchKind::PhaseScatter:
+    case KeyPunchKind::VoiceDivide:
+    case KeyPunchKind::VoiceEuclid:
+    case KeyPunchKind::RhythmPump:
+    case KeyPunchKind::RhythmChase:
+    case KeyPunchKind::RhythmTempo:
+    case KeyPunchKind::RhythmShort:
+    case KeyPunchKind::RhythmSwing:
         return KnobBankMode::Frequency;
     case KeyPunchKind::None:
         break;
@@ -332,6 +348,15 @@ constexpr bool evalKeyPunchHeaderBar(const HudState& hud, float& outNorm) noexce
     case KeyPunchKind::FilterScream:
     case KeyPunchKind::HardSync:
     case KeyPunchKind::PhaseScatter:
+    case KeyPunchKind::VoiceStutter:
+    case KeyPunchKind::VoiceDivide:
+    case KeyPunchKind::VoiceEuclid:
+    case KeyPunchKind::RhythmPump:
+    case KeyPunchKind::RhythmChase:
+    case KeyPunchKind::RhythmTempo:
+    case KeyPunchKind::RhythmPluck:
+    case KeyPunchKind::RhythmShort:
+    case KeyPunchKind::RhythmSwing:
         outNorm = clampf(hud.activePunchValue, 0.0f, 1.0f);
         return true;
     case KeyPunchKind::SubDrop:
@@ -345,7 +370,6 @@ constexpr bool evalKeyPunchHeaderBar(const HudState& hud, float& outNorm) noexce
     case KeyPunchKind::DubLpfDrop:
     case KeyPunchKind::StasisFreeze:
     case KeyPunchKind::VoiceCut:
-    case KeyPunchKind::VoiceStutter:
         return false;
     }
     return false;
@@ -363,6 +387,8 @@ struct LedState {
     std::array<float, kNumPanelButtons> buttonLeds{};
     float stopLed = 0.0f;
 };
+static_assert(__is_trivially_copyable(HudState), "HudState must remain trivially copyable");
+static_assert(__is_trivially_copyable(LedState), "LedState must remain trivially copyable");
 static_assert(sizeof(LedState) == kNumLedChannels * sizeof(float),
               "LedState must pack contiguously as 42 floats for Wasm/DMA transport");
 

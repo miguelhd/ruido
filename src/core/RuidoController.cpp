@@ -22,6 +22,8 @@ void RuidoController::reset() noexcept {
     keyboard_.syncConfig(hud_.config);
     snapshots_.reset();
     snapshots_.syncHud(hud_);
+    midiClock_.reset();
+    (void)syncClockState();
     keys_.reset();
     env_.reset();
     ledSmooth_.reset(state_);
@@ -55,9 +57,37 @@ KnobBankMode RuidoController::baseKnobBank() const noexcept {
                                                      : KnobBankMode::Frequency;
 }
 
-void RuidoController::closeAllPages() noexcept {
-    hud_.freqPageOpen = hud_.fxPageOpen = hud_.panPageOpen = false;
-    hud_.lfoPageOpen = hud_.editPageOpen = hud_.configPageOpen = hud_.selPageOpen = false;
+void RuidoController::resetPageNav() noexcept {
+    selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
+    hud_.focusedKnob = kNoFocusedKnob;
+    closeAllPages();
+    hud_.saveArmed = false;
+}
+
+void RuidoController::setLatchedPage(HudMode mode, ButtonId button) noexcept {
+    if (mode != HudMode::None) {
+        dismissedByHome_ = false;
+        latchedHudMode_ = mode;
+        latchedButton_ = button;
+        hud_.lastButton = button;
+    } else {
+        latchedHudMode_ = HudMode::None;
+        latchedButton_ = ButtonId::Count;
+    }
+}
+
+bool RuidoController::syncClockState() noexcept {
+    const float nextBpm = midiClock_.bpm(hud_.config.clockSync);
+    const bool nextSync = midiClock_.isExternalSynced(hud_.config.clockSync);
+    const uint8_t nextSeq = midiClock_.resetSeq();
+    hud_.effectiveClockBpm = nextBpm;
+    hud_.midiClockSynced = nextSync;
+    if (absf(state_.global.clockBpm - nextBpm) > 0.01f || state_.global.clockResetSeq != nextSeq) {
+        state_.global.clockBpm = nextBpm;
+        state_.global.clockResetSeq = nextSeq;
+        return true;
+    }
+    return false;
 }
 
 void RuidoController::triggerHud(HudMode mode, uint8_t voiceIndex, uint8_t knobIndex) noexcept {
@@ -91,6 +121,19 @@ void RuidoController::latchKnobEdit(KnobBankMode bank, HudMode mode, uint8_t kno
     env_.latchPage();
 }
 
+void RuidoController::restoreLatchedFields() noexcept {
+    hud_.mode = latchedHudMode_;
+    hud_.knobBank = baseKnobBank();
+    if (hud_.fxPageOpen) {
+        hud_.focusedVoice = static_cast<uint8_t>(hud_.fxVoiceFocus & 3u);
+    } else if (hud_.lfoPageOpen) {
+        hud_.focusedVoice = lfoFocusVoice(hud_.lfoVoiceFocus);
+    }
+    if (latchedButton_ != ButtonId::Count) {
+        hud_.lastButton = latchedButton_;
+    }
+}
+
 void RuidoController::restoreOrDissolveHud() noexcept {
     if (keyboard_.anyKeyHeld()) {
         dismissedByHome_ = false;
@@ -111,15 +154,7 @@ void RuidoController::restoreOrDissolveHud() noexcept {
     }
     hud_.knobBank = baseKnobBank();
     if (latchedHudMode_ != HudMode::None) {
-        hud_.mode = latchedHudMode_;
-        if (hud_.fxPageOpen) {
-            hud_.focusedVoice = static_cast<uint8_t>(hud_.fxVoiceFocus & 3u);
-        } else if (hud_.lfoPageOpen) {
-            hud_.focusedVoice = lfoFocusVoice(hud_.lfoVoiceFocus);
-        }
-        if (latchedButton_ != ButtonId::Count) {
-            hud_.lastButton = latchedButton_;
-        }
+        restoreLatchedFields();
         hud_.focusedKnob = kNoFocusedKnob;
         env_.latchPage();
         return;
@@ -150,8 +185,7 @@ void RuidoController::syncModifierHud() noexcept {
 }
 
 void RuidoController::applyKeyboardPerformanceChange() noexcept {
-    keys_.blackKeyHeld = keyboard_.blackHeld();
-    keys_.whiteKeyHeld = keyboard_.whiteHeld();
+    keys_.anyPerfKeyHeld = keyboard_.anyKeyHeld();
     if (keyboard_.model() == KeyboardModel::LiveMixer) {
         const auto sHeld = keyboard_.snapKeysHeld();
         snapshots_.onSnapKeysChanged(sHeld, keyboard_.snapKeysPressure(), hud_.config.snapMode,
@@ -188,6 +222,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
                 keyboard_.syncConfig(hud_.config);
                 snapshots_.cancelMomentaryIfActive(state_);
                 snapshots_.syncHud(hud_);
+                (void)syncClockState();
                 keyboard_.evaluate(state_, hud_);
                 publishState();
             }
@@ -276,8 +311,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         if (hud_.saveArmed) {
             hud_.saveArmed = false;
             if (latchedHudMode_ == HudMode::SaveArmed) {
-                latchedHudMode_ = HudMode::None;
-                latchedButton_ = ButtonId::Count;
+                setLatchedPage(HudMode::None, ButtonId::Count);
             }
         }
         const int32_t prevSlot = static_cast<int32_t>(snapshots_.activeSlot());
@@ -404,95 +438,57 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
         return;
     }
 
-    // SEL button: opens/closes Keyboard Model Status & Guidance screen (SELECT knob swaps 1/3..3/3)
     if (button == ButtonId::Sel) {
-        selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
-        hud_.focusedKnob = kNoFocusedKnob;
         const bool opening = !hud_.selPageOpen;
-        closeAllPages();
-        hud_.saveArmed = false;
-        if (opening) {
-            dismissedByHome_ = false;
-            hud_.selPageOpen = true;
-            latchedHudMode_ = HudMode::KeyboardModel;
-            latchedButton_ = ButtonId::Sel;
-            hud_.lastButton = ButtonId::Sel;
-        } else {
-            latchedHudMode_ = HudMode::None;
-            latchedButton_ = ButtonId::Count;
-        }
+        resetPageNav();
+        hud_.selPageOpen = opening;
+        setLatchedPage(opening ? HudMode::KeyboardModel : HudMode::None, ButtonId::Sel);
         syncModifierHud();
         return;
     }
 
-    // EDIT Option A: 1st tap = Channel Mix (Page 1), 2nd tap = Spatial Pan (Page 2), 3rd = Close
     if (button == ButtonId::Edit) {
-        selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
-        hud_.focusedKnob = kNoFocusedKnob;
-        if (!hud_.editPageOpen && !hud_.panPageOpen) {
-            closeAllPages();
-            dismissedByHome_ = false;
-            hud_.editPageOpen = true;
-            hud_.saveArmed = false;
-            latchedHudMode_ = hudModeForEditTarget(hud_.editTarget);
-            latchedButton_ = ButtonId::Edit;
-            hud_.lastButton = ButtonId::Edit;
-        } else if (hud_.editPageOpen) {
-            closeAllPages();
-            dismissedByHome_ = false;
-            hud_.panPageOpen = true;
-            hud_.saveArmed = false;
-            latchedHudMode_ = HudMode::Panning;
-            latchedButton_ = ButtonId::Edit;
-            hud_.lastButton = ButtonId::Edit;
-        } else {
-            closeAllPages();
-            hud_.saveArmed = false;
-            latchedHudMode_ = HudMode::None;
-            latchedButton_ = ButtonId::Count;
-        }
+        const bool toMix = !hud_.editPageOpen && !hud_.panPageOpen;
+        const bool toPan = hud_.editPageOpen;
+        resetPageNav();
+        hud_.editPageOpen = toMix;
+        hud_.panPageOpen = toPan;
+        setLatchedPage(toMix   ? hudModeForEditTarget(hud_.editTarget)
+                       : toPan ? HudMode::Panning
+                               : HudMode::None,
+                       ButtonId::Edit);
         syncModifierHud();
         return;
     }
 
     if (button == ButtonId::Fx || button == ButtonId::Lfo || button == ButtonId::GloRight) {
-        selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
-        hud_.focusedKnob = kNoFocusedKnob;
         const bool isFx = (button == ButtonId::Fx);
         const bool isLfo = (button == ButtonId::Lfo);
         const bool opening = isFx    ? !hud_.fxPageOpen
                              : isLfo ? !hud_.lfoPageOpen
                                      : !hud_.configPageOpen;
-        closeAllPages();
+        resetPageNav();
         if (opening) {
-            dismissedByHome_ = false;
             hud_.fxPageOpen = isFx;
             hud_.lfoPageOpen = isLfo;
             hud_.configPageOpen = (!isFx && !isLfo);
-            hud_.saveArmed = false;
-            if (isFx) {
-                hud_.focusedVoice = static_cast<uint8_t>(hud_.fxVoiceFocus & 3u);
-                latchedHudMode_ = HudMode::VoiceFilter;
-            } else if (isLfo) {
-                hud_.focusedVoice = lfoFocusVoice(hud_.lfoVoiceFocus);
-                latchedHudMode_ = HudMode::VoiceLfo;
-            } else {
-                latchedHudMode_ = HudMode::GlobalConfig;
+            if (isFx || isLfo) {
+                hud_.focusedVoice = isFx ? static_cast<uint8_t>(hud_.fxVoiceFocus & 3u)
+                                         : lfoFocusVoice(hud_.lfoVoiceFocus);
             }
-            latchedButton_ = button;
-            hud_.lastButton = button;
-        } else {
-            latchedHudMode_ = HudMode::None;
-            latchedButton_ = ButtonId::Count;
         }
+        setLatchedPage(opening ? (isFx    ? HudMode::VoiceFilter
+                                  : isLfo ? HudMode::VoiceLfo
+                                          : HudMode::GlobalConfig)
+                               : HudMode::None,
+                       button);
         syncModifierHud();
         return;
     }
 
     if (button == ButtonId::PlayStop) {
         state_.global.masterRun = !state_.global.masterRun;
-        if (hud_.freqPageOpen || hud_.fxPageOpen || hud_.panPageOpen || hud_.lfoPageOpen ||
-            hud_.editPageOpen || hud_.configPageOpen || hud_.selPageOpen) {
+        if (anyPageOpen()) {
             hud_.lastButton = button;
             triggerHud(HudMode::AudioOutput, hud_.focusedVoice, kNoFocusedKnob);
         } else {
@@ -504,16 +500,11 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
     }
 
     if (button == ButtonId::Home) {
-        const bool hudActive = (latchedHudMode_ != HudMode::None) || hud_.freqPageOpen ||
-                               hud_.fxPageOpen || hud_.panPageOpen || hud_.lfoPageOpen ||
-                               hud_.editPageOpen || hud_.configPageOpen || hud_.selPageOpen ||
+        const bool hudActive = (latchedHudMode_ != HudMode::None) || anyPageOpen() ||
                                hud_.saveArmed ||
                                keys_.isAnyMomentaryHudHoldActive(hud_.scopeFrozen) ||
                                (hud_.mode != HudMode::None && !dismissedByHome_);
-        closeAllPages();
-        hud_.saveArmed = false;
-        selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
-        hud_.focusedKnob = kNoFocusedKnob;
+        resetPageNav();
         knobTurnedDuringRateHold_ = false;
         if (!hudActive) {
             hud_.freqPageOpen = true;
@@ -522,8 +513,7 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
             return;
         }
         dismissedByHome_ = true;
-        latchedHudMode_ = HudMode::None;
-        latchedButton_ = ButtonId::Count;
+        setLatchedPage(HudMode::None, ButtonId::Count);
         if (keys_.isAnyMomentaryHudHoldActive(hud_.scopeFrozen)) {
             if (!keyboard_.anyKeyHeld() && !hud_.scopeFrozen && hud_.rateHoldActive) {
                 hud_.knobBank = KnobBankMode::Frequency;
@@ -547,13 +537,11 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
         closeAllPages();
         hud_.snapshotSavedToast = false;
         hud_.saveArmed = !hud_.saveArmed;
+        hud_.knobBank = KnobBankMode::Snapshot;
         if (hud_.saveArmed) {
-            hud_.knobBank = KnobBankMode::Snapshot;
             latchSwitchHud(HudMode::SaveArmed, ButtonId::Save);
         } else {
-            latchedHudMode_ = HudMode::None;
-            latchedButton_ = ButtonId::Count;
-            hud_.knobBank = KnobBankMode::Snapshot;
+            setLatchedPage(HudMode::None, ButtonId::Count);
             triggerHud(HudMode::SaveArmed, hud_.focusedVoice, kNoFocusedKnob);
         }
         return;
@@ -600,8 +588,7 @@ bool RuidoController::tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active
     }
     saveSwallowedMask_ |= sBit;
     hud_.saveArmed = false;
-    latchedHudMode_ = HudMode::None;
-    latchedButton_ = ButtonId::Count;
+    setLatchedPage(HudMode::None, ButtonId::Count);
     snapshots_.saveSlot(slot, state_);
     hud_.snapshotSavedToast = true;
     snapshots_.syncHud(hud_);
@@ -629,8 +616,19 @@ void RuidoController::onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) 
     applyKeyboardPerformanceChange();
 }
 
+void RuidoController::onMidiRealtime(uint8_t statusByte, float msgTimestampSec) noexcept {
+    (void)midiClock_.onMidiRealtime(statusByte, hud_.config.clockSync, msgTimestampSec);
+    if (syncClockState()) {
+        publishState();
+    }
+}
+
 void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexcept {
     const float dt = clampf(dtSec, 0.0f, 0.25f);
+    (void)midiClock_.step(dt, hud_.config.clockSync);
+    if (syncClockState()) {
+        publishState();
+    }
     const std::array<bool, kNumSnapshots> snapHeld =
         (keyboard_.model() == KeyboardModel::LiveMixer)
             ? keyboard_.snapKeysHeld()
@@ -661,16 +659,7 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
         if (keyboard_.anyKeyHeld()) {
             restoreOrDissolveHud();
         } else {
-            hud_.mode = latchedHudMode_;
-            hud_.knobBank = baseKnobBank();
-            if (hud_.fxPageOpen) {
-                hud_.focusedVoice = static_cast<uint8_t>(hud_.fxVoiceFocus & 3u);
-            } else if (hud_.lfoPageOpen) {
-                hud_.focusedVoice = lfoFocusVoice(hud_.lfoVoiceFocus);
-            }
-            if (latchedButton_ != ButtonId::Count) {
-                hud_.lastButton = latchedButton_;
-            }
+            restoreLatchedFields();
         }
     }
     if (dissolvedToIdle) {

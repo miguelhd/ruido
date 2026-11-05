@@ -152,7 +152,7 @@ async function ensureAudioRunning() {
       } else if (msg.type === 'telemetry') {
         const t = msg.telemetry;
         if (t && t.length >= 26) {
-          uiF32.set(t.subarray(0, Math.min(t.length, 47)), uiPtrs.telemetryIn);
+          uiF32.set(t.subarray(0, Math.min(t.length, 48)), uiPtrs.telemetryIn);
           uiWasm.wasm_ui_apply_telemetry();
         }
         if (msg.scopeBuffer && msg.scopeCount > 0) {
@@ -896,8 +896,40 @@ async function initWebMidi() {
     const heldMidiWhitePads = new Set();
     const lastCcValues = new Int16Array(128).fill(-1);
 
+    let midiDeviceCount = 0;
+    let midiTimeOriginMs = -1;
+    const renderMidiBadge = () => {
+      const synced = uiWasm && uiPtrs && uiF32[uiPtrs.summary + 56] > 0.5;
+      const bpm = synced ? Math.round(uiF32[uiPtrs.summary + 55]) : 0;
+      const base =
+        midiDeviceCount > 0
+          ? `MIDI: ${midiDeviceCount} Device${midiDeviceCount > 1 ? 's' : ''} Active`
+          : 'MIDI: Ready (0 Devices)';
+      badge.textContent = synced ? `${base} · ${bpm} BPM` : base;
+    };
+
     const handleMidiMessage = (ev) => {
-      if (!uiWasm || !ev.data || ev.data.length < 2) return;
+      if (!uiWasm || !ev.data || ev.data.length < 1) return;
+      const raw0 = ev.data[0];
+
+      // 1-byte MIDI System Real-Time Clock & Transport (USB, TRS interface, or BLE-MIDI)
+      if (raw0 >= 0xf8) {
+        if (raw0 === 0xf8 || raw0 === 0xfa || raw0 === 0xfb || raw0 === 0xfc) {
+          let tsSec = -1;
+          if (typeof ev.timeStamp === 'number' && ev.timeStamp >= 0) {
+            if (midiTimeOriginMs < 0 || ev.timeStamp < midiTimeOriginMs) {
+              midiTimeOriginMs = ev.timeStamp;
+            }
+            tsSec = ((ev.timeStamp - midiTimeOriginMs) * 0.001) % 64;
+          }
+          uiWasm.wasm_ui_midi_realtime(raw0, tsSec);
+          flushControlToWorklet();
+          renderMidiBadge();
+        }
+        return;
+      }
+
+      if (ev.data.length < 2) return;
       ensureAudioRunning();
 
       const status = ev.data[0] & 0xf0;
@@ -1015,12 +1047,12 @@ async function initWebMidi() {
     };
 
     const bindInputs = () => {
-      let count = 0;
+      midiDeviceCount = 0;
       for (const input of midi.inputs.values()) {
         input.onmidimessage = handleMidiMessage;
-        count++;
+        midiDeviceCount++;
       }
-      badge.textContent = count > 0 ? `MIDI: ${count} Device${count > 1 ? 's' : ''} Active` : 'MIDI: Ready (0 Devices)';
+      renderMidiBadge();
     };
 
     midi.onstatechange = bindInputs;

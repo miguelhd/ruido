@@ -57,10 +57,10 @@ struct VoiceParams {
     float lfoRateHz = 0.25f;               // [0.01, 2000.0] Hz LFO A rate
     float lfoShape = 0.0f;                 // [0.0, 1.0] LFO A Sine->Tri->Saw->Square->Drift
     float lfoDepth = 0.0f;                 // [0.0, 1.0] LFO A modulation amount (0 = off)
+    float lfoBRateHz = 0.25f;              // [0.01, 2000.0] Hz LFO B rate
+    float lfoBShape = 0.0f;                // [0.0, 1.0] LFO B shape
+    float lfoBDepth = 0.0f;                // [0.0, 1.0] LFO B modulation amount (0 = off)
     LfoTarget lfoTarget = LfoTarget::LpCutoff;  // KNOB1 LFO A destination (Pitch..Pan)
-    float lfoBRateHz = 0.25f;                   // [0.01, 2000.0] Hz LFO B rate
-    float lfoBShape = 0.0f;                     // [0.0, 1.0] LFO B shape
-    float lfoBDepth = 0.0f;                     // [0.0, 1.0] LFO B modulation amount (0 = off)
     LfoTarget lfoBTarget = LfoTarget::LpCutoff; // KNOB1 LFO B destination (Pitch..LfoADepth)
     bool muted = false;                         // White Keys 1-4 latching mute
 };
@@ -111,10 +111,12 @@ inline constexpr VoiceChannelGain computeVoiceChannelGain(float amplitude) noexc
     return {preDrive, postVca};
 }
 
-// Global circuit & master routing state (Left encoders + SEL + MONO/POLY + PLAY/STOP).
+// Global circuit & master routing state (Left encoders + SEL + MONO/POLY + PLAY/STOP + MIDI clock).
 struct GlobalParams {
     float circuitCoupling = 0.25f;  // ALGORITHM knob: [0.0, 1.0] rail sag -> starved-rail sync
     float masterTrim = 0.85f;       // Software headroom trim before DAC / pedals
+    float clockBpm = 120.0f;        // Master rhythm clock BPM (120 default, or 30..300 MIDI clock)
+    uint8_t clockResetSeq = 0u;     // Incremented on MIDI 0xFA Start to snap bar phase to step 0
     bool monoCollapse = false;      // MONO vs POLY (true = MONO L==R)
     bool masterRun = true;          // PLAY/STOP button (clickless master kill/run)
     bool pitchPressureMode = false; // SEL button: false = MS-20 Filter/LPG, true = Pitch Bend
@@ -195,11 +197,10 @@ inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpRes
 
 // Live performance keyboard interaction models selected via SEL button + SELECT encoder.
 enum class KeyboardModel : uint8_t {
-    LiveMixer = 0,  // 1/4: 4-Oscillator Live Mixer, FX & 4-Slot Scenes (default)
-    CircuitLab = 1, // 2/4: Circuit-Bent CMOS Patch Bay
-    Harmonium = 2,  // 3/4: Just-Intonation Harmonium / Monochord (framework slot)
-    RhythmLab = 3,  // 4/4: Polyrhythmic Gate & Chopper Matrix (framework slot)
-    Count = 4
+    LiveMixer = 0,  // 1/3: 4-Oscillator Live Mixer, FX & 4-Slot Scenes (default)
+    CircuitLab = 1, // 2/3: Circuit-Bent CMOS Patch Bay
+    RhythmLab = 2,  // 3/3: Stutter, Clock Dividers & Euclidean Grooves
+    Count = 3
 };
 
 // Non-destructive momentary punch-in modulation overlaid onto the steady knob patch (Core 0 -> 1).
@@ -212,6 +213,8 @@ struct KeyboardModState {
     std::array<float, kNumOscillators> xmodDepth{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> foldDepth{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> crushDepth{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<uint8_t, kNumOscillators> rhythmMode{0u, 0u, 0u, 0u};  // VoiceRhythmMode per osc
+    std::array<uint8_t, kNumOscillators> rhythmParam{0u, 0u, 0u, 0u}; // Div/Euclid index per osc
     float overloadSurge = 0.0f;   // [0, 1] -> 4.5x MS-20 drive + 100% starved-rail sync
     float dubLpfDrop = 0.0f;      // [0, 1] -> master resonant MS-20 LPF curtain
     float spatialFocus = 0.0f;    // -1.0 = center focus, +1.0 = hyper-wide spread
@@ -220,8 +223,14 @@ struct KeyboardModState {
     float hardSyncAmount = 0.0f;  // [0, 1] band-limited OSC 1 -> OSC 2..4 hard sync
     float lfoTurbo = 0.0f;        // [0, 1] 1x -> 32x LFO rate overclock + dry-patch floor
     float filterScream = 0.0f;    // [0, 1] twin Korg35 HPF + LPF self-oscillation sweep
+    float rhythmPump = 0.0f;      // [0, 1] 4-voice sidechain pump ducking swell
+    float rhythmChase = 0.0f;     // [0, 1] 1->2->3->4 step loop sequencer
+    float rhythmTempo = 0.0f;     // [0, 1] 1x -> 4x master rhythm clock speed
+    float rhythmPluck = 0.0f;     // [0, 1] percussive MS-20 low-pass filter pluck
+    float rhythmShort = 0.0f;     // [0, 1] 50% -> 6% pinpoint gate length
+    float rhythmSwing = 0.0f;     // [0, 1] 50% -> 72% shuffle swing + stereo bounce
     uint8_t soloMask = 0u;        // 4-bit mask of soloed oscillators (bit v = OSC v+1 solo active)
-    bool stasisFreeze = false;    // 11th tall key: freezes 8 LFOs + thermal drift + scope
+    bool stasisFreeze = false;    // 11th tall key: freezes 8 LFOs + thermal drift + clock + scope
 };
 
 // Complete patch state + momentary SARADC finger-pressure modulation from Core 0 -> Core 1.
@@ -261,7 +270,13 @@ struct EngineControlState {
     }
 };
 
-// Verify lock-free atomic invariants mandated by src/dsp/AGENTS.md Rule #3
+// Verify lock-free atomic & POD bus invariants mandated by src/core/AGENTS.md & src/dsp/AGENTS.md
+static_assert(__is_trivially_copyable(VoiceParams), "VoiceParams must remain trivially copyable");
+static_assert(__is_trivially_copyable(GlobalParams), "GlobalParams must remain trivially copyable");
+static_assert(__is_trivially_copyable(KeyboardModState),
+              "KeyboardModState must remain trivially copyable");
+static_assert(__is_trivially_copyable(EngineControlState),
+              "EngineControlState must remain trivially copyable for lock-free bus");
 static_assert(std::atomic<uint32_t>::is_always_lock_free,
               "uint32_t atomics must be lock-free on target architecture");
 static_assert(std::atomic<size_t>::is_always_lock_free,
@@ -350,6 +365,7 @@ struct ScopeFrame {
     uint8_t voiceRisingMask = 0u;
     std::array<int16_t, kNumOscillators> voiceQ13{0, 0, 0, 0};
 };
+static_assert(__is_trivially_copyable(ScopeFrame), "ScopeFrame must remain trivially copyable");
 
 // Lock-free SPSC ring buffer feeding the 240x240 CRT scope on Core 0.
 class ScopeRingBuffer {
@@ -435,8 +451,10 @@ struct EngineTelemetry {
         std::atomic<float>{0.0f},
         std::atomic<float>{0.0f},
     };
-    // Sample-accurate 4-voice stutter chopper open-gate mask (bit v = 1 open, 0 chopped silent)
+    // Sample-accurate 4-voice rhythm/stutter open-gate mask (bit v = 1 open, 0 chopped silent)
     std::atomic<uint8_t> stutterGateMask{0x0Fu};
+    // Instantaneous [0.0, 1.0) swung master 16-step bar phase from Core 1 -> Core 0 LEDs/HUD
+    std::atomic<float> rhythmPhase{0.0f};
 };
 
 } // namespace ruido

@@ -2740,6 +2740,182 @@ void testCircuitLabPatchMatrixHardSyncTurboAndScreamDsp() {
                 labRms, static_cast<double>(maxReleaseStep));
 }
 
+void testRhythmLabClockDividersEuclidPumpPluckAndSwingDsp() {
+    std::printf(
+        "[Test 17] Rhythm Lab DSP: Clock Dividers, Euclid, Chase, Pump, Pluck, Swing & Reset...\n");
+
+    static ruido::DroneEngine engine;
+    engine.init(ruido::kBaseSampleRate);
+    engine.setAnalogCharacterEnabled(false, false);
+
+    ruido::EngineControlState baseSt = ruido::EngineControlState::makeDefault();
+    baseSt.global.circuitCoupling = 0.0f;
+    baseSt.global.clockBpm = 120.0f; // 1 bar = 2.00 s (~88,236 frames)
+    for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
+        baseSt.voices[v].pan = 0.0f;
+        baseSt.voices[v].amplitude = 0.65f;
+    }
+
+    std::array<float, ruido::kBlockFrames> outL{};
+    std::array<float, ruido::kBlockFrames> outR{};
+    std::array<ruido::ScopeFrame, ruido::kBlockFrames> drain{};
+
+    // 1. Clock Dividers: OSC 1 on /2 (2 cycles/bar) vs OSC 4 on X8 (32 cycles/bar)
+    ruido::EngineControlState divSt = baseSt;
+    divSt.keyMod.rhythmMode[0] = static_cast<uint8_t>(ruido::VoiceRhythmMode::Divide);
+    divSt.keyMod.rhythmParam[0] = 0u; // /2 = 2 gates per bar
+    divSt.keyMod.rhythmMode[3] = static_cast<uint8_t>(ruido::VoiceRhythmMode::Divide);
+    divSt.keyMod.rhythmParam[3] = 5u; // X8 = 32 gates per bar
+    engine.controlBus().publish(divSt);
+    engine.snapParametersToLatest();
+
+    int edgesOsc1 = 0;
+    int edgesOsc4 = 0;
+    uint8_t prevMask = 0x0Fu;
+    // Run ~1 full 2.0s bar (1380 x 64-frame blocks = 88,320 frames)
+    for (int b = 0; b < 1380; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        const uint8_t m = engine.telemetry().stutterGateMask.load(std::memory_order_relaxed);
+        if (((prevMask & 0x01u) == 0u) && ((m & 0x01u) != 0u)) {
+            ++edgesOsc1;
+        }
+        if (((prevMask & 0x08u) == 0u) && ((m & 0x08u) != 0u)) {
+            ++edgesOsc4;
+        }
+        prevMask = m;
+    }
+    EXPECT_TRUE(edgesOsc4 >= edgesOsc1 * 10 && edgesOsc4 >= 28,
+                "Clock Divider X8 vs /2 gate ratio mismatch (osc1=%d, osc4=%d)", edgesOsc1,
+                edgesOsc4);
+
+    // 2. 16-Step Euclidean Interlock across OSC 1..4 (5/16 rotated {0, 2, 1, 3})
+    ++baseSt.global.clockResetSeq;
+    ruido::EngineControlState eucSt = baseSt;
+    for (size_t v = 0u; v < 4u; ++v) {
+        eucSt.keyMod.rhythmMode[v] = static_cast<uint8_t>(ruido::VoiceRhythmMode::Euclid);
+        eucSt.keyMod.rhythmParam[v] = 2u; // 5/16
+    }
+    engine.controlBus().publish(eucSt);
+    engine.snapParametersToLatest();
+
+    uint16_t seenMasks = 0u;
+    for (int b = 0; b < 1380; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        const uint8_t m =
+            engine.telemetry().stutterGateMask.load(std::memory_order_relaxed) & 0x0Fu;
+        seenMasks |= static_cast<uint16_t>(1u << m);
+    }
+    // Rotated 5/16 patterns must produce at least 4 distinct polyrhythmic voice combinations
+    int distinctCombos = 0;
+    for (int k = 1; k < 16; ++k) {
+        if (((seenMasks >> k) & 1u) != 0u) {
+            ++distinctCombos;
+        }
+    }
+    EXPECT_TRUE(distinctCombos >= 4, "Euclidean 4-voice rotation lacked polyrhythmic variety (%d)",
+                distinctCombos);
+
+    // 3. Round-Robin CHASE (OP6): exactly one oscillator gated open at a time (0x01, 0x02, 0x04,
+    // 0x08)
+    ++baseSt.global.clockResetSeq;
+    ruido::EngineControlState chaseSt = baseSt;
+    chaseSt.keyMod.rhythmChase = 0.45f; // 16th-note chase
+    engine.controlBus().publish(chaseSt);
+    engine.snapParametersToLatest();
+
+    uint8_t chaseVoiceUnion = 0u;
+    bool sawMultiVoiceOpen = false;
+    for (int b = 0; b < 720; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        const uint8_t m =
+            engine.telemetry().stutterGateMask.load(std::memory_order_relaxed) & 0x0Fu;
+        chaseVoiceUnion |= m;
+        if ((m & (m - 1u)) != 0u) {
+            sawMultiVoiceOpen = true;
+        }
+    }
+    EXPECT_TRUE(chaseVoiceUnion == 0x0Fu && !sawMultiVoiceOpen,
+                "CHASE failed exclusive 1->2->3->4 round-robin (union=0x%X, multi=%d)",
+                chaseVoiceUnion, sawMultiVoiceOpen ? 1 : 0);
+
+    // 4. Sidechain PUMP (OP5) + TEMPO 4x (PIT) + MIDI Start Reset (`clockResetSeq`)
+    ++baseSt.global.clockResetSeq;
+    ruido::EngineControlState pumpSt = baseSt;
+    pumpSt.keyMod.rhythmPump = 1.0f;
+    engine.controlBus().publish(pumpSt);
+    engine.snapParametersToLatest();
+
+    double earlyBeatEnergy = 0.0;
+    double lateBeatEnergy = 0.0;
+    // 1 beat @ 120 BPM = 0.50 s ~= 344 blocks of 64 frames
+    for (int b = 0; b < 320; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        for (float s : outL) {
+            if (b >= 2 && b < 42) {
+                earlyBeatEnergy += static_cast<double>(s) * static_cast<double>(s);
+            } else if (b >= 250 && b < 290) {
+                lateBeatEnergy += static_cast<double>(s) * static_cast<double>(s);
+            }
+        }
+    }
+    EXPECT_TRUE(lateBeatEnergy > earlyBeatEnergy * 6.0,
+                "Sidechain PUMP failed duck-to-swell envelope (early=%.4f, late=%.4f)",
+                earlyBeatEnergy, lateBeatEnergy);
+
+    // Verify PIT TEMPO (4x) advances rhythmPhase ~4x faster & MIDI 0xFA snaps phase to 0
+    ++baseSt.global.clockResetSeq;
+    ruido::EngineControlState tempoSt = baseSt;
+    tempoSt.keyMod.rhythmTempo = 1.0f; // 4.0x = 480 BPM (1 bar = 0.50 s)
+    engine.controlBus().publish(tempoSt);
+    engine.snapParametersToLatest();
+    engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+    engine.scopeBuffer().popBatch(drain.data(), drain.size());
+    const float resetPhase = engine.telemetry().rhythmPhase.load(std::memory_order_relaxed);
+    EXPECT_TRUE(resetPhase < 0.02f, "clockResetSeq failed to snap rhythmPhase near 0 (%.4f)",
+                static_cast<double>(resetPhase));
+    for (int b = 0; b < 170; ++b) { // ~0.25 s = half a bar at 480 BPM!
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+    }
+    const float fastPhase = engine.telemetry().rhythmPhase.load(std::memory_order_relaxed);
+    EXPECT_TRUE(fastPhase > 0.42f && fastPhase < 0.62f,
+                "TEMPO 4x failed expected bar phase advance (%.4f)",
+                static_cast<double>(fastPhase));
+
+    // 5. Combined Euclid + MS-20 PLUCK (GLO) + SHORT (MONO) + Stereo SWING (POLY) stress
+    ruido::EngineControlState grooveSt = eucSt;
+    grooveSt.global.clockResetSeq = static_cast<uint8_t>(baseSt.global.clockResetSeq + 1u);
+    grooveSt.keyMod.rhythmPluck = 1.0f;
+    grooveSt.keyMod.rhythmShort = 0.35f;
+    grooveSt.keyMod.rhythmSwing = 1.0f;
+    engine.controlBus().publish(grooveSt);
+
+    float peakGroove = 0.0f;
+    double diffStereo = 0.0;
+    for (int b = 0; b < 240; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            EXPECT_TRUE(isFiniteNonSubnormal(outL[i]) && isFiniteNonSubnormal(outR[i]),
+                        "Non-finite or subnormal sample during Rhythm Lab groove stress");
+            peakGroove = std::max(peakGroove, std::max(std::fabs(outL[i]), std::fabs(outR[i])));
+            diffStereo += std::fabs(static_cast<double>(outL[i] - outR[i]));
+        }
+    }
+    EXPECT_TRUE(peakGroove > 0.08f && peakGroove <= 1.25f,
+                "Rhythm Lab groove peak out of bounds (%.4f)", static_cast<double>(peakGroove));
+    EXPECT_TRUE(diffStereo > 5.0, "SWING failed to create stereo ping-pong bounce (diff=%.3f)",
+                diffStereo);
+    std::printf("  Div(/2=%d, X8=%d), Euclid combos=%d, Pump swell=%.1fx, Groove peak=%.3f\n",
+                edgesOsc1, edgesOsc4, distinctCombos,
+                lateBeatEnergy / std::max(earlyBeatEnergy, 1.0e-6),
+                static_cast<double>(peakGroove));
+}
+
 } // namespace
 
 int main() {
@@ -2761,6 +2937,7 @@ int main() {
     testPulseWidthAndVoiceDriftPhysics();
     testLiveMixerAndSnapshotMorphDsp();
     testCircuitLabPatchMatrixHardSyncTurboAndScreamDsp();
+    testRhythmLabClockDividersEuclidPumpPluckAndSwingDsp();
 
     if (gFailures == 0) {
         std::printf("\n[PASS] All Milestone 1 DSP verification gates passed!\n");

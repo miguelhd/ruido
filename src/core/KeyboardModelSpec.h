@@ -24,7 +24,7 @@ struct KeyboardModelSpec {
 
 inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel::Count)>
     kKeyboardModelSpecs = {{
-        // 1/4: LIVE MIXER (4-Oscillator Mix, FX & 4-Slot Scenes)
+        // 1/3: LIVE MIXER (4-Oscillator Mix, FX & 4-Slot Scenes)
         {
             "LIVE MIXER",
             "MIX, FX & SCENES",
@@ -32,7 +32,7 @@ inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel
             {"MUTE", "FILTER", "OCTAVE", "SCENE"},
             "HOLD KEYS FOR LIVE MIX & FX",
         },
-        // 2/4: CIRCUIT LAB (CMOS Patch Bay)
+        // 2/3: CIRCUIT LAB (CMOS Patch Bay)
         {
             "CIRCUIT LAB",
             "CMOS PATCH BAY",
@@ -40,20 +40,12 @@ inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel
             {"MUTE", "CROSS", "FOLD", "CRUSH"},
             "HOLD KEYS TO BEND CIRCUIT",
         },
-        // 3/4: HARMONIUM (Just Intonation)
-        {
-            "HARMONIUM",
-            "JUST INTONATION",
-            {"OSC 1-4", "FIFTH", "SUB/OCT", "WIDE"},
-            {"ROOTS", "FIFTHS", "CHORDS", "OCTAVE"},
-            "HOLD KEYS TO TUNE RATIOS",
-        },
-        // 4/4: RHYTHM LAB (Polyrhythmic Gate & Chopper Matrix)
+        // 3/3: RHYTHM LAB (Stutter, Clock Dividers & Euclidean Grooves)
         {
             "RHYTHM LAB",
-            "POLYRHYTHM & GATES",
-            {"SOLO", "CLOCK", "SHAPE", "SWING"},
-            {"MUTE", "PULSE", "RATCHET", "HOCKET"},
+            "CLOCK, DIVIDE & EUCLID",
+            {"SOLO", "PUMP", "CLOCK", "SWING"},
+            {"MUTE", "STUTTER", "DIVIDE", "EUCLID"},
             "HOLD KEYS FOR RHYTHM GATES",
         },
     }};
@@ -108,20 +100,9 @@ inline void computeKeyboardModelRestLeds(KeyboardModel model, const EngineContro
         }
     }
 
-    if (model == KeyboardModel::LiveMixer || model == KeyboardModel::CircuitLab ||
-        model == KeyboardModel::RhythmLab) {
-        for (size_t v = 0u; v < kNumOscillators; ++v) {
-            const VoiceCircuitState vc = evaluateVoiceCircuit(state, v, stutterGateMask);
-            evaluateVoiceConsoleLeds(vc, subBreathWave01, outBlack[v], outWhite[v]);
-        }
-        return;
-    }
-
-    // Harmonium: OSC 1-4 top indicators follow unified circuit mute state
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         const VoiceCircuitState vc = evaluateVoiceCircuit(state, v, stutterGateMask);
-        outBlack[v] = vc.isMuted ? 0.0f : (0.64f * (1.0f - vc.muteBlend));
-        outWhite[v] = 0.64f;
+        evaluateVoiceConsoleLeds(vc, subBreathWave01, outBlack[v], outWhite[v]);
     }
 }
 

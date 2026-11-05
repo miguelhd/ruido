@@ -16,37 +16,20 @@ constexpr bool isModifierBlackKey(BlackKeyId) noexcept {
 
 // LIFO momentary key & knob-rate tracker for two-hand chording without dynamic containers.
 struct ModifierKeyTracker {
-    std::array<bool, kNumBlackKeys> blackKeyHeld{};
-    std::array<uint32_t, kNumBlackKeys> blackKeyOrder{};
-    std::array<bool, kNumWhiteKeys> whiteKeyHeld{};
     uint32_t pressSeq = 0u;
     uint32_t octMinusOrder = 0u;
     uint32_t octPlusOrder = 0u;
     bool octMinusHeld = false;
     bool octPlusHeld = false;
+    bool anyPerfKeyHeld = false;
 
     void reset() noexcept {
-        blackKeyHeld.fill(false);
-        blackKeyOrder.fill(0u);
-        whiteKeyHeld.fill(false);
         pressSeq = 0u;
         octMinusOrder = 0u;
         octPlusOrder = 0u;
         octMinusHeld = false;
         octPlusHeld = false;
-    }
-
-    bool setBlackKey(BlackKeyId key, bool pressed) noexcept {
-        const size_t idx = static_cast<size_t>(key);
-        if (idx >= kNumBlackKeys) {
-            return false;
-        }
-        const bool wasHeld = blackKeyHeld[idx];
-        blackKeyHeld[idx] = pressed;
-        if (pressed) {
-            blackKeyOrder[idx] = ++pressSeq;
-        }
-        return wasHeld;
+        anyPerfKeyHeld = false;
     }
 
     bool setRateButton(ButtonId button, bool pressed) noexcept {
@@ -69,19 +52,7 @@ struct ModifierKeyTracker {
 
     HeldModifier activeModifier() const noexcept { return HeldModifier::None; }
 
-    bool isAnyPerformanceKeyHeld() const noexcept {
-        for (size_t i = 0u; i < kNumBlackKeys; ++i) {
-            if (blackKeyHeld[i]) {
-                return true;
-            }
-        }
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-            if (whiteKeyHeld[i]) {
-                return true;
-            }
-        }
-        return false;
-    }
+    bool isAnyPerformanceKeyHeld() const noexcept { return anyPerfKeyHeld; }
 
     KnobRate activeKnobRate() const noexcept {
         if (octMinusHeld && octPlusHeld) {

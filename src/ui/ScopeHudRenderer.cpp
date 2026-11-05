@@ -43,6 +43,7 @@ void ScopeHudRenderer::reset() noexcept {
     smoothedPeakR_ = 0.0f;
     prevHeaderBarMode_ = HudMode::None;
     prevKnobBank_ = KnobBankMode::Frequency;
+    frameRhythmPhase_ = 0.0f;
     frameStutterGateMask_ = 0x0Fu;
     releaseLatchActive_ = false;
     hudGaugesPrimed_ = false;
@@ -110,6 +111,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     const bool streamStalled = traceEngine_.isStreamStalled(hud.scopeFrozen);
     if (!hud.scopeFrozen) {
         frameStutterGateMask_ = telemetry.stutterGateMask.load(std::memory_order_relaxed);
+        frameRhythmPhase_ = telemetry.rhythmPhase.load(std::memory_order_relaxed);
         for (size_t i = 0u; i < kNumVoiceLfos; ++i) {
             frameLfoOutput_[i] = telemetry.lfoOutput[i].load(std::memory_order_relaxed);
             frameLfoPhase_[i] =
@@ -232,6 +234,8 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.activePunch = releaseLatchHud_.activePunch;
         effectiveHud.activePunchVoice = releaseLatchHud_.activePunchVoice;
         effectiveHud.activePunchValue = releaseLatchHud_.activePunchValue;
+        effectiveHud.effectiveClockBpm = releaseLatchHud_.effectiveClockBpm;
+        effectiveHud.midiClockSynced = releaseLatchHud_.midiClockSynced;
         effectiveHud.heldBlackMask = releaseLatchHud_.heldBlackMask;
         effectiveHud.heldWhiteMask = releaseLatchHud_.heldWhiteMask;
         effectiveHud.blackPressureQ8 = releaseLatchHud_.blackPressureQ8;
@@ -271,7 +275,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     const bool extraCenterView = globalViews_.anyActiveTarget(hud) || ampGraph_.isActive(hud) ||
                                  keybedView_.isActive(effectiveHud);
     graphs_.update(dtClamped, control, hud, effectiveHud, extraCenterView, frameLfoOutput_,
-                   frameLfoDriftPacked_);
+                   frameLfoDriftPacked_, frameRhythmPhase_, frameStutterGateMask_);
 }
 
 void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,

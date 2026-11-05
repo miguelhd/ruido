@@ -212,7 +212,7 @@ inline void applyAuthoritativeConsoleLeds(const EngineControlState& state, uint8
     }
 }
 
-// Pluggable behavior contract for each 27-key interaction model (LiveMixer, CircuitLab, Harmonium)
+// Pluggable behavior contract for each 27-key interaction model (LiveMixer, CircuitLab, RhythmLab)
 struct KeyboardModelOps {
     void (*onKeyPress)(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
                        KeyboardLatchState& latch) noexcept;
@@ -220,7 +220,7 @@ struct KeyboardModelOps {
                      HudState& hud) noexcept;
     void (*choreographActiveLeds)(const KeyboardInputView& input, float animPhase,
                                   float subBreathWave01, const EngineControlState& state,
-                                  const HudState& hud, uint8_t stutterGateMask,
+                                  const HudState& hud, uint8_t stutterGateMask, float rhythmPhase01,
                                   LedState& outLeds) noexcept;
 };
 
@@ -230,7 +230,7 @@ void evaluateLiveMixerModel(const KeyboardInputView& input, EngineControlState& 
                             HudState& hud) noexcept;
 void choreographLiveMixerLeds(const KeyboardInputView& input, float animPhase,
                               float subBreathWave01, const EngineControlState& state,
-                              const HudState& hud, uint8_t stutterGateMask,
+                              const HudState& hud, uint8_t stutterGateMask, float rhythmPhase01,
                               LedState& outLeds) noexcept;
 
 void onCircuitLabKeyPress(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
@@ -239,8 +239,17 @@ void evaluateCircuitLabModel(const KeyboardInputView& input, EngineControlState&
                              HudState& hud) noexcept;
 void choreographCircuitLabLeds(const KeyboardInputView& input, float animPhase,
                                float subBreathWave01, const EngineControlState& state,
-                               const HudState& hud, uint8_t stutterGateMask,
+                               const HudState& hud, uint8_t stutterGateMask, float rhythmPhase01,
                                LedState& outLeds) noexcept;
+
+void onRhythmLabKeyPress(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
+                         KeyboardLatchState& latch) noexcept;
+void evaluateRhythmLabModel(const KeyboardInputView& input, EngineControlState& state,
+                            HudState& hud) noexcept;
+void choreographRhythmLabLeds(const KeyboardInputView& input, float animPhase,
+                              float subBreathWave01, const EngineControlState& state,
+                              const HudState& hud, uint8_t stutterGateMask, float rhythmPhase01,
+                              LedState& outLeds) noexcept;
 
 const KeyboardModelOps& keyboardModelOps(KeyboardModel model) noexcept;
 

@@ -1933,6 +1933,7 @@ int main() {
     ruido_test::runGlobalFiveModesAndConfigMenuTests(check);
     ruido_test::runEditChannelDrivePageAndAmpGraphTests(check);
     ruido_test::runKeyboardModelAndLiveMixerTests(check);
+    ruido_test::runRhythmLabAndMidiClockTests(check);
 
     if (gFailures == 0) {
         std::printf("\nALL UI & CONTROLLER VERIFICATION GATES PASSED (0 failures).\n");

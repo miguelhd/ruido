@@ -176,7 +176,8 @@ void evaluateLiveMixerModel(const KeyboardInputView& in, EngineControlState& sta
 
 void choreographLiveMixerLeds(const KeyboardInputView& in, float animPhase, float subBreathWave01,
                               const EngineControlState& state, const HudState& hud,
-                              uint8_t stutMask, LedState& outLeds) noexcept {
+                              uint8_t stutMask, float rhythmPhase01, LedState& outLeds) noexcept {
+    (void)rhythmPhase01;
     // 1. OP5 Drive: Dual-edge plasma flood + top VU bar + physical RED REC clip beacon!
     if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op5)]) {
         const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Op5)];

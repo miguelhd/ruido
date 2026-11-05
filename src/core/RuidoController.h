@@ -4,6 +4,7 @@
 #include "core/HudEnvelope.h"
 #include "core/KeyboardEngine.h"
 #include "core/LedEngine.h"
+#include "core/MidiClock.h"
 #include "core/ModifierTracker.h"
 #include "core/Parameters.h"
 #include "core/SnapshotBank.h"
@@ -45,7 +46,11 @@ class RuidoController {
     void onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexcept;
     void onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) noexcept;
 
-    // Advance 150 ms HUD envelope & refresh all 42 varibright PWM LED levels.
+    // Transport-agnostic 1-byte MIDI System Real-Time clock sync (0xF8 / 0xFA / 0xFB / 0xFC)
+    // across TRS UART, USB-MIDI, and Bluetooth BLE-MIDI (`msgTimestampSec < 0` uses internal time).
+    void onMidiRealtime(uint8_t statusByte, float msgTimestampSec = -1.0f) noexcept;
+
+    // Advance 150 ms HUD envelope, MIDI clock timeout & refresh all 42 varibright PWM LED levels.
     void tick(float dtSec, const EngineTelemetry& telemetry) noexcept;
 
     const EngineControlState& state() const noexcept { return state_; }
@@ -64,7 +69,18 @@ class RuidoController {
 
   private:
     KnobBankMode baseKnobBank() const noexcept;
-    void closeAllPages() noexcept;
+    bool anyPageOpen() const noexcept {
+        return hud_.freqPageOpen || hud_.fxPageOpen || hud_.panPageOpen || hud_.lfoPageOpen ||
+               hud_.editPageOpen || hud_.configPageOpen || hud_.selPageOpen;
+    }
+    void closeAllPages() noexcept {
+        hud_.freqPageOpen = hud_.fxPageOpen = hud_.panPageOpen = false;
+        hud_.lfoPageOpen = hud_.editPageOpen = hud_.configPageOpen = hud_.selPageOpen = false;
+    }
+    void resetPageNav() noexcept;
+    void setLatchedPage(HudMode mode, ButtonId button) noexcept;
+    void restoreLatchedFields() noexcept;
+    bool syncClockState() noexcept;
     bool tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active) noexcept;
     void applyKeyboardPerformanceChange() noexcept;
     void syncModifierHud() noexcept;
@@ -83,6 +99,7 @@ class RuidoController {
 
     KeyboardEngine keyboard_{};
     SnapshotBank snapshots_{};
+    MidiClockTracker midiClock_{};
     ModifierKeyTracker keys_{};
     HudEnvelopeTracker env_{};
     LedSmoothState ledSmooth_{};
