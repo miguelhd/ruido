@@ -30,16 +30,14 @@ Each milestone has a strict verification gate before advancing to the next phase
 
 ---
 
-## Milestone 3: Per-Voice LFO, Config Menu, 3-Model Performance Keyboard & Snapshots
+## Milestone 3: Per-Voice LFO, Config Menu, 3-Model Performance Keyboard & Snapshots *(Complete)*
 - [x] Implement dedicated dual per-voice LFO engine (`8` LFOs: `LFO A/B OSC 1..4`) & `LFO` HUD page (`ADR-022`, `ADR-031`: `SELECT` = `LFO A OSC 1 · LFO B OSC 1 .. LFO B OSC 4`, `KNOB 1–4` = `TARGET | SHAPE | RATE | DEPTH` with continuous `Sine -> Tri -> Saw -> Slewed Square -> Smooth Drift` morphing, `WIDTH` PWM target, `LFO B -> LFO A` `A RATE` / `A DEPTH` cross-modulation, companion sibling curve HUD, and smart `GLOBAL LFO` scaling).
 - [x] Implement focused Configuration Menu behind right-grid `GLO` button (`ADR-027`, `ADR-030`, `ADR-036`, `ADR-037`, `ADR-040`, `ADR-042`: housing `OUTPUT ROUTING` (`STEREO` / `MONO`), `MUTE MODE` (`MOMENTARY` / `LATCHING`), `SOLO MODE` (`MOMENTARY` / `LATCHING`), `SCENE MODE` (`LATCHING` / `MOMENTARY`), `MIDI CLOCK IN` (`AUTO` / `OFF`), `MIDI TRANSPORT IN` (`PHASE` / `RUN/STOP`), and `MIDI CHANNEL IN` (`OMNI` / `CH 1–16`)).
 - [x] Implement 2-page `EDIT` cycle (`1st tap` = `DUTY · DRIFT · LEVEL`, `2nd tap` = `PAN`, `3rd tap` = Close), persistent `SEL` + `SELECT` knob **3-Model Performance Keyboard** selector, 7-tier monotonic left-to-right varibright LED zoning, unified per-oscillator circuit mute truth, and **Mode 1 (`1/3`): `LIVE MIXER`** (`MUTE · FILTER · OCTAVE · SCENE` + `UNISON`/`SPREAD`) across all 27 pressure-sensitive keys (`ADR-036`, `ADR-037`, `ADR-039`).
 - [x] Complete **Mode 2 (`2/3`): `CIRCUIT LAB` (`CMOS PATCH BAY`)** across all 27 pressure-sensitive keys and 42 LEDs (`SOLO 1–4`, `MUTE 1–4`, `CROSS-PIN 5–8`, `FOLD 9–12` `1x->6.2x` capacitor wavefolder, `CRUSH 13–16` `CD4040` sub-XOR + `CD4013` S&H clock crush, `OP5 STARVE`, `OP6 RING MOD`, `PIT TURBO LFO`, `GLO SCREAM`, `MONO HARD SYNC`, `POLY SCATTER`, universal `11th FREEZE` + modular `CircuitPatchMatrix` / `KeyboardModel` architecture, `ADR-038`).
 - [x] Complete **Mode 3 (`3/3`): `RHYTHM LAB` (`CLOCK, DIVIDE & EUCLID`)** + **Port-Agnostic `24 PPQN` MIDI Clock In** (`SOLO 1–4`, `MUTE 1–4`, `STUTTER 5–8`, `DIVIDE 9–12` `/2..X8`, `EUCLID 13–16` 16-step rotated Euclidean grooves, `OP5 PUMP`, `OP6 CHASE`, `PIT TEMPO`, `GLO PLUCK` live MS-20 filter plucks, `MONO SHORT`, `POLY SWING`, logarithmic `20–3,000 BPM` `ALGORITHM` tempo + `11th TAP TEMPO`, WebMIDI USB/TRS/BLE clock sync in simulator, and BLE-jitter-immune 24-tick PLL, `ADR-040`, `ADR-042`).
 - [x] Implement compact `128-byte` CRC-32 binary snapshot engine (`4` slots on `LIVE MIXER` `Keys 13–16`), `SAVE` + `Keys 13–16` direct slot store, `LATCHING` pressure-accelerated glide / multi-key hybrid blend + `MOMENTARY` non-destructive pressure morph, and stepped `PRESETS` encoder recall across all 3 keyboard models (`ADR-037`, `ADR-039`).
-
-### Open Product Discussions
-- [ ] **4-Voice `GLOBAL` (`GLO`) Macro — Bring Back vs Retire Permanently:** Keybed `GLO` was repurposed during the 27-key overhaul (the underlying 5-mode 4-voice macro math remains intact in `src/core/` so reviving it is trivial). After playtesting all 3 keyboard models (`LIVE MIXER`, `CIRCUIT LAB`, `RHYTHM LAB`), decide whether multi-voice `GLOBAL` is essential enough to bring back onto the surface or whether Ruido is a stronger, simpler instrument without it.
+- [x] Permanently retire the legacy 5-mode 4-voice `GLOBAL` macro (`ADR-043`), stripping dead multi-voice encoder/HUD paths ahead of Milestone 4 hardware bring-up while retaining 4-voice MS-20 filter readout/graph support for keybed `GLO` punch-ins (`LOW PASS`, `SCREAM`, `PLUCK`).
 
 ---
 

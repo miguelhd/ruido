@@ -37,8 +37,7 @@ class HudGlobalViews {
   private:
     static constexpr bool isPanStageActive(const HudState& rawHud) noexcept {
         return (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None) &&
-               (rawHud.knobBank == KnobBankMode::Panning ||
-                (rawHud.knobBank == KnobBankMode::GlobalAmp && rawHud.focusedKnob == 3u));
+               (rawHud.knobBank == KnobBankMode::Panning);
     }
 
     std::array<float, kNumOscillators> panX_{78.0f, 162.0f, 48.0f, 192.0f};

@@ -125,7 +125,6 @@ def main() -> int:
                         "core/ControlSurface.h",
                         "core/EncoderMath.h",
                         "core/GlobalConfig.h",
-                        "core/GlobalControl.h",
                         "core/HudEnvelope.h",
                         "core/KeyboardEngine.h",
                         "core/KeyboardModel.h",

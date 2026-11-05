@@ -52,19 +52,18 @@ inline constexpr size_t kLfoShape = 42u;
 inline constexpr size_t kLfoRateHz = 43u;
 inline constexpr size_t kLfoDepth = 44u;
 inline constexpr size_t kConfigPageOpen = 45u;
-inline constexpr size_t kGlobalTarget = 46u;
-inline constexpr size_t kKnobBank = 47u;
-inline constexpr size_t kEditPageOpen = 48u;
-inline constexpr size_t kFxPageOpen = 49u;
-inline constexpr size_t kFxVoiceFocus = 50u;
-inline constexpr size_t kEditTarget = 51u;
-inline constexpr size_t kPanPageOpen = 52u;
-inline constexpr size_t kKeyboardModel = 53u;
-inline constexpr size_t kSelPageOpen = 54u;
-inline constexpr size_t kEffectiveClockBpm = 55u;
-inline constexpr size_t kMidiClockSynced = 56u;
-inline constexpr size_t kMidiChannelIn = 57u;
-inline constexpr size_t kCount = 58u;
+inline constexpr size_t kKnobBank = 46u;
+inline constexpr size_t kEditPageOpen = 47u;
+inline constexpr size_t kFxPageOpen = 48u;
+inline constexpr size_t kFxVoiceFocus = 49u;
+inline constexpr size_t kEditTarget = 50u;
+inline constexpr size_t kPanPageOpen = 51u;
+inline constexpr size_t kKeyboardModel = 52u;
+inline constexpr size_t kSelPageOpen = 53u;
+inline constexpr size_t kEffectiveClockBpm = 54u;
+inline constexpr size_t kMidiClockSynced = 55u;
+inline constexpr size_t kMidiChannelIn = 56u;
+inline constexpr size_t kCount = 57u;
 } // namespace WasmSummaryIdx
 
 } // namespace ruido::wasm_abi

@@ -2,7 +2,6 @@
 
 #include "core/DspMath.h"
 #include "core/FilterModMath.h"
-#include "core/GlobalControl.h"
 #include "core/KeyPunchSpec.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
@@ -70,14 +69,11 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
     for (uint8_t k = 0u; k < 4u; ++k) {
         out.focused[k] = (hud.focusedKnob == k) && isKnobFocusableMode(hud.mode);
 
-        if (isGlobalKnobBank(hud.knobBank)) {
+        if (hud.knobBank == KnobBankMode::GlobalFilter) {
             const GlobalColumnSummary gs =
-                evaluateGlobalColumn(hud.knobBank, k, control, lfoOutput, stutterGateMask);
+                evaluateGlobalFilterColumn(k, control, lfoOutput, stutterGateMask);
             out.posSigned[k] = gs.posSigned;
             out.dimAmount[k] = 0.0f;
-            if (gs.disabled) {
-                out.focused[k] = false;
-            }
             continue;
         }
         if (hud.knobBank == KnobBankMode::Panning && control.global.monoCollapse &&

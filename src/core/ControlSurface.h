@@ -66,9 +66,6 @@ enum class BlackKeyId : uint8_t {
     Count = 11
 };
 
-// 5 multi-voice destinations selected via SELECT while holding keybed GLO
-enum class GlobalTarget : uint8_t { Freq = 0, Filter = 1, Lfo = 2, Amp = 3, All = 4, Count = 5 };
-
 // 3 per-oscillator modes selected via discrete SELECT on the latching EDIT page
 // (signal-flow order: Osc Width -> Osc Drift -> Channel Level/Drive; default = Level)
 enum class EditTarget : uint8_t { Width = 0, Drift = 1, Level = 2, Count = 3 };
@@ -82,13 +79,9 @@ enum class KnobBankMode : uint8_t {
     Amplitude = 4,
     Panning = 5,
     Lfo = 6,
-    GlobalFreq = 7,
-    GlobalFilter = 8,
-    GlobalLfo = 9,
-    GlobalAmp = 10,
-    GlobalAll = 11,
-    Snapshot = 12,
-    None = 13
+    GlobalFilter = 7,
+    Snapshot = 8,
+    None = 9
 };
 
 // Encoder sweep rate selected via OCT- (Fine) and OCT+ (Coarse: ~1.3 turns full sweep)
@@ -117,15 +110,10 @@ enum class HudMode : uint8_t {
     ScopeFreeze = 18,
     UnassignedButton = 19,
     VoiceLfo = 20,
-    GlobalFreq = 21,
-    GlobalFilter = 22,
-    GlobalLfo = 23,
-    GlobalAmp = 24,
-    GlobalAll = 25,
-    GlobalConfig = 26,
-    KeyboardModel = 27, // Latching SEL Keyboard Model status & guidance screen
-    KeyboardPlay = 28,  // Momentary live punch-in routed 1-to-1 to native Ruido views
-    MasterTempo = 29    // ALGORITHM encoder Master Tempo control in 3/3 RHYTHM LAB
+    GlobalConfig = 21,
+    KeyboardModel = 22, // Latching SEL Keyboard Model status & guidance screen
+    KeyboardPlay = 23,  // Momentary live punch-in routed 1-to-1 to native Ruido views
+    MasterTempo = 24    // ALGORITHM encoder Master Tempo control in 3/3 RHYTHM LAB
 };
 
 // Active momentary punch-in family displayed in the top header during HudMode::KeyboardPlay
@@ -234,7 +222,6 @@ struct HudState {
     HudMode mode = HudMode::None;
     KnobBankMode knobBank = KnobBankMode::Frequency;
     KnobRate knobRate = KnobRate::Standard;
-    GlobalTarget globalTarget = GlobalTarget::All;
     EditTarget editTarget = EditTarget::Level;
     GlobalConfigState config{};
     ButtonId lastButton = ButtonId::Count;

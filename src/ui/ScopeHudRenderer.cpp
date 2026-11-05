@@ -77,10 +77,6 @@ void ScopeHudRenderer::updateHudGauges(float dtClamped, bool snapImmediate) noex
     const bool snapBank = snapImmediate || (prevKnobBank_ != frameHud_.knobBank);
     prevKnobBank_ = frameHud_.knobBank;
     const bool perOscBank = isPerOscKnobBank(frameHud_.knobBank);
-    const bool anyStutter = (frameControl_.keyMod.stutterDepth[0] > 1.0e-4f) ||
-                            (frameControl_.keyMod.stutterDepth[1] > 1.0e-4f) ||
-                            (frameControl_.keyMod.stutterDepth[2] > 1.0e-4f) ||
-                            (frameControl_.keyMod.stutterDepth[3] > 1.0e-4f);
     for (uint8_t k = 0u; k < 4u; ++k) {
         if (snapBank) {
             knobPosSignedSmooth_[k] = tgt.posSigned[k];
@@ -88,9 +84,7 @@ void ScopeHudRenderer::updateHudGauges(float dtClamped, bool snapImmediate) noex
             knobFocusSmooth_[k] = tgt.focused[k] ? 1.0f : 0.0f;
         } else {
             const bool oscChop = perOscBank && (frameControl_.keyMod.stutterDepth[k] > 1.0e-4f);
-            const bool posChop =
-                (oscChop && frameHud_.knobBank == KnobBankMode::Amplitude) ||
-                (anyStutter && frameHud_.knobBank == KnobBankMode::GlobalAmp && k < 2u);
+            const bool posChop = oscChop && frameHud_.knobBank == KnobBankMode::Amplitude;
             knobPosSignedSmooth_[k] = slewScalar(knobPosSignedSmooth_[k], tgt.posSigned[k],
                                                  posChop ? alphaChop : alphaGauge);
             knobDimSmooth_[k] =
@@ -227,7 +221,6 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.panPageOpen = releaseLatchHud_.panPageOpen;
         effectiveHud.editPageOpen = releaseLatchHud_.editPageOpen;
         effectiveHud.editTarget = releaseLatchHud_.editTarget;
-        effectiveHud.globalTarget = releaseLatchHud_.globalTarget;
         effectiveHud.configCursor = releaseLatchHud_.configCursor;
         effectiveHud.config = releaseLatchHud_.config;
         effectiveHud.selPageOpen = releaseLatchHud_.selPageOpen;

@@ -28,13 +28,10 @@ class HudAmpGraph {
     void stepFadeOut(float dtClamped) noexcept;
 
     static constexpr bool isLevelViewActive(const HudState& rawHud) noexcept {
-        return rawHud.opacity > 0.001f &&
-               ((rawHud.editPageOpen && !rawHud.modifierHeld &&
-                 rawHud.knobBank == KnobBankMode::Amplitude) ||
-                (rawHud.mode == HudMode::KeyboardPlay &&
-                 rawHud.knobBank == KnobBankMode::Amplitude) ||
-                (rawHud.knobBank == KnobBankMode::GlobalAmp && rawHud.focusedKnob != 3u) ||
-                (rawHud.knobBank == KnobBankMode::GlobalAll && rawHud.focusedKnob == 3u));
+        return rawHud.opacity > 0.001f && ((rawHud.editPageOpen && !rawHud.modifierHeld &&
+                                            rawHud.knobBank == KnobBankMode::Amplitude) ||
+                                           (rawHud.mode == HudMode::KeyboardPlay &&
+                                            rawHud.knobBank == KnobBankMode::Amplitude));
     }
 
     bool isActive(const HudState& rawHud) const noexcept {

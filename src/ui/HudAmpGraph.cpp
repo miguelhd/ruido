@@ -1,7 +1,6 @@
 #include "ui/HudAmpGraph.h"
 
 #include "core/DspMath.h"
-#include "core/GlobalControl.h"
 #include "core/HudEnvelope.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
@@ -147,7 +146,7 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
     }
 
     // 2. Linear-photon columns: clean VCA stem (0-70%) & 3A narrow hairy drive cap (>70%)
-    const bool perVoiceFocus = !isGlobalKnobBank(hud.knobBank);
+    const bool perVoiceFocus = (hud.knobBank != KnobBankMode::GlobalFilter);
     const int pyStart = (y0 > 32) ? y0 : 32;
     const int pyEnd = (y1 < 188) ? y1 : 188;
     if (pyStart < pyEnd) {

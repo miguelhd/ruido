@@ -42,8 +42,6 @@ DSP_SRCS := \
 	src/dsp/DroneEngine.cpp
 
 UI_SRCS := \
-	src/core/GlobalControl.cpp \
-	src/core/GlobalColumnEval.cpp \
 	src/core/KeyboardLiveMixer.cpp \
 	src/core/KeyboardCircuitLab.cpp \
 	src/core/KeyboardRhythmLab.cpp \

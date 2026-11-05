@@ -3,7 +3,6 @@
 #include "core/DspMath.h"
 #include "core/EncoderMath.h"
 #include "core/GlobalConfig.h"
-#include "core/GlobalControl.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
 #include "ui/FontSansAA.h"
@@ -257,59 +256,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
                   (lfoSlotDepth(lvp, sub) > 0.002f) ? "ACTIVE" : "BYPASSED");
         break;
     }
-    case HudMode::GlobalFreq: {
-        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " FREQ");
-        const GlobalColumnSummary gs =
-            evaluateGlobalColumn(KnobBankMode::GlobalFreq, 0u, control, lfoOutput, stutterGateMask);
-        char hzBuf[16]{};
-        formatCompactHz(hzBuf, sizeof(hzBuf), gs.primaryValue);
-        size_t p = appendStr(rightText, 0u, sizeof(rightText), "MEAN ");
-        appendStr(rightText, p, sizeof(rightText), hzBuf);
-        break;
-    }
-    case HudMode::GlobalFilter:
-        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " FILTER");
-        appendStr(rightText, 0u, sizeof(rightText), "12 dB HP -> LP");
-        break;
-    case HudMode::GlobalLfo: {
-        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " LFO");
-        uint32_t activeLfos = 0u;
-        for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
-            if (control.voices[vi].lfoDepth > 0.002f) {
-                ++activeLfos;
-            }
-            if (control.voices[vi].lfoBDepth > 0.002f) {
-                ++activeLfos;
-            }
-        }
-        if (activeLfos == 0u) {
-            appendStr(rightText, 0u, sizeof(rightText), "BYPASSED");
-        } else {
-            size_t p = appendUInt(rightText, 0u, sizeof(rightText), activeLfos);
-            appendStr(rightText, p, sizeof(rightText), "/8 ACTIVE");
-        }
-        break;
-    }
-    case HudMode::GlobalAmp:
-        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " LEVEL");
-        if (hud.focusedKnob == 3u) {
-            appendStr(rightText, 0u, sizeof(rightText),
-                      control.global.monoCollapse ? "MONO" : "STEREO");
-        } else {
-            formatHeaderEnsembleDrive(control, lfoOutput, stutterGateMask, rightText,
-                                      sizeof(rightText));
-        }
-        break;
-    case HudMode::GlobalAll:
-        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " ALL");
-        appendStr(rightText, 0u, sizeof(rightText),
-                  (hud.config.gloRelease == GloReleaseMode::SnapBack) ? "SNAP BACK" : "LATCH");
-        break;
     case HudMode::GlobalConfig: {
         appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
         appendStr(leftSuffix, 0u, sizeof(leftSuffix), " CONFIG");

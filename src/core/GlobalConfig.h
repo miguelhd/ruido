@@ -8,12 +8,6 @@
 
 namespace ruido {
 
-// Release behavior when letting go of the momentary keybed GLO switch (GLOBAL control).
-enum class GloReleaseMode : uint8_t {
-    Latch = 0,   // Keep multi-voice parameter offsets on GLO release (default)
-    SnapBack = 1 // Temporary performance twist: restore pre-GLO voice state on release
-};
-
 // Action mode for console MUTE, SOLO, and SNAP keys in GLOBAL CONFIG.
 enum class KeySwitchMode : uint8_t {
     Momentary = 0, // Active only while key is held
@@ -33,7 +27,6 @@ enum class MidiTransportMode : uint8_t {
 };
 
 // Scalable descriptor IDs for the right-panel GLO vertical GLOBAL CONFIG list menu.
-// (4-voice GLO macro & GLO RELEASE are tabled pending post-playtest roadmap evaluation.)
 enum class ConfigItemId : uint8_t {
     OutputRouting = 0,
     MuteMode = 1,
@@ -53,7 +46,6 @@ inline constexpr std::array<const char*, 17> kMidiChannelLabels = {
 };
 
 struct GlobalConfigState {
-    GloReleaseMode gloRelease = GloReleaseMode::Latch;
     KeySwitchMode muteMode = KeySwitchMode::Momentary;
     KeySwitchMode soloMode = KeySwitchMode::Momentary;
     KeySwitchMode snapMode = KeySwitchMode::Latching;
@@ -270,11 +262,8 @@ inline DeviceSettingsBlob encodeDeviceSettings(const GlobalConfigState& config,
     if (config.clockSync == ClockSyncMode::Internal) {
         flags |= (1u << 5u);
     }
-    if (config.gloRelease == GloReleaseMode::SnapBack) {
-        flags |= (1u << 6u);
-    }
     if (config.midiTransport == MidiTransportMode::RunStop) {
-        flags |= (1u << 7u);
+        flags |= (1u << 6u);
     }
     blob.configFlags = flags;
     blob.masterTrimQ16 =
@@ -315,9 +304,7 @@ inline bool decodeDeviceSettings(const DeviceSettingsBlob& blob, GlobalConfigSta
                                                                  : KeySwitchMode::Momentary;
     outConfig.clockSync =
         ((blob.configFlags & (1u << 5u)) != 0u) ? ClockSyncMode::Internal : ClockSyncMode::Auto;
-    outConfig.gloRelease =
-        ((blob.configFlags & (1u << 6u)) != 0u) ? GloReleaseMode::SnapBack : GloReleaseMode::Latch;
-    outConfig.midiTransport = ((blob.configFlags & (1u << 7u)) != 0u)
+    outConfig.midiTransport = ((blob.configFlags & (1u << 6u)) != 0u)
                                   ? MidiTransportMode::RunStop
                                   : MidiTransportMode::PhaseOnly;
     outConfig.midiChannel = (blob.midiChannel <= 16u) ? blob.midiChannel : 0u;

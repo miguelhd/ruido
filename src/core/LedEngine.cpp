@@ -2,7 +2,6 @@
 
 #include "core/DspMath.h"
 #include "core/FilterModMath.h"
-#include "core/GlobalControl.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
 
@@ -112,8 +111,9 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctPlus)] =
         (ctx.hud.knobRate == KnobRate::Coarse) ? 1.0f : 0.15f;
 
-    const bool homeFreqActive =
-        ctx.hud.freqPageOpen && !isGlobalKnobBank(ctx.hud.knobBank) && !ctx.hud.scopeFrozen;
+    const bool homeFreqActive = ctx.hud.freqPageOpen &&
+                                (ctx.hud.knobBank != KnobBankMode::GlobalFilter) &&
+                                !ctx.hud.scopeFrozen;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::Home)] =
         homeFreqActive ? 1.0f : (0.12f + 0.23f * ctx.hud.opacity);
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] = ctx.hud.saveArmed ? 1.0f : 0.15f;
@@ -150,7 +150,8 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
 
     // EDIT button: 100% across EDIT Page 1 (Channel Mix) AND Page 2 (Panning), 15% when closed
     const bool editActive = (ctx.hud.editPageOpen || ctx.hud.panPageOpen) &&
-                            !isGlobalKnobBank(ctx.hud.knobBank) && !ctx.hud.scopeFrozen;
+                            (ctx.hud.knobBank != KnobBankMode::GlobalFilter) &&
+                            !ctx.hud.scopeFrozen;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::Edit)] = editActive ? 1.0f : 0.15f;
 
     float lfoWave01 = 0.0f;

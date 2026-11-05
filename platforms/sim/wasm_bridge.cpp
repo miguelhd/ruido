@@ -48,8 +48,6 @@ size_t strlen(const char* s) {
 
 // Unity-include the 100% platform-independent Ruido C++17 sources
 #include "core/ControllerPageNav.cpp"
-#include "core/GlobalColumnEval.cpp"
-#include "core/GlobalControl.cpp"
 #include "core/KeyboardCircuitLab.cpp"
 #include "core/KeyboardEngine.cpp"
 #include "core/KeyboardLiveMixer.cpp"
@@ -152,8 +150,6 @@ void refreshSummary() noexcept {
     gSummaryOut[WasmSummaryIdx::kLfoRateHz] = ruido::lfoSlotRateHz(lfoVp, lfoSub);
     gSummaryOut[WasmSummaryIdx::kLfoDepth] = ruido::lfoSlotDepth(lfoVp, lfoSub);
     gSummaryOut[WasmSummaryIdx::kConfigPageOpen] = gCtrl->hud().configPageOpen ? 1.0f : 0.0f;
-    gSummaryOut[WasmSummaryIdx::kGlobalTarget] =
-        static_cast<float>(static_cast<uint8_t>(gCtrl->hud().globalTarget));
     gSummaryOut[WasmSummaryIdx::kKnobBank] =
         static_cast<float>(static_cast<uint8_t>(gCtrl->hud().knobBank));
     gSummaryOut[WasmSummaryIdx::kEditPageOpen] = gCtrl->hud().editPageOpen ? 1.0f : 0.0f;

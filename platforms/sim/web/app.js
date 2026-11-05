@@ -404,12 +404,12 @@ function bindKnobs() {
         e.preventDefault();
         const knobBank =
           uiWasm && uiPtrs ? Math.round(uiF32[uiPtrs.summary + WASM_SUMMARY.KNOB_BANK]) : 0;
-        // KnobBankMode: Lfo = 6, GlobalLfo = 9, None (GlobalConfig / SEL) = 13
+        // KnobBankMode: Lfo = 6, None (GlobalConfig / SEL) = 9
         const isDiscrete =
           encId === 0 ||
           encId === 1 ||
-          (encId === 2 && knobBank === 13) ||
-          (encId === 3 && (knobBank === 6 || knobBank === 9));
+          (encId === 2 && knobBank === 9) ||
+          (encId === 3 && knobBank === 6);
 
         if (isDiscrete) {
           if (e.deltaMode === 1 || Math.abs(e.deltaY) >= 24) {

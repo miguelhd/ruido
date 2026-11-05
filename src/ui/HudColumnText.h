@@ -3,7 +3,6 @@
 #include "core/ControlSurface.h"
 #include "core/DspMath.h"
 #include "core/FilterModMath.h"
-#include "core/GlobalControl.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
 #include "ui/HudFormat.h"
@@ -15,11 +14,76 @@
 
 namespace ruido {
 
+struct GlobalColumnSummary {
+    float posSigned = 0.0f;
+    std::array<float, kNumOscillators> voiceSigned{0.0f, 0.0f, 0.0f, 0.0f};
+    bool bipolar = false;
+    bool disabled = false;
+    bool hasVoiceSpread = false;
+    float primaryValue = 0.0f;
+};
+
+inline GlobalColumnSummary evaluateGlobalFilterColumn(uint8_t knobIdx,
+                                                      const EngineControlState& control,
+                                                      const LfoSignalArray& lfoOutput,
+                                                      uint8_t stutterGateMask = 0x0Fu) noexcept {
+    GlobalColumnSummary s{};
+    const uint8_t k = knobIdx & 3u;
+    const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
+    constexpr float kFltLogLo = cxLog2Pos(kFilterCutoffMinHz);
+    constexpr float kInvFltLogRange = 1.0f / (cxLog2Pos(kFilterCutoffMaxHz) - kFltLogLo);
+    float sumVal = 0.0f;
+    float lo = 1.0f;
+    float hi = -1.0f;
+    for (size_t i = 0u; i < kNumOscillators; ++i) {
+        const VoiceParams& vp = control.voices[i];
+        const float pluckEnv = (((stutterGateMask >> i) & 1u) != 0u) ? 0.55f : 0.0f;
+        const ModulatedFilterParams mod = computeLiveVoiceFilter(
+            vp, control.voicePressure[i], pitchMode, lfoOutput[i], lfoOutput[4u + i],
+            FilterMacroContext::fromKeyMod(control.keyMod, pluckEnv));
+        float vNorm = 0.0f;
+        if (k == 0u) {
+            const float lg = fastLog2(mod.hpCutoffHz);
+            sumVal += lg;
+            vNorm = clampf((lg - kFltLogLo) * kInvFltLogRange, 0.0f, 1.0f);
+        } else if (k == 1u) {
+            sumVal += mod.hpResonance;
+            vNorm = clampf(mod.hpResonance, 0.0f, 1.0f);
+        } else if (k == 2u) {
+            const float lg = fastLog2(mod.lpCutoffHz);
+            sumVal += lg;
+            vNorm = clampf((lg - kFltLogLo) * kInvFltLogRange, 0.0f, 1.0f);
+        } else {
+            sumVal += mod.lpResonance;
+            vNorm = clampf(mod.lpResonance, 0.0f, 1.0f);
+        }
+        const float vs = 2.0f * vNorm - 1.0f;
+        s.voiceSigned[i] = vs;
+        if (vs < lo) {
+            lo = vs;
+        }
+        if (vs > hi) {
+            hi = vs;
+        }
+    }
+    sumVal *= 0.25f;
+    if (k == 0u || k == 2u) {
+        s.primaryValue = fastExp2(sumVal);
+        const float norm = clampf((sumVal - kFltLogLo) * kInvFltLogRange, 0.0f, 1.0f);
+        s.posSigned = 2.0f * norm - 1.0f;
+    } else {
+        s.primaryValue = clampf(sumVal, 0.0f, 1.0f);
+        s.posSigned = 2.0f * s.primaryValue - 1.0f;
+    }
+    s.hasVoiceSpread = (hi - lo) > 0.045f;
+    return s;
+}
+
 constexpr bool isKnobFocusableMode(HudMode mode) noexcept {
     return mode == HudMode::VoiceFrequency || mode == HudMode::PulseWidth ||
            mode == HudMode::VoiceDrift || mode == HudMode::VoiceFilter ||
            mode == HudMode::Amplitude || mode == HudMode::Panning || mode == HudMode::VoiceGate ||
-           mode == HudMode::VoicePressure || mode == HudMode::VoiceLfo || isGlobalHudMode(mode);
+           mode == HudMode::VoicePressure || mode == HudMode::VoiceLfo;
 }
 
 inline void formatHeaderDriveValue(float ampVal, char* rightText, size_t rightCap) noexcept {
@@ -117,96 +181,22 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
     outGlobal = {};
     const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
 
-    if (isGlobalKnobBank(hud.knobBank)) {
-        outGlobal = evaluateGlobalColumn(hud.knobBank, k, control, lfoOutput, stutterGateMask);
-        switch (hud.knobBank) {
-        case KnobBankMode::GlobalFreq:
-            if (k == 0u) {
-                appendStr(roleLbl, 0u, roleCap, "FREQ");
-                formatCompactHz(valStr, valCap, outGlobal.primaryValue);
-            } else if (k == 1u) {
-                appendStr(roleLbl, 0u, roleCap, "SPREAD");
-                formatSemitones(valStr, valCap, outGlobal.primaryValue, false);
-            } else if (k == 2u) {
-                appendStr(roleLbl, 0u, roleCap, "DETUNE");
-                formatSignedCents(valStr, valCap, outGlobal.primaryValue);
-            } else {
-                appendStr(roleLbl, 0u, roleCap, "TILT");
-                formatSemitones(valStr, valCap, outGlobal.primaryValue, true);
-            }
-            return;
-        case KnobBankMode::GlobalFilter:
-            if (k == 0u) {
-                appendStr(roleLbl, 0u, roleCap, "HPF");
-                formatCompactHz(valStr, valCap, outGlobal.primaryValue);
-            } else if (k == 1u) {
-                appendStr(roleLbl, 0u, roleCap, "HP RES");
-                formatPercent(valStr, valCap, outGlobal.primaryValue);
-            } else if (k == 2u) {
-                appendStr(roleLbl, 0u, roleCap, "LPF");
-                formatCompactHz(valStr, valCap, outGlobal.primaryValue);
-            } else {
-                appendStr(roleLbl, 0u, roleCap, "LP RES");
-                formatPercent(valStr, valCap, outGlobal.primaryValue);
-            }
-            return;
-        case KnobBankMode::GlobalLfo:
-            if (k == 0u) {
-                appendStr(roleLbl, 0u, roleCap, "TARGET");
-                const auto uniTgt =
-                    static_cast<LfoTarget>(static_cast<uint8_t>(outGlobal.primaryValue + 0.5f));
-                appendStr(valStr, 0u, valCap,
-                          outGlobal.lfoTargetMixed ? "MIXED" : lfoTargetName(uniTgt));
-            } else if (k == 1u) {
-                appendStr(roleLbl, 0u, roleCap, "SHAPE");
-                appendStr(valStr, 0u, valCap,
-                          outGlobal.lfoShapeMixed ? "MIXED"
-                                                  : lfoShapeLabel(outGlobal.primaryValue));
-            } else if (k == 2u) {
-                appendStr(roleLbl, 0u, roleCap, "RATE");
-                formatCompactHz(valStr, valCap, outGlobal.primaryValue);
-            } else {
-                appendStr(roleLbl, 0u, roleCap, "DEPTH");
-                formatPercent(valStr, valCap, outGlobal.primaryValue);
-            }
-            return;
-        case KnobBankMode::GlobalAmp:
-            if (k == 0u) {
-                appendStr(roleLbl, 0u, roleCap, "LEVEL");
-                formatPercent(valStr, valCap, outGlobal.primaryValue);
-            } else if (k == 1u) {
-                appendStr(roleLbl, 0u, roleCap, "TILT");
-                formatSignedPercent(valStr, valCap, outGlobal.primaryValue);
-            } else if (k == 2u) {
-                appendStr(roleLbl, 0u, roleCap, "SPREAD");
-                formatPercent(valStr, valCap, outGlobal.primaryValue);
-            } else {
-                appendStr(roleLbl, 0u, roleCap, "PAN");
-                if (control.global.monoCollapse) {
-                    appendStr(valStr, 0u, valCap, "LOCKED");
-                } else {
-                    formatPanValue(valStr, valCap, outGlobal.primaryValue);
-                }
-            }
-            return;
-        case KnobBankMode::GlobalAll:
-            if (k == 0u) {
-                appendStr(roleLbl, 0u, roleCap, "FREQ");
-                formatCompactHz(valStr, valCap, outGlobal.primaryValue);
-            } else if (k == 1u) {
-                appendStr(roleLbl, 0u, roleCap, "FILTER");
-                formatCompactHz(valStr, valCap, outGlobal.primaryValue);
-            } else if (k == 2u) {
-                appendStr(roleLbl, 0u, roleCap, "LFO");
-                formatPercent(valStr, valCap, outGlobal.primaryValue);
-            } else {
-                appendStr(roleLbl, 0u, roleCap, "LEVEL");
-                formatPercent(valStr, valCap, outGlobal.primaryValue);
-            }
-            return;
-        default:
-            return;
+    if (hud.knobBank == KnobBankMode::GlobalFilter) {
+        outGlobal = evaluateGlobalFilterColumn(k, control, lfoOutput, stutterGateMask);
+        if (k == 0u) {
+            appendStr(roleLbl, 0u, roleCap, "HPF");
+            formatCompactHz(valStr, valCap, outGlobal.primaryValue);
+        } else if (k == 1u) {
+            appendStr(roleLbl, 0u, roleCap, "HP RES");
+            formatPercent(valStr, valCap, outGlobal.primaryValue);
+        } else if (k == 2u) {
+            appendStr(roleLbl, 0u, roleCap, "LPF");
+            formatCompactHz(valStr, valCap, outGlobal.primaryValue);
+        } else {
+            appendStr(roleLbl, 0u, roleCap, "LP RES");
+            formatPercent(valStr, valCap, outGlobal.primaryValue);
         }
+        return;
     }
 
     const float lfoA = lfoOutput[lfoBankIndex(k, 0u)];

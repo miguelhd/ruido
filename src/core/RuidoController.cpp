@@ -2,7 +2,6 @@
 
 #include "core/DspMath.h"
 #include "core/EncoderMath.h"
-#include "core/GlobalControl.h"
 #include "core/LedEngine.h"
 #include "core/LfoMath.h"
 

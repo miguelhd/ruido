@@ -2,7 +2,6 @@
 
 #include "core/FilterModMath.h"
 #include "core/GlobalConfig.h"
-#include "core/GlobalControl.h"
 #include "core/HudEnvelope.h"
 #include "core/KeyboardModelSpec.h"
 #include "core/Parameters.h"
@@ -305,8 +304,7 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
 }
 
 template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(CheckFn checkFn) {
-    std::printf(
-        "[Test 9] Preserved GlobalControl 5-Mode Math/Views & Clean GLOBAL CONFIG Menu...\n");
+    std::printf("[Test 9] GlobalFilter 4-Voice Spread & Clean GLOBAL CONFIG Menu...\n");
     const auto nearF = [](float a, float b, float eps = 1.0e-4f) {
         return std::fabs(a - b) <= eps;
     };
@@ -317,110 +315,13 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ruido::EngineTelemetry tel{};
     ruido::LfoSignalArray zeroLfo{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
-    // 1. Preserved GlobalControl math (tabled on keybed GLO, kept 100% regression-tested in core)
+    // 1. GlobalFilter 4-voice micro-bead spread evaluation (shared across GLO LOW PASS / SCREAM /
+    // PLUCK)
     ruido::EngineControlState gloSt = ruido::EngineControlState::makeDefault();
-    int32_t tgtAcc = 0;
-
-    // 2. GLOBAL FREQ orthogonality (PITCH | SPREAD | DETUNE | TILT) & unison recovery
-    const auto evalFreq = [&](uint8_t col) {
-        return ruido::evaluateGlobalColumn(ruido::KnobBankMode::GlobalFreq, col, gloSt, zeroLfo);
-    };
-    const float spread0 = evalFreq(1u).primaryValue;
-    const float detune0 = evalFreq(2u).primaryValue;
-    const float tilt0 = evalFreq(3u).primaryValue;
-    RTEST_CHECK(std::fabs(detune0) < 5.0f);
-
-    const float mean0 = evalFreq(0u).primaryValue;
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Freq, 0u, 24, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    RTEST_CHECK(evalFreq(0u).primaryValue > mean0 * 1.45f);
-    RTEST_CHECK(nearF(evalFreq(1u).primaryValue, spread0, 0.05f));
-    RTEST_CHECK(nearF(evalFreq(2u).primaryValue, detune0, 0.5f));
-    RTEST_CHECK(nearF(evalFreq(3u).primaryValue, tilt0, 0.05f));
-
-    const float meanAfterPitch = evalFreq(0u).primaryValue;
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Freq, 2u, 24, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    RTEST_CHECK(evalFreq(2u).primaryValue > detune0 + 25.0f);
-    RTEST_CHECK(nearF(evalFreq(0u).primaryValue, meanAfterPitch, 0.25f));
-    RTEST_CHECK(nearF(evalFreq(3u).primaryValue, tilt0, 0.05f));
-
-    const float detuneAfter = evalFreq(2u).primaryValue;
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Freq, 3u, 24, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    RTEST_CHECK(evalFreq(3u).primaryValue > tilt0 + 0.5f);
-    RTEST_CHECK(nearF(evalFreq(0u).primaryValue, meanAfterPitch, 0.25f));
-    RTEST_CHECK(nearF(evalFreq(2u).primaryValue, detuneAfter, 0.6f));
-
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Freq, 1u, -200, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    RTEST_CHECK(evalFreq(1u).primaryValue < 0.05f);
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Freq, 1u, 60, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    RTEST_CHECK(evalFreq(1u).primaryValue > 8.0f);
-
-    // 3. GLOBAL FILTER: 4-voice micro-bead spread
-    gloSt = ruido::EngineControlState::makeDefault();
     gloSt.voices[0].lpCutoffHz = 4000.0f;
-    const auto fltCol =
-        ruido::evaluateGlobalColumn(ruido::KnobBankMode::GlobalFilter, 2u, gloSt, zeroLfo);
+    const auto fltCol = ruido::evaluateGlobalFilterColumn(2u, gloSt, zeroLfo);
     RTEST_CHECK(fltCol.hasVoiceSpread);
 
-    // 4. GLOBAL LFO: "MIXED" shape detection & 4-voice uniform alignment
-    gloSt.voices[0].lfoShape = 0.60f;
-    const auto lfoShapeMixed =
-        ruido::evaluateGlobalColumn(ruido::KnobBankMode::GlobalLfo, 1u, gloSt, zeroLfo);
-    RTEST_CHECK(lfoShapeMixed.lfoShapeMixed);
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Lfo, 1u, 260, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    const auto lfoShapeUniform =
-        ruido::evaluateGlobalColumn(ruido::KnobBankMode::GlobalLfo, 1u, gloSt, zeroLfo);
-    RTEST_CHECK(!lfoShapeUniform.lfoShapeMixed);
-
-    // 5. GLOBAL LEVEL: LEVEL, TILT, SPREAD, PAN
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Amp, 2u, 120, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    RTEST_CHECK(gloSt.voices[0].amplitude + 0.25f < gloSt.voices[3].amplitude);
-    const auto ampSpreadOpen =
-        ruido::evaluateGlobalColumn(ruido::KnobBankMode::GlobalAmp, 2u, gloSt, zeroLfo);
-    RTEST_CHECK(ampSpreadOpen.primaryValue > 0.35f);
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Amp, 2u, -240, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    for (size_t v = 1u; v < ruido::kNumOscillators; ++v) {
-        RTEST_CHECK(std::fabs(gloSt.voices[v].amplitude - gloSt.voices[0].amplitude) < 0.01f);
-    }
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Amp, 3u, 260, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
-        RTEST_CHECK(gloSt.voices[v].pan > 0.90f);
-    }
-    const auto panRightSummary =
-        ruido::evaluateGlobalColumn(ruido::KnobBankMode::GlobalAmp, 3u, gloSt, zeroLfo);
-    RTEST_CHECK(panRightSummary.bipolar && panRightSummary.primaryValue > 0.90f);
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Amp, 3u, -520, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
-        RTEST_CHECK(gloSt.voices[v].pan < -0.90f);
-    }
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Amp, 3u, 120, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-
-    // 6. GLOBAL ALL: 4-stage macro edits all 4 voices simultaneously
-    const float v2HzBefore = gloSt.voices[2].frequencyHz;
-    const float v2LpBefore = gloSt.voices[2].lpCutoffHz;
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::All, 0u, 16, ruido::KnobRate::Standard, tgtAcc,
-                                gloSt);
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::All, 1u, -24, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::All, 2u, 80, ruido::KnobRate::Standard, tgtAcc,
-                                gloSt);
-    ruido::applyGlobalKnobDelta(ruido::GlobalTarget::All, 3u, -20, ruido::KnobRate::Standard,
-                                tgtAcc, gloSt);
-    RTEST_CHECK(gloSt.voices[2].frequencyHz > v2HzBefore * 1.2f);
-    RTEST_CHECK(gloSt.voices[2].lpCutoffHz < v2LpBefore * 0.85f);
-    RTEST_CHECK(gloSt.voices[2].lfoDepth > 0.25f);
-
-    // 7. Render all 5 GLOBAL custom center graphs & GLOBAL CONFIG menu:
     static std::array<uint16_t, 240u * 240u> s16{};
     static std::array<uint16_t, 240u * 240u> s8{};
     static std::array<uint16_t, 240u * 240u> s24{};
@@ -469,38 +370,7 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
         }
     };
 
-    static ruido::DroneEngine liveEng;
-    static std::array<float, 128> liveOutL{};
-    static std::array<float, 128> liveOutR{};
-    liveEng.init(44100.0f);
-    ruido::EngineControlState liveSt = gloSt;
-    liveSt.global.masterRun = true;
-    liveSt.global.masterTrim = 0.85f;
-    liveEng.controlBus().publish(liveSt);
-    liveEng.snapParametersToLatest();
-    for (int b = 0; b < 36; ++b) {
-        liveEng.processBlock(liveOutL.data(), liveOutR.data(), 128u);
-    }
-
-    for (int m = 0; m < 5; ++m) {
-        renderer.reset();
-        const auto gt = static_cast<ruido::GlobalTarget>(m);
-        ruido::HudState gh{};
-        gh.globalTarget = gt;
-        gh.mode = ruido::hudModeForGlobalTarget(gt);
-        gh.knobBank = ruido::knobBankForGlobalTarget(gt);
-        gh.opacity = 1.0f;
-        for (int b = 0; b < 36; ++b) {
-            liveEng.processBlock(liveOutL.data(), liveOutR.data(), 128u);
-            renderer.ingestScopeRing(liveEng.scopeBuffer());
-        }
-        for (int f = 0; f < 12; ++f) {
-            renderer.prepareFrame(0.025f, liveSt, gh, liveEng.telemetry());
-        }
-        verifyViewStripsAndCenter(true);
-    }
-
-    // 8. Right-panel GLO = GLOBAL CONFIG menu (OUTPUT ROUTING clean at Row 0)
+    // 2. Right-panel GLO = GLOBAL CONFIG menu (OUTPUT ROUTING clean at Row 0)
     ctrl.reset();
     RTEST_CHECK(
         nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::GloRight)], 0.15f));
@@ -915,7 +785,6 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(std::strcmp(ruido::lfoShapeLabel(1.00f), "RANDOM") == 0);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::OutputRouting),
                             "OUTPUT ROUTING") == 0);
-    RTEST_CHECK(std::strcmp(ruido::globalTargetSuffix(ruido::GlobalTarget::Amp), " LEVEL") == 0);
 
     // Verify 240x8 == 240x16 == 240x24 strip equivalence & monochrome neutrality across all 3 EDIT
     // modes (DUTY · DRIFT · LEVEL) + EDIT Page 2 (PAN)
@@ -1305,16 +1174,16 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     }
     RTEST_CHECK(lockedTurnNoPixelDiff);
 
-    // Verify GLOBAL LEVEL -> KNOB 4 (PAN) in MONO formats as disabled "LOCKED"
+    // Verify EDIT Page 2 (PAN) in MONO formats columns as disabled "LOCKED"
     {
-        ruido::HudState gloAmpHud = ctrl.hud();
-        gloAmpHud.knobBank = ruido::KnobBankMode::GlobalAmp;
+        ruido::HudState panHud = ctrl.hud();
+        panHud.knobBank = ruido::KnobBankMode::Panning;
         char roleBuf[12]{};
         char valBuf[16]{};
         ruido::GlobalColumnSummary colGs{};
-        ruido::formatColumnRoleAndValue(ctrl.state(), gloAmpHud, zeroLfo, 0x0Fu, 3u, roleBuf,
+        ruido::formatColumnRoleAndValue(ctrl.state(), panHud, zeroLfo, 0x0Fu, 3u, roleBuf,
                                         sizeof(roleBuf), valBuf, sizeof(valBuf), colGs);
-        RTEST_CHECK(colGs.disabled && std::strcmp(roleBuf, "PAN") == 0 &&
+        RTEST_CHECK(colGs.disabled && std::strcmp(roleBuf, "OSC 4") == 0 &&
                     std::strcmp(valBuf, "LOCKED") == 0);
     }
 

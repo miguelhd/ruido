@@ -1056,9 +1056,9 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     // the entire full-screen filter viewport (x = 0..239, y = 26..186)
     ruido::HudState gloFilterHud = a3Ctrl.hud();
     gloFilterHud.fxPageOpen = false;
-    gloFilterHud.mode = ruido::HudMode::GlobalFilter;
+    gloFilterHud.mode = ruido::HudMode::KeyboardPlay;
+    gloFilterHud.activePunch = ruido::KeyPunchKind::DubLpfDrop;
     gloFilterHud.knobBank = ruido::KnobBankMode::GlobalFilter;
-    gloFilterHud.globalTarget = ruido::GlobalTarget::Filter;
     gloFilterHud.scopeFrozen = true;
     for (int step = 0; step < 12; ++step) {
         calmRenderer.prepareFrame(0.080f, a3State, gloFilterHud, calmEngine.telemetry());
@@ -1646,40 +1646,6 @@ void testPerVoiceLfoPageAndHudGraph() {
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 24); // LpCutoff(2) + 6 -> LfoARate(8)
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 80); // Faster rate on 2B
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 60); // Active depth on 2B
-    const float ratioBefore = ctrl.state().voices[1].lfoBRateHz / ctrl.state().voices[1].lfoRateHz;
-
-    // Verify preserved GlobalControl LFO math scales all 8 rates proportionally (preserving A:B
-    // ratio), scales ONLY active 2A & 2B while keeping 0% LFOs at 0%, and wakes 1A..4A from 0%!
-    {
-        ruido::EngineControlState gloLfoSt = ctrl.state();
-        int32_t tgtAcc = 0;
-        ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Lfo, 2u, 32, ruido::KnobRate::Standard,
-                                    tgtAcc, gloLfoSt);
-        CHECK(near(gloLfoSt.voices[1].lfoBRateHz / gloLfoSt.voices[1].lfoRateHz, ratioBefore,
-                   1.0e-3f));
-        ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Lfo, 3u, 40, ruido::KnobRate::Standard,
-                                    tgtAcc, gloLfoSt);
-        CHECK(gloLfoSt.voices[1].lfoDepth > 0.50f);
-        CHECK(gloLfoSt.voices[1].lfoBDepth > 0.35f);
-        CHECK(near(gloLfoSt.voices[0].lfoDepth, 0.0f));
-        CHECK(near(gloLfoSt.voices[0].lfoBDepth, 0.0f));
-
-        ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Lfo, 3u, -300, ruido::KnobRate::Standard,
-                                    tgtAcc, gloLfoSt);
-        for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
-            CHECK(near(gloLfoSt.voices[v].lfoDepth, 0.0f));
-            CHECK(near(gloLfoSt.voices[v].lfoBDepth, 0.0f));
-        }
-        ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Lfo, 0u, -32, ruido::KnobRate::Standard,
-                                    tgtAcc, gloLfoSt);
-        ruido::applyGlobalKnobDelta(ruido::GlobalTarget::Lfo, 3u, 150, ruido::KnobRate::Standard,
-                                    tgtAcc, gloLfoSt);
-        for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
-            CHECK(gloLfoSt.voices[v].lfoTarget == ruido::LfoTarget::Pitch);
-            CHECK(gloLfoSt.voices[v].lfoDepth > 0.60f);
-            CHECK(near(gloLfoSt.voices[v].lfoBDepth, 0.0f));
-        }
-    }
 
     // 4. Momentary Keybed punch-in overrides LFO Page temporarily and returns cleanly on release!
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -32); // Focus OSC 1A (0)
