@@ -54,7 +54,8 @@ export const WASM_SUMMARY = Object.freeze({
   SEL_PAGE_OPEN: 54,
   EFFECTIVE_CLOCK_BPM: 55,
   MIDI_CLOCK_SYNCED: 56,
-  COUNT: 57,
+  MIDI_CHANNEL_IN: 57,
+  COUNT: 58,
 });
 
 // 1:1 with `ruido::LfoTarget` (0..9) in `src/core/Parameters.h`

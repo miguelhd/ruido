@@ -63,7 +63,8 @@ inline constexpr size_t kKeyboardModel = 53u;
 inline constexpr size_t kSelPageOpen = 54u;
 inline constexpr size_t kEffectiveClockBpm = 55u;
 inline constexpr size_t kMidiClockSynced = 56u;
-inline constexpr size_t kCount = 57u;
+inline constexpr size_t kMidiChannelIn = 57u;
+inline constexpr size_t kCount = 58u;
 } // namespace WasmSummaryIdx
 
 } // namespace ruido::wasm_abi

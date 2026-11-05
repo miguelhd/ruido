@@ -231,6 +231,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.configCursor = releaseLatchHud_.configCursor;
         effectiveHud.config = releaseLatchHud_.config;
         effectiveHud.selPageOpen = releaseLatchHud_.selPageOpen;
+        effectiveHud.selWakeSeq = releaseLatchHud_.selWakeSeq;
         effectiveHud.keyboardModel = releaseLatchHud_.keyboardModel;
         effectiveHud.activePunch = releaseLatchHud_.activePunch;
         effectiveHud.activePunchVoice = releaseLatchHud_.activePunchVoice;

@@ -2,6 +2,7 @@
 
 #include "core/ControlSurface.h"
 #include "core/DspMath.h"
+#include "core/EncoderMath.h"
 
 #include <array>
 #include <cstddef>
@@ -15,6 +16,7 @@ enum class PunchBarKind : uint8_t {
     NegTwoOct = 2,     // [-2.0, 0.0] octave drop mapped to [0, 1]
     PosTwoOct = 3,     // [0.0, +2.0] octave rise mapped to [0, 1]
     SnapshotGlide = 4, // Active only while hud.snapshotGliding is true (morphPosition)
+    LogTempo = 5,      // Normalized log-octave [20, 3000] BPM bar for Tap Tempo
 };
 
 enum class PunchReadoutKind : uint8_t {
@@ -36,6 +38,7 @@ enum class PunchReadoutKind : uint8_t {
     TempoBpm = 15,
     SwingPct = 16,
     Snapshot = 17,
+    TapBpm = 18,
 };
 
 // Contiguous position-independent ROM descriptor (20 B/row, zero pointer relocations in XIP Flash)
@@ -113,6 +116,8 @@ inline constexpr std::array<KeyPunchSpec, kNumKeyPunchKinds> kKeyPunchSpecs = {{
      PunchReadoutKind::Percent, false, "SHORT"},
     {KeyPunchKind::RhythmSwing, KnobBankMode::Frequency, PunchBarKind::Unit01,
      PunchReadoutKind::SwingPct, false, "SWING"},
+    {KeyPunchKind::TapTempo, KnobBankMode::Frequency, PunchBarKind::LogTempo,
+     PunchReadoutKind::TapBpm, false, "TAP TEMPO"},
 }};
 
 constexpr bool verifyKeyPunchSpecsAligned() noexcept {
@@ -137,7 +142,7 @@ constexpr KnobBankMode knobBankForKeyPunch(KeyPunchKind punch, KnobBankMode fall
 }
 
 // Single source of truth for normalized [0, 1] top-header bar gauges across all keyboard models.
-constexpr bool evalKeyPunchHeaderBar(const HudState& hud, float& outNorm) noexcept {
+inline bool evalKeyPunchHeaderBar(const HudState& hud, float& outNorm) noexcept {
     outNorm = 0.0f;
     switch (keyPunchSpec(hud.activePunch).barKind) {
     case PunchBarKind::None:
@@ -156,6 +161,9 @@ constexpr bool evalKeyPunchHeaderBar(const HudState& hud, float& outNorm) noexce
             return false;
         }
         outNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
+        return true;
+    case PunchBarKind::LogTempo:
+        outNorm = normalizeClockBpmLog01(hud.effectiveClockBpm);
         return true;
     }
     return false;

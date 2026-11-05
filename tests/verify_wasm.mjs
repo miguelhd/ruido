@@ -423,6 +423,29 @@ ex.wasm_ui_button(3, 0);
 
 assert.equal(f32[summaryIdx + 55], 120.0); // Default internal 120 BPM
 assert.equal(f32[summaryIdx + 56], 0.0);   // midiClockSynced === false
+
+// In 3/3 RHYTHM LAB, turning ALGORITHM (encoder 2) adjusts Master Tempo logarithmically across
+// [20, 3000] BPM without touching circuitCoupling, and 11th key (index 10) performs TAP TEMPO!
+const couplingBeforeAlg = f32[summaryIdx + WASM_SUMMARY.CIRCUIT_COUPLING];
+ex.wasm_ui_encoder(2, 48); // +1.0 octave -> ~240.0 BPM
+assert.ok(Math.abs(f32[summaryIdx + 55] - 240.0) < 0.5);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.CIRCUIT_COUPLING], couplingBeforeAlg);
+ex.wasm_ui_tick_and_render(0.05);
+const tempoRgba = u8.subarray(rgbaStart, rgbaStart + 240 * 240 * 4);
+for (let i = 0; i < tempoRgba.length; i += 4) {
+  assert.equal(tempoRgba[i], tempoRgba[i + 1]);
+  assert.equal(tempoRgba[i + 1], tempoRgba[i + 2]);
+}
+// Tap Tempo on 11th tall key (black key 10) spaced by 0.40 s (4 x 0.10 s) -> 150.0 BPM!
+ex.wasm_ui_black_key(10, 1);
+ex.wasm_ui_black_key(10, 0);
+for (let i = 0; i < 4; i++) {
+  ex.wasm_ui_tick_and_render(0.10);
+}
+ex.wasm_ui_black_key(10, 1);
+ex.wasm_ui_black_key(10, 0);
+assert.ok(Math.abs(f32[summaryIdx + 55] - 150.0) < 0.5);
+
 ex.wasm_ui_midi_realtime(0xFA, 5.0);       // MIDI Start (seconds)
 const tickSec135 = 60.0 / (135.0 * 24.0);
 for (let k = 0; k < 32; k++) {
@@ -464,9 +487,39 @@ for (let i = 0; i < rhyRgba.length; i += 4) {
 ex.wasm_ui_white_gate(12, 0);
 ex.wasm_ui_black_key(7, 0);
 ex.wasm_ui_black_key(9, 0);
-ex.wasm_ui_midi_realtime(0xFC, 6.0); // MIDI Stop -> back to 120 BPM internal
-assert.equal(f32[summaryIdx + 56], 0.0);
-assert.equal(f32[summaryIdx + 55], 120.0);
+ex.wasm_ui_midi_realtime(0xFC, 6.0); // MIDI Stop -> falls back to tapped 150.0 BPM internal!
+assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CLOCK_SYNCED], 0.0);
+assert.ok(Math.abs(f32[summaryIdx + WASM_SUMMARY.EFFECTIVE_CLOCK_BPM] - 150.0) < 0.5);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CHANNEL_IN], 0.0); // Default OMNI (0)
+
+// GLOBAL CONFIG: verify MIDI TRANSPORT IN (RUN/STOP) & MIDI CHANNEL IN (CH 3) over Wasm ABI
+ex.wasm_ui_button(7, 1); // ButtonId::GloRight -> open GLOBAL CONFIG
+ex.wasm_ui_button(7, 0);
+ex.wasm_ui_encoder(0, 20); // EncoderId::Select +5 detents -> Row 5: MIDI TRANSPORT IN
+ex.wasm_ui_encoder(2, 4); // EncoderId::Algorithm +1 detent -> RUN/STOP
+ex.wasm_ui_encoder(0, 4); // EncoderId::Select +1 detent -> Row 6: MIDI CHANNEL IN
+ex.wasm_ui_encoder(2, 12); // EncoderId::Algorithm +3 detents -> CH 3
+ex.wasm_ui_button(7, 1); // Close GLOBAL CONFIG
+ex.wasm_ui_button(7, 0);
+ex.wasm_ui_tick_and_render(0.05);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CHANNEL_IN], 3.0);
+ex.wasm_ui_midi_realtime(0xFC, 7.0); // Stop in RUN/STOP mode mutes masterRun
+ex.wasm_ui_tick_and_render(0.02);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.MASTER_RUN], 0.0);
+ex.wasm_ui_midi_realtime(0xFA, 7.1); // Start in RUN/STOP mode resumes masterRun
+ex.wasm_ui_tick_and_render(0.02);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.MASTER_RUN], 1.0);
+// Restore OMNI & PHASE and close GLOBAL CONFIG
+ex.wasm_ui_button(7, 1);
+ex.wasm_ui_button(7, 0);
+ex.wasm_ui_encoder(0, 24); // Row 6: MIDI CHANNEL IN
+ex.wasm_ui_encoder(2, -12); // -> OMNI
+ex.wasm_ui_encoder(0, -4); // Row 5: MIDI TRANSPORT IN
+ex.wasm_ui_encoder(2, -4); // -> PHASE
+ex.wasm_ui_button(7, 1);
+ex.wasm_ui_button(7, 0);
+ex.wasm_ui_tick_and_render(0.02);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CHANNEL_IN], 0.0);
 
 // Toggle PLAY/STOP -> AUDIO OUTPUT OFF (quiet): PLAY (Green) -> 100%, STOP (Red) -> 0%
 ex.wasm_ui_button(12, 1);

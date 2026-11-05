@@ -95,6 +95,11 @@ void RuidoController::restoreOrDissolveHud() noexcept {
         return;
     }
     hud_.knobBank = baseKnobBank();
+    if (hud_.mode == HudMode::KeyboardPlay && keyboard_.model() == KeyboardModel::RhythmLab &&
+        hud_.lastBlackKey == BlackKeyId::ScopeFreezeKey) {
+        triggerHud(HudMode::MasterTempo, hud_.focusedVoice, kNoFocusedKnob);
+        return;
+    }
     if (latchedHudMode_ != HudMode::None) {
         restoreLatchedFields();
         hud_.focusedKnob = kNoFocusedKnob;
@@ -174,6 +179,9 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
         const bool opening = !hud_.selPageOpen;
         resetPageNav();
         hud_.selPageOpen = opening;
+        if (opening) {
+            ++hud_.selWakeSeq;
+        }
         setLatchedPage(opening ? HudMode::KeyboardModel : HudMode::None, ButtonId::Sel);
         syncModifierHud();
         return;

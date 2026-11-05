@@ -2916,6 +2916,37 @@ void testRhythmLabClockDividersEuclidPumpPluckAndSwingDsp() {
                 "Rhythm Lab groove peak out of bounds (%.4f)", static_cast<double>(peakGroove));
     EXPECT_TRUE(diffStereo > 5.0, "SWING failed to create stereo ping-pong bounce (diff=%.3f)",
                 diffStereo);
+
+    // 6. Subharmonicon-class 3,000 BPM internal (+ 4x PIT = 6,000 BPM effective) audio-rate gating:
+    //    adaptive 0.35 ms vactrol slew must keep gates distinct (neither smeared flat nor NaN/clip)
+    ruido::EngineControlState audioRateSt = eucSt;
+    audioRateSt.global.clockBpm = 3000.0f;
+    audioRateSt.global.clockResetSeq = static_cast<uint8_t>(grooveSt.global.clockResetSeq + 1u);
+    audioRateSt.keyMod.rhythmTempo = 1.0f; // 4.0x -> 6,000 BPM effective!
+    engine.controlBus().publish(audioRateSt);
+    engine.snapParametersToLatest();
+
+    float audioRateMinAbs = 1.0f;
+    float audioRateMaxAbs = 0.0f;
+    for (int b = 0; b < 64; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        float blockRmsSq = 0.0f;
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            EXPECT_TRUE(isFiniteNonSubnormal(outL[i]) && isFiniteNonSubnormal(outR[i]),
+                        "Non-finite sample at 3,000 BPM x 4 audio-rate gating");
+            const float m = std::max(std::fabs(outL[i]), std::fabs(outR[i]));
+            audioRateMaxAbs = std::max(audioRateMaxAbs, m);
+            blockRmsSq += m * m;
+        }
+        const float blockRms = std::sqrt(blockRmsSq / static_cast<float>(ruido::kBlockFrames));
+        audioRateMinAbs = std::min(audioRateMinAbs, blockRms);
+    }
+    EXPECT_TRUE(audioRateMaxAbs > 0.15f && audioRateMaxAbs <= 1.25f &&
+                    audioRateMinAbs < audioRateMaxAbs * 0.65f,
+                "Audio-rate 6,000 BPM gates failed crisp modulation (minRms=%.4f, max=%.4f)",
+                static_cast<double>(audioRateMinAbs), static_cast<double>(audioRateMaxAbs));
+
     std::printf("  Div(/2=%d, X8=%d), Euclid combos=%d, Pump swell=%.1fx, Groove peak=%.3f\n",
                 edgesOsc1, edgesOsc4, distinctCombos,
                 lateBeatEnergy / std::max(earlyBeatEnergy, 1.0e-6),

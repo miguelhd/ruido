@@ -55,7 +55,8 @@ bool RuidoController::syncClockState() noexcept {
     const uint8_t nextSeq = midiClock_.resetSeq();
     hud_.effectiveClockBpm = nextBpm;
     hud_.midiClockSynced = nextSync;
-    if (absf(state_.global.clockBpm - nextBpm) > 0.01f || state_.global.clockResetSeq != nextSeq) {
+    if (absf(state_.global.clockBpm - nextBpm) > 1.0e-4f ||
+        state_.global.clockResetSeq != nextSeq) {
         state_.global.clockBpm = nextBpm;
         state_.global.clockResetSeq = nextSeq;
         return true;
@@ -115,6 +116,26 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             latchSwitchHud(HudMode::GlobalConfig, ButtonId::GloRight);
             return;
         }
+        if (hud_.selPageOpen) {
+            ++hud_.selWakeSeq;
+        }
+        if (keyboard_.model() == KeyboardModel::RhythmLab) {
+            if (!hud_.midiClockSynced) {
+                const float prevBpm = midiClock_.internalBpm();
+                const float nextBpm = adjustClockBpm(prevBpm, ticks, rate);
+                if (absf(nextBpm - prevBpm) > 1.0e-5f) {
+                    midiClock_.setInternalBpm(nextBpm);
+                    settingsDirty_ = true;
+                    (void)syncClockState();
+                    if (keyboard_.anyKeyHeld()) {
+                        keyboard_.evaluate(state_, hud_);
+                    }
+                }
+            }
+            triggerHud(HudMode::MasterTempo, hud_.focusedVoice, kNoFocusedKnob);
+            publishState();
+            return;
+        }
         state_.global.circuitCoupling =
             adjustLinear01(state_.global.circuitCoupling, ticks, rate, 0.0f, 1.0f);
         snapshots_.notifyManualEdit(state_);
@@ -138,6 +159,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             snapshots_.syncHud(hud_);
             keyboard_.evaluate(state_, hud_);
             hud_.selPageOpen = true;
+            ++hud_.selWakeSeq;
             hud_.knobBank = KnobBankMode::None;
             latchSwitchHud(HudMode::KeyboardModel, ButtonId::Sel);
             publishState();
@@ -291,7 +313,15 @@ void RuidoController::onBlackKeyEvent(BlackKeyId key, bool pressed) noexcept {
     if (static_cast<size_t>(key) >= kNumBlackKeys) {
         return;
     }
+    const bool wasHeld = keyboard_.blackHeld()[static_cast<size_t>(key)];
     keyboard_.setBlackGate(key, pressed);
+    if (!wasHeld && keyboard_.blackHeld()[static_cast<size_t>(key)] &&
+        key == BlackKeyId::ScopeFreezeKey && keyboard_.model() == KeyboardModel::RhythmLab) {
+        if (midiClock_.onTapTempo(hud_.config.clockSync)) {
+            settingsDirty_ = true;
+        }
+        (void)syncClockState();
+    }
     hud_.lastBlackKey = key;
     applyKeyboardPerformanceChange();
 }
@@ -300,7 +330,15 @@ void RuidoController::onBlackKeyPressure(BlackKeyId key, float pressure) noexcep
     if (static_cast<size_t>(key) >= kNumBlackKeys) {
         return;
     }
+    const bool wasHeld = keyboard_.blackHeld()[static_cast<size_t>(key)];
     keyboard_.setBlackPressure(key, pressure);
+    if (!wasHeld && keyboard_.blackHeld()[static_cast<size_t>(key)] &&
+        key == BlackKeyId::ScopeFreezeKey && keyboard_.model() == KeyboardModel::RhythmLab) {
+        if (midiClock_.onTapTempo(hud_.config.clockSync)) {
+            settingsDirty_ = true;
+        }
+        (void)syncClockState();
+    }
     hud_.lastBlackKey = key;
     applyKeyboardPerformanceChange();
 }
@@ -347,7 +385,7 @@ bool RuidoController::loadSnapshotSlot(uint8_t slot, const PatchSnapshot& snap) 
 
 DeviceSettingsBlob RuidoController::exportSettings() const noexcept {
     return encodeDeviceSettings(hud_.config, state_.global, keyboard_.model(),
-                                snapshots_.activeSlot());
+                                snapshots_.activeSlot(), midiClock_.internalBpm());
 }
 
 bool RuidoController::loadSettings(const DeviceSettingsBlob& blob) noexcept {
@@ -355,11 +393,13 @@ bool RuidoController::loadSettings(const DeviceSettingsBlob& blob) noexcept {
     GlobalParams nextGlobal = state_.global;
     KeyboardModel nextModel = keyboard_.model();
     uint8_t nextSlot = snapshots_.activeSlot();
-    if (!decodeDeviceSettings(blob, nextCfg, nextGlobal, nextModel, nextSlot)) {
+    float nextInternalBpm = midiClock_.internalBpm();
+    if (!decodeDeviceSettings(blob, nextCfg, nextGlobal, nextModel, nextSlot, &nextInternalBpm)) {
         return false;
     }
     hud_.config = nextCfg;
     state_.global = nextGlobal;
+    midiClock_.setInternalBpm(nextInternalBpm);
     keyboard_.setModel(nextModel);
     keyboard_.syncConfig(hud_.config);
     snapshots_.selectActiveSlotImmediate(nextSlot, state_);
@@ -389,7 +429,20 @@ void RuidoController::onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) 
 
 void RuidoController::onMidiRealtime(uint8_t statusByte, float msgTimestampSec) noexcept {
     (void)midiClock_.onMidiRealtime(statusByte, hud_.config.clockSync, msgTimestampSec);
-    if (syncClockState()) {
+    bool dirty = syncClockState();
+    if (hud_.config.clockSync == ClockSyncMode::Auto &&
+        hud_.config.midiTransport == MidiTransportMode::RunStop) {
+        if ((statusByte == 0xFAu || statusByte == 0xFBu) && !state_.global.masterRun) {
+            state_.global.masterRun = true;
+            triggerHud(HudMode::AudioOutput, hud_.focusedVoice, kNoFocusedKnob);
+            dirty = true;
+        } else if (statusByte == 0xFCu && state_.global.masterRun) {
+            state_.global.masterRun = false;
+            triggerHud(HudMode::AudioOutput, hud_.focusedVoice, kNoFocusedKnob);
+            dirty = true;
+        }
+    }
+    if (dirty) {
         publishState();
     }
 }

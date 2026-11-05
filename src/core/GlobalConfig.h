@@ -22,8 +22,14 @@ enum class KeySwitchMode : uint8_t {
 
 // External MIDI System Real-Time clock sync mode (TRS, USB-C, and BLE-MIDI).
 enum class ClockSyncMode : uint8_t {
-    Auto = 0,     // Lock automatically to incoming 24-PPQN MIDI clock; 120 BPM fallback
-    Internal = 1, // Ignore incoming MIDI clock and run on internal 120 BPM master clock
+    Auto = 0,     // Lock automatically to incoming 24-PPQN MIDI clock; internal BPM fallback
+    Internal = 1, // Ignore incoming MIDI clock and run on internal master clock
+};
+
+// External MIDI System Real-Time Start/Continue/Stop (0xFA / 0xFB / 0xFC) transport behavior.
+enum class MidiTransportMode : uint8_t {
+    PhaseOnly = 0, // 0xFA Start resets Beat-1 bar phase; PLAY/STOP audio output stays independent
+    RunStop = 1,   // 0xFA/0xFB starts audio output (masterRun=true); 0xFC stops audio output
 };
 
 // Scalable descriptor IDs for the right-panel GLO vertical GLOBAL CONFIG list menu.
@@ -34,10 +40,17 @@ enum class ConfigItemId : uint8_t {
     SoloMode = 2,
     SnapMode = 3,
     ClockSync = 4,
-    Count = 5
+    MidiTransport = 5,
+    MidiChannel = 6,
+    Count = 7
 };
 
 inline constexpr size_t kNumGlobalConfigItems = static_cast<size_t>(ConfigItemId::Count);
+
+inline constexpr std::array<const char*, 17> kMidiChannelLabels = {
+    "OMNI", "CH 1",  "CH 2",  "CH 3",  "CH 4",  "CH 5",  "CH 6",  "CH 7",  "CH 8",
+    "CH 9", "CH 10", "CH 11", "CH 12", "CH 13", "CH 14", "CH 15", "CH 16",
+};
 
 struct GlobalConfigState {
     GloReleaseMode gloRelease = GloReleaseMode::Latch;
@@ -45,7 +58,21 @@ struct GlobalConfigState {
     KeySwitchMode soloMode = KeySwitchMode::Momentary;
     KeySwitchMode snapMode = KeySwitchMode::Latching;
     ClockSyncMode clockSync = ClockSyncMode::Auto;
+    MidiTransportMode midiTransport = MidiTransportMode::PhaseOnly;
+    uint8_t midiChannel = 0u; // 0 = OMNI, 1..16 = MIDI Channel 1..16
 };
+
+// Returns true when an incoming MIDI status byte matches `midiChannel` (0 = OMNI, 1..16 = CH 1..16;
+// 0xF0..0xFF System Common & System Real-Time messages are channel-less per MIDI 1.0 spec).
+constexpr bool acceptsMidiChannel(uint8_t configuredChannel, uint8_t statusByte) noexcept {
+    if (statusByte >= 0xF0u || configuredChannel == 0u || configuredChannel > 16u) {
+        return true;
+    }
+    if (statusByte < 0x80u) {
+        return false;
+    }
+    return static_cast<uint8_t>((statusByte & 0x0Fu) + 1u) == configuredChannel;
+}
 
 constexpr const char* globalConfigItemLabel(ConfigItemId id) noexcept {
     switch (id) {
@@ -58,7 +85,11 @@ constexpr const char* globalConfigItemLabel(ConfigItemId id) noexcept {
     case ConfigItemId::SnapMode:
         return "SCENE MODE";
     case ConfigItemId::ClockSync:
-        return "MIDI CLOCK";
+        return "MIDI CLOCK IN";
+    case ConfigItemId::MidiTransport:
+        return "MIDI TRANSPORT IN";
+    case ConfigItemId::MidiChannel:
+        return "MIDI CHANNEL IN";
     case ConfigItemId::Count:
         break;
     }
@@ -72,7 +103,10 @@ constexpr int32_t globalConfigMaxIndex(ConfigItemId id) noexcept {
     case ConfigItemId::SoloMode:
     case ConfigItemId::SnapMode:
     case ConfigItemId::ClockSync:
+    case ConfigItemId::MidiTransport:
         return 1;
+    case ConfigItemId::MidiChannel:
+        return 16;
     case ConfigItemId::Count:
         break;
     }
@@ -92,6 +126,10 @@ constexpr int32_t globalConfigGetIndex(ConfigItemId id, const GlobalConfigState&
         return (config.snapMode == KeySwitchMode::Latching) ? 1 : 0;
     case ConfigItemId::ClockSync:
         return (config.clockSync == ClockSyncMode::Auto) ? 1 : 0;
+    case ConfigItemId::MidiTransport:
+        return (config.midiTransport == MidiTransportMode::RunStop) ? 1 : 0;
+    case ConfigItemId::MidiChannel:
+        return (config.midiChannel <= 16u) ? static_cast<int32_t>(config.midiChannel) : 0;
     case ConfigItemId::Count:
         break;
     }
@@ -131,6 +169,19 @@ inline bool globalConfigSetIndex(ConfigItemId id, int32_t idx, GlobalConfigState
         config.clockSync = next;
         return changed;
     }
+    case ConfigItemId::MidiTransport: {
+        const MidiTransportMode next =
+            (idx > 0) ? MidiTransportMode::RunStop : MidiTransportMode::PhaseOnly;
+        const bool changed = (config.midiTransport != next);
+        config.midiTransport = next;
+        return changed;
+    }
+    case ConfigItemId::MidiChannel: {
+        const auto next = static_cast<uint8_t>((idx <= 0) ? 0 : ((idx > 16) ? 16 : idx));
+        const bool changed = (config.midiChannel != next);
+        config.midiChannel = next;
+        return changed;
+    }
     case ConfigItemId::Count:
         break;
     }
@@ -150,6 +201,10 @@ constexpr const char* globalConfigValueLabel(ConfigItemId id, const GlobalConfig
         return (config.snapMode == KeySwitchMode::Latching) ? "LATCHING" : "MOMENTARY";
     case ConfigItemId::ClockSync:
         return (config.clockSync == ClockSyncMode::Internal) ? "OFF" : "AUTO";
+    case ConfigItemId::MidiTransport:
+        return (config.midiTransport == MidiTransportMode::RunStop) ? "RUN/STOP" : "PHASE";
+    case ConfigItemId::MidiChannel:
+        return kMidiChannelLabels[(config.midiChannel <= 16u) ? config.midiChannel : 0u];
     case ConfigItemId::Count:
         break;
     }
@@ -179,7 +234,9 @@ struct DeviceSettingsBlob {
     uint8_t keyboardModel = 0u;
     uint8_t configFlags = 0u;
     uint16_t masterTrimQ16 = 55705u;
-    std::array<uint8_t, 6> reserved{0u, 0u, 0u, 0u, 0u, 0u};
+    uint16_t internalBpmTenths = 1200u;
+    uint8_t midiChannel = 0u;
+    std::array<uint8_t, 3> reserved{0u, 0u, 0u};
 };
 static_assert(sizeof(DeviceSettingsBlob) == 16u, "DeviceSettingsBlob must be 16 bytes");
 static_assert(__is_trivially_copyable(DeviceSettingsBlob),
@@ -187,7 +244,8 @@ static_assert(__is_trivially_copyable(DeviceSettingsBlob),
 
 inline DeviceSettingsBlob encodeDeviceSettings(const GlobalConfigState& config,
                                                const GlobalParams& global, KeyboardModel model,
-                                               uint8_t activeSlot) noexcept {
+                                               uint8_t activeSlot,
+                                               float internalBpm = kDefaultClockBpm) noexcept {
     DeviceSettingsBlob blob{};
     blob.version = 1u;
     blob.activeSnapshotSlot = static_cast<uint8_t>(activeSlot & 3u);
@@ -215,9 +273,15 @@ inline DeviceSettingsBlob encodeDeviceSettings(const GlobalConfigState& config,
     if (config.gloRelease == GloReleaseMode::SnapBack) {
         flags |= (1u << 6u);
     }
+    if (config.midiTransport == MidiTransportMode::RunStop) {
+        flags |= (1u << 7u);
+    }
     blob.configFlags = flags;
     blob.masterTrimQ16 =
         static_cast<uint16_t>(clampf(global.masterTrim, 0.0f, 1.0f) * 65535.0f + 0.5f);
+    blob.internalBpmTenths = static_cast<uint16_t>(
+        clampf(internalBpm, kMinInternalClockBpm, kMaxInternalClockBpm) * 10.0f + 0.5f);
+    blob.midiChannel = (config.midiChannel <= 16u) ? config.midiChannel : 0u;
     const auto* payload = reinterpret_cast<const uint8_t*>(&blob) + sizeof(uint32_t);
     blob.crc32 = computeCrc32Bytes(payload, sizeof(DeviceSettingsBlob) - sizeof(uint32_t));
     return blob;
@@ -233,7 +297,7 @@ inline bool verifyDeviceSettingsCrc(const DeviceSettingsBlob& blob) noexcept {
 
 inline bool decodeDeviceSettings(const DeviceSettingsBlob& blob, GlobalConfigState& outConfig,
                                  GlobalParams& inOutGlobal, KeyboardModel& outModel,
-                                 uint8_t& outActiveSlot) noexcept {
+                                 uint8_t& outActiveSlot, float* outInternalBpm = nullptr) noexcept {
     if (!verifyDeviceSettingsCrc(blob)) {
         return false;
     }
@@ -253,6 +317,16 @@ inline bool decodeDeviceSettings(const DeviceSettingsBlob& blob, GlobalConfigSta
         ((blob.configFlags & (1u << 5u)) != 0u) ? ClockSyncMode::Internal : ClockSyncMode::Auto;
     outConfig.gloRelease =
         ((blob.configFlags & (1u << 6u)) != 0u) ? GloReleaseMode::SnapBack : GloReleaseMode::Latch;
+    outConfig.midiTransport = ((blob.configFlags & (1u << 7u)) != 0u)
+                                  ? MidiTransportMode::RunStop
+                                  : MidiTransportMode::PhaseOnly;
+    outConfig.midiChannel = (blob.midiChannel <= 16u) ? blob.midiChannel : 0u;
+    if (outInternalBpm != nullptr) {
+        *outInternalBpm = (blob.internalBpmTenths == 0u)
+                              ? kDefaultClockBpm
+                              : clampf(static_cast<float>(blob.internalBpmTenths) * 0.1f,
+                                       kMinInternalClockBpm, kMaxInternalClockBpm);
+    }
     return true;
 }
 

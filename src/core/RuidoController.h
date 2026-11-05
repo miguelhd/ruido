@@ -50,6 +50,11 @@ class RuidoController {
     // across TRS UART, USB-MIDI, and Bluetooth BLE-MIDI (`msgTimestampSec < 0` uses internal time).
     void onMidiRealtime(uint8_t statusByte, float msgTimestampSec = -1.0f) noexcept;
 
+    // Channel filter query (`MIDI CHANNEL IN`: `OMNI` or `CH 1..16`) for incoming MIDI messages.
+    bool acceptsMidiChannel(uint8_t statusByte) const noexcept {
+        return ruido::acceptsMidiChannel(hud_.config.midiChannel, statusByte);
+    }
+
     // Advance 150 ms HUD envelope, MIDI clock timeout & refresh all 42 varibright PWM LED levels.
     void tick(float dtSec, const EngineTelemetry& telemetry) noexcept;
 

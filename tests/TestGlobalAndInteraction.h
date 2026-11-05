@@ -453,7 +453,8 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
                 if (y >= 42u && y <= 182u && y != 120u && g6 >= 10u) {
                     ++centerPx;
                 }
-                if (y >= 191u && y <= 232u && g6 >= 8u) {
+                const size_t botCheckY = expectBottomStrip ? 191u : 210u;
+                if (y >= botCheckY && y <= 232u && g6 >= 8u) {
                     ++botPx;
                 }
             }
@@ -612,13 +613,11 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     RTEST_CHECK(ctrl.hud().config.snapMode == ruido::KeySwitchMode::Latching);
 
-    // Row 4 (MIDI CLOCK): AUTO (default) <-> OFF via SELECT/ALGORITHM, clamped at last row (4)
+    // Row 4 (MIDI CLOCK IN): AUTO (default) <-> OFF via SELECT/ALGORITHM
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 4u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8); // Clamped at last row (4)
-    RTEST_CHECK(ctrl.hud().configCursor == 4u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::ClockSync),
-                            "MIDI CLOCK") == 0);
+                            "MIDI CLOCK IN") == 0);
     RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::ClockSync,
                                                           ctrl.hud().config, ctrl.state().global),
                             "AUTO") == 0);
@@ -629,6 +628,48 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
                             "OFF") == 0);
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     RTEST_CHECK(ctrl.hud().config.clockSync == ruido::ClockSyncMode::Auto);
+
+    // Row 5 (MIDI TRANSPORT IN): PHASE (default) <-> RUN/STOP via SELECT/ALGORITHM
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    RTEST_CHECK(ctrl.hud().configCursor == 5u);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::MidiTransport),
+                            "MIDI TRANSPORT IN") == 0);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MidiTransport,
+                                                          ctrl.hud().config, ctrl.state().global),
+                            "PHASE") == 0);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
+    RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::RunStop);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MidiTransport,
+                                                          ctrl.hud().config, ctrl.state().global),
+                            "RUN/STOP") == 0);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -4);
+    RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::PhaseOnly);
+
+    // Row 6 (MIDI CHANNEL IN): OMNI (default) <-> CH 1..CH 16, clamped at last row (6) + scrolled
+    // 6-row viewport check
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    RTEST_CHECK(ctrl.hud().configCursor == 6u);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8); // Clamped at last row (6)
+    RTEST_CHECK(ctrl.hud().configCursor == 6u);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::MidiChannel),
+                            "MIDI CHANNEL IN") == 0);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MidiChannel,
+                                                          ctrl.hud().config, ctrl.state().global),
+                            "OMNI") == 0);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
+    RTEST_CHECK(ctrl.hud().config.midiChannel == 1u);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MidiChannel,
+                                                          ctrl.hud().config, ctrl.state().global),
+                            "CH 1") == 0);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 80); // Clamped at CH 16
+    RTEST_CHECK(ctrl.hud().config.midiChannel == 16u);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MidiChannel,
+                                                          ctrl.hud().config, ctrl.state().global),
+                            "CH 16") == 0);
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+    verifyViewStripsAndCenter(false); // Scrolled 6-row viewport renders cleanly without bottom bar
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -80); // Clamped back to OMNI (0)
+    RTEST_CHECK(ctrl.hud().config.midiChannel == 0u);
 
     // Close GLOBAL CONFIG via 2nd GloRight tap -> 150 ms smooth fade-out
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
@@ -2144,6 +2185,62 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         }
     }
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -8); // Back to LiveMixer
+    for (int f = 0; f < 10; ++f) {
+        ctrl.tick(0.020f, tel);
+        renderer.prepareFrame(0.020f, quietSt, ctrl.hud(), tel); // t = 0.20 s after Select wake
+    }
+    checkStripAndMono();
+
+    // Verify whole SEL illustration + instructions hold at 100% for 5.0 s, slowly dim over 5.0 s
+    // down to 50% (never 0%!), and wake back to 100% when interacting with SELECT!
+    const auto maxInstructG6 = [&]() -> uint16_t {
+        uint16_t hi = 0u;
+        for (size_t y = 202u; y <= 228u; ++y) {
+            for (size_t x = 20u; x <= 220u; ++x) {
+                const uint16_t g = g6Px(x, y);
+                if (g > hi) {
+                    hi = g;
+                }
+            }
+        }
+        return hi;
+    };
+    const uint16_t instructInitG6 = maxInstructG6();
+    const uint16_t slitInitG6 = g6Px(21u, 145u);
+    RTEST_CHECK(instructInitG6 >= 30u);
+    RTEST_CHECK(slitInitG6 >= 45u);
+
+    for (int f = 0; f < 73; ++f) {
+        ctrl.tick(0.10f, tel);
+        renderer.prepareFrame(0.10f, quietSt, ctrl.hud(), tel); // +7.30 s -> t = 7.50 s (mid-dim)
+    }
+    checkStripAndMono();
+    const uint16_t instructMidG6 = maxInstructG6();
+    const uint16_t slitMidG6 = g6Px(21u, 145u);
+    RTEST_CHECK(instructMidG6 < instructInitG6 - 4u);
+    RTEST_CHECK(slitMidG6 < slitInitG6 - 6u);
+
+    for (int f = 0; f < 30; ++f) {
+        ctrl.tick(0.10f, tel);
+        renderer.prepareFrame(0.10f, quietSt, ctrl.hud(),
+                              tel); // +3.00 s -> t = 10.50 s (50% floor)
+    }
+    checkStripAndMono();
+    const uint16_t instructDimG6 = maxInstructG6();
+    const uint16_t slitDimG6 = g6Px(21u, 145u);
+    RTEST_CHECK(instructDimG6 >= 14u && instructDimG6 < instructMidG6 - 3u);
+    RTEST_CHECK(slitDimG6 >= 22u && slitDimG6 < slitMidG6 - 5u);
+
+    // Turning SELECT (even clamped at 1/3 end stop) wakes whole view back to 100% brightness!
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
+    for (int f = 0; f < 10; ++f) {
+        ctrl.tick(0.025f, tel);
+        renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+    }
+    checkStripAndMono();
+    RTEST_CHECK(maxInstructG6() == instructInitG6);
+    RTEST_CHECK(g6Px(21u, 145u) >= slitInitG6 - 1u);
+
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false); // Dismiss SEL
 
@@ -2756,9 +2853,93 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
         renderer.prepareFrame(0.020f, ctrl.state(), ctrl.hud(), tel);
     }
     checkStripAndMono();
+
+    // Turning ALGORITHM while SEL 3/3 RHYTHM LAB is open adjusts Master Tempo logarithmically
+    // (+48 ticks = +1.0 octave -> 240.0 BPM), keeps SEL keybed map active underneath, and shows
+    // MasterTempo header!
+    const float couplingBeforeRhythmAlg = ctrl.state().global.circuitCoupling;
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 48); // +1.0 oct -> ~240.0 BPM
+    RTEST_CHECK(ctrl.hud().selPageOpen);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::MasterTempo);
+    RTEST_CHECK(std::fabs(ctrl.hud().effectiveClockBpm - 240.0f) < 0.25f);
+    RTEST_CHECK(std::fabs(ctrl.state().global.clockBpm - 240.0f) < 0.25f);
+    RTEST_CHECK(nearF(ctrl.state().global.circuitCoupling, couplingBeforeRhythmAlg));
+    for (int f = 0; f < 4; ++f) {
+        ctrl.tick(0.020f, tel);
+        renderer.prepareFrame(0.020f, ctrl.state(), ctrl.hud(), tel);
+    }
+    checkStripAndMono();
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -48); // Back to ~120.0 BPM
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
     RTEST_CHECK(!ctrl.hud().selPageOpen);
+
+    // Verify 3-gear logarithmic ALGORITHM tempo scaling in RHYTHM LAB across [20.0, 3000.0] BPM:
+    ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true); // Fine (~0.2 BPM / detent @ 120 BPM)
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8); // +2 detents -> ~120.4 BPM
+    RTEST_CHECK(std::fabs(ctrl.hud().effectiveClockBpm - 120.4f) < 0.1f);
+    for (int f = 0; f < 4; ++f) {
+        ctrl.tick(0.020f, tel);
+        renderer.prepareFrame(0.020f, ctrl.state(), ctrl.hud(), tel);
+    }
+    checkStripAndMono();
+    ctrl.onButtonEvent(ruido::ButtonId::OctMinus, false);
+
+    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);    // Coarse (6.0 oct/turn)
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 200); // Clamp at 3,000.0 BPM!
+    RTEST_CHECK(nearF(ctrl.hud().effectiveClockBpm, 3000.0f));
+    // Verify high-speed 3,000 BPM LED anti-strobe choreography stays strictly in [0, 1]
+    ctrl.onWhiteKeyPressure(12u, 0.70f); // EUCLID @ 3,000 BPM
+    ctrl.tick(0.016f, tel);
+    for (float l : ctrl.leds().whiteKeyLeds) {
+        RTEST_CHECK(l >= 0.0f && l <= 1.0f);
+    }
+    ctrl.onWhiteKeyGate(12u, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -300); // Clamp at 20.0 BPM!
+    RTEST_CHECK(nearF(ctrl.hud().effectiveClockBpm, 20.0f));
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 16); // +1.0 oct -> 40.0 BPM
+    RTEST_CHECK(std::fabs(ctrl.hud().effectiveClockBpm - 40.0f) < 0.15f);
+    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
+
+    // Verify 11th Tall Key = TAP TEMPO in RHYTHM LAB (never freezes scope, aligns Beat 1 on Tap 1,
+    // rejects <40 ms switch bounce, holds MasterTempo toast between taps, and locks 120.0 BPM!):
+    const uint8_t seqBeforeTap = ctrl.state().global.clockResetSeq;
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, true);
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::ScopeFreezeKey, 0.80f); // Held pressure: no 2x fire!
+    RTEST_CHECK(!ctrl.hud().scopeFrozen);
+    RTEST_CHECK(!ctrl.state().keyMod.stasisFreeze);
+    RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::TapTempo);
+    RTEST_CHECK(ctrl.state().global.clockResetSeq == static_cast<uint8_t>(seqBeforeTap + 1u));
+    {
+        char lm[24]{}, ls[16]{}, rt[32]{};
+        bool sb = false;
+        float bn = 0.0f;
+        ruido::formatKeybedTopHeader(ctrl.hud(), lm, sizeof(lm), ls, sizeof(ls), rt, sizeof(rt), sb,
+                                     bn);
+        RTEST_CHECK(std::strcmp(lm, "TAP TEMPO") == 0 && sb);
+    }
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::MasterTempo); // Steady toast between taps!
+
+    // < 40 ms switch bounce after Tap 1 must be ignored without corrupting BPM:
+    ctrl.tick(0.020f, tel);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, true);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
+    RTEST_CHECK(std::fabs(ctrl.hud().effectiveClockBpm - 40.0f) < 0.15f);
+
+    // Advance remaining 0.480 s (total 0.500 s since Tap 1 = 120.0 BPM) and tap twice @ 0.500 s:
+    for (int f = 0; f < 24; ++f) {
+        ctrl.tick(0.020f, tel);
+    }
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, true);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
+    RTEST_CHECK(std::fabs(ctrl.hud().effectiveClockBpm - 120.0f) < 0.5f);
+    for (int f = 0; f < 25; ++f) {
+        ctrl.tick(0.020f, tel); // 0.500 s -> Tap 3
+    }
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, true);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
+    RTEST_CHECK(nearF(ctrl.hud().effectiveClockBpm, 120.0f));
 
     // 2. Exercise STUTTER, DIVIDE, EUCLID, PUMP, CHASE, TEMPO, PLUCK, SHORT, SWING + HUD headers
     ctrl.onWhiteKeyPressure(4u, 0.50f); // Key 5: STUTTER OSC 1
@@ -2868,6 +3049,24 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     }
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Pit, false);
 
+    // Turning ALGORITHM OR tapping 11th key while externally MIDI-synced shows "140 BPM EXT"
+    // without mutating internal fallback BPM or breaking external lock (tap aligns Beat 1)!
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 24);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::MasterTempo);
+    RTEST_CHECK(ctrl.hud().midiClockSynced);
+    RTEST_CHECK(std::fabs(ctrl.hud().effectiveClockBpm - 140.0f) < 0.4f);
+    const uint8_t seqBeforeExtTap = ctrl.state().global.clockResetSeq;
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, true);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
+    RTEST_CHECK(ctrl.state().global.clockResetSeq == static_cast<uint8_t>(seqBeforeExtTap + 1u));
+    RTEST_CHECK(ctrl.hud().midiClockSynced);
+    RTEST_CHECK(std::fabs(ctrl.hud().effectiveClockBpm - 140.0f) < 0.4f);
+    for (int f = 0; f < 4; ++f) {
+        ctrl.tick(0.020f, tel);
+        renderer.prepareFrame(0.020f, ctrl.state(), ctrl.hud(), tel);
+    }
+    checkStripAndMono();
+
     // Simulate Bluetooth BLE-MIDI 15 ms connection-interval packet clumping @ 125.0 BPM
     // (true tick period = 20.0 ms, arriving quantized into 15.0 ms BLE connection events)
     ctrl.onMidiRealtime(0xFAu, 10.000f);
@@ -2880,10 +3079,11 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     RTEST_CHECK(ctrl.hud().midiClockSynced);
     RTEST_CHECK(std::fabs(ctrl.hud().effectiveClockBpm - 125.0f) < 1.5f);
 
-    // GLOBAL CONFIG -> MIDI CLOCK: OFF ignores external clock immediately
+    // GLOBAL CONFIG -> MIDI CLOCK IN: OFF ignores external clock immediately
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 20);    // Clamp to Row 4: MIDI CLOCK
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 16); // Row 4: MIDI CLOCK IN
+    RTEST_CHECK(ctrl.hud().configCursor == 4u);
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -4); // AUTO -> OFF
     RTEST_CHECK(!ctrl.hud().midiClockSynced);
     RTEST_CHECK(nearF(ctrl.state().global.clockBpm, 120.0f));
@@ -2892,7 +3092,8 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
 
-    // 1.6 s cable-unplug timeout falls back cleanly to 120 BPM; 0xFC Stop also releases lock
+    // 1.6 s cable-unplug timeout falls back cleanly to 120 BPM; 0xFC Stop releases lock while
+    // PHASE (default) leaves masterRun untouched
     for (int i = 0; i < 10; ++i) {
         ctrl.tick(0.20f, tel);
     }
@@ -2903,9 +3104,38 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
         ctrl.onMidiRealtime(0xF8u, 30.0f + static_cast<float>(k) * 0.020f);
     }
     RTEST_CHECK(ctrl.hud().midiClockSynced);
-    ctrl.onMidiRealtime(0xFCu, 30.30f); // MIDI Stop
+    RTEST_CHECK(ctrl.state().global.masterRun);
+    ctrl.onMidiRealtime(0xFCu, 30.30f); // MIDI Stop in PHASE mode -> drone keeps running!
     RTEST_CHECK(!ctrl.hud().midiClockSynced);
+    RTEST_CHECK(ctrl.state().global.masterRun);
     RTEST_CHECK(nearF(ctrl.state().global.clockBpm, 120.0f));
+
+    // MIDI TRANSPORT IN == RUN/STOP couples 0xFA/0xFB/0xFC to masterRun when MIDI CLOCK IN == AUTO
+    RTEST_CHECK(ctrl.acceptsMidiChannel(0x90u)); // Default OMNI accepts CH 1..16
+    RTEST_CHECK(ctrl.acceptsMidiChannel(0x9Fu));
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);     // Row 5: MIDI TRANSPORT IN
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);  // PHASE -> RUN/STOP
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);     // Row 6: MIDI CHANNEL IN
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 16); // OMNI -> CH 4
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
+    RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::RunStop);
+    RTEST_CHECK(ctrl.hud().config.midiChannel == 4u);
+    RTEST_CHECK(!ctrl.acceptsMidiChannel(0x90u)); // CH 1 rejected
+    RTEST_CHECK(ctrl.acceptsMidiChannel(0x93u));  // CH 4 accepted (0-indexed 3)
+    RTEST_CHECK(ctrl.acceptsMidiChannel(0xF8u));  // System Real-Time always accepted
+
+    ctrl.onMidiRealtime(0xFCu, 31.0f); // Stop -> mutes masterRun
+    RTEST_CHECK(!ctrl.state().global.masterRun);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::AudioOutput);
+    ctrl.onMidiRealtime(0xFBu, 31.2f); // Continue -> resumes masterRun
+    RTEST_CHECK(ctrl.state().global.masterRun);
+    ctrl.onMidiRealtime(0xFCu, 31.4f);
+    RTEST_CHECK(!ctrl.state().global.masterRun);
+    ctrl.onMidiRealtime(0xFAu, 31.6f); // Start -> resumes masterRun + resets phase
+    RTEST_CHECK(ctrl.state().global.masterRun);
 
     // 4. Multi-day continuous drone uptime immunity (no float32 timer stall after 80+ hours)
     ruido::MidiClockTracker longRunClock{};
@@ -2945,14 +3175,29 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     const float savedOsc1Hz = ctrl.state().voices[0].frequencyHz;
     const ruido::PatchSnapshot savedSlot2 = ctrl.snapshots().slotBinary(2u);
 
-    // Switch keyboard model to CircuitLab and muteMode to Latching, then export 16 B settings blob
+    // Switch to RhythmLab, dial ~1,920 BPM (+4 octaves = +192 ticks) via logarithmic ALGORITHM,
+    // then switch to CircuitLab + Latching MuteMode and export 16 B settings blob!
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8);      // -> RhythmLab
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 192); // +4.0 octaves -> ~1920.0 BPM
+    const float dialedHighBpm = ctrl.hud().effectiveClockBpm;
+    RTEST_CHECK(std::fabs(dialedHighBpm - 1920.0f) < 2.0f);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4); // -> CircuitLab (ALGORITHM = Rail Coupling)
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
+    const float couplingBeforeCircuitAlg = ctrl.state().global.circuitCoupling;
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::RailCoupling);
+    RTEST_CHECK(ctrl.state().global.circuitCoupling > couplingBeforeCircuitAlg);
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // MuteMode
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // Row 1: MuteMode
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 16);    // Row 5: MidiTransport
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);  // -> RunStop
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);     // Row 6: MidiChannel
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 28); // -> CH 7
     RTEST_CHECK(ctrl.consumeSettingsDirty());
     const ruido::DeviceSettingsBlob savedSettings = ctrl.exportSettings();
 
@@ -2970,6 +3215,9 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     RTEST_CHECK(bootCtrl.loadSettings(savedSettings));
     RTEST_CHECK(bootCtrl.hud().keyboardModel == ruido::KeyboardModel::CircuitLab);
     RTEST_CHECK(bootCtrl.hud().config.muteMode == ruido::KeySwitchMode::Latching);
+    RTEST_CHECK(bootCtrl.hud().config.midiTransport == ruido::MidiTransportMode::RunStop);
+    RTEST_CHECK(bootCtrl.hud().config.midiChannel == 7u);
+    RTEST_CHECK(std::fabs(bootCtrl.hud().effectiveClockBpm - dialedHighBpm) < 0.1f);
     RTEST_CHECK(bootCtrl.snapshots().activeSlot() == 2u);
     RTEST_CHECK(std::fabs(bootCtrl.state().voices[0].frequencyHz - savedOsc1Hz) < 0.25f);
 #undef RTEST_CHECK

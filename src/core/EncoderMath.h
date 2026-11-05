@@ -45,6 +45,25 @@ inline float adjustLinear01(float current, int32_t ticks, KnobRate rate, float l
     return clampf(current + delta, lo, hi);
 }
 
+// 3-gear logarithmic Master Tempo scaling on ALGORITHM in RHYTHM LAB (20 -> 3,000 BPM = 7.23 oct):
+//   Fine (Hold OCT-)   : ~0.058 oct/turn (~0.2 BPM/detent @ 120 BPM; ~0.72 cents/tick @ audio rate)
+//   Standard           : 2.00 oct/turn (1 semitone/detent; ~3.6 turns across 20 -> 3,000 BPM)
+//   Coarse (Hold OCT+) : 6.00 oct/turn (3 semitones/detent; ~1.2 turns across 20 -> 3,000 BPM)
+inline float adjustClockBpm(float currentBpm, int32_t ticks, KnobRate rate) noexcept {
+    const float octPerStep =
+        (rate == KnobRate::Fine) ? 0.00060f : ((rate == KnobRate::Coarse) ? 0.06250f : 0.02083333f);
+    const float nextBpm = currentBpm * fastExp2(static_cast<float>(ticks) * octPerStep);
+    return clampf(nextBpm, kMinInternalClockBpm, kMaxInternalClockBpm);
+}
+
+// Normalized [0, 1] log-octave position across [kMinInternalClockBpm, kMaxInternalClockBpm]
+inline float normalizeClockBpmLog01(float bpm) noexcept {
+    constexpr float kLogMin = 4.32192809f;                            // log2(20.0f)
+    constexpr float kInvLogSpan = 1.0f / (11.5507468f - 4.32192809f); // 1 / log2(3000 / 20)
+    const float clamped = clampf(bpm, kMinInternalClockBpm, kMaxInternalClockBpm);
+    return clampf((fastLog2(clamped) - kLogMin) * kInvLogSpan, 0.0f, 1.0f);
+}
+
 // Discrete notched encoder stepper: always 1 item per physical detent (4 X4 quadrature ticks)
 // across Fine, Standard, and Coarse gears, with zero-windup clamping at [0, maxVal].
 // Performs arithmetic in `int32_t` before storing the [-3, +3] sub-detent remainder so `int8_t`

@@ -27,6 +27,10 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
         out.headerBarNorm = clampf(control.global.circuitCoupling, 0.0f, 1.0f);
         out.hasHeaderBar = true;
         break;
+    case HudMode::MasterTempo:
+        out.headerBarNorm = normalizeClockBpmLog01(hud.effectiveClockBpm);
+        out.hasHeaderBar = true;
+        break;
     case HudMode::VoicePressure: {
         out.headerBarNorm = clampf(control.voicePressure[hud.focusedVoice & 3u], 0.0f, 1.0f);
         out.hasHeaderBar = true;

@@ -34,6 +34,14 @@ inline constexpr float kFilterCutoffMinHz = 2.0f;
 inline constexpr float kFilterCutoffMaxHz = 28000.0f;
 inline constexpr float kFilterMaxSafeHz = 30000.0f; // Safe ceiling @ 176.47 kHz
 
+// Master rhythm internal tempo bounds vs external 24-PPQN MIDI clock PLL sanity window (BPM)
+inline constexpr float kDefaultClockBpm = 120.0f;
+inline constexpr float kMinInternalClockBpm = 20.0f;
+inline constexpr float kMaxInternalClockBpm = 3000.0f;
+inline constexpr float kMaxEffectiveClockBpm = 6000.0f;
+inline constexpr float kMinMidiClockBpm = 30.0f;
+inline constexpr float kMaxMidiClockBpm = 300.0f;
+
 // Lock-free SPSC oscilloscope ring buffer capacity (power of two)
 inline constexpr size_t kScopeRingCapacity = 2048u;
 inline constexpr size_t kScopeRingMask = kScopeRingCapacity - 1u;

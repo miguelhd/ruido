@@ -4,6 +4,7 @@
 #include "core/KeyboardModel.h"
 #include "core/KeyboardModelSpec.h"
 #include "core/LfoMath.h"
+#include "core/RhythmMath.h"
 
 namespace ruido {
 
@@ -273,6 +274,21 @@ void KeyboardEngine::stepAndComputeKeyLeds(float dtSec, float animPhase, float s
     const float savePulse01 = 0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(animPhase * 2.5f)));
     computeKeyboardModelRestLeds(model_, state, hud, stutMask, subBreathWave01, savePulse01,
                                  outLeds.blackKeyLeds, outLeds.whiteKeyLeds);
+
+    // In 3/3 RHYTHM LAB, the 11th tall key acts as TAP TEMPO with a gentle quarter-note pulse
+    // (damped smoothly into a steady warm glow above 900 BPM so 60 Hz scan never strobes).
+    if (model_ == KeyboardModel::RhythmLab) {
+        const float effBpm =
+            state.global.clockBpm * computeTempoMultiplier(state.keyMod.rhythmTempo);
+        const float beatScaled = wrapLfoPhase01(rhythmPhase) * 4.0f;
+        const float beatFrac = beatScaled - static_cast<float>(static_cast<uint32_t>(beatScaled));
+        const float beatFlash = fastExpNeg(beatFrac * 6.0f);
+        const float beatSmooth =
+            smoothstep01(clampf((effBpm - 900.0f) * (1.0f / 600.0f), 0.0f, 1.0f));
+        const float pulse = beatFlash * (1.0f - beatSmooth) + 0.35f * beatSmooth;
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)] =
+            0.08f + 0.22f * pulse;
+    }
 
     if (anyKeyHeld()) {
         const KeyboardInputView view{blackHeld_,     whiteHeld_,     blackPressure_, whitePressure_,

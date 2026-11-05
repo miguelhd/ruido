@@ -129,9 +129,18 @@ void DroneEngineCore::snapParametersToLatest(EngineSharedBuses& buses) noexcept 
 
 void DroneEngineCore::updateTargetsFromState(const EngineControlState& state,
                                              bool snapImmediate) noexcept {
+    const float effClockBpm =
+        clampf(state.global.clockBpm, kMinInternalClockBpm, kMaxInternalClockBpm) *
+        computeTempoMultiplier(clampf(state.keyMod.rhythmTempo, 0.0f, 1.0f));
+    const float adaptiveGateEdgeSec =
+        (effClockBpm > 300.0f)
+            ? clampf(kStutterEdgeSec * (300.0f / effClockBpm), 0.00035f, kStutterEdgeSec)
+            : kStutterEdgeSec;
+
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceParams& vp = state.voices[i];
         VoiceSmoothers& sm = voiceSmoothers_[i];
+        sm.stutterGate.setTimeConstant(adaptiveGateEdgeSec, baseSampleRate_);
 
         const float clampedBaseHz = clampf(vp.frequencyHz, kAudioFreqMinHz, kAudioFreqMaxHz);
         const float pw =

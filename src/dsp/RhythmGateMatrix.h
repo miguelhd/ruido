@@ -40,7 +40,7 @@ struct RhythmClockState {
     }
 
     void updateTargets(const EngineControlState& state, bool snapImmediate) noexcept {
-        clockBpm = clampf(state.global.clockBpm, 30.0f, 300.0f);
+        clockBpm = clampf(state.global.clockBpm, kMinInternalClockBpm, kMaxInternalClockBpm);
         if (state.global.clockResetSeq != lastResetSeq) {
             lastResetSeq = state.global.clockResetSeq;
             barPhaseU32 = 0u;
@@ -94,7 +94,8 @@ inline RhythmFrameResult stepRhythmFrame(RhythmClockState& rs,
     out.pluckDepth = pluck;
 
     // 1. Advance 4-beat bar clock (1 bar = 4 quarter-note beats = 240 / BPM seconds)
-    const float effBpm = rs.clockBpm * computeTempoMultiplier(tempo);
+    const float effBpm = clampf(rs.clockBpm * computeTempoMultiplier(tempo), kMinInternalClockBpm,
+                                kMaxEffectiveClockBpm);
     const float barHz = effBpm * (1.0f / 240.0f);
     if (!stasisFreeze) {
         const auto barInc = static_cast<uint32_t>(barHz * hzToBasePhaseU32 + 0.5f);

@@ -124,7 +124,8 @@ enum class HudMode : uint8_t {
     GlobalAll = 25,
     GlobalConfig = 26,
     KeyboardModel = 27, // Latching SEL Keyboard Model status & guidance screen
-    KeyboardPlay = 28   // Momentary live punch-in routed 1-to-1 to native Ruido views
+    KeyboardPlay = 28,  // Momentary live punch-in routed 1-to-1 to native Ruido views
+    MasterTempo = 29    // ALGORITHM encoder Master Tempo control in 3/3 RHYTHM LAB
 };
 
 // Active momentary punch-in family displayed in the top header during HudMode::KeyboardPlay
@@ -160,7 +161,8 @@ enum class KeyPunchKind : uint8_t {
     RhythmPluck = 28,    // RhythmLab GLO: Percussive MS-20 low-pass filter pluck
     RhythmShort = 29,    // RhythmLab MONO: Pinpoint short gate duty
     RhythmSwing = 30,    // RhythmLab POLY: 50% -> 72% shuffle swing + stereo bounce
-    Count = 31
+    TapTempo = 31,       // RhythmLab 11th tall key: Tap Tempo & Beat-1 downbeat sync
+    Count = 32
 };
 
 struct PureRatioEntry {
@@ -273,6 +275,7 @@ struct HudState {
     bool editPageOpen = false;   // Latching EDIT Page 1 Channel Mix state (ButtonId::Edit x1)
     bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
     bool selPageOpen = false;    // Latching KEYBOARD MODEL status & guidance page (ButtonId::Sel)
+    uint8_t selWakeSeq = 0u;     // Incremented on SEL open or SELECT/ALGORITHM knob interaction
 };
 
 constexpr uint8_t resolveFilterViewVoice(const HudState& hud) noexcept {

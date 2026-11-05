@@ -196,13 +196,14 @@ void formatKeybedTopHeader(const HudState& hud, char* leftMain, size_t leftMainC
     outBarNorm = 0.0f;
 
     if (hud.mode == HudMode::KeyboardModel) {
+        (void)rightText;
+        (void)rightCap;
         appendStr(leftMain, 0u, leftMainCap, "KEYBOARD");
         size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " ");
         sp = appendUInt(leftSuffix, sp, leftSuffixCap,
                         static_cast<uint32_t>(hud.keyboardModel) + 1u);
         sp = appendStr(leftSuffix, sp, leftSuffixCap, "/");
         appendUInt(leftSuffix, sp, leftSuffixCap, static_cast<uint32_t>(KeyboardModel::Count));
-        appendStr(rightText, 0u, rightCap, "SELECT MODEL");
         return;
     }
 
@@ -278,13 +279,17 @@ void formatKeybedTopHeader(const HudState& hud, char* leftMain, size_t leftMainC
         break;
     }
     case PunchReadoutKind::TempoBpm: {
-        const auto bpmInt = static_cast<uint32_t>(
-            clampf(hud.effectiveClockBpm * computeTempoMultiplier(outBarNorm), 30.0f, 1200.0f) +
-            0.5f);
+        const auto bpmInt =
+            static_cast<uint32_t>(clampf(hud.effectiveClockBpm * computeTempoMultiplier(outBarNorm),
+                                         kMinInternalClockBpm, kMaxEffectiveClockBpm) +
+                                  0.5f);
         const size_t rp = appendUInt(rightText, 0u, rightCap, bpmInt);
         appendStr(rightText, rp, rightCap, hud.midiClockSynced ? " BPM EXT" : " BPM");
         break;
     }
+    case PunchReadoutKind::TapBpm:
+        formatClockBpm(rightText, rightCap, hud.effectiveClockBpm, hud.midiClockSynced, false);
+        break;
     case PunchReadoutKind::SwingPct:
         formatPercent(rightText, rightCap, computeSwingRatio(outBarNorm));
         break;
@@ -299,12 +304,23 @@ void HudKeybedView::reset() noexcept {
     whiteGlow_.fill(0.0f);
     phase_ = 0.0f;
     breathPhase_ = 0.0f;
+    idleTimerSec_ = 0.0f;
+    brightPhase_ = 1.0f;
+    lastWakeSeq_ = 0u;
     primed_ = false;
+    wasSelPageOpen_ = false;
 }
 
 void HudKeybedView::clearImmediate() noexcept {
     phase_ = 0.0f;
+    idleTimerSec_ = 0.0f;
+    brightPhase_ = 1.0f;
     primed_ = false;
+    wasSelPageOpen_ = false;
+}
+
+float HudKeybedView::brightnessScale() const noexcept {
+    return kDimFloorBrightness + (1.0f - kDimFloorBrightness) * smoothstep01(brightPhase_);
 }
 
 void HudKeybedView::update(float dtClamped, const EngineControlState& control,
@@ -312,6 +328,27 @@ void HudKeybedView::update(float dtClamped, const EngineControlState& control,
                            const std::array<float, kNumOscillators>& voicePeak,
                            uint8_t stutterGateMask) noexcept {
     (void)voicePeak;
+
+    if (rawHud.selPageOpen && !wasSelPageOpen_) {
+        idleTimerSec_ = 0.0f;
+        brightPhase_ = 1.0f;
+        lastWakeSeq_ = rawHud.selWakeSeq;
+    } else if (rawHud.selPageOpen && rawHud.selWakeSeq != lastWakeSeq_) {
+        idleTimerSec_ = 0.0f;
+        lastWakeSeq_ = rawHud.selWakeSeq;
+    }
+    wasSelPageOpen_ = rawHud.selPageOpen;
+
+    if (rawHud.selPageOpen) {
+        if (idleTimerSec_ < kIdleHoldSec) {
+            idleTimerSec_ += dtClamped;
+            if (brightPhase_ < 1.0f) {
+                brightPhase_ = clampf(brightPhase_ + dtClamped * (1.0f / kWakeRiseSec), 0.0f, 1.0f);
+            }
+        } else if (brightPhase_ > 0.0f) {
+            brightPhase_ = clampf(brightPhase_ - dtClamped * (1.0f / kIdleDimSec), 0.0f, 1.0f);
+        }
+    }
 
     const bool active = isActive(rawHud);
     const bool wasInvisible = !hasResidualPhase();
@@ -365,7 +402,12 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
     if (alpha8 == 0u || y1 <= 28 || y0 >= 236) {
         return;
     }
-    const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
+    const auto effAlpha8 =
+        static_cast<uint8_t>(static_cast<float>(alpha8) * brightnessScale() + 0.5f);
+    if (effAlpha8 == 0u) {
+        return;
+    }
+    const MonoStripCanvas cv{lumBuf, y0, y1, effAlpha8};
     const KeyboardModelSpec& spec = keyboardModelSpec(frameHud.keyboardModel);
     const auto modelIdx = static_cast<uint8_t>(frameHud.keyboardModel);
     constexpr uint8_t kModelCount = static_cast<uint8_t>(KeyboardModel::Count);
@@ -379,7 +421,18 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
             cv.drawSansRight(kFontSansMedium, 222, 34, ">", 132u, 0);
         }
         cv.drawSansCentered(kFontSansBold, 120, 33, spec.title, 255u, 0);
-        cv.drawSansCentered(kFontSansSmall, 120, 50, spec.subtitle, 168u, 1);
+        if (frameHud.keyboardModel == KeyboardModel::RhythmLab) {
+            char subBuf[36]{};
+            char bpmBuf[20]{};
+            formatClockBpm(bpmBuf, sizeof(bpmBuf), frameHud.effectiveClockBpm, false, false);
+            const size_t sp =
+                appendStr(subBuf, 0u, sizeof(subBuf),
+                          frameHud.midiClockSynced ? "MIDI CLOCK: " : "ALGORITHM / TAP: ");
+            appendStr(subBuf, sp, sizeof(subBuf), bpmBuf);
+            cv.drawSansCentered(kFontSansSmall, 120, 50, subBuf, 192u, 0);
+        } else {
+            cv.drawSansCentered(kFontSansSmall, 120, 50, spec.subtitle, 168u, 1);
+        }
 
         // Centered N-slot optical model indicator pips around x = 120
         constexpr float kBeadSpacing = 14.0f;
@@ -396,7 +449,7 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
         }
     }
 
-    // 2. Top-Row 4-Zone Brackets & Labels over OP1..POLY (y = 72..90; 11th Freeze key left open)
+    // 2. Top-Row Zone Brackets & Labels over OP1..POLY (+ 11th TAP key in Rhythm Lab)
     if (y1 > 70 && y0 < 92) {
         for (size_t z = 0u; z < kTopZoneSpans.size(); ++z) {
             const TopZoneSpan& span = kTopZoneSpans[z];
@@ -410,6 +463,15 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
             cv.drawHorizontalFilament(span.xL, span.xR, 87.0f, brkLum, 0.58f, true);
             cv.drawVerticalSlit(span.xL, 87.0f, 89.6f, brkLum);
             cv.drawVerticalSlit(span.xR, 87.0f, 89.6f, brkLum);
+        }
+        if (frameHud.keyboardModel == KeyboardModel::RhythmLab) {
+            const float tapX0 = kBlackCenterX[10] - 3.8f;
+            const float tapX1 = kBlackCenterX[10] + 3.8f;
+            const float tapLum = 56.0f + 92.0f * clampf(blackGlow_[10], 0.0f, 1.0f);
+            cv.drawSansCentered(kFontSansSmall, 213, 72, "TAP", 210u, 0);
+            cv.drawHorizontalFilament(tapX0, tapX1, 87.0f, tapLum, 0.58f, true);
+            cv.drawVerticalSlit(tapX0, 87.0f, 89.6f, tapLum);
+            cv.drawVerticalSlit(tapX1, 87.0f, 89.6f, tapLum);
         }
     }
 
@@ -468,10 +530,10 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
         }
     }
 
-    // 5. Swappable-Model & Performance Guidance Footer (y = 202..230)
+    // 5. Swappable-Model & Pressure Guidance Layer (y = 202..230; dims with view to 50% after 5 s)
     if (y1 > 200 && y0 < 234) {
         cv.drawSansCentered(kFontSansSmall, 120, 202, "TURN SELECT TO SWAP MODEL", 148u, 0);
-        cv.drawSansCentered(kFontSansSmall, 120, 217, spec.actionHint, 118u, 0);
+        cv.drawSansCentered(kFontSansSmall, 120, 217, "KEYS ARE PRESSURE SENSITIVE", 122u, 0);
     }
 }
 

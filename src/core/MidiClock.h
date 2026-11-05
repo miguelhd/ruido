@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Config.h"
 #include "core/DspMath.h"
 #include "core/GlobalConfig.h"
 
@@ -9,9 +10,6 @@
 
 namespace ruido {
 
-inline constexpr float kDefaultClockBpm = 120.0f;
-inline constexpr float kMinMidiClockBpm = 30.0f;
-inline constexpr float kMaxMidiClockBpm = 300.0f;
 inline constexpr float kMidiClockTimeoutSec = 1.50f;
 inline constexpr float kMidiTimestampWrapSec = 64.0f;
 
@@ -23,13 +21,18 @@ class MidiClockTracker {
   public:
     void reset() noexcept {
         tickDeltas100Us_.fill(0u);
+        tapIntervalsSec_.fill(0.0f);
         sinceLastTickSec_ = kMaxTickGapSec;
+        sinceLastTapSec_ = kMaxTickGapSec;
         lastTickTimeSec_ = -1.0f;
         residual100Us_ = 0.0f;
         silenceSec_ = kMidiClockTimeoutSec + 1.0f;
+        internalBpm_ = kDefaultClockBpm;
         smoothedBpm_ = kDefaultClockBpm;
         tickWrite_ = 0u;
         tickStored_ = 0u;
+        tapWrite_ = 0u;
+        tapCount_ = 0u;
         resetSeq_ = 0u;
         running_ = true;
         hasPrevTick_ = false;
@@ -44,6 +47,7 @@ class MidiClockTracker {
     bool step(float dtSec, ClockSyncMode mode) noexcept {
         const float dt = clampf(dtSec, 0.0f, 0.25f);
         sinceLastTickSec_ = clampf(sinceLastTickSec_ + dt, 0.0f, kMaxTickGapSec);
+        sinceLastTapSec_ = clampf(sinceLastTapSec_ + dt, 0.0f, kMaxTickGapSec);
         const bool wasActive = isExternalSynced(mode);
         if (externalActive_) {
             silenceSec_ += dt;
@@ -168,28 +172,94 @@ class MidiClockTracker {
         return (prevSync != isExternalSynced(mode)) || (absf(bpm(mode) - prevBpm) > 0.02f);
     }
 
+    void setInternalBpm(float bpm) noexcept {
+        internalBpm_ = clampf(bpm, kMinInternalClockBpm, kMaxInternalClockBpm);
+    }
+
+    float internalBpm() const noexcept { return internalBpm_; }
+
+    // Rising-edge Tap Tempo on the 11th tall key in 3/3 RHYTHM LAB:
+    //  - Aligns Beat 1 (`++resetSeq_`) on the first tap of a new sequence (or anytime externally
+    //    MIDI-synced so players can phase-align bars to incoming raw 0xF8 streams).
+    //  - Averages up to 3 consecutive quarter-note intervals (4 taps, resetting immediately on
+    //    >1.75x tempo jumps) with a 40 ms silicone contact-bounce guard.
+    //  - Returns `true` when `internalBpm_` was updated.
+    bool onTapTempo(ClockSyncMode mode) noexcept {
+        if (isExternalSynced(mode)) {
+            ++resetSeq_;
+            sinceLastTapSec_ = 0.0f;
+            tapCount_ = 0u;
+            tapWrite_ = 0u;
+            return false;
+        }
+        if (sinceLastTapSec_ < kMinTapIntervalSec) {
+            return false; // Reject <40 ms mechanical switch bounce
+        }
+        if (sinceLastTapSec_ > kMaxTapIntervalSec) {
+            tapCount_ = 0u;
+            tapWrite_ = 0u;
+            sinceLastTapSec_ = 0.0f;
+            ++resetSeq_;
+            return false;
+        }
+
+        const float dt = sinceLastTapSec_;
+        sinceLastTapSec_ = 0.0f;
+        if (tapCount_ > 0u) {
+            float prevSum = 0.0f;
+            for (uint8_t i = 0u; i < tapCount_; ++i) {
+                prevSum += tapIntervalsSec_[i];
+            }
+            const float prevAvg = prevSum / static_cast<float>(tapCount_);
+            if (dt > prevAvg * 1.75f || dt < prevAvg * 0.57f) {
+                tapCount_ = 0u;
+                tapWrite_ = 0u;
+            }
+        }
+        tapIntervalsSec_[tapWrite_] = dt;
+        tapWrite_ = static_cast<uint8_t>((tapWrite_ + 1u) % kMaxTapIntervals);
+        if (tapCount_ < kMaxTapIntervals) {
+            ++tapCount_;
+        }
+        float sumSec = 0.0f;
+        for (uint8_t i = 0u; i < tapCount_; ++i) {
+            sumSec += tapIntervalsSec_[i];
+        }
+        const float avgSec = sumSec / static_cast<float>(tapCount_);
+        internalBpm_ = clampf(60.0f / avgSec, kMinInternalClockBpm, kMaxInternalClockBpm);
+        return true;
+    }
+
     bool isExternalSynced(ClockSyncMode mode) const noexcept {
         return (mode == ClockSyncMode::Auto) && externalActive_ && running_;
     }
 
     float bpm(ClockSyncMode mode) const noexcept {
-        return isExternalSynced(mode) ? smoothedBpm_ : kDefaultClockBpm;
+        return isExternalSynced(mode) ? smoothedBpm_ : internalBpm_;
     }
 
     uint8_t resetSeq() const noexcept { return resetSeq_; }
 
   private:
     static constexpr size_t kMaxIntervals = 24u; // 24 intervals = 1 full quarter-note beat
+    static constexpr size_t kMaxTapIntervals = 3u;
     static constexpr float kMaxTickGapSec = 10.0f;
+    static constexpr float kMinTapIntervalSec = 0.040f; // 40 ms bounce guard (up to 1,500 BPM tap)
+    static constexpr float kMaxTapIntervalSec = 3.200f; // 3.2 s fresh-sequence timeout (~18.8 BPM)
 
     std::array<uint16_t, kMaxIntervals> tickDeltas100Us_{};
+    std::array<float, kMaxTapIntervals> tapIntervalsSec_{};
     float sinceLastTickSec_ = kMaxTickGapSec;
+    float sinceLastTapSec_ = kMaxTickGapSec;
     float lastTickTimeSec_ = -1.0f;
     float residual100Us_ = 0.0f;
     float silenceSec_ = kMidiClockTimeoutSec + 1.0f;
+    float internalBpm_ = kDefaultClockBpm;
     float smoothedBpm_ = kDefaultClockBpm;
     uint8_t tickWrite_ = 0u;
     uint8_t tickStored_ = 0u;
+    uint8_t tapWrite_ = 0u;
+    uint8_t tapCount_ = 0u;
     uint8_t resetSeq_ = 0u;
     bool running_ = true;
     bool hasPrevTick_ = false;

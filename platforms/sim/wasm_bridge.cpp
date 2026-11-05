@@ -167,6 +167,8 @@ void refreshSummary() noexcept {
     gSummaryOut[WasmSummaryIdx::kSelPageOpen] = gCtrl->hud().selPageOpen ? 1.0f : 0.0f;
     gSummaryOut[WasmSummaryIdx::kEffectiveClockBpm] = gCtrl->hud().effectiveClockBpm;
     gSummaryOut[WasmSummaryIdx::kMidiClockSynced] = gCtrl->hud().midiClockSynced ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kMidiChannelIn] =
+        static_cast<float>(gCtrl->hud().config.midiChannel);
 }
 
 } // namespace

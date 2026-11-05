@@ -1,6 +1,7 @@
 #include "ui/HudHeader.h"
 
 #include "core/DspMath.h"
+#include "core/EncoderMath.h"
 #include "core/GlobalConfig.h"
 #include "core/GlobalControl.h"
 #include "core/LfoMath.h"
@@ -183,6 +184,16 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         formatPercent(rightText, sizeof(rightText), headerBarNorm);
         showHeaderBar = true;
         break;
+    case HudMode::MasterTempo: {
+        appendStr(leftMain, 0u, sizeof(leftMain), "TEMPO");
+        headerBarNorm = normalizeClockBpmLog01(hud.effectiveClockBpm);
+        const bool showTenths =
+            !hud.midiClockSynced && (hud.rateHoldActive && hud.knobRate == KnobRate::Fine);
+        formatClockBpm(rightText, sizeof(rightText), hud.effectiveClockBpm, hud.midiClockSynced,
+                       showTenths);
+        showHeaderBar = true;
+        break;
+    }
     case HudMode::UnassignedEncoder:
         appendStr(leftMain, 0u, sizeof(leftMain),
                   (hud.lastEncoder == EncoderId::Presets) ? "PRESETS ENCODER" : "SELECT ENCODER");

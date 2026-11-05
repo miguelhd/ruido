@@ -19,7 +19,6 @@ struct KeyboardModelSpec {
     const char* subtitle;
     std::array<const char*, 4> topZones;
     std::array<const char*, 4> bottomZones;
-    const char* actionHint;
 };
 
 inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel::Count)>
@@ -30,7 +29,6 @@ inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel
             "MIX, FX & SCENES",
             {"SOLO", "DRIVE", "SUB/LPF", "SPREAD"},
             {"MUTE", "FILTER", "OCTAVE", "SCENE"},
-            "HOLD KEYS FOR LIVE MIX & FX",
         },
         // 2/3: CIRCUIT LAB (CMOS Patch Bay)
         {
@@ -38,7 +36,6 @@ inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel
             "CMOS PATCH BAY",
             {"SOLO", "STARVE", "RING/MOD", "SYNC"},
             {"MUTE", "CROSS", "FOLD", "CRUSH"},
-            "HOLD KEYS TO BEND CIRCUIT",
         },
         // 3/3: RHYTHM LAB (Stutter, Clock Dividers & Euclidean Grooves)
         {
@@ -46,7 +43,6 @@ inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel
             "CLOCK, DIVIDE & EUCLID",
             {"SOLO", "PUMP", "CLOCK", "SWING"},
             {"MUTE", "STUTTER", "DIVIDE", "EUCLID"},
-            "HOLD KEYS FOR RHYTHM GATES",
         },
     }};
 

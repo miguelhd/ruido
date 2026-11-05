@@ -925,11 +925,16 @@ async function initWebMidi() {
       }
 
       if (ev.data.length < 2) return;
-      ensureAudioRunning();
 
       const status = ev.data[0] & 0xf0;
+      const msgCh = (ev.data[0] & 0x0f) + 1;
+      const cfgCh = uiPtrs ? Math.round(uiF32[uiPtrs.summary + WASM_SUMMARY.MIDI_CHANNEL_IN]) : 0;
       const d1 = ev.data[1];
       const d2 = ev.data.length > 2 ? ev.data[2] : 0;
+      const isNoteOff = status === 0x80 || (status === 0x90 && d2 === 0);
+      if (cfgCh > 0 && msgCh !== cfgCh && !isNoteOff) return;
+
+      ensureAudioRunning();
 
       // Note On / Note Off across F3..G5 (MIDI 53..79)
       if (status === 0x90 || status === 0x80) {

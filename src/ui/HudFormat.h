@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Config.h"
 #include "core/DspMath.h"
 
 #include <cstddef>
@@ -159,6 +160,30 @@ inline void formatMultiplierX(char* buf, size_t cap, float mult) noexcept {
     p = appendStr(buf, p, cap, ".");
     p = appendUInt(buf, p, cap, deci % 10u);
     appendStr(buf, p, cap, "x");
+}
+
+inline void formatClockBpm(char* buf, size_t cap, float bpm, bool midiSynced,
+                           bool forceTenths = false) noexcept {
+    const float clamped = clampf(bpm, kMinInternalClockBpm, kMaxEffectiveClockBpm);
+    if (midiSynced) {
+        const auto bpmInt = static_cast<uint32_t>(clamped + 0.5f);
+        const size_t p = appendUInt(buf, 0u, cap, bpmInt);
+        appendStr(buf, p, cap, " BPM EXT");
+        return;
+    }
+    if (forceTenths || clamped < 100.0f) {
+        const auto tenths = static_cast<uint32_t>(clamped * 10.0f + 0.5f);
+        size_t p = appendUInt(buf, 0u, cap, tenths / 10u);
+        if (forceTenths || (tenths % 10u) != 0u) {
+            p = appendStr(buf, p, cap, ".");
+            p = appendUInt(buf, p, cap, tenths % 10u);
+        }
+        appendStr(buf, p, cap, " BPM");
+        return;
+    }
+    const auto bpmInt = static_cast<uint32_t>(clamped + 0.5f);
+    const size_t p = appendUInt(buf, 0u, cap, bpmInt);
+    appendStr(buf, p, cap, " BPM");
 }
 
 } // namespace ruido
