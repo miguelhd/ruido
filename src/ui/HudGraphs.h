@@ -2,6 +2,7 @@
 
 #include "core/ControlSurface.h"
 #include "core/DspMath.h"
+#include "core/FilterModMath.h"
 #include "core/LfoMath.h"
 #include "core/Parameters.h"
 #include "ui/GraphStyle.h"

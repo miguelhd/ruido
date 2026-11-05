@@ -22,14 +22,6 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
                                        const LfoSignalArray& lfoOutput,
                                        uint8_t stutterGateMask) noexcept;
 
-void compositeIdlePeakMeters(const MonoStripCanvas& idleCv, float smoothedPeakL,
-                             float smoothedPeakR) noexcept;
-
-void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState& control,
-                             const HudState& hud, const LfoSignalArray& lfoOutput,
-                             uint8_t stutterGateMask, float headerBarSmooth, float finePhase,
-                             float coarsePhase) noexcept;
-
 void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlState& control,
                               const HudState& hud, const LfoSignalArray& lfoOutput,
                               uint8_t stutterGateMask,

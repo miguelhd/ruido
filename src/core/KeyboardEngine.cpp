@@ -81,6 +81,61 @@ float KeyboardEngine::maxHeldPressure() const noexcept {
     return clampf(pMax, 0.0f, 1.0f);
 }
 
+uint16_t KeyboardEngine::nextPressSeq() noexcept {
+    if (pressCounter_ == 0xFFFFu) {
+        // Overflow-proof order-preserving compact rebase across the <= 27 held keys
+        uint16_t rebasedBlack[kNumBlackKeys]{};
+        uint16_t rebasedWhite[kNumWhiteKeys]{};
+        uint16_t maxRank = 0u;
+        for (size_t i = 0u; i < kNumBlackKeys; ++i) {
+            if (blackPressSeq_[i] != 0u) {
+                uint16_t rank = 1u;
+                for (size_t j = 0u; j < kNumBlackKeys; ++j) {
+                    if (blackPressSeq_[j] != 0u && blackPressSeq_[j] < blackPressSeq_[i]) {
+                        ++rank;
+                    }
+                }
+                for (size_t j = 0u; j < kNumWhiteKeys; ++j) {
+                    if (whitePressSeq_[j] != 0u && whitePressSeq_[j] < blackPressSeq_[i]) {
+                        ++rank;
+                    }
+                }
+                rebasedBlack[i] = rank;
+                if (rank > maxRank) {
+                    maxRank = rank;
+                }
+            }
+        }
+        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+            if (whitePressSeq_[i] != 0u) {
+                uint16_t rank = 1u;
+                for (size_t j = 0u; j < kNumBlackKeys; ++j) {
+                    if (blackPressSeq_[j] != 0u && blackPressSeq_[j] < whitePressSeq_[i]) {
+                        ++rank;
+                    }
+                }
+                for (size_t j = 0u; j < kNumWhiteKeys; ++j) {
+                    if (whitePressSeq_[j] != 0u && whitePressSeq_[j] < whitePressSeq_[i]) {
+                        ++rank;
+                    }
+                }
+                rebasedWhite[i] = rank;
+                if (rank > maxRank) {
+                    maxRank = rank;
+                }
+            }
+        }
+        for (size_t i = 0u; i < kNumBlackKeys; ++i) {
+            blackPressSeq_[i] = rebasedBlack[i];
+        }
+        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+            whitePressSeq_[i] = rebasedWhite[i];
+        }
+        pressCounter_ = maxRank;
+    }
+    return ++pressCounter_;
+}
+
 void KeyboardEngine::setBlackGate(BlackKeyId key, bool pressed) noexcept {
     const size_t idx = static_cast<size_t>(key);
     if (idx >= kNumBlackKeys) {
@@ -91,7 +146,7 @@ void KeyboardEngine::setBlackGate(BlackKeyId key, bool pressed) noexcept {
     if (pressed) {
         heldBlackMask_ |= static_cast<uint16_t>(1u << idx);
         if (!wasHeld) {
-            blackPressSeq_[idx] = ++pressCounter_;
+            blackPressSeq_[idx] = nextPressSeq();
             keyboardModelOps(model_).onKeyPress(true, static_cast<uint8_t>(idx), config_, latch_);
         }
         if (blackPressure_[idx] <= 0.001f) {
@@ -101,6 +156,9 @@ void KeyboardEngine::setBlackGate(BlackKeyId key, bool pressed) noexcept {
         heldBlackMask_ &= static_cast<uint16_t>(~(1u << idx));
         blackPressure_[idx] = 0.0f;
         blackPressSeq_[idx] = 0u;
+        if (!anyKeyHeld()) {
+            pressCounter_ = 0u;
+        }
     }
 }
 
@@ -117,12 +175,15 @@ void KeyboardEngine::setBlackPressure(BlackKeyId key, float pressure) noexcept {
     if (held) {
         heldBlackMask_ |= static_cast<uint16_t>(1u << idx);
         if (!wasHeld) {
-            blackPressSeq_[idx] = ++pressCounter_;
+            blackPressSeq_[idx] = nextPressSeq();
             keyboardModelOps(model_).onKeyPress(true, static_cast<uint8_t>(idx), config_, latch_);
         }
     } else {
         heldBlackMask_ &= static_cast<uint16_t>(~(1u << idx));
         blackPressSeq_[idx] = 0u;
+        if (!anyKeyHeld()) {
+            pressCounter_ = 0u;
+        }
     }
 }
 
@@ -135,7 +196,7 @@ void KeyboardEngine::setWhiteGate(uint8_t whiteIdx, bool pressed) noexcept {
     if (pressed) {
         heldWhiteMask_ |= static_cast<uint16_t>(1u << whiteIdx);
         if (!wasHeld) {
-            whitePressSeq_[whiteIdx] = ++pressCounter_;
+            whitePressSeq_[whiteIdx] = nextPressSeq();
             keyboardModelOps(model_).onKeyPress(false, whiteIdx, config_, latch_);
         }
         if (whitePressure_[whiteIdx] <= 0.001f) {
@@ -145,6 +206,9 @@ void KeyboardEngine::setWhiteGate(uint8_t whiteIdx, bool pressed) noexcept {
         heldWhiteMask_ &= static_cast<uint16_t>(~(1u << whiteIdx));
         whitePressure_[whiteIdx] = 0.0f;
         whitePressSeq_[whiteIdx] = 0u;
+        if (!anyKeyHeld()) {
+            pressCounter_ = 0u;
+        }
     }
 }
 
@@ -160,12 +224,15 @@ void KeyboardEngine::setWhitePressure(uint8_t whiteIdx, float pressure) noexcept
     if (held) {
         heldWhiteMask_ |= static_cast<uint16_t>(1u << whiteIdx);
         if (!wasHeld) {
-            whitePressSeq_[whiteIdx] = ++pressCounter_;
+            whitePressSeq_[whiteIdx] = nextPressSeq();
             keyboardModelOps(model_).onKeyPress(false, whiteIdx, config_, latch_);
         }
     } else {
         heldWhiteMask_ &= static_cast<uint16_t>(~(1u << whiteIdx));
         whitePressSeq_[whiteIdx] = 0u;
+        if (!anyKeyHeld()) {
+            pressCounter_ = 0u;
+        }
     }
 }
 

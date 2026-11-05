@@ -279,9 +279,8 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
                                            ((stutterGateMask >> v) & 1u) != 0u);
             const ModulatedFilterParams mod = computeLiveVoiceFilter(
                 vp, control.voicePressure[v], pitchMode, lfoOutput[lfoBankIndex(v, 0u)],
-                lfoOutput[lfoBankIndex(v, 1u)], control.keyMod.dubLpfDrop,
-                control.keyMod.overloadSurge, control.keyMod.filterScream,
-                control.keyMod.rhythmPluck, pluckEnv);
+                lfoOutput[lfoBankIndex(v, 1u)],
+                FilterMacroContext::fromKeyMod(control.keyMod, pluckEnv));
             mods = {mod, mod, mod, mod};
             unified = true;
         } else {
@@ -293,9 +292,8 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
                     ((stutterGateMask >> i) & 1u) != 0u);
                 mods[i] = computeLiveVoiceFilter(
                     vp, control.voicePressure[i], pitchMode, lfoOutput[lfoBankIndex(i, 0u)],
-                    lfoOutput[lfoBankIndex(i, 1u)], control.keyMod.dubLpfDrop,
-                    control.keyMod.overloadSurge, control.keyMod.filterScream,
-                    control.keyMod.rhythmPluck, pluckEnv);
+                    lfoOutput[lfoBankIndex(i, 1u)],
+                    FilterMacroContext::fromKeyMod(control.keyMod, pluckEnv));
             }
             for (size_t i = 1u; i < kNumOscillators; ++i) {
                 if (absf(mods[i].hpCutoffHz - mods[0].hpCutoffHz) >

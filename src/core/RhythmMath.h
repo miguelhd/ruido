@@ -94,23 +94,23 @@ inline constexpr uint16_t voiceEuclidMask16(uint8_t voiceIdx, uint8_t tierIdx) n
 }
 
 // Free-speed STUTTER rate: 1.5 Hz slow pulse -> 24.0 Hz fast buzz
-inline float computeStutterRateHz(float pressure01) noexcept {
+RUIDO_ALWAYS_INLINE float computeStutterRateHz(float pressure01) noexcept {
     return 1.5f * fastExp2(4.0f * clampf(pressure01, 0.0f, 1.0f));
 }
 
 // PIT TEMPO multiplier: 1.0x -> 4.0x master clock speed
-inline float computeTempoMultiplier(float pressure01) noexcept {
+RUIDO_ALWAYS_INLINE float computeTempoMultiplier(float pressure01) noexcept {
     return fastExp2(2.0f * clampf(pressure01, 0.0f, 1.0f));
 }
 
 // POLY SWING percentage: 50% straight -> 72% deep shuffle
-inline constexpr float computeSwingRatio(float swing01) noexcept {
+RUIDO_ALWAYS_INLINE constexpr float computeSwingRatio(float swing01) noexcept {
     return 0.50f + 0.22f * clampf(swing01, 0.0f, 1.0f);
 }
 
 // Continuous MPC-style 16th-note shuffle warp across the 8 eighth-note pairs in a 4-beat bar.
 // Maps raw bar phase [0, 1) -> swung bar phase [0, 1) so odd 16th off-beats delay up to 72%.
-inline float warpSwingBarPhase01(float rawBarPhase01, float swing01) noexcept {
+RUIDO_ALWAYS_INLINE float warpSwingBarPhase01(float rawBarPhase01, float swing01) noexcept {
     const float raw = wrapLfoPhase01(rawBarPhase01);
     const float s = clampf(swing01, 0.0f, 1.0f);
     if (s <= 1.0e-4f) {

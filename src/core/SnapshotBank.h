@@ -42,6 +42,8 @@ struct PatchSnapshot {
     std::array<VoiceSnapshotBin, kNumOscillators> voices{};
 };
 static_assert(sizeof(PatchSnapshot) == 128u, "PatchSnapshot must be exactly 128 bytes");
+static_assert(__is_trivially_copyable(PatchSnapshot),
+              "PatchSnapshot must remain trivially copyable");
 
 // Decoded floating-point synthesis patch frame (excludes hardware Master pot & Global Config).
 struct PatchFrame {
@@ -56,6 +58,7 @@ bool verifyPatchSnapshotCrc(const PatchSnapshot& snap) noexcept;
 PatchFrame extractPatchFrame(const EngineControlState& state) noexcept;
 void applyPatchFrame(const PatchFrame& patch, EngineControlState& state) noexcept;
 PatchFrame morphPatchFrames(const PatchFrame& a, const PatchFrame& b, float t01) noexcept;
+EngineControlState makeFactorySnapshotPreset(size_t slot) noexcept;
 
 // 4-slot Snapshot Bank + smooth log-octave latching glide & momentary pressure-morph engine.
 class SnapshotBank {
@@ -73,6 +76,14 @@ class SnapshotBank {
 
     // Store current synthesis patch into slot 0..3 (`SAVE` + Key 13-16).
     void saveSlot(uint8_t slot, EngineControlState& state) noexcept;
+
+    // Load a CRC-verified binary snapshot from FM-1 NVS flash (`dinghy` `slot_*`) into slot 0..3;
+    // returns false and preserves the existing/factory slot if `snap` fails version or CRC checks.
+    bool loadSlotBinary(uint8_t slot, const PatchSnapshot& snap,
+                        EngineControlState& state) noexcept;
+
+    // Immediately activate slot 0..3 without starting a glide (used on NVS boot restore).
+    void selectActiveSlotImmediate(uint8_t slot, EngineControlState& state) noexcept;
 
     // Stepped recall via left PRESETS encoder (works across all 3 keyboard models).
     void recallSlotStepped(uint8_t slot, KnobRate rate, EngineControlState& state) noexcept;

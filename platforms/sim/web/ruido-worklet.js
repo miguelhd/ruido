@@ -55,6 +55,7 @@ class RuidoAudioProcessor extends AudioWorkletProcessor {
         right: ex.wasm_dsp_get_right_ptr() >> 2,
         scopeOut: ex.wasm_dsp_get_scope_ptr(),
         scopeFrameSize: ex.wasm_dsp_get_scope_frame_size(),
+        telemetryFloats: ex.wasm_dsp_get_telemetry_floats(),
       };
       this.ex = ex;
 
@@ -98,7 +99,7 @@ class RuidoAudioProcessor extends AudioWorkletProcessor {
     if (this.blockCounter === 0) {
       const nScope = this.ex.wasm_dsp_pop_scope(256);
       const telPtr = this.ex.wasm_dsp_read_telemetry() >> 2;
-      const telemetry = this.f32.slice(telPtr, telPtr + 48);
+      const telemetry = this.f32.slice(telPtr, telPtr + this.ptrs.telemetryFloats);
 
       let scopeBuffer = null;
       if (nScope > 0) {

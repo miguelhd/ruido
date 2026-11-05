@@ -97,6 +97,12 @@ void testMemoryFootprintAndLockFreeBus() {
     std::printf("  sizeof(Ms20DualFilter)           = %zu bytes\n", sizeof(ruido::Ms20DualFilter));
     std::printf("  sizeof(StereoHalfBandDecimator4x)= %zu bytes\n",
                 sizeof(ruido::StereoHalfBandDecimator4x));
+    std::printf("  sizeof(EngineSharedBuses)        = %zu bytes (%.2f KB)\n",
+                sizeof(ruido::EngineSharedBuses),
+                static_cast<double>(sizeof(ruido::EngineSharedBuses)) / 1024.0);
+    std::printf("  sizeof(DroneEngineCore)          = %zu bytes (%.2f KB)\n",
+                sizeof(ruido::DroneEngineCore),
+                static_cast<double>(sizeof(ruido::DroneEngineCore)) / 1024.0);
     std::printf("  sizeof(DroneEngine) total        = %zu bytes (%.2f KB)\n",
                 sizeof(ruido::DroneEngine),
                 static_cast<double>(sizeof(ruido::DroneEngine)) / 1024.0);

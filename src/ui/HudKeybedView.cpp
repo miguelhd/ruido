@@ -2,6 +2,7 @@
 
 #include "core/DspMath.h"
 #include "core/HudEnvelope.h"
+#include "core/KeyPunchSpec.h"
 #include "core/KeyboardModelSpec.h"
 #include "core/LfoMath.h"
 #include "core/RhythmMath.h"
@@ -177,6 +178,15 @@ constexpr std::array<TopZoneSpan, 4> kTopZoneSpans = {{
     {kBlackCenterX[8] - 3.2f, kBlackCenterX[9] + 3.2f, 180, 8u, 2u}, // MONO, POLY
 }};
 
+inline void formatSignedOctave(char* dst, size_t cap, const char* signPrefix, float mag) noexcept {
+    const auto tenths = static_cast<uint32_t>(clampf(mag, 0.0f, 2.0f) * 10.0f + 0.5f);
+    size_t rp = appendStr(dst, 0u, cap, signPrefix);
+    rp = appendUInt(dst, rp, cap, tenths / 10u);
+    rp = appendStr(dst, rp, cap, ".");
+    rp = appendUInt(dst, rp, cap, tenths % 10u);
+    appendStr(dst, rp, cap, " OCT");
+}
+
 } // namespace
 
 void formatKeybedTopHeader(const HudState& hud, char* leftMain, size_t leftMainCap,
@@ -196,218 +206,90 @@ void formatKeybedTopHeader(const HudState& hud, char* leftMain, size_t leftMainC
         return;
     }
 
-    const uint32_t oscNum = static_cast<uint32_t>((hud.activePunchVoice & 3u) + 1u);
-    switch (hud.activePunch) {
-    case KeyPunchKind::SpotlightSolo: {
-        appendStr(leftMain, 0u, leftMainCap, "SOLO");
-        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
+    const KeyPunchSpec& spec = keyPunchSpec(hud.activePunch);
+    if (spec.readoutKind == PunchReadoutKind::Snapshot) {
+        formatSnapshotHeader(hud, leftMain, leftMainCap, leftSuffix, leftSuffixCap, rightText,
+                             rightCap, outShowBar, outBarNorm);
+        return;
+    }
+    if (spec.readoutKind == PunchReadoutKind::ModelPreview) {
+        appendStr(leftMain, 0u, leftMainCap, keyboardModelTitle(hud.keyboardModel));
+        appendStr(rightText, 0u, rightCap, "PREVIEW");
+        return;
+    }
+
+    appendStr(leftMain, 0u, leftMainCap, spec.title);
+    if (spec.showOscSuffix) {
+        const uint32_t oscNum = static_cast<uint32_t>((hud.activePunchVoice & 3u) + 1u);
+        const size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
         appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
+    }
+    outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+
+    switch (spec.readoutKind) {
+    case PunchReadoutKind::Percent:
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
+    case PunchReadoutKind::SoloState:
         appendStr(rightText, 0u, rightCap, (hud.activePunchValue > 0.5f) ? "SOLOED" : "UNSOLOED");
         break;
-    }
-    case KeyPunchKind::OverloadSurge:
-        appendStr(leftMain, 0u, leftMainCap, "DRIVE");
-        outBarNorm = clampf(hud.activePunchValue, 0.0f, 1.0f);
-        formatPercent(rightText, rightCap, outBarNorm);
-        outShowBar = true;
+    case PunchReadoutKind::MuteState:
+        appendStr(rightText, 0u, rightCap, (hud.activePunchValue > 0.5f) ? "MUTED" : "UNMUTED");
         break;
-    case KeyPunchKind::SubDrop: {
-        appendStr(leftMain, 0u, leftMainCap, "SUB OCTAVE");
-        const float mag = clampf(-hud.activePunchValue, 0.0f, 2.0f);
-        const auto tenths = static_cast<uint32_t>(mag * 10.0f + 0.5f);
-        size_t rp = appendStr(rightText, 0u, rightCap, "-");
-        rp = appendUInt(rightText, rp, rightCap, tenths / 10u);
-        rp = appendStr(rightText, rp, rightCap, ".");
-        rp = appendUInt(rightText, rp, rightCap, tenths % 10u);
-        appendStr(rightText, rp, rightCap, " OCT");
-        outBarNorm = clampf(mag * 0.5f, 0.0f, 1.0f);
-        outShowBar = true;
+    case PunchReadoutKind::Holding:
+        appendStr(rightText, 0u, rightCap, "HOLDING");
         break;
-    }
-    case KeyPunchKind::RatioMagnet: {
-        appendStr(leftMain, 0u, leftMainCap, "RATIO LOCK");
+    case PunchReadoutKind::SubOctave:
+        formatSignedOctave(rightText, rightCap, "-", -hud.activePunchValue);
+        break;
+    case PunchReadoutKind::PosOctave:
+        formatSignedOctave(rightText, rightCap, "+", hud.activePunchValue);
+        break;
+    case PunchReadoutKind::JustRatio: {
         const size_t rIdx = (hud.activePunchVoice < kNumJustRatios) ? hud.activePunchVoice : 12u;
         size_t rp = appendUInt(rightText, 0u, rightCap, kJustRatioTable[rIdx].num);
         rp = appendStr(rightText, rp, rightCap, ":");
         appendUInt(rightText, rp, rightCap, kJustRatioTable[rIdx].den);
-        outBarNorm = clampf(hud.activePunchValue, 0.0f, 1.0f);
-        outShowBar = true;
         break;
     }
-    case KeyPunchKind::DubLpfDrop:
-        appendStr(leftMain, 0u, leftMainCap, "LOW PASS");
+    case PunchReadoutKind::RawCutoffHz:
         formatCompactHz(rightText, rightCap, clampf(hud.activePunchValue, 20.0f, 28000.0f));
         break;
-    case KeyPunchKind::MonoFocus:
-        appendStr(leftMain, 0u, leftMainCap, "UNISON");
-        outBarNorm = clampf(hud.activePunchValue, 0.0f, 1.0f);
-        formatPercent(rightText, rightCap, outBarNorm);
-        outShowBar = true;
-        break;
-    case KeyPunchKind::PolySpread:
-        appendStr(leftMain, 0u, leftMainCap, "DETUNE SPREAD");
-        outBarNorm = clampf(hud.activePunchValue, 0.0f, 1.0f);
-        formatPercent(rightText, rightCap, outBarNorm);
-        outShowBar = true;
-        break;
-    case KeyPunchKind::StasisFreeze:
-        appendStr(leftMain, 0u, leftMainCap, "FREEZE");
-        appendStr(rightText, 0u, rightCap, "HOLDING");
-        break;
-    case KeyPunchKind::VoiceCut: {
-        appendStr(leftMain, 0u, leftMainCap, "MUTE");
-        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
-        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-        appendStr(rightText, 0u, rightCap, (hud.activePunchValue > 0.5f) ? "MUTED" : "UNMUTED");
-        break;
-    }
-    case KeyPunchKind::VoiceFormant: {
-        appendStr(leftMain, 0u, leftMainCap, "FILTER");
-        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
-        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-        outBarNorm = clampf(hud.activePunchValue, 0.0f, 1.0f);
-        formatPercent(rightText, rightCap, outBarNorm);
-        outShowBar = true;
-        break;
-    }
-    case KeyPunchKind::VoiceStutter: {
-        appendStr(leftMain, 0u, leftMainCap, "STUTTER");
-        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
-        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+    case PunchReadoutKind::StutterHz:
         formatCompactHz(rightText, rightCap, computeStutterRateHz(outBarNorm));
         break;
-    }
-    case KeyPunchKind::VoiceSiren: {
-        appendStr(leftMain, 0u, leftMainCap, "OCTAVE");
-        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
-        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-        const float mag = clampf(hud.activePunchValue, 0.0f, 2.0f);
-        const auto tenths = static_cast<uint32_t>(mag * 10.0f + 0.5f);
-        size_t rp = appendStr(rightText, 0u, rightCap, "+");
-        rp = appendUInt(rightText, rp, rightCap, tenths / 10u);
-        rp = appendStr(rightText, rp, rightCap, ".");
-        rp = appendUInt(rightText, rp, rightCap, tenths % 10u);
-        appendStr(rightText, rp, rightCap, " OCT");
-        outBarNorm = clampf(mag * 0.5f, 0.0f, 1.0f);
-        outShowBar = true;
-        break;
-    }
-    case KeyPunchKind::SnapshotRecall:
-        formatSnapshotHeader(hud, leftMain, leftMainCap, leftSuffix, leftSuffixCap, rightText,
-                             rightCap, outShowBar, outBarNorm);
-        break;
-    case KeyPunchKind::VoiceXMod: {
-        appendStr(leftMain, 0u, leftMainCap, "CROSS-PIN");
-        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
-        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    }
-    case KeyPunchKind::VoiceFold: {
-        appendStr(leftMain, 0u, leftMainCap, "FOLD");
-        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
-        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+    case PunchReadoutKind::FoldStages:
         formatMultiplierX(rightText, rightCap, computeWavefoldStages(outBarNorm));
         break;
-    }
-    case KeyPunchKind::VoiceCrush: {
-        appendStr(leftMain, 0u, leftMainCap, "CRUSH");
-        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
-        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+    case PunchReadoutKind::CrushHz:
         formatCompactHz(rightText, rightCap, computeCrushClockHz(outBarNorm));
         break;
-    }
-    case KeyPunchKind::RailStarve:
-        appendStr(leftMain, 0u, leftMainCap, "STARVE");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    case KeyPunchKind::RingXor:
-        appendStr(leftMain, 0u, leftMainCap, "RING MOD");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    case KeyPunchKind::LfoTurbo:
-        appendStr(leftMain, 0u, leftMainCap, "TURBO LFO");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+    case PunchReadoutKind::TurboMult:
         formatMultiplierX(rightText, rightCap, fastExp2(5.0f * outBarNorm));
         break;
-    case KeyPunchKind::FilterScream:
-        appendStr(leftMain, 0u, leftMainCap, "SCREAM");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    case KeyPunchKind::HardSync:
-        appendStr(leftMain, 0u, leftMainCap, "HARD SYNC");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    case KeyPunchKind::PhaseScatter:
-        appendStr(leftMain, 0u, leftMainCap, "SCATTER");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    case KeyPunchKind::VoiceDivide: {
-        appendStr(leftMain, 0u, leftMainCap, "DIVIDE");
-        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
-        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+    case PunchReadoutKind::ClockDiv:
         appendStr(rightText, 0u, rightCap,
                   clockDivisionLabel(selectVoiceClockDivIndex(hud.activePunchVoice, outBarNorm)));
         break;
-    }
-    case KeyPunchKind::VoiceEuclid: {
-        appendStr(leftMain, 0u, leftMainCap, "EUCLID");
-        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
-        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+    case PunchReadoutKind::EuclidHits: {
         const uint8_t hits = kEuclidHitCounts[selectEuclidTierIndex(outBarNorm)];
-        size_t rp = appendUInt(rightText, 0u, rightCap, hits);
+        const size_t rp = appendUInt(rightText, 0u, rightCap, hits);
         appendStr(rightText, rp, rightCap, "/16");
         break;
     }
-    case KeyPunchKind::RhythmPump:
-        appendStr(leftMain, 0u, leftMainCap, "PUMP");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    case KeyPunchKind::RhythmChase:
-        appendStr(leftMain, 0u, leftMainCap, "CHASE");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    case KeyPunchKind::RhythmTempo: {
-        appendStr(leftMain, 0u, leftMainCap, "TEMPO");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+    case PunchReadoutKind::TempoBpm: {
         const auto bpmInt = static_cast<uint32_t>(
             clampf(hud.effectiveClockBpm * computeTempoMultiplier(outBarNorm), 30.0f, 1200.0f) +
             0.5f);
-        size_t rp = appendUInt(rightText, 0u, rightCap, bpmInt);
+        const size_t rp = appendUInt(rightText, 0u, rightCap, bpmInt);
         appendStr(rightText, rp, rightCap, hud.midiClockSynced ? " BPM EXT" : " BPM");
         break;
     }
-    case KeyPunchKind::RhythmPluck:
-        appendStr(leftMain, 0u, leftMainCap, "PLUCK");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    case KeyPunchKind::RhythmShort:
-        appendStr(leftMain, 0u, leftMainCap, "SHORT");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    case KeyPunchKind::RhythmSwing:
-        appendStr(leftMain, 0u, leftMainCap, "SWING");
-        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+    case PunchReadoutKind::SwingPct:
         formatPercent(rightText, rightCap, computeSwingRatio(outBarNorm));
         break;
-    case KeyPunchKind::None:
-        appendStr(leftMain, 0u, leftMainCap, keyboardModelTitle(hud.keyboardModel));
-        appendStr(rightText, 0u, rightCap, "PREVIEW");
+    case PunchReadoutKind::ModelPreview:
+    case PunchReadoutKind::Snapshot:
         break;
     }
 }

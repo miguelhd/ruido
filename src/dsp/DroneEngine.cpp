@@ -1,6 +1,7 @@
 #include "dsp/DroneEngine.h"
 
 #include "core/DspMath.h"
+#include "core/FilterModMath.h"
 #include "core/LfoMath.h"
 #include "dsp/CircuitPatchMatrix.h"
 
@@ -21,11 +22,7 @@ constexpr std::array<float, kNumOscillators> kWideFanPans = {-1.0f, -0.52f, 0.52
 
 } // namespace
 
-DroneEngine::DroneEngine() noexcept {
-    init(kBaseSampleRate);
-}
-
-void DroneEngine::init(float baseSampleRate) noexcept {
+void DroneEngineCore::init(EngineSharedBuses& buses, float baseSampleRate) noexcept {
     baseSampleRate_ = (baseSampleRate >= 16000.0f && baseSampleRate <= 384000.0f) ? baseSampleRate
                                                                                   : kBaseSampleRate;
     oversampledRate_ = baseSampleRate_ * static_cast<float>(kOversampleFactor);
@@ -52,7 +49,7 @@ void DroneEngine::init(float baseSampleRate) noexcept {
 
     // Smoothers step once per 44.118 kHz output audio frame (100% sample-accurate audio rate
     // smoothing while saving 4x redundant coefficient / pan updates inside the 4x inner loop).
-    const EngineControlState initState = controlBus_.consumeLatest();
+    const EngineControlState initState = buses.controlBus.consumeLatest();
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         VoiceSmoothers& sm = voiceSmoothers_[i];
         sm.freqHz.init(initState.voices[i].frequencyHz, kPotPoleTauSec, baseSampleRate_);
@@ -97,14 +94,14 @@ void DroneEngine::init(float baseSampleRate) noexcept {
     punchBusSmoothers_.snapChannel(4u, initState.keyMod.hardSyncAmount);
     punchBusSmoothers_.snapChannel(5u, initState.keyMod.filterScream);
     stasisFreeze_ = initState.keyMod.stasisFreeze;
-    telemetry_.stutterGateMask.store(0x0Fu, std::memory_order_relaxed);
-    telemetry_.rhythmPhase.store(0.0f, std::memory_order_relaxed);
+    buses.telemetry.stutterGateMask.store(0x0Fu, std::memory_order_relaxed);
+    buses.telemetry.rhythmPhase.store(0.0f, std::memory_order_relaxed);
 
     updateTargetsFromState(initState, true);
-    lfoBank_.writeInitialTelemetry(telemetry_);
+    lfoBank_.writeInitialTelemetry(buses.telemetry);
 }
 
-void DroneEngine::reset() noexcept {
+void DroneEngineCore::reset(EngineSharedBuses& buses) noexcept {
     oscBank_.reset(oversampledRate_);
     lfoBank_.reset(baseSampleRate_);
     for (auto& f : filters_) {
@@ -121,17 +118,17 @@ void DroneEngine::reset() noexcept {
     voiceEdgeDelayLines_ = {0u, 0u, 0u, 0u};
     voiceScopeDelay_ = {};
     voiceScopeDelayWrite_ = 0u;
-    snapParametersToLatest();
-    lfoBank_.writeInitialTelemetry(telemetry_);
+    snapParametersToLatest(buses);
+    lfoBank_.writeInitialTelemetry(buses.telemetry);
 }
 
-void DroneEngine::snapParametersToLatest() noexcept {
-    const EngineControlState& state = controlBus_.consumeLatest();
+void DroneEngineCore::snapParametersToLatest(EngineSharedBuses& buses) noexcept {
+    const EngineControlState& state = buses.controlBus.consumeLatest();
     updateTargetsFromState(state, true);
 }
 
-void DroneEngine::updateTargetsFromState(const EngineControlState& state,
-                                         bool snapImmediate) noexcept {
+void DroneEngineCore::updateTargetsFromState(const EngineControlState& state,
+                                             bool snapImmediate) noexcept {
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceParams& vp = state.voices[i];
         VoiceSmoothers& sm = voiceSmoothers_[i];
@@ -247,12 +244,13 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
     lfoBank_.updateTargets(state, snapImmediate);
 }
 
-void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames) noexcept {
+void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, float* outRight,
+                                   size_t numFrames) noexcept {
     if (numFrames == 0u || outLeft == nullptr || outRight == nullptr) {
         return;
     }
 
-    const EngineControlState& latestState = controlBus_.consumeLatest();
+    const EngineControlState& latestState = buses.controlBus.consumeLatest();
     updateTargetsFromState(latestState, false);
 
     float blockPeakL = 0.0f;
@@ -360,10 +358,13 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             lpResBase = applyLfoResonance(
                 lpResBase, tdB[static_cast<size_t>(LfoTarget::LpResonance)], lfoB.raw);
 
-            ModulatedFilterParams mod = applyKeyDubLowPass(
+            const FilterMacroContext fltMacros{
+                dubDrop, surge, filterScream, rhythmFrame.pluckDepth, rhythmFrame.pluckEnv01[i],
+            };
+            ModulatedFilterParams mod = applyFilterPerformanceMacros(
                 computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase, p, baseGate,
                                           pitchMode),
-                dubDrop, surge, filterScream, rhythmFrame.pluckDepth, rhythmFrame.pluckEnv01[i]);
+                fltMacros);
 
             float modAmp = applyLfoAmplitude(
                 sm.potSmoothers.next(4u), tdA[static_cast<size_t>(LfoTarget::Amplitude)], lfoA.raw);
@@ -504,22 +505,22 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
                 delayedMask |= static_cast<uint8_t>(1u << v);
             }
         }
-        scopeBuffer_.push({cleanL, cleanR, delayedMask, delayedVoices});
+        buses.scopeBuffer.push({cleanL, cleanR, delayedMask, delayedVoices});
     }
 
-    telemetry_.peakLeft.store(blockPeakL, std::memory_order_relaxed);
-    telemetry_.peakRight.store(blockPeakR, std::memory_order_relaxed);
+    buses.telemetry.peakLeft.store(blockPeakL, std::memory_order_relaxed);
+    buses.telemetry.peakRight.store(blockPeakR, std::memory_order_relaxed);
     for (size_t i = 0u; i < kNumOscillators; ++i) {
-        telemetry_.oscGateHigh[i].store(lastGateHigh[i], std::memory_order_relaxed);
-        telemetry_.voicePeak[i].store(blockVoicePeak[i], std::memory_order_relaxed);
-        telemetry_.voiceDriftNorm[i].store(lastDriftNorm[i], std::memory_order_relaxed);
+        buses.telemetry.oscGateHigh[i].store(lastGateHigh[i], std::memory_order_relaxed);
+        buses.telemetry.voicePeak[i].store(blockVoicePeak[i], std::memory_order_relaxed);
+        buses.telemetry.voiceDriftNorm[i].store(lastDriftNorm[i], std::memory_order_relaxed);
     }
-    telemetry_.stutterGateMask.store(lastStutterMask, std::memory_order_relaxed);
-    telemetry_.rhythmPhase.store(rhythmState_.warpedBar01, std::memory_order_relaxed);
+    buses.telemetry.stutterGateMask.store(lastStutterMask, std::memory_order_relaxed);
+    buses.telemetry.rhythmPhase.store(rhythmState_.warpedBar01, std::memory_order_relaxed);
     for (size_t s = 0u; s < kNumVoiceLfos; ++s) {
-        telemetry_.lfoOutput[s].store(lastLfo[s].raw, std::memory_order_relaxed);
-        telemetry_.lfoPhase[s].store(lastLfo[s].phase01, std::memory_order_relaxed);
-        telemetry_.lfoDriftPacked[s].store(lastLfo[s].driftPacked, std::memory_order_relaxed);
+        buses.telemetry.lfoOutput[s].store(lastLfo[s].raw, std::memory_order_relaxed);
+        buses.telemetry.lfoPhase[s].store(lastLfo[s].phase01, std::memory_order_relaxed);
+        buses.telemetry.lfoDriftPacked[s].store(lastLfo[s].driftPacked, std::memory_order_relaxed);
     }
 }
 

@@ -59,7 +59,7 @@ class VoiceLfoBank {
         LogFreqSmoother rateHz{};
         CriticallyDampedSmoother shape{};
         CriticallyDampedSmoother depth{};
-        std::array<OnePoleSmoother, kNumTargets> targetWeights{};
+        OnePoleSmootherBank<kNumTargets> targetWeights{};
         uint8_t activeTarget = 0u;
         bool crossfading = false;
     };

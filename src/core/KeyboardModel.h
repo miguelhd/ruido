@@ -55,8 +55,8 @@ struct KeyboardInputView {
     const std::array<bool, kNumWhiteKeys>& whiteHeld;
     const std::array<float, kNumBlackKeys>& blackPressure;
     const std::array<float, kNumWhiteKeys>& whitePressure;
-    const std::array<uint32_t, kNumBlackKeys>& blackPressSeq;
-    const std::array<uint32_t, kNumWhiteKeys>& whitePressSeq;
+    const std::array<uint16_t, kNumBlackKeys>& blackPressSeq;
+    const std::array<uint16_t, kNumWhiteKeys>& whitePressSeq;
     uint16_t heldBlackMask = 0u;
     uint16_t heldWhiteMask = 0u;
     KeyboardLatchState latch{};
@@ -65,12 +65,12 @@ struct KeyboardInputView {
 
 // LIFO most-recently-pressed key punch tracker for HudMode::KeyboardPlay headers.
 struct PunchTracker {
-    uint32_t latestSeq = 0u;
+    uint16_t latestSeq = 0u;
     KeyPunchKind latestKind = KeyPunchKind::None;
     uint8_t latestVoice = 0u;
     float latestValue = 0.0f;
 
-    void note(uint32_t seq, KeyPunchKind kind, uint8_t vIdx, float val) noexcept {
+    void note(uint16_t seq, KeyPunchKind kind, uint8_t vIdx, float val) noexcept {
         if (seq >= latestSeq) {
             latestSeq = seq;
             latestKind = kind;
@@ -115,7 +115,7 @@ inline void evaluateConsoleSoloMute(const KeyboardInputView& in, KeyboardModStat
     uint8_t soloMask = soloLatch ? in.latch.soloMask : 0u;
     uint8_t muteMask = muteLatch ? in.latch.muteMask : 0u;
 
-    uint32_t latestSoloSeq = 0u;
+    uint16_t latestSoloSeq = 0u;
     uint8_t latestSoloVoice = 0u;
     bool latestSoloOn = true;
 

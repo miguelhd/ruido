@@ -122,77 +122,11 @@ struct GlobalParams {
     bool pitchPressureMode = false; // SEL button: false = MS-20 Filter/LPG, true = Pitch Bend
 };
 
-// Effective filter + VCA parameters produced by White Keys 5-8 continuous pressure:
-//  - Filter/LPG mode (pitchMode = 0): zero pitch shift; active voices sweep MS-20 HPF/LPF Accent
-//    + full Rev 2 / Korg35 HP/LP Resonance (free to cross HPF > LPF); muted voices swell via LPG.
-//  - Pitch Bend mode (pitchMode = 1): filter stays at base settings while pressure bends pitch
-//    upward (+24 semitones / +2 octaves at full pressure) and swells muted voices via VCA gate.
-struct ModulatedFilterParams {
-    float hpCutoffHz;
-    float hpResonance;
-    float lpCutoffHz;
-    float lpResonance;
-    float effectiveGate;
-};
-
-inline float computeVoicePitchRatio(float pressure, float pitchMode) noexcept {
+// White Keys 5-8 continuous pitch-bend ratio (+24 semitones / +2 octaves at full pressure
+// when SEL pitchPressureMode is active; 1.0f otherwise).
+RUIDO_ALWAYS_INLINE float computeVoicePitchRatio(float pressure, float pitchMode) noexcept {
     const float pp = clampf(pressure, 0.0f, 1.0f) * clampf(pitchMode, 0.0f, 1.0f);
     return (pp > 0.0f) ? fastExp2(2.0f * pp * pp) : 1.0f;
-}
-
-inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpResBase, float lpBase,
-                                                       float lpResBase, float pressure,
-                                                       float activeGate,
-                                                       float pitchMode = 0.0f) noexcept {
-    const float p = clampf(pressure, 0.0f, 1.0f);
-    const float g = clampf(activeGate, 0.0f, 1.0f);
-    if (p <= 0.0f) {
-        return {hpBase, hpResBase, lpBase, lpResBase, g};
-    }
-
-    const float pm = clampf(pitchMode, 0.0f, 1.0f);
-    const float fp = p * (1.0f - pm);
-
-    const float lpgGate = p * (0.65f + 0.35f * p);
-    const float effGate = clampf(g + (1.0f - g) * lpgGate, 0.0f, 1.0f);
-    if (fp <= 0.0f) {
-        return {hpBase, hpResBase, lpBase, lpResBase, effGate};
-    }
-
-    // 1. Active Voice: Full-Throw [0..1] MS-20 Vocal Formant + Korg35 HP/LP Resonance
-    // Avoids wasting the first 50% of pressure below 24 Hz when HPF is parked at 2.0 Hz,
-    // and sweeps open 28 kHz LPF down into the vocal formant band across the entire throw.
-    const float lpOpenness = smoothstep01((fastLog2(lpBase) - 11.287712f) * (1.0f / 3.5f));
-    const float lpOctDelta = (4.8f * (1.0f - lpOpenness) - 3.80f * lpOpenness) * fp;
-    const float lpAccent =
-        clampf(lpBase * fastExp2(lpOctDelta), kFilterCutoffMinHz, kFilterCutoffMaxHz);
-
-    const float hpFloorHz =
-        (hpBase < 22.0f) ? (hpBase + (22.0f - hpBase) * smoothstep01(fp * 4.5f)) : hpBase;
-    const float hpOctDelta = 4.65f * lpOpenness * fp;
-    const float hpAccent =
-        clampf(hpFloorHz * fastExp2(hpOctDelta), kFilterCutoffMinHz, kFilterCutoffMaxHz);
-
-    const float resCurve = fp * (0.65f + 0.35f * fp);
-    const float hpResAccent = clampf(hpResBase + 0.80f * resCurve, 0.0f, 1.0f);
-    const float lpResAccent = clampf(lpResBase + 0.85f * resCurve, 0.0f, 1.0f);
-
-    // 2. Muted Voice: Vactrol Low-Pass Gate (warm 85 Hz sub murmur -> full base LPF harmonics)
-    const float lpgCeil = (lpBase > 85.0f) ? lpBase : 85.0f;
-    const float lpgSpanOct = fastLog2(lpgCeil * (1.0f / 85.0f));
-    const float lpLpg =
-        clampf(85.0f * fastExp2(lpgSpanOct * fp * (0.48f + 0.52f * fp)), 85.0f, kFilterCutoffMaxHz);
-    const float hpLpg = hpBase;
-    const float hpResLpg = hpResBase;
-    const float lpResLpg = clampf(lpResBase + 0.55f * fp * fp, 0.0f, 1.0f);
-
-    return {
-        hpLpg + g * (hpAccent - hpLpg),
-        hpResLpg + g * (hpResAccent - hpResLpg),
-        lpLpg + g * (lpAccent - lpLpg),
-        lpResLpg + g * (lpResAccent - lpResLpg),
-        effGate,
-    };
 }
 
 // Live performance keyboard interaction models selected via SEL button + SELECT encoder.
@@ -409,7 +343,7 @@ class ScopeRingBuffer {
 };
 
 // Real-time acoustic telemetry for Core 0 varibright LED pulsing & headroom indicator.
-struct EngineTelemetry {
+struct alignas(64) EngineTelemetry {
     std::atomic<float> peakLeft{0.0f};
     std::atomic<float> peakRight{0.0f};
     // Instantaneous [0.0, 1.0] gate state per Schmitt trigger (for < 20 Hz key LED pulse)
@@ -455,6 +389,15 @@ struct EngineTelemetry {
     std::atomic<uint8_t> stutterGateMask{0x0Fu};
     // Instantaneous [0.0, 1.0) swung master 16-step bar phase from Core 1 -> Core 0 LEDs/HUD
     std::atomic<float> rhythmPhase{0.0f};
+};
+
+// Cache-line-isolated Core 0 <-> Core 1 shared IPC buses.
+// On dual-core `AC791N` (`fm1_cpu1`), `EngineSharedBuses` can be placed in uncached shared SRAM
+// while `DroneEngineCore` stays in Core 1 L1-cached SRAM with zero false sharing.
+struct alignas(64) EngineSharedBuses {
+    LockFreeControlBus controlBus{};
+    ScopeRingBuffer scopeBuffer{};
+    EngineTelemetry telemetry{};
 };
 
 } // namespace ruido

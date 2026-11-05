@@ -159,7 +159,8 @@ enum class KeyPunchKind : uint8_t {
     RhythmTempo = 27,    // RhythmLab PIT: 1x -> 4x master clock speed
     RhythmPluck = 28,    // RhythmLab GLO: Percussive MS-20 low-pass filter pluck
     RhythmShort = 29,    // RhythmLab MONO: Pinpoint short gate duty
-    RhythmSwing = 30     // RhythmLab POLY: 50% -> 72% shuffle swing + stereo bounce
+    RhythmSwing = 30,    // RhythmLab POLY: 50% -> 72% shuffle swing + stereo bounce
+    Count = 31
 };
 
 struct PureRatioEntry {
@@ -279,100 +280,6 @@ constexpr uint8_t resolveFilterViewVoice(const HudState& hud) noexcept {
         return hud.activePunchVoice & 3u;
     }
     return (hud.mode == HudMode::VoicePressure) ? (hud.focusedVoice & 3u) : (hud.fxVoiceFocus & 3u);
-}
-
-constexpr KnobBankMode knobBankForKeyPunch(KeyPunchKind punch, KnobBankMode fallback) noexcept {
-    switch (punch) {
-    case KeyPunchKind::VoiceFormant:
-        return KnobBankMode::VoiceFilter;
-    case KeyPunchKind::DubLpfDrop:
-    case KeyPunchKind::FilterScream:
-    case KeyPunchKind::RhythmPluck:
-        return KnobBankMode::GlobalFilter;
-    case KeyPunchKind::OverloadSurge:
-        return KnobBankMode::Amplitude;
-    case KeyPunchKind::SnapshotRecall:
-        return KnobBankMode::Snapshot;
-    case KeyPunchKind::MonoFocus:
-    case KeyPunchKind::PolySpread:
-    case KeyPunchKind::SpotlightSolo:
-    case KeyPunchKind::SubDrop:
-    case KeyPunchKind::RatioMagnet:
-    case KeyPunchKind::StasisFreeze:
-    case KeyPunchKind::VoiceCut:
-    case KeyPunchKind::VoiceStutter:
-    case KeyPunchKind::VoiceSiren:
-    case KeyPunchKind::VoiceXMod:
-    case KeyPunchKind::VoiceFold:
-    case KeyPunchKind::VoiceCrush:
-    case KeyPunchKind::RailStarve:
-    case KeyPunchKind::RingXor:
-    case KeyPunchKind::LfoTurbo:
-    case KeyPunchKind::HardSync:
-    case KeyPunchKind::PhaseScatter:
-    case KeyPunchKind::VoiceDivide:
-    case KeyPunchKind::VoiceEuclid:
-    case KeyPunchKind::RhythmPump:
-    case KeyPunchKind::RhythmChase:
-    case KeyPunchKind::RhythmTempo:
-    case KeyPunchKind::RhythmShort:
-    case KeyPunchKind::RhythmSwing:
-        return KnobBankMode::Frequency;
-    case KeyPunchKind::None:
-        break;
-    }
-    return fallback;
-}
-
-// Single source of truth for normalized [0, 1] top-header bar gauges across all keyboard models.
-constexpr bool evalKeyPunchHeaderBar(const HudState& hud, float& outNorm) noexcept {
-    outNorm = 0.0f;
-    switch (hud.activePunch) {
-    case KeyPunchKind::SnapshotRecall:
-        if (!hud.snapshotGliding) {
-            return false;
-        }
-        outNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
-        return true;
-    case KeyPunchKind::OverloadSurge:
-    case KeyPunchKind::RatioMagnet:
-    case KeyPunchKind::MonoFocus:
-    case KeyPunchKind::PolySpread:
-    case KeyPunchKind::VoiceFormant:
-    case KeyPunchKind::VoiceXMod:
-    case KeyPunchKind::VoiceFold:
-    case KeyPunchKind::VoiceCrush:
-    case KeyPunchKind::RailStarve:
-    case KeyPunchKind::RingXor:
-    case KeyPunchKind::LfoTurbo:
-    case KeyPunchKind::FilterScream:
-    case KeyPunchKind::HardSync:
-    case KeyPunchKind::PhaseScatter:
-    case KeyPunchKind::VoiceStutter:
-    case KeyPunchKind::VoiceDivide:
-    case KeyPunchKind::VoiceEuclid:
-    case KeyPunchKind::RhythmPump:
-    case KeyPunchKind::RhythmChase:
-    case KeyPunchKind::RhythmTempo:
-    case KeyPunchKind::RhythmPluck:
-    case KeyPunchKind::RhythmShort:
-    case KeyPunchKind::RhythmSwing:
-        outNorm = clampf(hud.activePunchValue, 0.0f, 1.0f);
-        return true;
-    case KeyPunchKind::SubDrop:
-        outNorm = clampf(-hud.activePunchValue * 0.5f, 0.0f, 1.0f);
-        return true;
-    case KeyPunchKind::VoiceSiren:
-        outNorm = clampf(hud.activePunchValue * 0.5f, 0.0f, 1.0f);
-        return true;
-    case KeyPunchKind::None:
-    case KeyPunchKind::SpotlightSolo:
-    case KeyPunchKind::DubLpfDrop:
-    case KeyPunchKind::StasisFreeze:
-    case KeyPunchKind::VoiceCut:
-        return false;
-    }
-    return false;
 }
 
 // Software-PWM brightness [0.0f, 1.0f] across all 42 physical LED channels on the M-VAVE FM-1:

@@ -5,21 +5,27 @@
 #include <cstdint>
 #include <cstring>
 
+#if defined(__clang__) || defined(__GNUC__)
+#define RUIDO_ALWAYS_INLINE __attribute__((always_inline)) inline
+#else
+#define RUIDO_ALWAYS_INLINE inline
+#endif
+
 namespace ruido {
 
 // Clamp value to [lo, hi] safely: unordered NaN deterministically falls back to lo.
-inline constexpr float clampf(float x, float lo, float hi) noexcept {
+RUIDO_ALWAYS_INLINE constexpr float clampf(float x, float lo, float hi) noexcept {
     const float t = (x >= lo) ? x : lo;
     return (t <= hi) ? t : hi;
 }
 
 // Branchless single-instruction float32 absolute value (zero libm dependency).
-inline float absf(float x) noexcept {
+RUIDO_ALWAYS_INLINE float absf(float x) noexcept {
     return __builtin_fabsf(x);
 }
 
 // Bit-level finite + denormal sanitizer for feedback states (zero libm overhead).
-inline float sanitizeState(float x) noexcept {
+RUIDO_ALWAYS_INLINE float sanitizeState(float x) noexcept {
     uint32_t bits = 0u;
     std::memcpy(&bits, &x, sizeof(bits));
     const uint32_t abs_bits = bits & 0x7FFFFFFFu;
@@ -31,13 +37,13 @@ inline float sanitizeState(float x) noexcept {
 }
 
 // Smoothstep 3t^2 - 2t^3 for clickless/kinkless edge tapers on [0, 1].
-inline constexpr float smoothstep01(float t) noexcept {
+RUIDO_ALWAYS_INLINE constexpr float smoothstep01(float t) noexcept {
     const float c = clampf(t, 0.0f, 1.0f);
     return c * c * (3.0f - 2.0f * c);
 }
 
 // Fast rational exp(-x) for x >= 0 (< 0.1% error across RC/vactrol/Gauss envelopes, zero libm).
-inline constexpr float fastExpNeg(float x) noexcept {
+RUIDO_ALWAYS_INLINE constexpr float fastExpNeg(float x) noexcept {
     const float u = (x > 0.0f) ? x : 0.0f;
     return 1.0f / (1.0f + u + 0.48f * u * u + 0.235f * u * u * u);
 }
@@ -50,7 +56,7 @@ struct SatResult {
 
 // C1-continuous algebraic tanh approximation on [-3, 3] (zero transcendentals):
 //   f(x) = x*(27 + x^2) / (27 + 9*x^2)  for |x| < 3,  sgn(x) for |x| >= 3
-inline float padeClip(float x) noexcept {
+RUIDO_ALWAYS_INLINE float padeClip(float x) noexcept {
     if (x >= 3.0f) {
         return 1.0f;
     }
@@ -63,7 +69,7 @@ inline float padeClip(float x) noexcept {
 
 // High-headroom master bus analog transformer / op-amp soft ceiling:
 // Linear up to |x| <= 0.75f, smoothly approaches +-1.25f without hard digital clipping.
-inline float masterBusSoftClip(float x) noexcept {
+RUIDO_ALWAYS_INLINE float masterBusSoftClip(float x) noexcept {
     constexpr float kKnee = 0.75f;
     constexpr float kHeadroom = 0.50f; // Max asymptotic output = 0.75 + 0.50 = 1.25f
     constexpr float kInvHeadroom = 1.0f / kHeadroom;
@@ -79,7 +85,7 @@ inline float masterBusSoftClip(float x) noexcept {
 
 // Post-decimator DAC rail guard: 100% bit-exact linear pass-through up to |x| <= 1.15f,
 // catching linear-phase FIR Gibbs overshoot on ultrasonic square edges below +-1.45f.
-inline float dacSafetyClip(float x) noexcept {
+RUIDO_ALWAYS_INLINE float dacSafetyClip(float x) noexcept {
     constexpr float kLinearCeil = 1.15f;
     constexpr float kMargin = 0.30f; // Max asymptotic DAC output = 1.15 + 0.30 = 1.45f
     constexpr float kInvMargin = 1.0f / kMargin;
@@ -94,7 +100,7 @@ inline float dacSafetyClip(float x) noexcept {
 
 // Constant-power stereo panner: pan in [-1.0f (Left), +1.0f (Right)].
 // Uses 5th-order minimax sin polynomial on [0, pi/2] (max error < 1.5e-4, zero libm calls).
-inline void equalPowerPan(float pan, float& gainL, float& gainR) noexcept {
+RUIDO_ALWAYS_INLINE void equalPowerPan(float pan, float& gainL, float& gainR) noexcept {
     const float p = clampf(pan, -1.0f, 1.0f);
     const float aR = (p + 1.0f) * (0.25f * kPi); // [0, pi/2]
     const float aL = kHalfPi - aR;               // [pi/2, 0]
@@ -107,7 +113,7 @@ inline void equalPowerPan(float pan, float& gainL, float& gainR) noexcept {
 // Fast 5th-order polynomial approximation for tan(x) on [0, 0.55] (max error < 5e-5).
 // At 176.472 kHz, f_c <= 30 kHz corresponds to pi * fc / fs <= 0.534 rad (< pi/4).
 // Clamps w to [1e-5, 0.55] so extreme/low sample rates or NaN/Inf invSampleRate stay finite.
-inline float fastPrewarpTan(float cutoffHz, float invSampleRate) noexcept {
+RUIDO_ALWAYS_INLINE float fastPrewarpTan(float cutoffHz, float invSampleRate) noexcept {
     const float fc = clampf(cutoffHz, 2.0f, kFilterMaxSafeHz);
     const float w = clampf(kPi * fc * invSampleRate, 1.0e-5f, 0.55f);
     const float w2 = w * w;
@@ -116,7 +122,7 @@ inline float fastPrewarpTan(float cutoffHz, float invSampleRate) noexcept {
 
 // Fast reciprocal square root 1 / sqrt(x) for positive x (Lomont magic + 2 NR polish steps:
 // < 1e-6 relative error, zero libm calls).
-inline float fastInvSqrt(float x) noexcept {
+RUIDO_ALWAYS_INLINE float fastInvSqrt(float x) noexcept {
     const float safeX = clampf(x, 1.0e-12f, 1.0e12f);
     const float halfX = 0.5f * safeX;
     uint32_t bits = 0u;
@@ -131,7 +137,7 @@ inline float fastInvSqrt(float x) noexcept {
 
 // Fast IEEE-754 + 4th-order minimax 2^octaves for octaves in [-64, +64].
 // Exact at all integer octaves (-3..+3) and < 0.16 cents max error, zero libm calls.
-inline float fastExp2(float octaves) noexcept {
+RUIDO_ALWAYS_INLINE float fastExp2(float octaves) noexcept {
     const float x = clampf(octaves, -64.0f, 64.0f);
     const int32_t xi = static_cast<int32_t>(x + 128.0f) - 128;
     const float f = x - static_cast<float>(xi);
@@ -144,12 +150,12 @@ inline float fastExp2(float octaves) noexcept {
 }
 
 // Fast natural exponential e^x via 2^(x * log2(e)), zero libm calls.
-inline float fastExp(float x) noexcept {
+RUIDO_ALWAYS_INLINE float fastExp(float x) noexcept {
     return fastExp2(x * 1.44269504f);
 }
 
 // Fast IEEE-754 + 4th-order minimax log2(x) for positive x (< 4e-4 octave error, zero libm calls).
-inline float fastLog2(float x) noexcept {
+RUIDO_ALWAYS_INLINE float fastLog2(float x) noexcept {
     const float safeX = clampf(x, 1.0e-12f, 1.0e12f);
     uint32_t bits = 0u;
     std::memcpy(&bits, &safeX, sizeof(bits));

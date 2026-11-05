@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/FilterModMath.h"
 #include "core/GlobalConfig.h"
 #include "core/GlobalControl.h"
 #include "core/HudEnvelope.h"
@@ -2359,9 +2360,9 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(ctrl.leds().whiteKeyLeds[6u] > 0.70f && ctrl.leds().whiteKeyLeds[9u] > 0.70f);
     RTEST_CHECK(ctrl.leds().whiteKeyLeds[4u] < 0.25f);
     {
-        const ruido::ModulatedFilterParams vf =
-            ruido::computeLiveVoiceFilter(ctrl.state().voices[0], 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                                          0.0f, ctrl.state().keyMod.filterScream);
+        const ruido::ModulatedFilterParams vf = ruido::computeLiveVoiceFilter(
+            ctrl.state().voices[0], 0.0f, 0.0f, 0.0f, 0.0f,
+            ruido::FilterMacroContext::fromKeyMod(ctrl.state().keyMod));
         RTEST_CHECK(vf.hpCutoffHz > 380.0f && vf.lpCutoffHz < 950.0f);
         RTEST_CHECK(vf.hpResonance > 0.90f && vf.lpResonance > 0.90f);
     }
@@ -2928,6 +2929,49 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     }
     RTEST_CHECK(longRunClock.isExternalSynced(ruido::ClockSyncMode::Auto));
     RTEST_CHECK(std::fabs(longRunClock.bpm(ruido::ClockSyncMode::Auto) - 120.0f) < 0.25f);
+
+    // 5. Bidirectional `dinghy` NVS flash ports (`PatchSnapshot` 128 B & `DeviceSettingsBlob` 16 B)
+    ctrl.reset();
+    RTEST_CHECK(ctrl.consumeSavedSlotMask() == 0u);
+    RTEST_CHECK(!ctrl.consumeSettingsDirty());
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 24);
+    ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+    ctrl.onWhiteKeyGate(14u, true); // Save into slot 2 (Key 15)
+    ctrl.onWhiteKeyGate(14u, false);
+    RTEST_CHECK(ctrl.consumeSavedSlotMask() == (1u << 2u));
+    RTEST_CHECK(ctrl.consumeSavedSlotMask() == 0u);
+    RTEST_CHECK(ctrl.consumeSettingsDirty());
+    const float savedOsc1Hz = ctrl.state().voices[0].frequencyHz;
+    const ruido::PatchSnapshot savedSlot2 = ctrl.snapshots().slotBinary(2u);
+
+    // Switch keyboard model to CircuitLab and muteMode to Latching, then export 16 B settings blob
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // MuteMode
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
+    RTEST_CHECK(ctrl.consumeSettingsDirty());
+    const ruido::DeviceSettingsBlob savedSettings = ctrl.exportSettings();
+
+    // Fresh boot restore + corrupt-CRC rejection (never bricks on uninitialized 0xFF flash!)
+    ruido::RuidoController bootCtrl{};
+    ruido::PatchSnapshot corruptSnap = savedSlot2;
+    corruptSnap.crc32 ^= 0xDEADBEEFu;
+    RTEST_CHECK(!bootCtrl.loadSnapshotSlot(2u, corruptSnap));
+
+    ruido::DeviceSettingsBlob erasedFlashSettings{};
+    std::memset(&erasedFlashSettings, 0xFF, sizeof(erasedFlashSettings));
+    RTEST_CHECK(!bootCtrl.loadSettings(erasedFlashSettings));
+
+    RTEST_CHECK(bootCtrl.loadSnapshotSlot(2u, savedSlot2));
+    RTEST_CHECK(bootCtrl.loadSettings(savedSettings));
+    RTEST_CHECK(bootCtrl.hud().keyboardModel == ruido::KeyboardModel::CircuitLab);
+    RTEST_CHECK(bootCtrl.hud().config.muteMode == ruido::KeySwitchMode::Latching);
+    RTEST_CHECK(bootCtrl.snapshots().activeSlot() == 2u);
+    RTEST_CHECK(std::fabs(bootCtrl.state().voices[0].frequencyHz - savedOsc1Hz) < 0.25f);
 #undef RTEST_CHECK
 }
 

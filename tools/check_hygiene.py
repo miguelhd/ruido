@@ -14,6 +14,8 @@ SRC_DIR = ROOT / "src"
 TESTS_DIR = ROOT / "tests"
 MAKEFILE = ROOT / "Makefile"
 WASM_BRIDGE = ROOT / "platforms" / "sim" / "wasm_bridge.cpp"
+WASM_ABI_CPP = ROOT / "platforms" / "sim" / "WasmAbiLayout.h"
+WASM_ABI_JS = ROOT / "platforms" / "sim" / "web" / "wasm-abi.js"
 
 MAX_HANDWRITTEN_LINES = 700
 LINE_CAP_EXEMPT = {
@@ -128,6 +130,7 @@ def main() -> int:
                         "core/KeyboardEngine.h",
                         "core/KeyboardModel.h",
                         "core/KeyboardModelSpec.h",
+                        "core/KeyPunchSpec.h",
                         "core/LedEngine.h",
                         "core/MidiClock.h",
                         "core/ModifierTracker.h",
@@ -176,7 +179,47 @@ def main() -> int:
             f"missing_in_wasm={missing_in_wasm}, extra_in_wasm={extra_in_wasm}"
         )
 
-    # 3. .clang-format check
+    # 3. Wasm C++ <-> JS ABI schema synchronization
+    if not WASM_ABI_CPP.is_file() or not WASM_ABI_JS.is_file():
+        errors.append("[wasm-abi] WasmAbiLayout.h or wasm-abi.js missing")
+    else:
+        abi_cpp_text = WASM_ABI_CPP.read_text(encoding="utf-8")
+        abi_js_text = WASM_ABI_JS.read_text(encoding="utf-8")
+        for cpp_ns, js_obj in (
+            ("WasmTelemetryIdx", "WASM_TELEMETRY"),
+            ("WasmSummaryIdx", "WASM_SUMMARY"),
+        ):
+            cpp_block = re.search(
+                rf"namespace\s+{cpp_ns}\s*\{{([^}}]+)\}}", abi_cpp_text
+            )
+            js_block = re.search(
+                rf"export\s+const\s+{js_obj}\s*=\s*Object\.freeze\(\{{([^}}]+)\}}\)",
+                abi_js_text,
+            )
+            if not cpp_block or not js_block:
+                errors.append(
+                    f"[wasm-abi] Missing {cpp_ns} in WasmAbiLayout.h or {js_obj} in wasm-abi.js"
+                )
+                continue
+            cpp_map = {
+                re.sub(r"(?<!^)(?=[A-Z])", "_", k[1:]).upper(): int(v)
+                for k, v in re.findall(
+                    r"constexpr\s+size_t\s+(k[A-Za-z0-9]+)\s*=\s*(\d+)u?\s*;",
+                    cpp_block.group(1),
+                )
+            }
+            js_map = {
+                k: int(v)
+                for k, v in re.findall(
+                    r"([A-Z0-9_]+)\s*:\s*(\d+)", js_block.group(1)
+                )
+            }
+            if cpp_map != js_map:
+                errors.append(
+                    f"[wasm-abi] {cpp_ns} != {js_obj}: cpp={cpp_map} vs js={js_map}"
+                )
+
+    # 4. .clang-format check
     cf_bin = find_clang_format()
     if not cf_bin:
         errors.append("[clang-format] clang-format binary not found")

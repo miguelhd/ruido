@@ -1,12 +1,23 @@
 #pragma once
 
 #include "core/ControlSurface.h"
+#include "core/DspMath.h"
 #include "core/Parameters.h"
 
 #include <array>
 #include <cstdint>
 
 namespace ruido {
+
+inline constexpr float kGcAudioLogMin = cxLog2Pos(kAudioFreqMinHz);
+inline constexpr float kGcAudioLogMax = cxLog2Pos(kAudioFreqMaxHz);
+inline constexpr float kGcAudioLogSpan = kGcAudioLogMax - kGcAudioLogMin;
+inline constexpr float kGcFilterLogLo = cxLog2Pos(kFilterCutoffMinHz);
+inline constexpr float kGcFilterLogHi = cxLog2Pos(kFilterCutoffMaxHz);
+inline constexpr float kGcFilterLogRange = kGcFilterLogHi - kGcFilterLogLo;
+inline constexpr float kGcLfoLogLo = cxLog2Pos(kLfoFreqMinHz);
+inline constexpr float kGcLfoLogRange = cxLog2Pos(kLfoFreqMaxHz) - kGcLfoLogLo;
+inline constexpr float kRefAmpSpreadRms = 0.37379808f; // RMS of 0.5 * {-1.0, -0.34, +0.34, +1.0}
 
 struct GlobalColumnSummary {
     float posSigned = 0.0f;

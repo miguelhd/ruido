@@ -6,6 +6,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "WasmAbiLayout.h"
+
 // Placement new for zero-static-ctor deterministic initialization in freestanding Wasm
 inline void* operator new(size_t, void* p) noexcept {
     return p;
@@ -45,6 +47,8 @@ size_t strlen(const char* s) {
 } // extern "C"
 
 // Unity-include the 100% platform-independent Ruido C++17 sources
+#include "core/ControllerPageNav.cpp"
+#include "core/GlobalColumnEval.cpp"
 #include "core/GlobalControl.cpp"
 #include "core/KeyboardCircuitLab.cpp"
 #include "core/KeyboardEngine.cpp"
@@ -53,6 +57,7 @@ size_t strlen(const char* s) {
 #include "core/LedEngine.cpp"
 #include "core/RuidoController.cpp"
 #include "core/SnapshotBank.cpp"
+#include "core/SnapshotCodec.cpp"
 #include "dsp/DroneEngine.cpp"
 #include "dsp/HalfBandDecimator.cpp"
 #include "dsp/Ms20Filter.cpp"
@@ -62,9 +67,11 @@ size_t strlen(const char* s) {
 #include "ui/HudChrome.cpp"
 #include "ui/HudGlobalViews.cpp"
 #include "ui/HudGraphs.cpp"
+#include "ui/HudHeader.cpp"
 #include "ui/HudKeybedView.cpp"
 #include "ui/ScopeHudRenderer.cpp"
 #include "ui/ScopeTraceEngine.cpp"
+#include "ui/ScopeTraceRender.cpp"
 
 namespace {
 
@@ -87,13 +94,13 @@ static_assert(kRgbaArenaAddr + (ruido::kDisplayWidth * ruido::kDisplayHeight * 4
 // --- Core 1 (AudioWorklet) Static Storage ---
 ruido::DroneEngine* gDsp = nullptr;
 
-constexpr size_t kTelemetryFloats = 48u;
+using namespace ruido::wasm_abi;
 
 alignas(16) ruido::EngineControlState gDspStagedControl{};
 alignas(16) float gAudioLeft[kMaxWorkletFrames]{};
 alignas(16) float gAudioRight[kMaxWorkletFrames]{};
 alignas(16) ruido::ScopeFrame gScopeBatchOut[kMaxScopeBatch]{};
-alignas(16) float gTelemetryOut[kTelemetryFloats]{};
+alignas(16) float gTelemetryOut[WasmTelemetryIdx::kCount]{};
 
 // --- Core 0 (Main UI Thread) Static Storage ---
 alignas(64) uint8_t gUiTelemetryStorage[sizeof(ruido::EngineTelemetry)]{};
@@ -103,10 +110,10 @@ ruido::ScopeHudRenderer* gRenderer = nullptr;
 ruido::EngineTelemetry* gUiTelemetry = nullptr;
 
 alignas(16) ruido::ScopeFrame gScopeBatchIn[kMaxScopeBatch]{};
-alignas(16) float gTelemetryIn[kTelemetryFloats]{};
+alignas(16) float gTelemetryIn[WasmTelemetryIdx::kCount]{};
 alignas(16) uint16_t gScanlineStripRgb565[ruido::kDisplayWidth * ruido::kScanlineStripHeight]{};
 uint8_t* const gScreenRgba = reinterpret_cast<uint8_t*>(kRgbaArenaAddr);
-alignas(16) float gSummaryOut[57]{};
+alignas(16) float gSummaryOut[WasmSummaryIdx::kCount]{};
 bool gControlDirty = true;
 
 void refreshSummary() noexcept {
@@ -115,46 +122,51 @@ void refreshSummary() noexcept {
     }
     const ruido::EngineControlState& st = gCtrl->state();
     for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
-        const size_t base = i * 8u;
+        const size_t base = WasmSummaryIdx::kVoiceBase + i * WasmSummaryIdx::kVoiceStride;
         const ruido::VoiceParams& vp = st.voices[i];
-        gSummaryOut[base + 0u] = vp.frequencyHz;
-        gSummaryOut[base + 1u] = vp.amplitude;
-        gSummaryOut[base + 2u] = vp.pan;
-        gSummaryOut[base + 3u] = vp.hpCutoffHz;
-        gSummaryOut[base + 4u] = vp.hpResonance;
-        gSummaryOut[base + 5u] = vp.lpCutoffHz;
-        gSummaryOut[base + 6u] = vp.lpResonance;
-        gSummaryOut[base + 7u] = vp.muted ? 1.0f : 0.0f;
+        gSummaryOut[base + WasmSummaryIdx::kVoiceFreqHz] = vp.frequencyHz;
+        gSummaryOut[base + WasmSummaryIdx::kVoiceAmplitude] = vp.amplitude;
+        gSummaryOut[base + WasmSummaryIdx::kVoicePan] = vp.pan;
+        gSummaryOut[base + WasmSummaryIdx::kVoiceHpCutoffHz] = vp.hpCutoffHz;
+        gSummaryOut[base + WasmSummaryIdx::kVoiceHpResonance] = vp.hpResonance;
+        gSummaryOut[base + WasmSummaryIdx::kVoiceLpCutoffHz] = vp.lpCutoffHz;
+        gSummaryOut[base + WasmSummaryIdx::kVoiceLpResonance] = vp.lpResonance;
+        gSummaryOut[base + WasmSummaryIdx::kVoiceMuted] = vp.muted ? 1.0f : 0.0f;
     }
-    gSummaryOut[32u] = st.global.circuitCoupling;
-    gSummaryOut[33u] = st.global.masterTrim;
-    gSummaryOut[34u] = static_cast<float>(static_cast<int>(gCtrl->hud().knobRate));
-    gSummaryOut[35u] = st.global.monoCollapse ? 1.0f : 0.0f;
-    gSummaryOut[36u] = st.global.masterRun ? 1.0f : 0.0f;
-    gSummaryOut[37u] = st.global.pitchPressureMode ? 1.0f : 0.0f;
-    gSummaryOut[38u] = gCtrl->hud().saveArmed ? 1.0f : 0.0f;
-    gSummaryOut[39u] = gCtrl->hud().lfoPageOpen ? 1.0f : 0.0f;
-    gSummaryOut[40u] = static_cast<float>(gCtrl->hud().lfoVoiceFocus);
+    gSummaryOut[WasmSummaryIdx::kCircuitCoupling] = st.global.circuitCoupling;
+    gSummaryOut[WasmSummaryIdx::kMasterTrim] = st.global.masterTrim;
+    gSummaryOut[WasmSummaryIdx::kKnobRate] = static_cast<float>(static_cast<int>(gCtrl->hud().knobRate));
+    gSummaryOut[WasmSummaryIdx::kMonoCollapse] = st.global.monoCollapse ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kMasterRun] = st.global.masterRun ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kPitchPressureMode] = st.global.pitchPressureMode ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kSaveArmed] = gCtrl->hud().saveArmed ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kLfoPageOpen] = gCtrl->hud().lfoPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kLfoVoiceFocus] = static_cast<float>(gCtrl->hud().lfoVoiceFocus);
 
     const uint8_t lfoSlot = gCtrl->hud().lfoVoiceFocus & 7u;
     const ruido::VoiceParams& lfoVp = st.voices[ruido::lfoFocusVoice(lfoSlot)];
     const uint8_t lfoSub = ruido::lfoFocusSub(lfoSlot);
-    gSummaryOut[41u] = static_cast<float>(static_cast<uint8_t>(ruido::lfoSlotTarget(lfoVp, lfoSub)));
-    gSummaryOut[42u] = ruido::lfoSlotShape(lfoVp, lfoSub);
-    gSummaryOut[43u] = ruido::lfoSlotRateHz(lfoVp, lfoSub);
-    gSummaryOut[44u] = ruido::lfoSlotDepth(lfoVp, lfoSub);
-    gSummaryOut[45u] = gCtrl->hud().configPageOpen ? 1.0f : 0.0f;
-    gSummaryOut[46u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().globalTarget));
-    gSummaryOut[47u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().knobBank));
-    gSummaryOut[48u] = gCtrl->hud().editPageOpen ? 1.0f : 0.0f;
-    gSummaryOut[49u] = gCtrl->hud().fxPageOpen ? 1.0f : 0.0f;
-    gSummaryOut[50u] = static_cast<float>(gCtrl->hud().fxVoiceFocus);
-    gSummaryOut[51u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().editTarget));
-    gSummaryOut[52u] = gCtrl->hud().panPageOpen ? 1.0f : 0.0f;
-    gSummaryOut[53u] = static_cast<float>(static_cast<uint8_t>(gCtrl->hud().keyboardModel));
-    gSummaryOut[54u] = gCtrl->hud().selPageOpen ? 1.0f : 0.0f;
-    gSummaryOut[55u] = gCtrl->hud().effectiveClockBpm;
-    gSummaryOut[56u] = gCtrl->hud().midiClockSynced ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kLfoTarget] =
+        static_cast<float>(static_cast<uint8_t>(ruido::lfoSlotTarget(lfoVp, lfoSub)));
+    gSummaryOut[WasmSummaryIdx::kLfoShape] = ruido::lfoSlotShape(lfoVp, lfoSub);
+    gSummaryOut[WasmSummaryIdx::kLfoRateHz] = ruido::lfoSlotRateHz(lfoVp, lfoSub);
+    gSummaryOut[WasmSummaryIdx::kLfoDepth] = ruido::lfoSlotDepth(lfoVp, lfoSub);
+    gSummaryOut[WasmSummaryIdx::kConfigPageOpen] = gCtrl->hud().configPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kGlobalTarget] =
+        static_cast<float>(static_cast<uint8_t>(gCtrl->hud().globalTarget));
+    gSummaryOut[WasmSummaryIdx::kKnobBank] =
+        static_cast<float>(static_cast<uint8_t>(gCtrl->hud().knobBank));
+    gSummaryOut[WasmSummaryIdx::kEditPageOpen] = gCtrl->hud().editPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kFxPageOpen] = gCtrl->hud().fxPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kFxVoiceFocus] = static_cast<float>(gCtrl->hud().fxVoiceFocus);
+    gSummaryOut[WasmSummaryIdx::kEditTarget] =
+        static_cast<float>(static_cast<uint8_t>(gCtrl->hud().editTarget));
+    gSummaryOut[WasmSummaryIdx::kPanPageOpen] = gCtrl->hud().panPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kKeyboardModel] =
+        static_cast<float>(static_cast<uint8_t>(gCtrl->hud().keyboardModel));
+    gSummaryOut[WasmSummaryIdx::kSelPageOpen] = gCtrl->hud().selPageOpen ? 1.0f : 0.0f;
+    gSummaryOut[WasmSummaryIdx::kEffectiveClockBpm] = gCtrl->hud().effectiveClockBpm;
+    gSummaryOut[WasmSummaryIdx::kMidiClockSynced] = gCtrl->hud().midiClockSynced ? 1.0f : 0.0f;
 }
 
 } // namespace
@@ -249,29 +261,47 @@ const void* wasm_dsp_get_scope_ptr() {
     return gScopeBatchOut;
 }
 
+RUIDO_EXPORT("wasm_dsp_get_telemetry_floats")
+uint32_t wasm_dsp_get_telemetry_floats() {
+    return static_cast<uint32_t>(WasmTelemetryIdx::kCount);
+}
+
 RUIDO_EXPORT("wasm_dsp_read_telemetry")
 const float* wasm_dsp_read_telemetry() {
     if (gDsp != nullptr) {
         const ruido::EngineTelemetry& t = gDsp->telemetry();
-        gTelemetryOut[0] = t.peakLeft.load(std::memory_order_relaxed);
-        gTelemetryOut[1] = t.peakRight.load(std::memory_order_relaxed);
+        gTelemetryOut[WasmTelemetryIdx::kPeakLeft] = t.peakLeft.load(std::memory_order_relaxed);
+        gTelemetryOut[WasmTelemetryIdx::kPeakRight] = t.peakRight.load(std::memory_order_relaxed);
         for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
-            gTelemetryOut[2u + i] = t.oscGateHigh[i].load(std::memory_order_relaxed);
-            gTelemetryOut[6u + i] = t.lfoOutput[i].load(std::memory_order_relaxed);
-            gTelemetryOut[10u + i] = t.lfoPhase[i].load(std::memory_order_relaxed);
+            gTelemetryOut[WasmTelemetryIdx::kOscGate + i] =
+                t.oscGateHigh[i].load(std::memory_order_relaxed);
+            gTelemetryOut[WasmTelemetryIdx::kLfoAOut + i] =
+                t.lfoOutput[i].load(std::memory_order_relaxed);
+            gTelemetryOut[WasmTelemetryIdx::kLfoAPhase + i] =
+                t.lfoPhase[i].load(std::memory_order_relaxed);
             const uint32_t packedA = t.lfoDriftPacked[i].load(std::memory_order_relaxed);
-            gTelemetryOut[14u + i * 2u] = static_cast<float>(packedA & 0x7FFFu);
-            gTelemetryOut[15u + i * 2u] = static_cast<float>((packedA >> 15u) & 0x7FFFu);
-            gTelemetryOut[22u + i] = t.voicePeak[i].load(std::memory_order_relaxed);
-            gTelemetryOut[26u + i] = t.voiceDriftNorm[i].load(std::memory_order_relaxed);
-            gTelemetryOut[30u + i] = t.lfoOutput[4u + i].load(std::memory_order_relaxed);
-            gTelemetryOut[34u + i] = t.lfoPhase[4u + i].load(std::memory_order_relaxed);
+            gTelemetryOut[WasmTelemetryIdx::kLfoADrift + i * 2u] =
+                static_cast<float>(packedA & 0x7FFFu);
+            gTelemetryOut[WasmTelemetryIdx::kLfoADrift + i * 2u + 1u] =
+                static_cast<float>((packedA >> 15u) & 0x7FFFu);
+            gTelemetryOut[WasmTelemetryIdx::kVoicePeak + i] =
+                t.voicePeak[i].load(std::memory_order_relaxed);
+            gTelemetryOut[WasmTelemetryIdx::kVoiceDrift + i] =
+                t.voiceDriftNorm[i].load(std::memory_order_relaxed);
+            gTelemetryOut[WasmTelemetryIdx::kLfoBOut + i] =
+                t.lfoOutput[4u + i].load(std::memory_order_relaxed);
+            gTelemetryOut[WasmTelemetryIdx::kLfoBPhase + i] =
+                t.lfoPhase[4u + i].load(std::memory_order_relaxed);
             const uint32_t packedB = t.lfoDriftPacked[4u + i].load(std::memory_order_relaxed);
-            gTelemetryOut[38u + i * 2u] = static_cast<float>(packedB & 0x7FFFu);
-            gTelemetryOut[39u + i * 2u] = static_cast<float>((packedB >> 15u) & 0x7FFFu);
+            gTelemetryOut[WasmTelemetryIdx::kLfoBDrift + i * 2u] =
+                static_cast<float>(packedB & 0x7FFFu);
+            gTelemetryOut[WasmTelemetryIdx::kLfoBDrift + i * 2u + 1u] =
+                static_cast<float>((packedB >> 15u) & 0x7FFFu);
         }
-        gTelemetryOut[46u] = static_cast<float>(t.stutterGateMask.load(std::memory_order_relaxed));
-        gTelemetryOut[47u] = t.rhythmPhase.load(std::memory_order_relaxed);
+        gTelemetryOut[WasmTelemetryIdx::kStutterGateMask] =
+            static_cast<float>(t.stutterGateMask.load(std::memory_order_relaxed));
+        gTelemetryOut[WasmTelemetryIdx::kRhythmPhase] =
+            t.rhythmPhase.load(std::memory_order_relaxed);
     }
     return gTelemetryOut;
 }
@@ -289,7 +319,7 @@ void wasm_ui_init() {
     gCtrl = new (ctrlMem) ruido::RuidoController();
     gRenderer = new (rendMem) ruido::ScopeHudRenderer();
     gUiTelemetry = new (gUiTelemetryStorage) ruido::EngineTelemetry();
-    gTelemetryIn[46u] = 15.0f;
+    gTelemetryIn[WasmTelemetryIdx::kStutterGateMask] = 15.0f;
     gControlDirty = true;
     refreshSummary();
 }
@@ -400,28 +430,45 @@ void wasm_ui_apply_telemetry() {
     if (gUiTelemetry == nullptr) {
         return;
     }
-    gUiTelemetry->peakLeft.store(gTelemetryIn[0], std::memory_order_relaxed);
-    gUiTelemetry->peakRight.store(gTelemetryIn[1], std::memory_order_relaxed);
+    gUiTelemetry->peakLeft.store(gTelemetryIn[WasmTelemetryIdx::kPeakLeft],
+                                 std::memory_order_relaxed);
+    gUiTelemetry->peakRight.store(gTelemetryIn[WasmTelemetryIdx::kPeakRight],
+                                  std::memory_order_relaxed);
     for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
-        gUiTelemetry->oscGateHigh[i].store(gTelemetryIn[2u + i], std::memory_order_relaxed);
-        gUiTelemetry->lfoOutput[i].store(gTelemetryIn[6u + i], std::memory_order_relaxed);
-        gUiTelemetry->lfoPhase[i].store(gTelemetryIn[10u + i], std::memory_order_relaxed);
-        const uint32_t lo15A = static_cast<uint32_t>(gTelemetryIn[14u + i * 2u]) & 0x7FFFu;
-        const uint32_t hi15A = static_cast<uint32_t>(gTelemetryIn[15u + i * 2u]) & 0x7FFFu;
+        gUiTelemetry->oscGateHigh[i].store(gTelemetryIn[WasmTelemetryIdx::kOscGate + i],
+                                           std::memory_order_relaxed);
+        gUiTelemetry->lfoOutput[i].store(gTelemetryIn[WasmTelemetryIdx::kLfoAOut + i],
+                                         std::memory_order_relaxed);
+        gUiTelemetry->lfoPhase[i].store(gTelemetryIn[WasmTelemetryIdx::kLfoAPhase + i],
+                                        std::memory_order_relaxed);
+        const uint32_t lo15A =
+            static_cast<uint32_t>(gTelemetryIn[WasmTelemetryIdx::kLfoADrift + i * 2u]) & 0x7FFFu;
+        const uint32_t hi15A =
+            static_cast<uint32_t>(gTelemetryIn[WasmTelemetryIdx::kLfoADrift + i * 2u + 1u]) &
+            0x7FFFu;
         gUiTelemetry->lfoDriftPacked[i].store((hi15A << 15u) | lo15A, std::memory_order_relaxed);
-        gUiTelemetry->voicePeak[i].store(gTelemetryIn[22u + i], std::memory_order_relaxed);
-        gUiTelemetry->voiceDriftNorm[i].store(gTelemetryIn[26u + i], std::memory_order_relaxed);
-        gUiTelemetry->lfoOutput[4u + i].store(gTelemetryIn[30u + i], std::memory_order_relaxed);
-        gUiTelemetry->lfoPhase[4u + i].store(gTelemetryIn[34u + i], std::memory_order_relaxed);
-        const uint32_t lo15B = static_cast<uint32_t>(gTelemetryIn[38u + i * 2u]) & 0x7FFFu;
-        const uint32_t hi15B = static_cast<uint32_t>(gTelemetryIn[39u + i * 2u]) & 0x7FFFu;
+        gUiTelemetry->voicePeak[i].store(gTelemetryIn[WasmTelemetryIdx::kVoicePeak + i],
+                                         std::memory_order_relaxed);
+        gUiTelemetry->voiceDriftNorm[i].store(gTelemetryIn[WasmTelemetryIdx::kVoiceDrift + i],
+                                              std::memory_order_relaxed);
+        gUiTelemetry->lfoOutput[4u + i].store(gTelemetryIn[WasmTelemetryIdx::kLfoBOut + i],
+                                              std::memory_order_relaxed);
+        gUiTelemetry->lfoPhase[4u + i].store(gTelemetryIn[WasmTelemetryIdx::kLfoBPhase + i],
+                                             std::memory_order_relaxed);
+        const uint32_t lo15B =
+            static_cast<uint32_t>(gTelemetryIn[WasmTelemetryIdx::kLfoBDrift + i * 2u]) & 0x7FFFu;
+        const uint32_t hi15B =
+            static_cast<uint32_t>(gTelemetryIn[WasmTelemetryIdx::kLfoBDrift + i * 2u + 1u]) &
+            0x7FFFu;
         gUiTelemetry->lfoDriftPacked[4u + i].store((hi15B << 15u) | lo15B,
                                                    std::memory_order_relaxed);
     }
     gUiTelemetry->stutterGateMask.store(
-        static_cast<uint8_t>(static_cast<uint32_t>(gTelemetryIn[46u]) & 0x0Fu),
+        static_cast<uint8_t>(
+            static_cast<uint32_t>(gTelemetryIn[WasmTelemetryIdx::kStutterGateMask]) & 0x0Fu),
         std::memory_order_relaxed);
-    gUiTelemetry->rhythmPhase.store(gTelemetryIn[47u], std::memory_order_relaxed);
+    gUiTelemetry->rhythmPhase.store(gTelemetryIn[WasmTelemetryIdx::kRhythmPhase],
+                                    std::memory_order_relaxed);
 }
 
 RUIDO_EXPORT("wasm_ui_tick_and_render")
@@ -481,6 +528,11 @@ const void* wasm_ui_get_control_ptr() {
         return nullptr;
     }
     return &gCtrl->state();
+}
+
+RUIDO_EXPORT("wasm_ui_get_summary_floats")
+uint32_t wasm_ui_get_summary_floats() {
+    return static_cast<uint32_t>(WasmSummaryIdx::kCount);
 }
 
 RUIDO_EXPORT("wasm_ui_get_summary_ptr")

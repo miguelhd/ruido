@@ -47,34 +47,40 @@ inline float adjustLinear01(float current, int32_t ticks, KnobRate rate, float l
 
 // Discrete notched encoder stepper: always 1 item per physical detent (4 X4 quadrature ticks)
 // across Fine, Standard, and Coarse gears, with zero-windup clamping at [0, maxVal].
+// Performs arithmetic in `int32_t` before storing the [-3, +3] sub-detent remainder so `int8_t`
+// accumulators never overflow regardless of `ticks` magnitude.
+template <typename AccumInt>
 inline int32_t stepClampedDetent(int32_t currentVal, int32_t maxVal, int32_t ticks, KnobRate rate,
-                                 int32_t& accum) noexcept {
+                                 AccumInt& accum) noexcept {
     (void)rate;
     constexpr int32_t kDetentThreshold = 4;
-    if ((ticks > 0 && accum < 0) || (ticks < 0 && accum > 0)) {
-        accum = 0;
+    int32_t acc = static_cast<int32_t>(accum);
+    if ((ticks > 0 && acc < 0) || (ticks < 0 && acc > 0)) {
+        acc = 0;
     }
-    accum += ticks;
-    const int32_t steps = accum / kDetentThreshold;
+    acc += ticks;
+    const int32_t steps = acc / kDetentThreshold;
     if (steps == 0) {
-        if ((currentVal <= 0 && accum < 0) || (currentVal >= maxVal && accum > 0)) {
-            accum = 0;
+        if ((currentVal <= 0 && acc < 0) || (currentVal >= maxVal && acc > 0)) {
+            acc = 0;
         }
+        accum = static_cast<AccumInt>(acc);
         return currentVal;
     }
-    accum -= steps * kDetentThreshold;
+    acc -= steps * kDetentThreshold;
     int32_t next = currentVal + steps;
     if (next <= 0) {
         next = 0;
-        if (accum < 0) {
-            accum = 0;
+        if (acc < 0) {
+            acc = 0;
         }
     } else if (next >= maxVal) {
         next = maxVal;
-        if (accum > 0) {
-            accum = 0;
+        if (acc > 0) {
+            acc = 0;
         }
     }
+    accum = static_cast<AccumInt>(acc);
     return next;
 }
 
@@ -123,8 +129,9 @@ inline void applyVoiceFilterKnobDelta(VoiceParams& vp, uint8_t knobIdx, int32_t 
     }
 }
 
+template <typename AccumInt>
 inline void applyVoiceLfoKnobDelta(VoiceParams& vp, size_t subIdx, uint8_t knobIdx, int32_t ticks,
-                                   KnobRate rate, int32_t& targetTickAccum) noexcept {
+                                   KnobRate rate, AccumInt& targetTickAccum) noexcept {
     if (knobIdx == 0u) {
         LfoTarget& tgtRef = lfoSlotTargetRef(vp, subIdx);
         const int32_t maxTgt =

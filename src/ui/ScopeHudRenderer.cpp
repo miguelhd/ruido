@@ -5,6 +5,7 @@
 #include "core/LfoMath.h"
 #include "ui/GraphStyle.h"
 #include "ui/HudChrome.h"
+#include "ui/HudHeader.h"
 #include "ui/MonoCanvas.h"
 
 namespace ruido {

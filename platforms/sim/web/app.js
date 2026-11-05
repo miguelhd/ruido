@@ -1,5 +1,7 @@
 // Main-Thread (Core 0) Hardware Surface, 240x16 Scanline Canvas & WebMIDI Host for Ruido.
 
+import { LFO_TARGET_NAMES, WASM_SUMMARY, WASM_TELEMETRY } from './wasm-abi.js';
+
 const DISPLAY_W = 240;
 const DISPLAY_H = 240;
 
@@ -151,8 +153,8 @@ async function ensureAudioRunning() {
         rateBadge.textContent = `DSP: ${(msg.sampleRate / 1000).toFixed(1)} kHz (${osKhz} kHz 4x)`;
       } else if (msg.type === 'telemetry') {
         const t = msg.telemetry;
-        if (t && t.length >= 26) {
-          uiF32.set(t.subarray(0, Math.min(t.length, 48)), uiPtrs.telemetryIn);
+        if (t && t.length >= WASM_TELEMETRY.VOICE_DRIFT) {
+          uiF32.set(t.subarray(0, Math.min(t.length, WASM_TELEMETRY.COUNT)), uiPtrs.telemetryIn);
           uiWasm.wasm_ui_apply_telemetry();
         }
         if (msg.scopeBuffer && msg.scopeCount > 0) {
@@ -185,7 +187,7 @@ async function ensureAudioRunning() {
 async function toggleAudioPower() {
   const powerBtn = document.getElementById('audio-toggle-btn');
   if (!audioCtx || audioCtx.state !== 'running') {
-    if (uiWasm && uiPtrs && uiF32[uiPtrs.summary + 36] < 0.5) {
+    if (uiWasm && uiPtrs && uiF32[uiPtrs.summary + WASM_SUMMARY.MASTER_RUN] < 0.5) {
       uiWasm.wasm_ui_button(12, 1);
       uiWasm.wasm_ui_button(12, 0);
     }
@@ -227,26 +229,27 @@ function sendEncoderSteps(encId, ticks) {
 
 function syncAriaFromSummary() {
   if (!uiWasm || !uiPtrs) return;
-  const s = uiF32.subarray(uiPtrs.summary, uiPtrs.summary + 48);
+  const s = uiF32.subarray(uiPtrs.summary, uiPtrs.summary + WASM_SUMMARY.COUNT);
 
-  const couplingPct = Math.round(s[32] * 100);
-  const mono = s[35] > 0.5;
-  const run = s[36] > 0.5;
-  const pitchMode = s[37] > 0.5;
-  const saveArmed = s[38] > 0.5;
-  const lfoOpen = s[39] > 0.5;
-  const lfoVoiceFocus = Math.round(s[40]);
-  const lfoTarget = Math.round(s[41]);
-  const lfoShape = s[42];
-  const lfoRateHz = s[43];
-  const lfoDepth = s[44];
+  const couplingPct = Math.round(s[WASM_SUMMARY.CIRCUIT_COUPLING] * 100);
+  const mono = s[WASM_SUMMARY.MONO_COLLAPSE] > 0.5;
+  const run = s[WASM_SUMMARY.MASTER_RUN] > 0.5;
+  const pitchMode = s[WASM_SUMMARY.PITCH_PRESSURE_MODE] > 0.5;
+  const saveArmed = s[WASM_SUMMARY.SAVE_ARMED] > 0.5;
+  const lfoOpen = s[WASM_SUMMARY.LFO_PAGE_OPEN] > 0.5;
+  const lfoVoiceFocus = Math.round(s[WASM_SUMMARY.LFO_VOICE_FOCUS]);
+  const lfoTarget = Math.round(s[WASM_SUMMARY.LFO_TARGET]);
+  const lfoShape = s[WASM_SUMMARY.LFO_SHAPE];
+  const lfoRateHz = s[WASM_SUMMARY.LFO_RATE_HZ];
+  const lfoDepth = s[WASM_SUMMARY.LFO_DEPTH];
 
   const selectEl = document.querySelector('[data-encoder="0"]');
   if (selectEl) {
     if (lfoOpen) {
-      const focusNames = ['Osc 1', 'Osc 2', 'Osc 3', 'Osc 4'];
-      selectEl.setAttribute('aria-valuenow', String(Math.min(100, Math.max(0, lfoVoiceFocus * 33))));
-      selectEl.setAttribute('aria-valuetext', `LFO Voice ${focusNames[lfoVoiceFocus] || 'Osc 1'}`);
+      const voiceNum = ((lfoVoiceFocus >> 1) & 3) + 1;
+      const subName = (lfoVoiceFocus & 1) === 0 ? 'A' : 'B';
+      selectEl.setAttribute('aria-valuenow', String(Math.min(100, Math.max(0, lfoVoiceFocus * 14))));
+      selectEl.setAttribute('aria-valuetext', `LFO ${subName} Osc ${voiceNum}`);
     } else {
       selectEl.setAttribute('aria-valuenow', '0');
       selectEl.setAttribute('aria-valuetext', 'Unassigned');
@@ -259,27 +262,17 @@ function syncAriaFromSummary() {
     algEl.setAttribute('aria-valuetext', `Rail Coupling ${couplingPct}%`);
   }
 
-  const lfoTargetNames = [
-    'Pitch',
-    'LPF Cutoff',
-    'LPF Resonance',
-    'HPF Cutoff',
-    'HPF Resonance',
-    'Amplitude',
-    'Stereo Pan',
-  ];
-
   for (let i = 0; i < 4; i++) {
-    const base = i * 8;
-    const hz = s[base + 0];
-    const muted = s[base + 7] > 0.5;
+    const base = WASM_SUMMARY.VOICE_BASE + i * WASM_SUMMARY.VOICE_STRIDE;
+    const hz = s[base + WASM_SUMMARY.VOICE_FREQ_HZ];
+    const muted = s[base + WASM_SUMMARY.VOICE_MUTED] > 0.5;
     const knobEl = document.querySelector(`[data-encoder="${3 + i}"]`);
     if (knobEl) {
       if (lfoOpen) {
         if (i === 0) {
           knobEl.setAttribute(
             'aria-valuetext',
-            `LFO Target ${lfoTargetNames[lfoTarget] || 'LPF Cutoff'}`
+            `LFO Target ${LFO_TARGET_NAMES[lfoTarget] || 'LPF'}`
           );
         } else if (i === 1) {
           knobEl.setAttribute('aria-valuetext', `LFO Shape ${Math.round(lfoShape * 100)}%`);
@@ -409,7 +402,8 @@ function bindKnobs() {
       'wheel',
       (e) => {
         e.preventDefault();
-        const knobBank = uiWasm && uiPtrs ? Math.round(uiF32[uiPtrs.summary + 47]) : 0;
+        const knobBank =
+          uiWasm && uiPtrs ? Math.round(uiF32[uiPtrs.summary + WASM_SUMMARY.KNOB_BANK]) : 0;
         // KnobBankMode: Lfo = 6, GlobalLfo = 9, None (GlobalConfig / SEL) = 13
         const isDiscrete =
           encId === 0 ||
@@ -467,7 +461,7 @@ function bindKnobs() {
 
 function pressPanelButton(btnId) {
   const wasAudioRunning = Boolean(audioCtx && audioCtx.state === 'running');
-  const wasMasterRun = uiF32[uiPtrs.summary + 36] > 0.5;
+  const wasMasterRun = uiF32[uiPtrs.summary + WASM_SUMMARY.MASTER_RUN] > 0.5;
   ensureAudioRunning();
   if (btnId === 12 && !wasAudioRunning && wasMasterRun) {
     // Browser was quiet because WebAudio had not started yet:
@@ -899,8 +893,9 @@ async function initWebMidi() {
     let midiDeviceCount = 0;
     let midiTimeOriginMs = -1;
     const renderMidiBadge = () => {
-      const synced = uiWasm && uiPtrs && uiF32[uiPtrs.summary + 56] > 0.5;
-      const bpm = synced ? Math.round(uiF32[uiPtrs.summary + 55]) : 0;
+      const synced =
+        uiWasm && uiPtrs && uiF32[uiPtrs.summary + WASM_SUMMARY.MIDI_CLOCK_SYNCED] > 0.5;
+      const bpm = synced ? Math.round(uiF32[uiPtrs.summary + WASM_SUMMARY.EFFECTIVE_CLOCK_BPM]) : 0;
       const base =
         midiDeviceCount > 0
           ? `MIDI: ${midiDeviceCount} Device${midiDeviceCount > 1 ? 's' : ''} Active`

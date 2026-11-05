@@ -1,6 +1,7 @@
 #include "core/LedEngine.h"
 
 #include "core/DspMath.h"
+#include "core/FilterModMath.h"
 #include "core/GlobalControl.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
@@ -66,9 +67,13 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
             dominantLfoBankIdx = 4u + i;
         }
         if (!vc.isMuted) {
-            const ModulatedFilterParams flt = computeLiveVoiceFilter(
-                vp, p, pitchMode, lfoARaw, lfoBRaw, ctx.state.keyMod.dubLpfDrop,
-                ctx.state.keyMod.overloadSurge, ctx.state.keyMod.filterScream);
+            const FilterMacroContext fltMacros{
+                ctx.state.keyMod.dubLpfDrop,
+                ctx.state.keyMod.overloadSurge,
+                ctx.state.keyMod.filterScream,
+            };
+            const ModulatedFilterParams flt =
+                computeLiveVoiceFilter(vp, p, pitchMode, lfoARaw, lfoBRaw, fltMacros);
             constexpr float kHpMinOct = cxLog2Pos(kFilterCutoffMinHz);
             constexpr float kLpMaxOct = cxLog2Pos(kFilterCutoffMaxHz);
             const float hpEng =

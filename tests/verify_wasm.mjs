@@ -5,6 +5,7 @@
 
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
+import { WASM_SUMMARY, WASM_TELEMETRY } from '../platforms/sim/web/wasm-abi.js';
 
 const wasmPath = new URL('../platforms/sim/web/ruido.wasm', import.meta.url);
 const bytes = fs.readFileSync(wasmPath);
@@ -34,6 +35,8 @@ const { exports: ex } = await WebAssembly.instantiate(mod, {
 
 ex.wasm_dsp_init(44118.0);
 ex.wasm_ui_init();
+assert.equal(ex.wasm_dsp_get_telemetry_floats(), WASM_TELEMETRY.COUNT);
+assert.equal(ex.wasm_ui_get_summary_floats(), WASM_SUMMARY.COUNT);
 
 const u8 = new Uint8Array(memory.buffer);
 const f32 = new Float32Array(memory.buffer);
@@ -83,11 +86,14 @@ assert.ok(energyL > 1.0 && energyR > 1.0);
 
 const telIdx = ex.wasm_dsp_read_telemetry() >> 2;
 const telInIdx = ex.wasm_ui_get_telemetry_in_ptr() >> 2;
-for (let i = 0; i < 48; i++) {
+for (let i = 0; i < WASM_TELEMETRY.COUNT; i++) {
   f32[telInIdx + i] = f32[telIdx + i];
 }
-assert.equal(f32[telIdx + 46], 15.0); // stutterGateMask === 0x0F when idle
-assert.ok(f32[telIdx + 47] >= 0.0 && f32[telIdx + 47] < 1.0); // rhythmPhase in [0, 1)
+assert.equal(f32[telIdx + WASM_TELEMETRY.STUTTER_GATE_MASK], 15.0); // stutterGateMask === 0x0F when idle
+assert.ok(
+  f32[telIdx + WASM_TELEMETRY.RHYTHM_PHASE] >= 0.0 &&
+    f32[telIdx + WASM_TELEMETRY.RHYTHM_PHASE] < 1.0
+); // rhythmPhase in [0, 1)
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.2);
 
@@ -197,9 +203,9 @@ for (let b = 0; b < 8; b++) {
   ex.wasm_dsp_process_block(128);
 }
 
-const tel47Idx = ex.wasm_dsp_read_telemetry() >> 2;
-for (let i = 0; i < 48; i++) {
-  f32[telInIdx + i] = f32[tel47Idx + i];
+const telOutIdx = ex.wasm_dsp_read_telemetry() >> 2;
+for (let i = 0; i < WASM_TELEMETRY.COUNT; i++) {
+  f32[telInIdx + i] = f32[telOutIdx + i];
 }
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.1);
@@ -233,8 +239,8 @@ ex.wasm_dsp_publish_control(1);
 for (let b = 0; b < 6; b++) {
   ex.wasm_dsp_process_block(128);
 }
-for (let i = 0; i < 47; i++) {
-  f32[telInIdx + i] = f32[tel47Idx + i];
+for (let i = 0; i < WASM_TELEMETRY.COUNT; i++) {
+  f32[telInIdx + i] = f32[telOutIdx + i];
 }
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.1);
@@ -438,10 +444,13 @@ for (let b = 0; b < 20; b++) {
   ex.wasm_dsp_process_block(128);
 }
 const rhyTelIdx = ex.wasm_dsp_read_telemetry() >> 2;
-for (let i = 0; i < 48; i++) {
+for (let i = 0; i < WASM_TELEMETRY.COUNT; i++) {
   f32[telInIdx + i] = f32[rhyTelIdx + i];
 }
-assert.ok(f32[rhyTelIdx + 47] > 0.01 && f32[rhyTelIdx + 47] < 1.0);
+assert.ok(
+  f32[rhyTelIdx + WASM_TELEMETRY.RHYTHM_PHASE] > 0.01 &&
+    f32[rhyTelIdx + WASM_TELEMETRY.RHYTHM_PHASE] < 1.0
+);
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.1);
 for (let i = 0; i < 42; i++) {

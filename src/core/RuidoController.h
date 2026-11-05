@@ -67,6 +67,22 @@ class RuidoController {
         return dirty;
     }
 
+    // Bidirectional `zvenson/dinghy` NVS flash ports (`slot_*` 128 B & `settings_*` 16 B):
+    // Pure in-RAM CRC-32 POD transfers with zero raw SPI NOR flash register access in `src/`.
+    bool loadSnapshotSlot(uint8_t slot, const PatchSnapshot& snap) noexcept;
+    uint8_t consumeSavedSlotMask() noexcept {
+        const uint8_t mask = savedSlotMask_;
+        savedSlotMask_ = 0u;
+        return mask;
+    }
+    DeviceSettingsBlob exportSettings() const noexcept;
+    bool loadSettings(const DeviceSettingsBlob& blob) noexcept;
+    bool consumeSettingsDirty() noexcept {
+        const bool dirty = settingsDirty_;
+        settingsDirty_ = false;
+        return dirty;
+    }
+
   private:
     KnobBankMode baseKnobBank() const noexcept;
     bool anyPageOpen() const noexcept {
@@ -106,15 +122,17 @@ class RuidoController {
     bool knobTurnedDuringRateHold_ = false;
     bool dismissedByHome_ = false;
     bool stateDirty_ = false;
+    bool settingsDirty_ = false;
     uint8_t saveSwallowedMask_ = 0u;
-    float masterPot_ = 0.85f;
-    float masterPotHudAnchor_ = 0.85f;
+    uint8_t savedSlotMask_ = 0u;
+    int8_t selectTickAccum_ = 0;
+    int8_t presetTickAccum_ = 0;
+    int8_t targetTickAccum_ = 0;
+    int8_t configTickAccum_ = 0;
     HudMode latchedHudMode_ = HudMode::None;
     ButtonId latchedButton_ = ButtonId::Count;
-    int32_t selectTickAccum_ = 0;
-    int32_t presetTickAccum_ = 0;
-    int32_t targetTickAccum_ = 0;
-    int32_t configTickAccum_ = 0;
+    float masterPot_ = 0.85f;
+    float masterPotHudAnchor_ = 0.85f;
 };
 
 } // namespace ruido

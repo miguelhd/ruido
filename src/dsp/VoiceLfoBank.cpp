@@ -90,9 +90,10 @@ void VoiceLfoBank::reset(float sampleRate) noexcept {
 
         v.activeTarget = static_cast<uint8_t>(LfoTarget::LpCutoff);
         v.crossfading = false;
+        v.targetWeights.setTimeConstant(kTargetCrossfadeTauSec, sampleRate_);
         for (size_t t = 0u; t < kNumTargets; ++t) {
             const float initWeight = (t == v.activeTarget) ? 1.0f : 0.0f;
-            v.targetWeights[t].init(initWeight, kTargetCrossfadeTauSec, sampleRate_);
+            v.targetWeights.snapChannel(t, initWeight);
         }
     }
 }
@@ -119,7 +120,7 @@ void VoiceLfoBank::updateTargets(const EngineControlState& state, bool snapImmed
                 v.activeTarget = targetIdx;
                 v.crossfading = false;
                 for (size_t t = 0u; t < kNumTargets; ++t) {
-                    v.targetWeights[t].snapTo((t == targetIdx) ? 1.0f : 0.0f);
+                    v.targetWeights.snapChannel(t, (t == targetIdx) ? 1.0f : 0.0f);
                 }
             } else {
                 v.rateHz.setTarget(rate);
@@ -129,7 +130,7 @@ void VoiceLfoBank::updateTargets(const EngineControlState& state, bool snapImmed
                     v.activeTarget = targetIdx;
                     v.crossfading = true;
                     for (size_t t = 0u; t < kNumTargets; ++t) {
-                        v.targetWeights[t].setTarget((t == targetIdx) ? 1.0f : 0.0f);
+                        v.targetWeights.setTarget(t, (t == targetIdx) ? 1.0f : 0.0f);
                     }
                 }
             }
@@ -179,9 +180,9 @@ void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth,
     if (v.crossfading) {
         bool allSettled = true;
         for (size_t t = 0u; t < kNumTargets; ++t) {
-            const float w = v.targetWeights[t].next();
+            const float w = v.targetWeights.next(t);
             out.targetDepths[t] = curDepth * w;
-            if (w != v.targetWeights[t].target()) {
+            if (w != v.targetWeights.target(t)) {
                 allSettled = false;
             }
         }

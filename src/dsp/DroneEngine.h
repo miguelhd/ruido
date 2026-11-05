@@ -16,38 +16,25 @@
 
 namespace ruido {
 
-// Complete Core 1 portable synthesis & filtering engine:
-//  - Unified 4x oversampled (176.472 kHz) voice, rail-coupling, MS-20 ZDF filter & master bus
-//  - Clickless per-sample parameter & vactrol mute/pressure slewing
-//  - Lock-free Core 0 -> Core 1 control consumption & Core 1 -> Core 0 scope/LED telemetry
-class DroneEngine {
+// Hot L1-cacheable Core 1 synthesis & filtering state (~5.9 KB), decoupled from the 42.9 KB
+// shared Core 0 <-> Core 1 IPC buses (`EngineSharedBuses`) so dual-core FM-1 (`fm1_cpu1`) can
+// allocate `EngineSharedBuses` in uncached SRAM while keeping `DroneEngineCore` in Core 1 L1.
+class DroneEngineCore {
   public:
-    DroneEngine() noexcept;
+    DroneEngineCore() noexcept = default;
 
-    void init(float baseSampleRate = kBaseSampleRate) noexcept;
-    void reset() noexcept;
+    void init(EngineSharedBuses& buses, float baseSampleRate = kBaseSampleRate) noexcept;
+    void reset(EngineSharedBuses& buses) noexcept;
 
-    // Control bus (Core 0 calls controlBus().publish(state))
-    LockFreeControlBus& controlBus() noexcept { return controlBus_; }
-
-    // Scope SPSC ring buffer (Core 0 calls scopeBuffer().popBatch(...))
-    ScopeRingBuffer& scopeBuffer() noexcept { return scopeBuffer_; }
-
-    // Atomic LED & peak telemetry (Core 0 reads without locking)
-    const EngineTelemetry& telemetry() const noexcept { return telemetry_; }
-
-    // Toggle internal analog drift / RC roof tilt (default: both enabled).
     void setAnalogCharacterEnabled(bool enableDrift, bool enableRcTilt) noexcept {
         oscBank_.setAnalogCharacterEnabled(enableDrift, enableRcTilt);
         lfoBank_.setAnalogCharacterEnabled(enableDrift);
     }
 
-    // Snap all parameter smoothers immediately to the latest published control state
-    // (useful on boot or inside deterministic unit tests).
-    void snapParametersToLatest() noexcept;
+    void snapParametersToLatest(EngineSharedBuses& buses) noexcept;
 
-    // Render `numFrames` stereo samples at baseSampleRate (64 frames per block on FM-1).
-    void processBlock(float* outLeft, float* outRight, size_t numFrames) noexcept;
+    void processBlock(EngineSharedBuses& buses, float* outLeft, float* outRight,
+                      size_t numFrames) noexcept;
 
   private:
     struct VoiceSmoothers {
@@ -75,12 +62,7 @@ class DroneEngine {
 
     void updateTargetsFromState(const EngineControlState& state, bool snapImmediate) noexcept;
 
-    // 64-byte-aligned IPC rings & SIMD FIR state placed first to eliminate alignment padding
-    LockFreeControlBus controlBus_{};
-    ScopeRingBuffer scopeBuffer_{};
     StereoHalfBandDecimator4x decimator_{};
-    EngineTelemetry telemetry_{};
-
     float baseSampleRate_ = kBaseSampleRate;
     float oversampledRate_ = kOversampledRate;
     float invOversampledRate_ = kInvOversampledRate;
@@ -115,6 +97,52 @@ class DroneEngine {
     std::array<uint64_t, kNumOscillators> voiceEdgeDelayLines_{0u, 0u, 0u, 0u};
     std::array<std::array<int16_t, kNumOscillators>, kScopeAlignDelaySlots> voiceScopeDelay_{};
     uint32_t voiceScopeDelayWrite_ = 0u;
+};
+
+// Complete Core 1 portable synthesis & filtering engine composing `EngineSharedBuses` +
+// `DroneEngineCore` for single-object use in unit tests, macOS/Wasm simulators, and single-core
+// `dinghy` targets.
+class DroneEngine {
+  public:
+    DroneEngine() noexcept { core_.init(buses_, kBaseSampleRate); }
+
+    void init(float baseSampleRate = kBaseSampleRate) noexcept {
+        core_.init(buses_, baseSampleRate);
+    }
+
+    void reset() noexcept { core_.reset(buses_); }
+
+    EngineSharedBuses& sharedBuses() noexcept { return buses_; }
+    const EngineSharedBuses& sharedBuses() const noexcept { return buses_; }
+
+    DroneEngineCore& core() noexcept { return core_; }
+    const DroneEngineCore& core() const noexcept { return core_; }
+
+    // Control bus (Core 0 calls controlBus().publish(state))
+    LockFreeControlBus& controlBus() noexcept { return buses_.controlBus; }
+
+    // Scope SPSC ring buffer (Core 0 calls scopeBuffer().popBatch(...))
+    ScopeRingBuffer& scopeBuffer() noexcept { return buses_.scopeBuffer; }
+
+    // Atomic LED & peak telemetry (Core 0 reads without locking)
+    const EngineTelemetry& telemetry() const noexcept { return buses_.telemetry; }
+
+    // Toggle internal analog drift / RC roof tilt (default: both enabled).
+    void setAnalogCharacterEnabled(bool enableDrift, bool enableRcTilt) noexcept {
+        core_.setAnalogCharacterEnabled(enableDrift, enableRcTilt);
+    }
+
+    // Snap all parameter smoothers immediately to the latest published control state.
+    void snapParametersToLatest() noexcept { core_.snapParametersToLatest(buses_); }
+
+    // Render `numFrames` stereo samples at baseSampleRate (64 frames per block on FM-1).
+    void processBlock(float* outLeft, float* outRight, size_t numFrames) noexcept {
+        core_.processBlock(buses_, outLeft, outRight, numFrames);
+    }
+
+  private:
+    EngineSharedBuses buses_{};
+    DroneEngineCore core_{};
 };
 
 } // namespace ruido

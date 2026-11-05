@@ -85,6 +85,8 @@ template <size_t N> class OnePoleSmootherBank {
 
     void setTarget(size_t idx, float target) noexcept { target_[idx] = sanitizeState(target); }
 
+    float target(size_t idx) const noexcept { return target_[idx]; }
+
     float current(size_t idx) const noexcept { return state_[idx]; }
 
     float next(size_t idx) noexcept {

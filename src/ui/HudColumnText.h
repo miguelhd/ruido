@@ -2,6 +2,7 @@
 
 #include "core/ControlSurface.h"
 #include "core/DspMath.h"
+#include "core/FilterModMath.h"
 #include "core/GlobalControl.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
@@ -243,10 +244,14 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
     }
     case KnobBankMode::VoiceFilter: {
         const uint8_t refV = resolveFilterViewVoice(hud);
+        const FilterMacroContext fltMacros{
+            control.keyMod.dubLpfDrop,
+            control.keyMod.overloadSurge,
+            control.keyMod.filterScream,
+        };
         const ModulatedFilterParams mod = computeLiveVoiceFilter(
             control.voices[refV], control.voicePressure[refV], pitchMode,
-            lfoOutput[lfoBankIndex(refV, 0u)], lfoOutput[lfoBankIndex(refV, 1u)],
-            control.keyMod.dubLpfDrop, control.keyMod.overloadSurge, control.keyMod.filterScream);
+            lfoOutput[lfoBankIndex(refV, 0u)], lfoOutput[lfoBankIndex(refV, 1u)], fltMacros);
         if (k == 0u) {
             appendStr(roleLbl, 0u, roleCap, "HPF");
             formatCompactHz(valStr, valCap, mod.hpCutoffHz);

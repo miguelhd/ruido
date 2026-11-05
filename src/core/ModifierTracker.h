@@ -2,23 +2,15 @@
 
 #include "core/ControlSurface.h"
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
 
 namespace ruido {
 
-enum class HeldModifier : uint8_t { None = 0, Global = 1 };
-
-constexpr bool isModifierBlackKey(BlackKeyId) noexcept {
-    return false; // All 11 black keys belong to the momentary Keyboard Performance surface
-}
-
-// LIFO momentary key & knob-rate tracker for two-hand chording without dynamic containers.
+// LIFO momentary OCT-/OCT+ knob-rate & performance-key hold tracker without dynamic containers.
 struct ModifierKeyTracker {
-    uint32_t pressSeq = 0u;
-    uint32_t octMinusOrder = 0u;
-    uint32_t octPlusOrder = 0u;
+    uint16_t pressSeq = 0u;
+    uint16_t octMinusOrder = 0u;
+    uint16_t octPlusOrder = 0u;
     bool octMinusHeld = false;
     bool octPlusHeld = false;
     bool anyPerfKeyHeld = false;
@@ -37,20 +29,37 @@ struct ModifierKeyTracker {
         if (button == ButtonId::OctMinus) {
             octMinusHeld = pressed;
             if (pressed) {
-                octMinusOrder = ++pressSeq;
+                octMinusOrder = nextOrder();
             }
         } else if (button == ButtonId::OctPlus) {
             octPlusHeld = pressed;
             if (pressed) {
-                octPlusOrder = ++pressSeq;
+                octPlusOrder = nextOrder();
             }
+        }
+        if (!octMinusHeld && !octPlusHeld) {
+            pressSeq = 0u;
+            octMinusOrder = 0u;
+            octPlusOrder = 0u;
         }
         return wasRateHeld;
     }
 
-    bool isRateHeld() const noexcept { return octMinusHeld || octPlusHeld; }
+    uint16_t nextOrder() noexcept {
+        if (pressSeq == 0xFFFFu) {
+            if (octMinusOrder <= octPlusOrder) {
+                octMinusOrder = octMinusHeld ? 1u : 0u;
+                octPlusOrder = octPlusHeld ? 2u : 0u;
+            } else {
+                octPlusOrder = octPlusHeld ? 1u : 0u;
+                octMinusOrder = octMinusHeld ? 2u : 0u;
+            }
+            pressSeq = 2u;
+        }
+        return ++pressSeq;
+    }
 
-    HeldModifier activeModifier() const noexcept { return HeldModifier::None; }
+    bool isRateHeld() const noexcept { return octMinusHeld || octPlusHeld; }
 
     bool isAnyPerformanceKeyHeld() const noexcept { return anyPerfKeyHeld; }
 

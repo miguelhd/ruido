@@ -50,14 +50,16 @@ class KeyboardEngine {
                                const EngineTelemetry& telemetry, LedState& outLeds) noexcept;
 
   private:
+    uint16_t nextPressSeq() noexcept;
+
     KeyboardModel model_ = KeyboardModel::LiveMixer;
     std::array<bool, kNumBlackKeys> blackHeld_{};
     std::array<bool, kNumWhiteKeys> whiteHeld_{};
     std::array<float, kNumBlackKeys> blackPressure_{};
     std::array<float, kNumWhiteKeys> whitePressure_{};
-    std::array<uint32_t, kNumBlackKeys> blackPressSeq_{};
-    std::array<uint32_t, kNumWhiteKeys> whitePressSeq_{};
-    uint32_t pressCounter_ = 0u;
+    std::array<uint16_t, kNumBlackKeys> blackPressSeq_{};
+    std::array<uint16_t, kNumWhiteKeys> whitePressSeq_{};
+    uint16_t pressCounter_ = 0u;
     uint16_t heldBlackMask_ = 0u;
     uint16_t heldWhiteMask_ = 0u;
     KeyboardLatchState latch_{};

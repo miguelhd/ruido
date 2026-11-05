@@ -12,6 +12,8 @@ DSP_CXXFLAGS := \
 	-Werror \
 	-Wdouble-promotion \
 	-Wshadow \
+	-Wglobal-constructors \
+	-Wexit-time-destructors \
 	-fno-exceptions \
 	-fno-rtti \
 	-fno-math-errno \
@@ -41,18 +43,23 @@ DSP_SRCS := \
 
 UI_SRCS := \
 	src/core/GlobalControl.cpp \
+	src/core/GlobalColumnEval.cpp \
 	src/core/KeyboardLiveMixer.cpp \
 	src/core/KeyboardCircuitLab.cpp \
 	src/core/KeyboardRhythmLab.cpp \
 	src/core/KeyboardEngine.cpp \
 	src/core/LedEngine.cpp \
+	src/core/SnapshotCodec.cpp \
 	src/core/SnapshotBank.cpp \
+	src/core/ControllerPageNav.cpp \
 	src/core/RuidoController.cpp \
 	src/ui/ScopeTraceEngine.cpp \
+	src/ui/ScopeTraceRender.cpp \
 	src/ui/HudAmpGraph.cpp \
 	src/ui/HudGraphs.cpp \
 	src/ui/HudGlobalViews.cpp \
 	src/ui/HudKeybedView.cpp \
+	src/ui/HudHeader.cpp \
 	src/ui/HudChrome.cpp \
 	src/ui/ScopeHudRenderer.cpp
 
@@ -81,7 +88,7 @@ check:
 	python3 tools/check_hygiene.py
 
 format:
-	@"$(CLANG_FORMAT)" -i $(wildcard src/core/*.h src/core/*.cpp src/dsp/*.h src/dsp/*.cpp src/ui/*.h src/ui/*.cpp tests/*.h tests/*.cpp)
+	@"$(CLANG_FORMAT)" -i $(wildcard src/core/*.h src/core/*.cpp src/dsp/*.h src/dsp/*.cpp src/ui/*.h src/ui/*.cpp tests/*.h tests/*.cpp platforms/sim/WasmAbiLayout.h)
 
 $(BUILD_DIR)/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
@@ -112,11 +119,12 @@ test: check $(TEST_DSP_BIN) $(TEST_UI_BIN) $(WASM_OUT) $(MACOS_SIM_BIN)
 
 wasm: $(WASM_OUT)
 
-$(WASM_OUT): platforms/sim/wasm_bridge.cpp $(ALL_ENGINE_SRCS) \
+$(WASM_OUT): platforms/sim/wasm_bridge.cpp platforms/sim/WasmAbiLayout.h $(ALL_ENGINE_SRCS) \
 	$(wildcard src/core/*.h src/dsp/*.h src/ui/*.h platforms/sim/wasm_libc/*)
 	@mkdir -p $(dir $@)
 	$(CXX) --target=wasm32 -std=c++17 -O3 \
 		-Wall -Wextra -Werror -Wdouble-promotion -Wshadow \
+		-Wglobal-constructors -Wexit-time-destructors \
 		-fno-exceptions -fno-rtti -fno-math-errno -ffp-contract=off \
 		-nostdinc -nostdinc++ -nostdlib \
 		-isystem platforms/sim/wasm_libc -Isrc \
