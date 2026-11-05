@@ -30,6 +30,7 @@ constexpr std::array<uint32_t, kNumOscillators> kInitialPhases = {
 };
 
 constexpr float kUint32ToNormFloat = 2.3283064365386963e-10f; // 1.0 / 2^32
+constexpr float kHalfPhaseToBipolar = 9.31322575e-10f;        // 2.0 / 2^31
 constexpr uint32_t kHalfPhase = 0x80000000u;
 constexpr uint32_t kMaxPhaseInc = 0x1F000000u; // >= 4.13 ticks per half-cycle (< fs/8 safe BLEP)
 
@@ -105,9 +106,20 @@ OscillatorBankOutput
 SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& freqHz,
                                      const std::array<float, kNumOscillators>& pulseWidth,
                                      const std::array<float, kNumOscillators>& drift,
-                                     float circuitCoupling, bool freezeDrift) noexcept {
+                                     float circuitCoupling, bool freezeDrift,
+                                     float hardSync) noexcept {
     OscillatorBankOutput out{};
     const float coupling = clampf(circuitCoupling, 0.0f, 1.0f);
+    const float syncAmt = clampf(hardSync, 0.0f, 1.0f);
+    const float syncShaped = smoothstep01(syncAmt * 1.45f);
+    const uint32_t hardSyncThreshold =
+        (syncShaped <= 1.0e-4f)
+            ? 0xFFFFFFFFu
+            : ((syncShaped >= 0.9999f)
+                   ? 0u
+                   : static_cast<uint32_t>((1.0f - syncShaped) * 4294967040.0f));
+    bool osc0Wrapped = false;
+    float osc0WrapD = 0.0f;
     // Two-regime ALGORITHM coupling:
     //  - [0.00, 0.45]: smooth CD40106 Vdd rail sag & subtle organic chorus shimmer (25% default)
     //  - (0.45, 1.00]: starved-rail voltage collapse -> PWM duty warp, subharmonic sync locks,
@@ -202,14 +214,50 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
 
         const uint8_t neighborRose =
             static_cast<uint8_t>((lastRising | out.risingMask) & static_cast<uint8_t>(~(1u << i)));
-        if (chaos > 0.02f && neighborRose != 0u && v.currentLevel < 0.0f &&
-            v.phase >= syncCapturePhase) {
+        if (i > 0u && osc0Wrapped && syncAmt > 1.0e-4f && v.phase >= hardSyncThreshold) {
+            // Band-limited master->slave hard/threshold sync (OSC 1 -> OSC 2..4) at osc0WrapD
+            const float preFrac = 1.0f - osc0WrapD;
+            if (v.currentLevel < 0.0f) {
+                const uint32_t remToWrap = 0u - v.phase;
+                const float preLow = preFrac * static_cast<float>(incLowU32);
+                if (static_cast<float>(remToWrap) < preLow && incLowU32 > 0u) {
+                    const float dNat =
+                        1.0f - static_cast<float>(remToWrap) / static_cast<float>(incLowU32);
+                    addCubicBsplineBlep(v.blepResidual, dNat, 2.0f);
+                } else {
+                    addCubicBsplineBlep(v.blepResidual, osc0WrapD, 2.0f);
+                }
+            } else {
+                const uint32_t remToHalf = kHalfPhase - v.phase;
+                const float preHigh = preFrac * static_cast<float>(incHighU32);
+                if (static_cast<float>(remToHalf) < preHigh && incHighU32 > 0u) {
+                    const float dFall =
+                        1.0f - static_cast<float>(remToHalf) / static_cast<float>(incHighU32);
+                    addCubicBsplineBlep(v.blepResidual, dFall, -2.0f);
+                    addCubicBsplineBlep(v.blepResidual, osc0WrapD, 2.0f);
+                }
+            }
+            v.lastEdgePulse += 0.22f;
+            out.risingMask |= static_cast<uint8_t>(1u << i);
+            uint32_t postHigh =
+                static_cast<uint32_t>(osc0WrapD * static_cast<float>(incHighU32) + 0.5f);
+            if (postHigh >= kHalfPhase) {
+                postHigh = kHalfPhase - 1u;
+            }
+            v.phase = postHigh;
+            v.currentLevel = 1.0f;
+        } else if (chaos > 0.02f && neighborRose != 0u && v.currentLevel < 0.0f &&
+                   v.phase >= syncCapturePhase) {
             // Starved-rail Vt+ threshold collapse: band-limited hard-sync snap at d = 0.5
             v.phase = (incHighU32 >> 1u);
             addCubicBsplineBlep(v.blepResidual, 0.5f, 2.0f);
             v.lastEdgePulse += 0.22f;
             v.currentLevel = 1.0f;
             out.risingMask |= static_cast<uint8_t>(1u << i);
+            if (i == 0u) {
+                osc0Wrapped = true;
+                osc0WrapD = 0.5f;
+            }
         } else if (v.phase < kHalfPhase) {
             const uint32_t remToHalf = kHalfPhase - v.phase;
             if (incHighU32 < remToHalf) {
@@ -236,6 +284,10 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
                 addCubicBsplineBlep(v.blepResidual, d, 2.0f);
                 v.lastEdgePulse += 0.22f;
                 out.risingMask |= static_cast<uint8_t>(1u << i);
+                if (i == 0u) {
+                    osc0Wrapped = true;
+                    osc0WrapD = d;
+                }
                 uint32_t postHigh =
                     static_cast<uint32_t>(d * static_cast<float>(incHighU32) + 0.5f);
                 if (postHigh >= kHalfPhase) {
@@ -267,6 +319,10 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
         }
 
         out.samples[i] = voiceSample;
+        out.capRamp[i] =
+            (v.phase < kHalfPhase)
+                ? (static_cast<float>(v.phase) * kHalfPhaseToBipolar - 1.0f)
+                : (1.0f - static_cast<float>(v.phase - kHalfPhase) * kHalfPhaseToBipolar);
         out.gateHigh[i] = (v.currentLevel > 0.0f) ? 1.0f : 0.0f;
         out.driftNorm[i] = v.cachedDriftNorm;
     }

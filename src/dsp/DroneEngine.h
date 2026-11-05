@@ -3,6 +3,7 @@
 #include "core/Config.h"
 #include "core/ParameterSmoother.h"
 #include "core/Parameters.h"
+#include "dsp/CircuitPatchMatrix.h"
 #include "dsp/HalfBandDecimator.h"
 #include "dsp/Ms20Filter.h"
 #include "dsp/SchmittOscillatorBank.h"
@@ -64,6 +65,9 @@ class DroneEngine {
         LogFreqSmoother keyPitchMul;
         OnePoleSmoother stutterDepth;
         OnePoleSmoother stutterGate;
+        OnePoleSmoother xmodDepth;
+        OnePoleSmoother foldDepth;
+        OnePoleSmoother crushDepth;
         uint32_t stutterPhase = 0x80000000u;
         float stutterRateHz = 6.0f;
     };
@@ -81,24 +85,29 @@ class DroneEngine {
 
     void updateTargetsFromState(const EngineControlState& state, bool snapImmediate) noexcept;
 
+    // 64-byte-aligned IPC rings & SIMD FIR state placed first to eliminate alignment padding
+    LockFreeControlBus controlBus_{};
+    ScopeRingBuffer scopeBuffer_{};
+    StereoHalfBandDecimator4x decimator_{};
+    EngineTelemetry telemetry_{};
+
     float baseSampleRate_ = kBaseSampleRate;
     float oversampledRate_ = kOversampledRate;
     float invOversampledRate_ = kInvOversampledRate;
     float hzToBasePhaseU32_ = 4294967296.0f / kBaseSampleRate;
-
-    LockFreeControlBus controlBus_{};
-    ScopeRingBuffer scopeBuffer_{};
-    EngineTelemetry telemetry_{};
+    float hzToOversampledPhaseU32_ = 4294967296.0f / kOversampledRate;
 
     SchmittOscillatorBank oscBank_{};
     VoiceLfoBank lfoBank_{};
     std::array<Ms20DualFilter, kNumOscillators> filters_{};
     std::array<Ms20DualFilter::Coeffs, kNumOscillators> filterCoeffs_{};
-    StereoHalfBandDecimator4x decimator_{};
 
     std::array<VoiceSmoothers, kNumOscillators> voiceSmoothers_{};
     std::array<VoiceCoeffCache, kNumOscillators> coeffCache_{};
+    std::array<VoiceCrushState, kNumOscillators> crushStates_{};
     std::array<float, kNumOscillators> prevOscFreqHz_{55.0f, 82.41f, 110.15f, 164.81f};
+    std::array<float, kNumOscillators> prevOscSamples_{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, kNumOscillators> prevCapRamp_{0.0f, 0.0f, 0.0f, 0.0f};
     CriticallyDampedSmoother couplingSmoother_{};
     CriticallyDampedSmoother masterTrimSmoother_{};
     OnePoleSmoother monoMixSmoother_{};   // 0.0 = Stereo (POLY), 1.0 = Dual-Mono (MONO)
@@ -107,11 +116,15 @@ class DroneEngine {
     OnePoleSmoother overloadSurgeSmoother_{};
     OnePoleSmoother dubLpfDropSmoother_{};
     OnePoleSmoother spatialFocusSmoother_{};
+    OnePoleSmoother ringModSmoother_{};
+    OnePoleSmoother hardSyncSmoother_{};
+    OnePoleSmoother filterScreamSmoother_{};
     bool stasisFreeze_ = false;
 
     // 36-frame delay aligning 4-voice rising edges & scope taps with PolyBLEP + FIR delay
+    static constexpr uint32_t kScopeAlignDelaySlots = 37u;
     std::array<uint64_t, kNumOscillators> voiceEdgeDelayLines_{0u, 0u, 0u, 0u};
-    std::array<std::array<int16_t, kNumOscillators>, 64> voiceScopeDelay_{};
+    std::array<std::array<int16_t, kNumOscillators>, kScopeAlignDelaySlots> voiceScopeDelay_{};
     uint32_t voiceScopeDelayWrite_ = 0u;
 };
 

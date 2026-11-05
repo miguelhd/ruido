@@ -50,104 +50,12 @@ void choreographScaffoldLeds(const KeyboardInputView& input, float animPhase, fl
     }
 }
 
-void evaluateCircuitLabModel(const KeyboardInputView& in, EngineControlState& state,
-                             HudState& hud) noexcept {
-    KeyboardModState mod{};
-    uint32_t latestSeq = 0u;
-    KeyPunchKind latestKind = KeyPunchKind::None;
-    uint8_t latestVoice = 0u;
-    float latestValue = 0.0f;
-    const auto notePunch = [&](uint32_t seq, KeyPunchKind kind, uint8_t vIdx, float val) noexcept {
-        if (seq >= latestSeq) {
-            latestSeq = seq;
-            latestKind = kind;
-            latestVoice = vIdx;
-            latestValue = val;
-        }
-    };
-
-    const bool soloLatch = (in.config.soloMode == KeySwitchMode::Latching);
-    const bool muteLatch = (in.config.muteMode == KeySwitchMode::Latching);
-    uint8_t soloMask = soloLatch ? in.latch.soloMask : 0u;
-    uint8_t muteMask = muteLatch ? in.latch.muteMask : 0u;
-    for (uint8_t v = 0u; v < kNumOscillators; ++v) {
-        const uint8_t bit = static_cast<uint8_t>(1u << v);
-        if (!soloLatch && in.blackHeld[v]) {
-            soloMask |= bit;
-        }
-        if (!muteLatch && in.whiteHeld[v]) {
-            muteMask |= bit;
-        }
-        if (in.blackHeld[v]) {
-            notePunch(in.blackPressSeq[v], KeyPunchKind::SpotlightSolo, v,
-                      ((soloMask & bit) != 0u) ? 1.0f : 0.0f);
-        }
-    }
-    mod.soloMask = soloMask;
-    if (soloMask != 0u) {
-        for (uint8_t v = 0u; v < kNumOscillators; ++v) {
-            mod.voiceGainMul[v] = (((soloMask >> v) & 1u) != 0u) ? 1.0f : 0.0f;
-        }
-    }
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)]) {
-        const size_t idx = static_cast<size_t>(BlackKeyId::ScopeFreezeKey);
-        mod.stasisFreeze = true;
-        hud.scopeFrozen = true;
-        notePunch(in.blackPressSeq[idx], KeyPunchKind::StasisFreeze, 0u, 1.0f);
-    }
-    for (uint8_t v = 0u; v < kNumOscillators; ++v) {
-        if (((muteMask >> v) & 1u) != 0u) {
-            mod.voiceGainMul[v] = 0.0f;
-        }
-        if (in.whiteHeld[v]) {
-            notePunch(in.whitePressSeq[v], KeyPunchKind::VoiceCut, v,
-                      (((muteMask >> v) & 1u) != 0u) ? 1.0f : 0.0f);
-        }
-        // Circuit Lab Bank C (White 8..11): Stutter Chopper (1.2 Hz -> 20 Hz)
-        if (in.whiteHeld[8u + v]) {
-            const float p = in.whitePressure[8u + v];
-            mod.stutterDepth[v] = 1.0f;
-            mod.stutterRateHz[v] = 1.2f * fastExp2(4.0588937f * p);
-            notePunch(in.whitePressSeq[8u + v], KeyPunchKind::VoiceStutter, v,
-                      mod.stutterRateHz[v]);
-        }
-    }
-    hud.activePunch = latestKind;
-    hud.activePunchVoice = latestVoice;
-    hud.activePunchValue = latestValue;
-    state.keyMod = mod;
-}
-
-void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, float subBreathWave01,
-                               const EngineControlState& state, const HudState& hud,
-                               uint8_t stutMask, LedState& outLeds) noexcept {
-    (void)animPhase;
-    (void)hud;
-    choreographScaffoldLeds(in, animPhase, subBreathWave01, state, hud, stutMask, outLeds);
-    bool anyChopOpen = false;
-    bool anyChopClosed = false;
-    for (size_t v = 0u; v < kNumOscillators; ++v) {
-        if (in.whiteHeld[8u + v]) {
-            const bool gateOpen = ((stutMask >> v) & 1u) != 0u;
-            outLeds.whiteKeyLeds[8u + v] = gateOpen ? 1.0f : 0.03f;
-            anyChopOpen = anyChopOpen || gateOpen;
-            anyChopClosed = anyChopClosed || !gateOpen;
-        }
-        const VoiceCircuitState vc = evaluateVoiceCircuit(state, v, stutMask);
-        evaluateVoiceConsoleLeds(vc, subBreathWave01, outLeds.blackKeyLeds[v],
-                                 outLeds.whiteKeyLeds[v]);
-    }
-    if (anyChopOpen || anyChopClosed) {
-        maxPanelBtnLed(outLeds, ButtonId::Env, anyChopOpen ? 0.92f : 0.02f);
-        maxPanelBtnLed(outLeds, ButtonId::Arp, anyChopClosed ? 0.92f : 0.02f);
-    }
-}
-
 constexpr std::array<KeyboardModelOps, static_cast<size_t>(KeyboardModel::Count)> kModelOpsTable = {
     {
         {&onLiveMixerKeyPress, &evaluateLiveMixerModel, &choreographLiveMixerLeds},
+        {&onCircuitLabKeyPress, &evaluateCircuitLabModel, &choreographCircuitLabLeds},
         {&onScaffoldKeyPress, &evaluateScaffoldModel, &choreographScaffoldLeds},
-        {&onLiveMixerKeyPress, &evaluateCircuitLabModel, &choreographCircuitLabLeds},
+        {&onScaffoldKeyPress, &evaluateScaffoldModel, &choreographScaffoldLeds},
     }};
 
 } // namespace
@@ -351,6 +259,8 @@ void KeyboardEngine::stepAndComputeKeyLeds(float dtSec, float animPhase, float s
                 pos01 = absf(static_cast<float>(i) - 7.5f) * (1.0f / 7.5f);
             } else if (model_ == KeyboardModel::CircuitLab) {
                 pos01 = static_cast<float>((i * 7u + 3u) & 15u) * (1.0f / 15.0f);
+            } else if (model_ == KeyboardModel::RhythmLab) {
+                pos01 = static_cast<float>(((i & 3u) * 4u) + (i >> 2u)) * (1.0f / 15.0f);
             }
             const float pulse = clampf(1.0f - absf(prog * 1.25f - pos01) * 4.2f, 0.0f, 1.0f);
             outLeds.whiteKeyLeds[i] =

@@ -246,7 +246,7 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         const ModulatedFilterParams mod = computeLiveVoiceFilter(
             control.voices[refV], control.voicePressure[refV], pitchMode,
             lfoOutput[lfoBankIndex(refV, 0u)], lfoOutput[lfoBankIndex(refV, 1u)],
-            control.keyMod.dubLpfDrop, control.keyMod.overloadSurge);
+            control.keyMod.dubLpfDrop, control.keyMod.overloadSurge, control.keyMod.filterScream);
         if (k == 0u) {
             appendStr(roleLbl, 0u, roleCap, "HPF");
             formatCompactHz(valStr, valCap, mod.hpCutoffHz);

@@ -189,7 +189,8 @@ void formatKeybedTopHeader(const HudState& hud, char* leftMain, size_t leftMainC
         size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " ");
         sp = appendUInt(leftSuffix, sp, leftSuffixCap,
                         static_cast<uint32_t>(hud.keyboardModel) + 1u);
-        appendStr(leftSuffix, sp, leftSuffixCap, "/3");
+        sp = appendStr(leftSuffix, sp, leftSuffixCap, "/");
+        appendUInt(leftSuffix, sp, leftSuffixCap, static_cast<uint32_t>(KeyboardModel::Count));
         appendStr(rightText, 0u, rightCap, "SELECT MODEL");
         return;
     }
@@ -294,6 +295,60 @@ void formatKeybedTopHeader(const HudState& hud, char* leftMain, size_t leftMainC
         formatSnapshotHeader(hud, leftMain, leftMainCap, leftSuffix, leftSuffixCap, rightText,
                              rightCap, outShowBar, outBarNorm);
         break;
+    case KeyPunchKind::VoiceXMod: {
+        appendStr(leftMain, 0u, leftMainCap, "CROSS-PIN");
+        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
+        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
+    }
+    case KeyPunchKind::VoiceFold: {
+        appendStr(leftMain, 0u, leftMainCap, "FOLD");
+        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
+        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatMultiplierX(rightText, rightCap, computeWavefoldStages(outBarNorm));
+        break;
+    }
+    case KeyPunchKind::VoiceCrush: {
+        appendStr(leftMain, 0u, leftMainCap, "CRUSH");
+        size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
+        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatCompactHz(rightText, rightCap, computeCrushClockHz(outBarNorm));
+        break;
+    }
+    case KeyPunchKind::RailStarve:
+        appendStr(leftMain, 0u, leftMainCap, "STARVE");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
+    case KeyPunchKind::RingXor:
+        appendStr(leftMain, 0u, leftMainCap, "RING MOD");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
+    case KeyPunchKind::LfoTurbo:
+        appendStr(leftMain, 0u, leftMainCap, "TURBO LFO");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatMultiplierX(rightText, rightCap, fastExp2(5.0f * outBarNorm));
+        break;
+    case KeyPunchKind::FilterScream:
+        appendStr(leftMain, 0u, leftMainCap, "SCREAM");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
+    case KeyPunchKind::HardSync:
+        appendStr(leftMain, 0u, leftMainCap, "HARD SYNC");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
+    case KeyPunchKind::PhaseScatter:
+        appendStr(leftMain, 0u, leftMainCap, "SCATTER");
+        outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
+        formatPercent(rightText, rightCap, outBarNorm);
+        break;
     case KeyPunchKind::None:
         appendStr(leftMain, 0u, leftMainCap, keyboardModelTitle(hud.keyboardModel));
         appendStr(rightText, 0u, rightCap, "PREVIEW");
@@ -340,7 +395,8 @@ void HudKeybedView::update(float dtClamped, const EngineControlState& control,
     computeKeyboardModelRestLeds(rawHud.keyboardModel, control, rawHud, stutterGateMask,
                                  subBreath01, savePulse01, tgtBlack, tgtWhite);
 
-    if (rawHud.keyboardModel == KeyboardModel::LiveMixer) {
+    if (rawHud.keyboardModel == KeyboardModel::LiveMixer ||
+        rawHud.keyboardModel == KeyboardModel::CircuitLab) {
         for (size_t i = kNumOscillators; i < kNumBlackKeys; ++i) {
             if (((rawHud.heldBlackMask >> i) & 1u) != 0u) {
                 tgtBlack[i] = 1.0f;
@@ -409,11 +465,16 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
         cv.drawSansCentered(kFontSansBold, 120, 33, spec.title, 255u, 0);
         cv.drawSansCentered(kFontSansSmall, 120, 50, spec.subtitle, 168u, 1);
 
-        // 3-slot optical model indicator pips (x = 106, 120, 134)
-        cv.drawHorizontalFilament(109.0f, 117.0f, 66.0f, 40.0f, 0.55f, true);
-        cv.drawHorizontalFilament(123.0f, 131.0f, 66.0f, 40.0f, 0.55f, true);
+        // Centered N-slot optical model indicator pips around x = 120
+        constexpr float kBeadSpacing = 14.0f;
+        const float firstX = 120.0f - 0.5f * static_cast<float>(kModelCount - 1u) * kBeadSpacing;
+        for (uint8_t m = 0u; m + 1u < kModelCount; ++m) {
+            const float fx0 = firstX + static_cast<float>(m) * kBeadSpacing + 3.0f;
+            const float fx1 = firstX + static_cast<float>(m + 1u) * kBeadSpacing - 3.0f;
+            cv.drawHorizontalFilament(fx0, fx1, 66.0f, 40.0f, 0.55f, true);
+        }
         for (uint8_t m = 0u; m < kModelCount; ++m) {
-            const float sx = 106.0f + static_cast<float>(m) * 14.0f;
+            const float sx = firstX + static_cast<float>(m) * kBeadSpacing;
             const bool sel = (m == modelIdx);
             cv.drawOpticalBead(sx, 66.0f, sel ? 0.98f : 0.28f, sel ? 2.05f : 1.10f);
         }

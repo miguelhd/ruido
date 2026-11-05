@@ -169,7 +169,7 @@ void testTwoHandErgonomicsAndLinearGears() {
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::None);
     CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::LiveMixer);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
-    CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::Harmonium);
+    CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::CircuitLab);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
     CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::LiveMixer);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);

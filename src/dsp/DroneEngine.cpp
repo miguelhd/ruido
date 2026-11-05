@@ -2,6 +2,7 @@
 
 #include "core/DspMath.h"
 #include "core/LfoMath.h"
+#include "dsp/CircuitPatchMatrix.h"
 
 namespace ruido {
 
@@ -30,6 +31,7 @@ void DroneEngine::init(float baseSampleRate) noexcept {
     oversampledRate_ = baseSampleRate_ * static_cast<float>(kOversampleFactor);
     invOversampledRate_ = 1.0f / oversampledRate_;
     hzToBasePhaseU32_ = 4294967296.0f / baseSampleRate_;
+    hzToOversampledPhaseU32_ = 4294967296.0f / oversampledRate_;
 
     oscBank_.reset(oversampledRate_);
     lfoBank_.reset(baseSampleRate_);
@@ -39,6 +41,9 @@ void DroneEngine::init(float baseSampleRate) noexcept {
     decimator_.reset();
     coeffCache_ = {};
     filterCoeffs_ = {};
+    crushStates_ = {};
+    prevOscSamples_ = {0.0f, 0.0f, 0.0f, 0.0f};
+    prevCapRamp_ = {0.0f, 0.0f, 0.0f, 0.0f};
     voiceEdgeDelayLines_ = {0u, 0u, 0u, 0u};
     voiceScopeDelay_ = {};
     voiceScopeDelayWrite_ = 0u;
@@ -65,6 +70,9 @@ void DroneEngine::init(float baseSampleRate) noexcept {
         sm.keyPitchMul.init(initState.keyMod.voicePitchMul[i], kPotPoleTauSec, baseSampleRate_);
         sm.stutterDepth.init(initState.keyMod.stutterDepth[i], kVactrolSlewSec, baseSampleRate_);
         sm.stutterGate.init(1.0f, kStutterEdgeSec, baseSampleRate_);
+        sm.xmodDepth.init(initState.keyMod.xmodDepth[i], kPunchBusSlewSec, baseSampleRate_);
+        sm.foldDepth.init(initState.keyMod.foldDepth[i], kPunchBusSlewSec, baseSampleRate_);
+        sm.crushDepth.init(initState.keyMod.crushDepth[i], kPunchBusSlewSec, baseSampleRate_);
         sm.stutterPhase = 0x80000000u;
         sm.stutterRateHz = initState.keyMod.stutterRateHz[i];
     }
@@ -80,6 +88,9 @@ void DroneEngine::init(float baseSampleRate) noexcept {
     overloadSurgeSmoother_.init(initState.keyMod.overloadSurge, kPunchBusSlewSec, baseSampleRate_);
     dubLpfDropSmoother_.init(initState.keyMod.dubLpfDrop, kPunchBusSlewSec, baseSampleRate_);
     spatialFocusSmoother_.init(initState.keyMod.spatialFocus, kPunchBusSlewSec, baseSampleRate_);
+    ringModSmoother_.init(initState.keyMod.ringModMix, kPunchBusSlewSec, baseSampleRate_);
+    hardSyncSmoother_.init(initState.keyMod.hardSyncAmount, kPunchBusSlewSec, baseSampleRate_);
+    filterScreamSmoother_.init(initState.keyMod.filterScream, kPunchBusSlewSec, baseSampleRate_);
     stasisFreeze_ = initState.keyMod.stasisFreeze;
     telemetry_.stutterGateMask.store(0x0Fu, std::memory_order_relaxed);
 
@@ -96,6 +107,9 @@ void DroneEngine::reset() noexcept {
     decimator_.reset();
     coeffCache_ = {};
     filterCoeffs_ = {};
+    crushStates_ = {};
+    prevOscSamples_ = {0.0f, 0.0f, 0.0f, 0.0f};
+    prevCapRamp_ = {0.0f, 0.0f, 0.0f, 0.0f};
     voiceEdgeDelayLines_ = {0u, 0u, 0u, 0u};
     voiceScopeDelay_ = {};
     voiceScopeDelayWrite_ = 0u;
@@ -130,6 +144,9 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
         const float kGain = clampf(state.keyMod.voiceGainMul[i], 0.0f, 1.5f);
         const float kPitch = clampf(state.keyMod.voicePitchMul[i], 0.125f, 8.0f);
         const float kStutDepth = clampf(state.keyMod.stutterDepth[i], 0.0f, 1.0f);
+        const float kXMod = clampf(state.keyMod.xmodDepth[i], 0.0f, 1.0f);
+        const float kFold = clampf(state.keyMod.foldDepth[i], 0.0f, 1.0f);
+        const float kCrush = clampf(state.keyMod.crushDepth[i], 0.0f, 1.0f);
         sm.stutterRateHz = clampf(state.keyMod.stutterRateHz[i], 1.0f, 30.0f);
 
         if (snapImmediate) {
@@ -148,6 +165,9 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
             sm.keyPitchMul.snapTo(kPitch);
             sm.stutterDepth.snapTo(kStutDepth);
             sm.stutterGate.snapTo(1.0f);
+            sm.xmodDepth.snapTo(kXMod);
+            sm.foldDepth.snapTo(kFold);
+            sm.crushDepth.snapTo(kCrush);
             sm.stutterPhase = 0x80000000u;
             const float pm = state.global.pitchPressureMode ? 1.0f : 0.0f;
             prevOscFreqHz_[i] = clampf(clampedBaseHz * kPitch * computeVoicePitchRatio(press, pm),
@@ -174,6 +194,9 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
             sm.keyGainMul.setTarget(kGain);
             sm.keyPitchMul.setTarget(kPitch);
             sm.stutterDepth.setTarget(kStutDepth);
+            sm.xmodDepth.setTarget(kXMod);
+            sm.foldDepth.setTarget(kFold);
+            sm.crushDepth.setTarget(kCrush);
         }
     }
 
@@ -185,6 +208,9 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
     const float surgeTarget = clampf(state.keyMod.overloadSurge, 0.0f, 1.0f);
     const float dubLpfTarget = clampf(state.keyMod.dubLpfDrop, 0.0f, 1.0f);
     const float spatialTarget = clampf(state.keyMod.spatialFocus, -1.0f, 1.0f);
+    const float ringTarget = clampf(state.keyMod.ringModMix, 0.0f, 1.0f);
+    const float syncTarget = clampf(state.keyMod.hardSyncAmount, 0.0f, 1.0f);
+    const float screamTarget = clampf(state.keyMod.filterScream, 0.0f, 1.0f);
     stasisFreeze_ = state.keyMod.stasisFreeze;
 
     if (snapImmediate) {
@@ -196,6 +222,9 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
         overloadSurgeSmoother_.snapTo(surgeTarget);
         dubLpfDropSmoother_.snapTo(dubLpfTarget);
         spatialFocusSmoother_.snapTo(spatialTarget);
+        ringModSmoother_.snapTo(ringTarget);
+        hardSyncSmoother_.snapTo(syncTarget);
+        filterScreamSmoother_.snapTo(screamTarget);
     } else {
         couplingSmoother_.setTarget(coupling);
         masterTrimSmoother_.setTarget(trim);
@@ -205,6 +234,9 @@ void DroneEngine::updateTargetsFromState(const EngineControlState& state,
         overloadSurgeSmoother_.setTarget(surgeTarget);
         dubLpfDropSmoother_.setTarget(dubLpfTarget);
         spatialFocusSmoother_.setTarget(spatialTarget);
+        ringModSmoother_.setTarget(ringTarget);
+        hardSyncSmoother_.setTarget(syncTarget);
+        filterScreamSmoother_.setTarget(screamTarget);
     }
 
     lfoBank_.updateTargets(state, snapImmediate);
@@ -236,6 +268,9 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         const float surgeDrive = surge * (0.62f + 0.38f * surge);
         const float dubDrop = dubLpfDropSmoother_.next();
         const float spatialFocus = spatialFocusSmoother_.next();
+        const float ringModMix = ringModSmoother_.next();
+        const float hardSync = hardSyncSmoother_.next();
+        const float filterScream = filterScreamSmoother_.next();
         const float baseCoupling = couplingSmoother_.next();
         const float coupling = baseCoupling + (1.0f - baseCoupling) * (surge * surge);
         const float masterTrim = masterTrimSmoother_.next();
@@ -252,6 +287,9 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         std::array<float, kNumOscillators> oscFreqs{};
         std::array<float, kNumOscillators> oscPulseWidths{};
         std::array<float, kNumOscillators> oscDrifts{};
+        std::array<float, kNumOscillators> xmodDepths{};
+        std::array<float, kNumOscillators> foldDepths{};
+        std::array<float, kNumOscillators> crushDepths{};
         std::array<float, kNumOscillators> vcaGates{};
         std::array<float, kNumOscillators> gainL{};
         std::array<float, kNumOscillators> gainR{};
@@ -270,6 +308,9 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             const float kGainMul = sm.keyGainMul.next();
             const float kPitchMul = sm.keyPitchMul.next();
             const float stutDepth = sm.stutterDepth.next();
+            xmodDepths[i] = sm.xmodDepth.next();
+            foldDepths[i] = sm.foldDepth.next();
+            crushDepths[i] = sm.crushDepth.next();
             float stutMul = 1.0f;
             if (stutDepth > 1.0e-4f) {
                 if (!stasisFreeze_) {
@@ -324,7 +365,7 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             ModulatedFilterParams mod =
                 applyKeyDubLowPass(computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase,
                                                              p, baseGate, pitchMode),
-                                   dubDrop, surge);
+                                   dubDrop, surge, filterScream);
 
             float modAmp = applyLfoAmplitude(
                 sm.amplitude.next(), tdA[static_cast<size_t>(LfoTarget::Amplitude)], lfoA.raw);
@@ -378,18 +419,29 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 subFreqs[i] = prevOscFreqHz_[i] + (oscFreqs[i] - prevOscFreqHz_[i]) * subAlpha;
             }
+            applyCrossPinFm4x(subFreqs, prevCapRamp_, prevOscSamples_, xmodDepths);
             const OscillatorBankOutput oscOut = oscBank_.processSample(
-                subFreqs, oscPulseWidths, oscDrifts, coupling, stasisFreeze_);
+                subFreqs, oscPulseWidths, oscDrifts, coupling, stasisFreeze_, hardSync);
+            prevOscSamples_ = oscOut.samples;
+            prevCapRamp_ = oscOut.capRamp;
+            std::array<float, kNumOscillators> patchedSamples = oscOut.samples;
+            applyCrossPinXor4x(patchedSamples, oscOut.capRamp, xmodDepths);
+            applyCapacitorWavefold4x(patchedSamples, oscOut.capRamp, foldDepths);
+            applyRippleSubXorPreFilter4x(patchedSamples, oscOut.risingMask, crushDepths,
+                                         crushStates_);
+            applyRingXorMatrix4x(patchedSamples, ringModMix);
             voiceRisingInFrame |= oscOut.risingMask;
             lastGateHigh = oscOut.gateHigh;
             lastDriftNorm = oscOut.driftNorm;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
-                voiceSub[i][sub] = oscOut.samples[i];
+                voiceSub[i][sub] = patchedSamples[i];
             }
         }
         prevOscFreqHz_ = oscFreqs;
 
         Ms20DualFilter::processQuadBank4x(filters_, voiceSub, filterCoeffs_);
+        applySampleHoldCrushPostFilter4x(voiceSub, crushDepths, hzToOversampledPhaseU32_,
+                                         crushStates_);
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             voiceScopeAccum[i] = voiceSub[i][0] + voiceSub[i][1] + voiceSub[i][2] + voiceSub[i][3];
             const float vAbs = absf(voiceScopeAccum[i]) * 0.25f * vcaGates[i];
@@ -438,11 +490,12 @@ void DroneEngine::processBlock(float* outLeft, float* outRight, size_t numFrames
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             curVoiceQ13[i] = quantizeVoiceScopeQ13(voiceScopeAccum[i] * voiceScopeScale[i]);
         }
-        const uint32_t delayWriteSlot = voiceScopeDelayWrite_ & 63u;
-        const uint32_t delayReadSlot = (voiceScopeDelayWrite_ - 36u) & 63u;
-        voiceScopeDelay_[delayWriteSlot] = curVoiceQ13;
-        const std::array<int16_t, kNumOscillators> delayedVoices = voiceScopeDelay_[delayReadSlot];
-        ++voiceScopeDelayWrite_;
+        voiceScopeDelay_[voiceScopeDelayWrite_] = curVoiceQ13;
+        const uint32_t nextDelaySlot = (voiceScopeDelayWrite_ + 1u < kScopeAlignDelaySlots)
+                                           ? (voiceScopeDelayWrite_ + 1u)
+                                           : 0u;
+        const std::array<int16_t, kNumOscillators> delayedVoices = voiceScopeDelay_[nextDelaySlot];
+        voiceScopeDelayWrite_ = nextDelaySlot;
 
         uint8_t delayedMask = 0u;
         for (size_t v = 0u; v < kNumOscillators; ++v) {

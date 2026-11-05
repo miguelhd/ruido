@@ -130,19 +130,28 @@ enum class HudMode : uint8_t {
 // Active momentary punch-in family displayed in the top header during HudMode::KeyboardPlay
 enum class KeyPunchKind : uint8_t {
     None = 0,
-    SpotlightSolo = 1,  // OP1-OP4: Solo OSC 1-4
-    OverloadSurge = 2,  // OP5: Drive (4.5x MS-20 overdrive + rail coupling)
-    SubDrop = 3,        // OP6: Sub Octave (-1 / -2 Oct)
-    RatioMagnet = 4,    // PIT: Ratio Lock (Just Intonation)
-    DubLpfDrop = 5,     // GLO key: Low Pass sweep (28 kHz -> 31 Hz)
-    MonoFocus = 6,      // MONO key: 4-oscillator unison pitch collapse
-    PolySpread = 7,     // POLY key: Detuned + PWM swarm spread
-    StasisFreeze = 8,   // 11th tall key: Freeze (8 LFOs + Drift + Scope)
-    VoiceCut = 9,       // White Keys 1-4: Mute OSC 1-4
-    VoiceFormant = 10,  // White Keys 5-8: Filter OSC 1-4
-    VoiceStutter = 11,  // Reserved for Circuit Lab: Stutter OSC 1-4
-    VoiceSiren = 12,    // White Keys 9-12: Octave OSC 1-4 (+1 / +2 Oct)
-    SnapshotRecall = 13 // White Keys 13-16: Snapshot 1-4 recall / pressure morph
+    SpotlightSolo = 1,   // OP1-OP4: Solo OSC 1-4
+    OverloadSurge = 2,   // LiveMixer OP5: Drive (4.5x MS-20 overdrive + rail coupling)
+    SubDrop = 3,         // LiveMixer OP6: Sub Octave (-1 / -2 Oct)
+    RatioMagnet = 4,     // LiveMixer PIT: Ratio Lock (Just Intonation)
+    DubLpfDrop = 5,      // LiveMixer GLO: Low Pass sweep (28 kHz -> 31 Hz)
+    MonoFocus = 6,       // LiveMixer MONO: 4-oscillator unison pitch collapse
+    PolySpread = 7,      // LiveMixer POLY: Detuned + PWM swarm spread
+    StasisFreeze = 8,    // 11th tall key: Freeze (8 LFOs + Drift + Scope)
+    VoiceCut = 9,        // White Keys 1-4: Mute OSC 1-4
+    VoiceFormant = 10,   // LiveMixer Keys 5-8: Filter OSC 1-4
+    VoiceStutter = 11,   // RhythmLab: Stutter chopper gate OSC 1-4
+    VoiceSiren = 12,     // LiveMixer Keys 9-12: Octave OSC 1-4 (+1 / +2 Oct)
+    SnapshotRecall = 13, // LiveMixer Keys 13-16: Scene 1-4 recall / pressure morph
+    VoiceXMod = 14,      // CircuitLab Keys 5-8: Cross-Pin neighbor FM/XOR into OSC 1-4
+    VoiceFold = 15,      // CircuitLab Keys 9-12: 4x West-Coast capacitor wavefolder OSC 1-4
+    RailStarve = 16,     // CircuitLab OP5: Starved 9V CMOS rail collapse
+    RingXor = 17,        // CircuitLab OP6: 4x paired Ring/XOR sidebands
+    LfoTurbo = 18,       // CircuitLab PIT: 1x -> 32x LFO overclock
+    FilterScream = 19,   // CircuitLab GLO: Twin Korg35 HPF + LPF self-oscillation
+    HardSync = 20,       // CircuitLab MONO: Band-limited OSC 1 -> 2..4 hard sync
+    PhaseScatter = 21,   // CircuitLab POLY: Duty, pitch, filter & stereo scatter
+    VoiceCrush = 22      // CircuitLab Keys 13-16: CD4013 S&H clock crush + CD4040 ripple XOR
 };
 
 struct PureRatioEntry {
@@ -165,10 +174,12 @@ constexpr const char* keyboardModelTitle(KeyboardModel model) noexcept {
     switch (model) {
     case KeyboardModel::LiveMixer:
         return "LIVE MIXER";
-    case KeyboardModel::Harmonium:
-        return "HARMONIUM";
     case KeyboardModel::CircuitLab:
         return "CIRCUIT LAB";
+    case KeyboardModel::Harmonium:
+        return "HARMONIUM";
+    case KeyboardModel::RhythmLab:
+        return "RHYTHM LAB";
     case KeyboardModel::Count:
         break;
     }
@@ -267,6 +278,7 @@ constexpr KnobBankMode knobBankForKeyPunch(KeyPunchKind punch, KnobBankMode fall
     case KeyPunchKind::VoiceFormant:
         return KnobBankMode::VoiceFilter;
     case KeyPunchKind::DubLpfDrop:
+    case KeyPunchKind::FilterScream:
         return KnobBankMode::GlobalFilter;
     case KeyPunchKind::OverloadSurge:
         return KnobBankMode::Amplitude;
@@ -281,11 +293,62 @@ constexpr KnobBankMode knobBankForKeyPunch(KeyPunchKind punch, KnobBankMode fall
     case KeyPunchKind::VoiceCut:
     case KeyPunchKind::VoiceStutter:
     case KeyPunchKind::VoiceSiren:
+    case KeyPunchKind::VoiceXMod:
+    case KeyPunchKind::VoiceFold:
+    case KeyPunchKind::VoiceCrush:
+    case KeyPunchKind::RailStarve:
+    case KeyPunchKind::RingXor:
+    case KeyPunchKind::LfoTurbo:
+    case KeyPunchKind::HardSync:
+    case KeyPunchKind::PhaseScatter:
         return KnobBankMode::Frequency;
     case KeyPunchKind::None:
         break;
     }
     return fallback;
+}
+
+// Single source of truth for normalized [0, 1] top-header bar gauges across all keyboard models.
+constexpr bool evalKeyPunchHeaderBar(const HudState& hud, float& outNorm) noexcept {
+    outNorm = 0.0f;
+    switch (hud.activePunch) {
+    case KeyPunchKind::SnapshotRecall:
+        if (!hud.snapshotGliding) {
+            return false;
+        }
+        outNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
+        return true;
+    case KeyPunchKind::OverloadSurge:
+    case KeyPunchKind::RatioMagnet:
+    case KeyPunchKind::MonoFocus:
+    case KeyPunchKind::PolySpread:
+    case KeyPunchKind::VoiceFormant:
+    case KeyPunchKind::VoiceXMod:
+    case KeyPunchKind::VoiceFold:
+    case KeyPunchKind::VoiceCrush:
+    case KeyPunchKind::RailStarve:
+    case KeyPunchKind::RingXor:
+    case KeyPunchKind::LfoTurbo:
+    case KeyPunchKind::FilterScream:
+    case KeyPunchKind::HardSync:
+    case KeyPunchKind::PhaseScatter:
+        outNorm = clampf(hud.activePunchValue, 0.0f, 1.0f);
+        return true;
+    case KeyPunchKind::SubDrop:
+        outNorm = clampf(-hud.activePunchValue * 0.5f, 0.0f, 1.0f);
+        return true;
+    case KeyPunchKind::VoiceSiren:
+        outNorm = clampf(hud.activePunchValue * 0.5f, 0.0f, 1.0f);
+        return true;
+    case KeyPunchKind::None:
+    case KeyPunchKind::SpotlightSolo:
+    case KeyPunchKind::DubLpfDrop:
+    case KeyPunchKind::StasisFreeze:
+    case KeyPunchKind::VoiceCut:
+    case KeyPunchKind::VoiceStutter:
+        return false;
+    }
+    return false;
 }
 
 // Software-PWM brightness [0.0f, 1.0f] across all 42 physical LED channels on the M-VAVE FM-1:

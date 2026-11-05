@@ -9,6 +9,7 @@ namespace ruido {
 
 struct OscillatorBankOutput {
     std::array<float, kNumOscillators> samples{};
+    std::array<float, kNumOscillators> capRamp{};   // [-1.0f, +1.0f] CD40106 timing-capacitor ramp
     std::array<float, kNumOscillators> gateHigh{};  // 1.0f high, 0.0f low (for LED pulse)
     std::array<float, kNumOscillators> driftNorm{}; // [-1.0f, +1.0f] live 1/f thermal drift
     uint8_t risingMask = 0u;                        // Bit v set on sample where Osc v wrapped 0
@@ -37,7 +38,8 @@ class SchmittOscillatorBank {
     OscillatorBankOutput processSample(const std::array<float, kNumOscillators>& freqHz,
                                        const std::array<float, kNumOscillators>& pulseWidth,
                                        const std::array<float, kNumOscillators>& drift,
-                                       float circuitCoupling, bool freezeDrift = false) noexcept;
+                                       float circuitCoupling, bool freezeDrift = false,
+                                       float hardSync = 0.0f) noexcept;
 
     OscillatorBankOutput processSample(const std::array<float, kNumOscillators>& freqHz,
                                        float circuitCoupling) noexcept {

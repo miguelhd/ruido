@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 const wasmPath = new URL('../platforms/sim/web/ruido.wasm', import.meta.url);
 const bytes = fs.readFileSync(wasmPath);
-assert.ok(bytes.length > 4096 && bytes.length < 450000, `Unexpected wasm size: ${bytes.length}`);
+assert.ok(bytes.length > 4096 && bytes.length < 550000, `Unexpected wasm size: ${bytes.length}`);
 
 const mod = await WebAssembly.compile(bytes);
 const imports = WebAssembly.Module.imports(mod);
@@ -140,11 +140,11 @@ for (let i = 0; i < selRgbaBytes.length; i += 4) {
   assert.equal(selRgbaBytes[i], selRgbaBytes[i + 1]);
   assert.equal(selRgbaBytes[i + 1], selRgbaBytes[i + 2]);
 }
-ex.wasm_ui_encoder(0, 4); // SELECT -> Harmonium (1)
+ex.wasm_ui_encoder(0, 4); // SELECT -> CircuitLab (1)
 assert.equal(f32[summaryIdx + 53], 1.0);
-ex.wasm_ui_encoder(0, 4); // SELECT -> CircuitLab (2)
+ex.wasm_ui_encoder(0, 4); // SELECT -> Harmonium (2)
 assert.equal(f32[summaryIdx + 53], 2.0);
-ex.wasm_ui_encoder(0, -8); // SELECT -> back to DubConsole (0)
+ex.wasm_ui_encoder(0, -8); // SELECT -> back to LiveMixer (0)
 assert.equal(f32[summaryIdx + 53], 0.0);
 // Persists across 3.0s until dismissed by 2nd SEL tap
 for (let i = 0; i < 15; i++) {
@@ -355,35 +355,54 @@ for (let i = 0; i < 6; i++) {
 }
 assert.ok(Math.abs(f32[summaryIdx + 0] - osc1HzBeforeSave) < 0.1);
 
-// Switch to 3/3 CIRCUIT LAB and verify Key 9 (white 8) Stutter chopper + RGBA neutrality!
+// Switch across 4-model SEL carousel (0..3 -> RhythmLab at end) then select 2/4 CIRCUIT LAB (1)
 ex.wasm_ui_button(3, 1);
 ex.wasm_ui_button(3, 0);
-ex.wasm_ui_encoder(0, 8); // -> CircuitLab (2)
+ex.wasm_ui_encoder(0, 12); // -> RhythmLab (3)
+assert.equal(f32[summaryIdx + 53], 3.0);
+ex.wasm_ui_encoder(0, -8); // -> CircuitLab (1)
+assert.equal(f32[summaryIdx + 53], 1.0);
 ex.wasm_ui_button(3, 1);
 ex.wasm_ui_button(3, 0);
-ex.wasm_ui_white_pressure(8, 0.90); // Key 9 Gate Stutter (Osc 1)
+
+// Exercise CROSS-PIN (white 4), FOLD (white 8), CRUSH (white 12), RING MOD (OP6), HARD SYNC (MONO), SCREAM (GLO)
+ex.wasm_ui_white_pressure(4, 0.85);
+ex.wasm_ui_white_pressure(8, 0.90);
+ex.wasm_ui_white_pressure(12, 0.95);
+ex.wasm_ui_black_pressure(5, 0.90);
+ex.wasm_ui_black_pressure(8, 1.00);
+ex.wasm_ui_black_pressure(7, 0.95);
+assert.equal(f32[summaryIdx + 47], 8.0); // GLO SCREAM routes to KnobBankMode::GlobalFilter (8)
 u8.copyWithin(
   ex.wasm_dsp_get_control_ptr(),
   ex.wasm_ui_get_control_ptr(),
   ex.wasm_ui_get_control_ptr() + ctrlSize
 );
 ex.wasm_dsp_publish_control(0);
-let sawClosedStutterGate = false;
-for (let b = 0; b < 30; b++) {
+for (let b = 0; b < 16; b++) {
   ex.wasm_dsp_process_block(128);
-  const stutPtr = ex.wasm_dsp_read_telemetry() >> 2;
-  if ((Math.round(f32[stutPtr + 46]) & 1) === 0) {
-    sawClosedStutterGate = true;
-  }
 }
-assert.ok(sawClosedStutterGate, 'Expected Osc 1 stutter gate to chop open/closed on Circuit Lab');
+const labAudioL = ex.wasm_dsp_get_left_ptr() >> 2;
+for (let i = 0; i < 128; i++) {
+  assert.ok(Number.isFinite(f32[labAudioL + i]) && Math.abs(f32[labAudioL + i]) <= 1.25);
+}
 ex.wasm_ui_tick_and_render(0.2);
+assert.ok(f32[ledsIdx + 40] > 0.70); // Red REC warning LED flares during SCREAM
+ex.wasm_ui_black_key(5, 0);
+ex.wasm_ui_black_key(7, 0);
+ex.wasm_ui_black_key(8, 0);
+ex.wasm_ui_white_gate(4, 0);
+ex.wasm_ui_white_gate(8, 0);
+
+// Isolate CRUSH 1 (white 12) + render HUD strips -> verify 42-LED binary bus & strict B&W RGBA neutrality
+ex.wasm_ui_tick_and_render(0.2);
+assert.ok(Math.abs(f32[ledsIdx + 11 + 12] - 1.0) < 1e-4);
 const playRgba = u8.subarray(rgbaStart, rgbaStart + 240 * 240 * 4);
 for (let i = 0; i < playRgba.length; i += 4) {
   assert.equal(playRgba[i], playRgba[i + 1]);
   assert.equal(playRgba[i + 1], playRgba[i + 2]);
 }
-ex.wasm_ui_white_gate(8, 0);
+ex.wasm_ui_white_gate(12, 0);
 ex.wasm_ui_tick_and_render(0.2);
 
 // Toggle PLAY/STOP -> AUDIO OUTPUT OFF (quiet): PLAY (Green) -> 100%, STOP (Red) -> 0%

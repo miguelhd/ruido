@@ -24,7 +24,7 @@ struct KeyboardModelSpec {
 
 inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel::Count)>
     kKeyboardModelSpecs = {{
-        // 1/3: LIVE MIXER (4-Oscillator Mix, FX & 4-Slot Scenes)
+        // 1/4: LIVE MIXER (4-Oscillator Mix, FX & 4-Slot Scenes)
         {
             "LIVE MIXER",
             "MIX, FX & SCENES",
@@ -32,7 +32,15 @@ inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel
             {"MUTE", "FILTER", "OCTAVE", "SCENE"},
             "HOLD KEYS FOR LIVE MIX & FX",
         },
-        // 2/3: HARMONIUM (Just Intonation)
+        // 2/4: CIRCUIT LAB (CMOS Patch Bay)
+        {
+            "CIRCUIT LAB",
+            "CMOS PATCH BAY",
+            {"SOLO", "STARVE", "RING/MOD", "SYNC"},
+            {"MUTE", "CROSS", "FOLD", "CRUSH"},
+            "HOLD KEYS TO BEND CIRCUIT",
+        },
+        // 3/4: HARMONIUM (Just Intonation)
         {
             "HARMONIUM",
             "JUST INTONATION",
@@ -40,13 +48,13 @@ inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel
             {"ROOTS", "FIFTHS", "CHORDS", "OCTAVE"},
             "HOLD KEYS TO TUNE RATIOS",
         },
-        // 3/3: CIRCUIT LAB (CMOS Patch Bay — houses Stutter chopper)
+        // 4/4: RHYTHM LAB (Polyrhythmic Gate & Chopper Matrix)
         {
-            "CIRCUIT LAB",
-            "CMOS PATCH BAY",
-            {"SOLO", "RAIL", "XOR/FM", "PHASE"},
-            {"GATE", "X-MOD", "STUTTER", "BEND"},
-            "HOLD KEYS TO PATCH CIRCUIT",
+            "RHYTHM LAB",
+            "POLYRHYTHM & GATES",
+            {"SOLO", "CLOCK", "SHAPE", "SWING"},
+            {"MUTE", "PULSE", "RATCHET", "HOCKET"},
+            "HOLD KEYS FOR RHYTHM GATES",
         },
     }};
 
@@ -100,7 +108,8 @@ inline void computeKeyboardModelRestLeds(KeyboardModel model, const EngineContro
         }
     }
 
-    if (model == KeyboardModel::LiveMixer || model == KeyboardModel::CircuitLab) {
+    if (model == KeyboardModel::LiveMixer || model == KeyboardModel::CircuitLab ||
+        model == KeyboardModel::RhythmLab) {
         for (size_t v = 0u; v < kNumOscillators; ++v) {
             const VoiceCircuitState vc = evaluateVoiceCircuit(state, v, stutterGateMask);
             evaluateVoiceConsoleLeds(vc, subBreathWave01, outBlack[v], outWhite[v]);

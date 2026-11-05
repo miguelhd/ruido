@@ -108,9 +108,9 @@ Reference faceplate photo: [`docs/assets/fm1-front-panel.png`](assets/fm1-front-
 - **`KNOB 1–4` (`HPF | HP RES | LPF | LP RES`):** Adjust High-Pass Cutoff (`2 Hz–28 kHz`), High-Pass Resonance (`0–100%`), Low-Pass Cutoff (`2 Hz–28 kHz`), and Low-Pass Resonance (`0–100%`) for the selected voice.
 - **Live Full-Screen MS-20 Passband Visualization:** Spans edge-to-edge across the display (`2 Hz–28 kHz`, anchored to the shared unipolar graph baseline) over a dimmed live waveform backdrop, rendering the `0 dB` passband reference, dual `Korg35` resonant peaks, and real-time Filter LFO + Keyboard Formant modulation for the focused voice.
 
-#### Keyboard Model Status & Guidance Screen (`SEL` + `SELECT` — `ADR-036`, `ADR-037`)
-- **Inspect / Dismiss (`SEL` Button):** Tapping **`SEL`** closes any other page and opens a persistent **Keyboard Model Status & Guidance** screen (`KEYBOARD 1/3..3/3`, `SEL` LED `100%`) so you can inspect the swappable interaction model carousel (`< LIVE MIXER >`, `< HARMONIUM >`, `< CIRCUIT LAB >`), its anatomically accurate rounded-capsule FM-1 keybed map (short upper slits on `OP1–POLY`, full-height slit on the `11th` key, and `4·3·4·3·2` registration dots), and its live 7-tier varibright LED zones at your own pace—while **`KNOB 1–4` remain directly mapped to `OSC 1–4` Frequency** and pressing any key jumps live into its native performance view before returning cleanly on release. Tapping `SEL` a second time or pressing `HOME` dissolves the screen in `150 ms`; tapping `SEL` never cycles models on its own.
-- **Swap Model (`SELECT` Encoder):** Turning the left-hand **`SELECT`** encoder while the `SEL` screen is open steps between the 3 keyboard models, updates the on-screen zone legends and slit brightness 1-to-1 with the physical hardware LEDs, and sweeps a signature varibright LED wave across all 27 silicone keys.
+#### Keyboard Model Status & Guidance Screen (`SEL` + `SELECT` — `ADR-036`, `ADR-037`, `ADR-038`)
+- **Inspect / Dismiss (`SEL` Button):** Tapping **`SEL`** closes any other page and opens a persistent **Keyboard Model Status & Guidance** screen (`KEYBOARD 1/4..4/4`, `SEL` LED `100%`) so you can inspect the swappable interaction model carousel (`< LIVE MIXER >`, `< CIRCUIT LAB >`, `< HARMONIUM >`, `< RHYTHM LAB >`), its anatomically accurate rounded-capsule FM-1 keybed map (short upper slits on `OP1–POLY`, full-height slit on the `11th` key, and `4·3·4·3·2` registration dots), and its live 7-tier varibright LED zones at your own pace—while **`KNOB 1–4` remain directly mapped to `OSC 1–4` Frequency** and pressing any key jumps live into its native performance view before returning cleanly on release. Tapping `SEL` a second time or pressing `HOME` dissolves the screen in `150 ms`; tapping `SEL` never cycles models on its own.
+- **Swap Model (`SELECT` Encoder):** Turning the left-hand **`SELECT`** encoder while the `SEL` screen is open steps between the 4 keyboard models, updates the on-screen zone legends and slit brightness 1-to-1 with the physical hardware LEDs, and sweeps a signature varibright LED wave across all 27 silicone keys.
 
 #### 2-Page Oscillator Channel & Spatial Strip (`EDIT` — `ADR-028`, `ADR-030`, `ADR-032`, `ADR-033`, `ADR-036`)
 - **3-Step Cycle (`Page 1 -> Page 2 -> Close`):**
@@ -144,7 +144,7 @@ Each of the 4 voices (`Osc 1..4`) owns **2 dedicated LFOs (`LFO A` + `LFO B` = `
 
 All **27 silicone keys (`11` top black keys + `16` bottom white keys)** turn the bottom half of the FM-1 into an expressive analog carbon-pill performance surface, configurable between momentary punch-ins and latching console/scene switches via `GLOBAL CONFIG`.
 
-#### Mode 1 (`1/3`): `LIVE MIXER` *(Active Default)*
+#### Mode 1 (`1/4`): `LIVE MIXER` *(Active Default)*
 The core performance mixer, synthesis macro, and 4-slot scene desk for live drone performance:
 - **Top Row — 11 Raised Keys (Ensemble & Master Bus Macros):**
   - **`OP1` – `OP4` (`SOLO 1..4`):** **Console Solo** (`MOMENTARY` default / `LATCHING` via `SOLO MODE`) — silences non-soloed oscillators immediately on touch via smooth clickless vactrol cut while lifting the held soloist(s); chord multiple `OP1–4` keys to spotlight a duet or trio.
@@ -165,8 +165,27 @@ The core performance mixer, synthesis macro, and 4-slot scene desk for live dron
   - **Ordered Left-to-Right Group Gradient (`64% -> 8%` Rest, `100%` Active):** At rest, both rows step in a clean monotonic brightness gradient from brightest group on the left to faintest group on the right—top `OP1–4 SOLO` (`64%`) → `OP5 DRIVE` (`46%`) → `OP6·PIT·GLO` (`30%`) → `MONO·POLY` (`18%`) → `11th FREEZE` (`8%`), paired on bottom with `MUTE 1–4` (`64%`, or `0.35 Hz` breath if sub-audio) → `FILTER 1–4` (`42%`) → `OCTAVE 1–4` (`22%`) → `SCENE 1–4` (`16%` active clean scene / `8%` inactive scenes, strictly `< 22%`). `SOLO` and `MUTE` follow strict console truth: soloing `OP 1` lights `OP 1` to `100%` (`MUTE 1` = `0%`) and lights `MUTE 2–4` to `100%` (`OP 2–4` = `0%`) with zero extraneous highlights on `Keys 5–16` or `FX`/`HOME`, while any muted or silent oscillator always lights `MUTE` (`100%`) and keeps `SOLO` dark (`0%`).
   - **1-to-1 Native Ruido Views During Play:** Holding any key displays its **real native Ruido visualization** with live keybed modulation applied (`MUTE` / `SOLO` / `OCTAVE` / `SUB OCTAVE` / `RATIO LOCK` / `UNISON` / `DETUNE SPREAD` / `FREEZE` -> `100%` undimmed live oscilloscope + `OSC 1–4` `Hz` strip; `SCENE 1–4` -> `100%` undimmed live oscilloscope + `SCENE 1–4` `%` weight strip; `FILTER 1–4` -> focused single-voice MS-20 passband curve; `LOW PASS` -> 4-voice MS-20 passband sweep; `DRIVE` -> 4-column `LEVEL` + live-audio overdrive stems), dissolving smoothly over `150 ms` on release.
 
-#### Modes 2 & 3 (`2/3 HARMONIUM` & `3/3 CIRCUIT LAB`)
-Inspectable and selectable via **`SEL` + `SELECT` knob** (`3/3 CIRCUIT LAB` already houses the active **`STUTTER 1–4`** `1.2–20 Hz` pressure-speed gate chopper on `Keys 9–12` alongside `OSC 1–4` solo / `GATE` mute, with full `HARMONIUM` and `CIRCUIT LAB` voice-routing buildouts queued next on Milestone 3).
+#### Mode 2 (`2/4`): `CIRCUIT LAB` (`CMOS PATCH BAY`)
+Turns the 27-key carbon-pill bed into an analog CMOS circuit-bending patch bay where every touch shorts IC pins, folds timing-capacitor ramps, crushes sample-and-hold clocks, starves the power rail, locks hard sync, or drives twin filters into scream—while restoring your underlying drone `100%` intact the moment you lift your fingers:
+- **Top Row — 11 Raised Keys (Console Solo + Global Circuit Bends):**
+  - **`OP1` – `OP4` (`SOLO 1..4`):** Shared **Console Solo** (`MOMENTARY` default / `LATCHING` via `SOLO MODE`).
+  - **`OP5` (`STARVE`):** **Dying-9V CMOS Rail Starve** — collapses shared power-rail coupling toward `100%`, sags pitch across all 4 oscillators, squeezes Schmitt duties into asymmetrical needles, and browns out the 42-LED panel with organic voltage sputter.
+  - **`OP6` (`RING MOD`):** **Paired Ring / XOR Matrix** — crossfades all 4 oscillators into balanced `4x`-oversampled ring/XOR sidebands (`1×2`, `2×3`, `3×4`, `4×1`) for metallic bell and clangorous CMOS logic timbres, flipping the 42 LEDs in a binary checkerboard.
+  - **`PIT` (`TURBO LFO`):** **Audio-Rate LFO Overclock (`1x -> 32x`)** — accelerates all 8 per-voice LFOs up to `32x` speed into FM/AM growl (temporarily waking a musical modulation floor even on a dry default patch) with an accelerating cyclotron LED loop.
+  - **`GLO` (`SCREAM`):** **Twin `Korg35` Self-Oscillation Sweep** — drives both `HPF` and `LPF` resonance toward self-oscillation while sweeping their cutoffs inward across the harmonic spectrum, opening the live 4-voice MS-20 passband graph on screen and flaring twin inward LED peaks + the red `REC` clip warning beacon.
+  - **`MONO` (`HARD SYNC`) · `POLY` (`SCATTER`):** **Master-Slave Hard Sync vs. Circuit Chaos** — hold `MONO` to lock `OSC 2–4` phase resets to `OSC 1` with band-limited hard sync while sweeping slave harmonics upward; hold `POLY` to scramble pitch, Schmitt duty, filter bite, and wide stereo spread with Geiger-counter LED sparks.
+  - **11th Tall Key (`FREEZE`):** Universal **Stasis Freeze** (halts all 8 LFOs, thermal drift, scope trace, and 42-LED motion in a crisp still-frame).
+- **Bottom Row — 16 Keys (`4 × 4` Per-Oscillator CMOS Bends):**
+  - **Zone 1 (`Keys 1–4` — `MUTE 1..4`):** Shared **Console Mute** (`MOMENTARY` default / `LATCHING` via `MUTE MODE`).
+  - **Zone 2 (`Keys 5–8` — `CROSS-PIN 1..4`):** **Shorted-Pin Neighbor FM & Comparator XOR** — taps neighbor `(v+1)%4`'s raw pre-mute `CD40106` timing-capacitor ramp + chaotic self-feedback directly into **Oscillator `v`'s** frequency (`±3.2 OCT`), comparator XOR, duty, and `Korg35` filter resonance (transforming `OSC v` even when soloed), shooting high-voltage arc lightning across all 42 LEDs.
+  - **Zone 3 (`Keys 9–12` — `FOLD 1..4`):** **West-Coast Capacitor Wavefolder (`1.0x -> 6.2x`)** — taps Oscillator `v`'s internal `CD40106` capacitor triangle ramp into a `4x`-oversampled sinusoidal Serge wavefolder, buckling flat squares into vocal, multi-crested waveforms at locked pitch while rippling symmetrical standing-wave LED crests across the chassis.
+  - **Zone 4 (`Keys 13–16` — `CRUSH 1..4`):** **`CD4040` Binary Sub-XOR + `CD4013` S&H Clock Crush (`16 kHz -> 165 Hz`)** — cascades `/2, /4, /8` sub-octave logic XOR into Oscillator `v`'s resonant `Korg35` filter followed by a `4x` zero-order sample-and-hold latch and R-2R DAC rung quantizer, turning all 42 LEDs into a live 16-bit binary ripple counter bus (while still honoring armed `SAVE` scene storage).
+
+#### Mode 3 (`3/4`): `HARMONIUM`
+Inspectable and selectable via **`SEL` + `SELECT` knob** (scaffolded for just-intonation / reed-organ harmonic voicings).
+
+#### Mode 4 (`4/4`): `RHYTHM LAB`
+Dedicated polyrhythmic gate, ratchet, and hocket chopper keyboard slot at the end of the `SEL` carousel (separating rhythmic gating cleanly from `CIRCUIT LAB`'s pure analog/CMOS circuit bends).
 
 ---
 

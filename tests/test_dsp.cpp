@@ -2487,6 +2487,259 @@ void testLiveMixerAndSnapshotMorphDsp() {
                 static_cast<double>(maxDelta), dubRms, static_cast<double>(maxMorphStep));
 }
 
+// 16. Circuit Lab DSP: Sub-Sample Hard Sync, 4x Patch Matrix (X-Mod + Ring/XOR), Turbo LFO & Scream
+void testCircuitLabPatchMatrixHardSyncTurboAndScreamDsp() {
+    std::printf("[Test 16] Circuit Lab DSP: Hard Sync, 4x X-Mod/Ring Matrix, Turbo LFO & Korg35 "
+                "Scream...\n");
+
+    // (a) SchmittOscillatorBank band-limited Hard Sync (OSC 0 master -> OSC 1..3 slaves)
+    ruido::SchmittOscillatorBank syncBank;
+    syncBank.reset(ruido::kOversampledRate);
+    syncBank.setAnalogCharacterEnabled(false, false);
+    const std::array<float, ruido::kNumOscillators> syncFreqs = {110.0f, 267.3f, 389.1f, 523.7f};
+    const std::array<float, ruido::kNumOscillators> syncDuties = {0.5f, 0.5f, 0.5f, 0.5f};
+    const std::array<float, ruido::kNumOscillators> zeroDrifts = {0.0f, 0.0f, 0.0f, 0.0f};
+
+    constexpr size_t kSyncSamples = 88236u; // 0.5 s @ 176.472 kHz
+    double dcSlave1 = 0.0;
+    float maxSyncSample = 0.0f;
+    size_t masterRiseCount = 0u;
+    int sinceMasterWrap = -100;
+    bool lockConsistent = true;
+    for (size_t n = 0u; n < kSyncSamples; ++n) {
+        const auto out =
+            syncBank.processSample(syncFreqs, syncDuties, zeroDrifts, 0.0f, false, 1.0f);
+        for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
+            EXPECT_TRUE(isFiniteNonSubnormal(out.samples[v]),
+                        "Non-finite/subnormal sample in Hard Sync");
+            maxSyncSample = std::max(maxSyncSample, std::fabs(out.samples[v]));
+        }
+        if (n > 8000u) {
+            dcSlave1 += static_cast<double>(out.samples[1]);
+        }
+        if (sinceMasterWrap >= 0) {
+            ++sinceMasterWrap;
+            if (sinceMasterWrap == 4) {
+                // 4 samples after master wrap (past 2-sample B-Spline BLEP delay), every synced
+                // slave oscillator has been reset to HIGH (+1.0f) regardless of inharmonic ratio!
+                for (size_t v = 1u; v < ruido::kNumOscillators; ++v) {
+                    if (out.samples[v] < 0.85f) {
+                        lockConsistent = false;
+                    }
+                }
+                sinceMasterWrap = -100;
+            }
+        }
+        if ((out.risingMask & 1u) != 0u && n > 16000u) {
+            sinceMasterWrap = 0;
+            ++masterRiseCount;
+        }
+    }
+    dcSlave1 /= static_cast<double>(kSyncSamples - 8000u);
+    EXPECT_TRUE(masterRiseCount >= 40u, "Master OSC 0 failed to emit periodic sync edges");
+    EXPECT_TRUE(lockConsistent, "Slave oscillators failed to phase-lock to OSC 0 Hard Sync wrap");
+    EXPECT_TRUE(maxSyncSample <= 1.6f, "PolyBLEP Hard Sync overshot safe rail bound (%.4f)",
+                static_cast<double>(maxSyncSample));
+    EXPECT_TRUE(std::fabs(dcSlave1) < 0.35, "Excessive DC offset under Hard Sync (%.4f)", dcSlave1);
+
+    // (b) Full 4x DroneEngine with X-MOD, RING/XOR, HARD SYNC, TURBO LFO (on dry patch!) & SCREAM
+    static ruido::DroneEngine engine;
+    engine.init(ruido::kBaseSampleRate);
+    std::array<float, ruido::kBlockFrames> outL{};
+    std::array<float, ruido::kBlockFrames> outR{};
+    std::array<ruido::ScopeFrame, ruido::kBlockFrames> drain{};
+
+    ruido::EngineControlState drySt = ruido::EngineControlState::makeDefault();
+    drySt.voices[0].lfoRateHz = 1.5f;
+    drySt.voices[0].lfoDepth = 0.0f; // Dry default patch!
+    engine.controlBus().publish(drySt);
+    engine.snapParametersToLatest();
+    for (int b = 0; b < 24; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+    }
+
+    // Engage TURBO LFO = 1.0 on dry patch: LFO phase must overclock 32x (~48 Hz) and LFO output
+    // must wake up via momentary depth floor without modifying stored patch depth!
+    ruido::EngineControlState turboSt = drySt;
+    turboSt.keyMod.lfoTurbo = 1.0f;
+    engine.controlBus().publish(turboSt);
+    int turboWraps = 0;
+    float maxTurboLfoOut = 0.0f;
+    float prevPh = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
+    for (int b = 0; b < 160; ++b) { // ~0.23 s -> ~10 wraps @ 48 Hz (vs 0 wraps @ 1.5 Hz!)
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        const float ph = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
+        const float lo = engine.telemetry().lfoOutput[0].load(std::memory_order_relaxed);
+        maxTurboLfoOut = std::max(maxTurboLfoOut, std::fabs(lo));
+        if (prevPh > 0.70f && ph < 0.30f) {
+            ++turboWraps;
+        }
+        prevPh = ph;
+    }
+    EXPECT_TRUE(turboWraps >= 7, "TURBO LFO failed to overclock 1.5 Hz -> 48 Hz (wraps=%d)",
+                turboWraps);
+    EXPECT_TRUE(maxTurboLfoOut > 0.25f,
+                "TURBO LFO failed to wake dry-patch modulation depth (max=%.4f)",
+                static_cast<double>(maxTurboLfoOut));
+
+    // Verify CROSS-PIN 1 (xmodDepth[0]=1) and CRUSH 1 (crushDepth[0]=1) each bend OSC 1 even when
+    // OSC 2..4 are SOLO-muted! Compare across 16 blocks (1024 frames > 1 full 55 Hz cycle).
+    ruido::EngineControlState soloPlain = drySt;
+    soloPlain.keyMod.voiceGainMul = {1.0f, 0.0f, 0.0f, 0.0f};
+    soloPlain.global.monoCollapse = true;
+    engine.controlBus().publish(soloPlain);
+    engine.snapParametersToLatest();
+    std::array<float, 16u * ruido::kBlockFrames> plainSoloTrace{};
+    float plainSoloPeak = 0.0f;
+    for (size_t b = 0u; b < 24u; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        if (b >= 8u) {
+            const size_t base = (b - 8u) * ruido::kBlockFrames;
+            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                plainSoloTrace[base + i] = outL[i];
+                plainSoloPeak = std::max(plainSoloPeak, std::fabs(outL[i]));
+            }
+        }
+    }
+
+    engine.init(ruido::kBaseSampleRate);
+    ruido::EngineControlState soloCross = soloPlain;
+    soloCross.keyMod.xmodDepth[0] = 1.0f;
+    engine.controlBus().publish(soloCross);
+    engine.snapParametersToLatest();
+    float maxSoloCrossDiff = 0.0f;
+    for (size_t b = 0u; b < 24u; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        if (b >= 8u) {
+            const size_t base = (b - 8u) * ruido::kBlockFrames;
+            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                maxSoloCrossDiff =
+                    std::max(maxSoloCrossDiff, std::fabs(outL[i] - plainSoloTrace[base + i]));
+            }
+        }
+    }
+    EXPECT_TRUE(plainSoloPeak > 0.05f && maxSoloCrossDiff > 0.80f * plainSoloPeak,
+                "CROSS-PIN 1 failed to modulate soloed OSC 1 from pre-mute OSC 2 (diff=%.4f, "
+                "peak=%.4f)",
+                static_cast<double>(maxSoloCrossDiff), static_cast<double>(plainSoloPeak));
+
+    engine.init(ruido::kBaseSampleRate);
+    ruido::EngineControlState soloCrush = soloPlain;
+    soloCrush.keyMod.crushDepth[0] = 1.0f;
+    engine.controlBus().publish(soloCrush);
+    engine.snapParametersToLatest();
+    float maxSoloCrushDiff = 0.0f;
+    for (size_t b = 0u; b < 24u; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        if (b >= 8u) {
+            const size_t base = (b - 8u) * ruido::kBlockFrames;
+            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                maxSoloCrushDiff =
+                    std::max(maxSoloCrushDiff, std::fabs(outL[i] - plainSoloTrace[base + i]));
+            }
+        }
+    }
+    EXPECT_TRUE(maxSoloCrushDiff > 0.70f * plainSoloPeak,
+                "CRUSH 1 failed to decimate/sub-divide soloed OSC 1 (diff=%.4f, peak=%.4f)",
+                static_cast<double>(maxSoloCrushDiff), static_cast<double>(plainSoloPeak));
+
+    // Verify FOLD 1 (foldDepth[0]=1) multiplies zero-crossings / crests vs plain square at 110 Hz
+    engine.init(ruido::kBaseSampleRate);
+    soloPlain.voices[0].frequencyHz = 110.0f;
+    engine.controlBus().publish(soloPlain);
+    engine.snapParametersToLatest();
+    int plainZc = 0;
+    float prevSmp = 0.0f;
+    for (int b = 0; b < 32; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        if (b >= 8) {
+            for (float s : outL) {
+                if ((prevSmp < 0.0f && s >= 0.0f) || (prevSmp >= 0.0f && s < 0.0f)) {
+                    ++plainZc;
+                }
+                prevSmp = s;
+            }
+        }
+    }
+    ruido::EngineControlState soloFold = soloPlain;
+    soloFold.keyMod.foldDepth[0] = 1.0f;
+    engine.controlBus().publish(soloFold);
+    engine.snapParametersToLatest();
+    int foldZc = 0;
+    prevSmp = 0.0f;
+    for (int b = 0; b < 32; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        if (b >= 8) {
+            for (float s : outL) {
+                if ((prevSmp < 0.0f && s >= 0.0f) || (prevSmp >= 0.0f && s < 0.0f)) {
+                    ++foldZc;
+                }
+                prevSmp = s;
+            }
+        }
+    }
+    EXPECT_TRUE(foldZc > plainZc * 3,
+                "FOLD 1 failed to multiply West-Coast wavefold crests (plain=%d, fold=%d)", plainZc,
+                foldZc);
+
+    // Engage simultaneous CROSS-PIN + FOLD + CRUSH + RING/XOR + HARD SYNC + Korg35 SCREAM stress
+    ruido::EngineControlState labSt = drySt;
+    labSt.keyMod.xmodDepth = {1.0f, 0.85f, 0.70f, 1.0f};
+    labSt.keyMod.foldDepth = {1.0f, 0.65f, 0.90f, 0.50f};
+    labSt.keyMod.crushDepth = {1.0f, 0.80f, 0.60f, 1.0f};
+    labSt.voicePressure = {0.72f, 0.65f, 0.50f, 0.78f};
+    labSt.keyMod.ringModMix = 1.0f;
+    labSt.keyMod.hardSyncAmount = 1.0f;
+    labSt.keyMod.filterScream = 1.0f;
+    engine.controlBus().publish(labSt);
+
+    float peakLab = 0.0f;
+    double labEnergy = 0.0;
+    for (int b = 0; b < 80; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            EXPECT_TRUE(isFiniteNonSubnormal(outL[i]) && isFiniteNonSubnormal(outR[i]),
+                        "Non-finite or subnormal sample during full Circuit Lab stress");
+            peakLab = std::max(peakLab, std::max(std::fabs(outL[i]), std::fabs(outR[i])));
+            if (b >= 40) {
+                labEnergy += static_cast<double>(outL[i]) * static_cast<double>(outL[i]);
+            }
+        }
+    }
+    const double labRms = std::sqrt(labEnergy / static_cast<double>(40u * ruido::kBlockFrames));
+    EXPECT_TRUE(peakLab <= 1.25f, "Circuit Lab output exceeded stereo limiter ceiling (%.4f)",
+                static_cast<double>(peakLab));
+    EXPECT_TRUE(labRms > 0.04, "Circuit Lab output unexpectedly silent (RMS=%.5f)", labRms);
+
+    // Release back to drySt -> smooth, finite restoration without clicks
+    engine.controlBus().publish(drySt);
+    float maxReleaseStep = 0.0f;
+    float prevRel = outL[ruido::kBlockFrames - 1u];
+    for (int b = 0; b < 40; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            EXPECT_TRUE(isFiniteNonSubnormal(outL[i]) && isFiniteNonSubnormal(outR[i]),
+                        "Non-finite sample releasing Circuit Lab bends");
+            maxReleaseStep = std::max(maxReleaseStep, std::fabs(outL[i] - prevRel));
+            prevRel = outL[i];
+        }
+    }
+    EXPECT_TRUE(maxReleaseStep < 0.55f, "Harsh click on Circuit Lab bend release (%.4f)",
+                static_cast<double>(maxReleaseStep));
+    std::printf("  HardSync max=%.3f, Turbo wraps=%d, Lab peak=%.3f (RMS=%.3f), releaseStep=%.4f\n",
+                static_cast<double>(maxSyncSample), turboWraps, static_cast<double>(peakLab),
+                labRms, static_cast<double>(maxReleaseStep));
+}
+
 } // namespace
 
 int main() {
@@ -2507,6 +2760,7 @@ int main() {
     testUnbrokenExtremesSubBassOverdriveSyncAndAudioLfo();
     testPulseWidthAndVoiceDriftPhysics();
     testLiveMixerAndSnapshotMorphDsp();
+    testCircuitLabPatchMatrixHardSyncTurboAndScreamDsp();
 
     if (gFailures == 0) {
         std::printf("\n[PASS] All Milestone 1 DSP verification gates passed!\n");

@@ -39,22 +39,9 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
             out.hasHeaderBar = true;
         }
         break;
-    case HudMode::KeyboardPlay: {
-        if (hud.activePunch == KeyPunchKind::SnapshotRecall) {
-            if (hud.snapshotGliding) {
-                out.headerBarNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
-                out.hasHeaderBar = true;
-            }
-        } else if (hud.activePunch == KeyPunchKind::SpotlightSolo ||
-                   hud.activePunch == KeyPunchKind::OverloadSurge ||
-                   hud.activePunch == KeyPunchKind::VoiceFormant ||
-                   hud.activePunch == KeyPunchKind::MonoFocus ||
-                   hud.activePunch == KeyPunchKind::PolySpread) {
-            out.headerBarNorm = clampf(hud.activePunchValue, 0.0f, 1.0f);
-            out.hasHeaderBar = true;
-        }
+    case HudMode::KeyboardPlay:
+        out.hasHeaderBar = evalKeyPunchHeaderBar(hud, out.headerBarNorm);
         break;
-    }
     default:
         break;
     }
@@ -67,10 +54,10 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
     ModulatedFilterParams voiceFlt{};
     if (hud.knobBank == KnobBankMode::VoiceFilter) {
         const uint8_t refV = resolveFilterViewVoice(hud);
-        voiceFlt = computeLiveVoiceFilter(control.voices[refV], control.voicePressure[refV],
-                                          pitchMode, lfoOutput[lfoBankIndex(refV, 0u)],
-                                          lfoOutput[lfoBankIndex(refV, 1u)],
-                                          control.keyMod.dubLpfDrop, control.keyMod.overloadSurge);
+        voiceFlt = computeLiveVoiceFilter(
+            control.voices[refV], control.voicePressure[refV], pitchMode,
+            lfoOutput[lfoBankIndex(refV, 0u)], lfoOutput[lfoBankIndex(refV, 1u)],
+            control.keyMod.dubLpfDrop, control.keyMod.overloadSurge, control.keyMod.filterScream);
     }
 
     for (uint8_t k = 0u; k < 4u; ++k) {

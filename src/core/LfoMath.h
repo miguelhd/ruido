@@ -360,7 +360,8 @@ inline float applySpatialFocusPan(float pan, size_t voiceIdx, bool monoCollapse,
 }
 
 inline ModulatedFilterParams applyKeyDubLowPass(ModulatedFilterParams mod, float dubLpfDrop,
-                                                float overloadSurge = 0.0f) noexcept {
+                                                float overloadSurge = 0.0f,
+                                                float filterScream = 0.0f) noexcept {
     const float surge = clampf(overloadSurge, 0.0f, 1.0f);
     if (surge > 0.22f) {
         const float u = (surge - 0.22f) * (1.0f / 0.78f);
@@ -379,13 +380,37 @@ inline ModulatedFilterParams applyKeyDubLowPass(ModulatedFilterParams mod, float
         const float dubResBump = 0.76f * dubDrop * (0.55f + 0.45f * dubDrop);
         mod.lpResonance = clampf(mod.lpResonance + dubResBump, 0.0f, 0.92f);
     }
+    const float scream = clampf(filterScream, 0.0f, 1.0f);
+    if (scream > 1.0e-4f) {
+        const float engage = smoothstep01(scream * 5.0f);
+        const float screamHpHz = 55.0f * fastExp2(2.90f * scream);     // 55 Hz -> 410 Hz
+        const float screamLpHz = 14000.0f * fastExp2(-3.95f * scream); // 14 kHz -> 905 Hz
+        if (screamHpHz > mod.hpCutoffHz) {
+            mod.hpCutoffHz =
+                clampf(mod.hpCutoffHz * fastExp2(engage * fastLog2(screamHpHz / mod.hpCutoffHz)),
+                       kFilterCutoffMinHz, kFilterCutoffMaxHz);
+        }
+        if (screamLpHz < mod.lpCutoffHz) {
+            mod.lpCutoffHz =
+                clampf(mod.lpCutoffHz * fastExp2(engage * fastLog2(screamLpHz / mod.lpCutoffHz)),
+                       kFilterCutoffMinHz, kFilterCutoffMaxHz);
+        }
+        const float screamRes = 0.96f * scream * (0.68f + 0.32f * scream);
+        if (screamRes > mod.hpResonance) {
+            mod.hpResonance = screamRes;
+        }
+        if (screamRes > mod.lpResonance) {
+            mod.lpResonance = screamRes;
+        }
+    }
     return mod;
 }
 
 inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float pressure,
                                                     float pitchMode, float lfoARaw,
                                                     float lfoBRaw = 0.0f, float dubLpfDrop = 0.0f,
-                                                    float overloadSurge = 0.0f) noexcept {
+                                                    float overloadSurge = 0.0f,
+                                                    float filterScream = 0.0f) noexcept {
     const float dA = computeLiveLfoADepth(vp, lfoBRaw);
     float hpBase = (vp.lfoTarget == LfoTarget::HpCutoff)
                        ? applyLfoCutoffHz(vp.hpCutoffHz, dA, lfoARaw)
@@ -414,7 +439,7 @@ inline ModulatedFilterParams computeLiveVoiceFilter(const VoiceParams& vp, float
     return applyKeyDubLowPass(computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase,
                                                         pressure, vp.muted ? 0.0f : 1.0f,
                                                         pitchMode),
-                              dubLpfDrop, overloadSurge);
+                              dubLpfDrop, overloadSurge, filterScream);
 }
 
 inline constexpr bool isFilterLfoTarget(LfoTarget t) noexcept {
@@ -518,6 +543,18 @@ inline constexpr const char* lfoShapeLabel(float shape01) noexcept {
         return "SQR-RND";
     }
     return "RANDOM";
+}
+
+// CIRCUIT LAB shared acoustic curves (consumed 1-to-1 by Core 1 DSP and Core 0 HUD readouts):
+//  - FOLD (Keys 9-12): 1.0x -> 6.2x West-Coast Serge wavefolder stages on CD40106 capacitor ramp
+//  - CRUSH (Keys 13-16): 16.0 kHz -> 165 Hz CD4013 sample-and-hold decimation clock
+inline float computeWavefoldStages(float foldDepth01) noexcept {
+    const float d = clampf(foldDepth01, 0.0f, 1.0f);
+    return 1.0f + 5.2f * d * (0.30f + 0.70f * d);
+}
+
+inline float computeCrushClockHz(float crushDepth01) noexcept {
+    return 16000.0f * fastExp2(-6.6f * clampf(crushDepth01, 0.0f, 1.0f));
 }
 
 } // namespace ruido

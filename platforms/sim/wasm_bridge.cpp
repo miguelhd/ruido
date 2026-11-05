@@ -46,6 +46,7 @@ size_t strlen(const char* s) {
 
 // Unity-include the 100% platform-independent Ruido C++17 sources
 #include "core/GlobalControl.cpp"
+#include "core/KeyboardCircuitLab.cpp"
 #include "core/KeyboardEngine.cpp"
 #include "core/KeyboardLiveMixer.cpp"
 #include "core/LedEngine.cpp"

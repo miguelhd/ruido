@@ -66,6 +66,7 @@ int8_t VoiceLfoBank::nextDriftKnot(VoiceState& v) noexcept {
 void VoiceLfoBank::reset(float sampleRate) noexcept {
     sampleRate_ = (sampleRate > 8000.0f) ? sampleRate : kBaseSampleRate;
     hzToPhaseU32_ = 4294967296.0f / sampleRate_;
+    turboSmoother_.init(0.0f, kLfoPotPoleTauSec, sampleRate_);
 
     for (size_t i = 0u; i < kNumVoiceLfos; ++i) {
         VoiceState& v = voices_[i];
@@ -134,18 +135,31 @@ void VoiceLfoBank::updateTargets(const EngineControlState& state, bool snapImmed
             }
         }
     }
+    const float turboTarget = clampf(state.keyMod.lfoTurbo, 0.0f, 1.0f);
+    if (snapImmediate) {
+        turboSmoother_.snapTo(turboTarget);
+    } else {
+        turboSmoother_.setTarget(turboTarget);
+    }
 }
 
 void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth, float modBipolar,
-                            bool freeze, VoiceLfoFrame& out) noexcept {
+                            float turbo, float turboMul, bool freeze, VoiceLfoFrame& out) noexcept {
     VoiceState& v = voices_[idx];
 
     const float baseRate = v.rateHz.next();
     const float curShape = v.shape.next();
     const float baseDepth = v.depth.next();
 
-    const float curRate = applyLfoModRateHz(baseRate, rateModDepth, modBipolar);
-    const float curDepth = applyLfoModDepth(baseDepth, depthModDepth, modBipolar);
+    const float curRate = clampf(applyLfoModRateHz(baseRate, rateModDepth, modBipolar) * turboMul,
+                                 kLfoFreqMinHz, kLfoFreqMaxHz);
+    float curDepth = applyLfoModDepth(baseDepth, depthModDepth, modBipolar);
+    if (idx < kNumOscillators && turbo > 1.0e-4f && voices_[4u + idx].depth.current() < 0.05f) {
+        const float turboFloor = 0.42f * turbo;
+        if (turboFloor > curDepth) {
+            curDepth = turboFloor;
+        }
+    }
 
     if (enableDrift_) {
         if (!freeze && ((v.thermalCounter++ & 255u) == 0u)) {
@@ -197,17 +211,19 @@ void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth,
 
 std::array<VoiceLfoFrame, kNumVoiceLfos> VoiceLfoBank::stepFrame(bool freeze) noexcept {
     std::array<VoiceLfoFrame, kNumVoiceLfos> frames{};
+    const float turbo = turboSmoother_.next();
+    const float turboMul = (turbo > 1.0e-4f) ? fastExp2(5.0f * turbo) : 1.0f;
 
     // 1. Step LFO B [4..7] first so LFO B -> LFO A Rate/Depth cross-modulation has zero delay
     for (size_t i = 0u; i < kNumOscillators; ++i) {
-        stepSlot(4u + i, 0.0f, 0.0f, 0.0f, freeze, frames[4u + i]);
+        stepSlot(4u + i, 0.0f, 0.0f, 0.0f, turbo, turboMul, freeze, frames[4u + i]);
     }
     // 2. Step LFO A [0..3] with instantaneous LFO B Rate/Depth cross-modulation
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceLfoFrame& bOut = frames[4u + i];
         stepSlot(i, bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoARate)],
-                 bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoADepth)], bOut.raw, freeze,
-                 frames[i]);
+                 bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoADepth)], bOut.raw, turbo,
+                 turboMul, freeze, frames[i]);
     }
 
     return frames;

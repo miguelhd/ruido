@@ -195,10 +195,11 @@ inline ModulatedFilterParams computeVoicePressureMacro(float hpBase, float hpRes
 
 // Live performance keyboard interaction models selected via SEL button + SELECT encoder.
 enum class KeyboardModel : uint8_t {
-    LiveMixer = 0,  // 1/3: 4-Oscillator Live Mixer, FX & 4-Slot Snapshots (default)
-    Harmonium = 1,  // 2/3: Just-Intonation Harmonium / Monochord (framework slot)
-    CircuitLab = 2, // 3/3: Circuit-Bent CMOS Touch-Plate Lab (framework slot)
-    Count = 3
+    LiveMixer = 0,  // 1/4: 4-Oscillator Live Mixer, FX & 4-Slot Scenes (default)
+    CircuitLab = 1, // 2/4: Circuit-Bent CMOS Patch Bay
+    Harmonium = 2,  // 3/4: Just-Intonation Harmonium / Monochord (framework slot)
+    RhythmLab = 3,  // 4/4: Polyrhythmic Gate & Chopper Matrix (framework slot)
+    Count = 4
 };
 
 // Non-destructive momentary punch-in modulation overlaid onto the steady knob patch (Core 0 -> 1).
@@ -206,13 +207,19 @@ struct KeyboardModState {
     std::array<float, kNumOscillators> voiceGainMul{1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, kNumOscillators> voicePitchMul{1.0f, 1.0f, 1.0f, 1.0f};
     std::array<float, kNumOscillators> voicePwDelta{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<float, kNumOscillators> voiceFormant{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> stutterRateHz{6.0f, 6.0f, 6.0f, 6.0f};
     std::array<float, kNumOscillators> stutterDepth{0.0f, 0.0f, 0.0f, 0.0f};
-    float overloadSurge = 0.0f;   // OP5: [0, 1] -> 4.5x MS-20 drive + 100% starved-rail sync
-    float dubLpfDrop = 0.0f;      // GLO key: [0, 1] -> master resonant MS-20 LPF curtain
-    float spatialFocus = 0.0f;    // MONO key = -1.0 (center), POLY key = +1.0 (hyper-wide)
-    float ratioLockAmount = 0.0f; // PIT / MONO key: [0, 1] thermal drift damping
+    std::array<float, kNumOscillators> xmodDepth{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, kNumOscillators> foldDepth{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, kNumOscillators> crushDepth{0.0f, 0.0f, 0.0f, 0.0f};
+    float overloadSurge = 0.0f;   // [0, 1] -> 4.5x MS-20 drive + 100% starved-rail sync
+    float dubLpfDrop = 0.0f;      // [0, 1] -> master resonant MS-20 LPF curtain
+    float spatialFocus = 0.0f;    // -1.0 = center focus, +1.0 = hyper-wide spread
+    float ratioLockAmount = 0.0f; // [0, 1] thermal drift damping
+    float ringModMix = 0.0f;      // [0, 1] 4x paired ring/XOR sideband crossfade
+    float hardSyncAmount = 0.0f;  // [0, 1] band-limited OSC 1 -> OSC 2..4 hard sync
+    float lfoTurbo = 0.0f;        // [0, 1] 1x -> 32x LFO rate overclock + dry-patch floor
+    float filterScream = 0.0f;    // [0, 1] twin Korg35 HPF + LPF self-oscillation sweep
     uint8_t soloMask = 0u;        // 4-bit mask of soloed oscillators (bit v = OSC v+1 solo active)
     bool stasisFreeze = false;    // 11th tall key: freezes 8 LFOs + thermal drift + scope
 };
@@ -314,7 +321,7 @@ class LockFreeControlBus {
     static constexpr uint32_t kNewDataBit = 0x4u;
 
     std::array<EngineControlState, 3> buffers_{};
-    alignas(64) uint32_t writeIdx_ = 0u;
+    uint32_t writeIdx_ = 0u;
     alignas(64) uint32_t readIdx_ = 1u;
     alignas(64) std::atomic<uint32_t> sharedState_{2u}; // Slot 2 initially parked in middle
 };

@@ -67,9 +67,10 @@ class VoiceLfoBank {
     static float nextUniformBipolar(uint32_t& rng) noexcept;
     static int8_t nextDriftKnot(VoiceState& v) noexcept;
     void stepSlot(size_t idx, float rateModDepth, float depthModDepth, float modBipolar,
-                  bool freeze, VoiceLfoFrame& out) noexcept;
+                  float turbo, float turboMul, bool freeze, VoiceLfoFrame& out) noexcept;
 
     std::array<VoiceState, kNumVoiceLfos> voices_{};
+    OnePoleSmoother turboSmoother_{};
     float sampleRate_ = kBaseSampleRate;
     float hzToPhaseU32_ = 4294967296.0f / kBaseSampleRate;
     bool enableDrift_ = true;

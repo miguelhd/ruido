@@ -42,6 +42,7 @@ DSP_SRCS := \
 UI_SRCS := \
 	src/core/GlobalControl.cpp \
 	src/core/KeyboardLiveMixer.cpp \
+	src/core/KeyboardCircuitLab.cpp \
 	src/core/KeyboardEngine.cpp \
 	src/core/LedEngine.cpp \
 	src/core/SnapshotBank.cpp \

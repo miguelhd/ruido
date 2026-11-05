@@ -66,9 +66,9 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
             dominantLfoBankIdx = 4u + i;
         }
         if (!vc.isMuted) {
-            const ModulatedFilterParams flt =
-                computeLiveVoiceFilter(vp, p, pitchMode, lfoARaw, lfoBRaw,
-                                       ctx.state.keyMod.dubLpfDrop, ctx.state.keyMod.overloadSurge);
+            const ModulatedFilterParams flt = computeLiveVoiceFilter(
+                vp, p, pitchMode, lfoARaw, lfoBRaw, ctx.state.keyMod.dubLpfDrop,
+                ctx.state.keyMod.overloadSurge, ctx.state.keyMod.filterScream);
             constexpr float kHpMinOct = cxLog2Pos(kFilterCutoffMinHz);
             constexpr float kLpMaxOct = cxLog2Pos(kFilterCutoffMaxHz);
             const float hpEng =
@@ -94,6 +94,9 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
 
     if (ctx.state.keyMod.dubLpfDrop > maxFilterEngagement) {
         maxFilterEngagement = ctx.state.keyMod.dubLpfDrop;
+    }
+    if (ctx.state.keyMod.filterScream > maxFilterEngagement) {
+        maxFilterEngagement = ctx.state.keyMod.filterScream;
     }
 
     // Panel Tactile Buttons (unused switches ENV/ARP/SEQ/REC strictly 0% dark)
