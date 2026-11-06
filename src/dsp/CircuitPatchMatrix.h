@@ -3,6 +3,7 @@
 #include "core/Config.h"
 #include "core/DspMath.h"
 #include "core/LfoMath.h"
+#include "dsp/SchmittOscillatorBank.h"
 
 #include <array>
 #include <cstddef>
@@ -153,6 +154,61 @@ inline void applySampleHoldCrushPostFilter4x(
             voiceSub[v][sub] = raw + (st[v].capSample - raw) * wet;
         }
     }
+}
+
+// 6. Full 4x-oversampled per-substep patched oscillator frame (XMod / Wavefold / Sub-XOR / Ring).
+inline uint8_t renderPatchedOscFrame4x(
+    SchmittOscillatorBank& oscBank, OscillatorBankOutput& oscOut,
+    std::array<std::array<float, kOversampleFactor>, kNumOscillators>& voiceSub,
+    const std::array<float, kNumOscillators>& startFreq,
+    const std::array<float, kNumOscillators>& endFreq, const std::array<float, kNumOscillators>& pw,
+    const std::array<float, kNumOscillators>& drifts, float coupling, bool stasisFreeze,
+    float hardSync, bool anyXmod, bool anyFold, bool anyCrush, bool anyRing, float ringModMix,
+    const std::array<float, kNumOscillators>& xmodDepths,
+    const std::array<float, kNumOscillators>& foldDepths,
+    const std::array<float, kNumOscillators>& crushDepths,
+    std::array<float, kNumOscillators>& prevOscSamples,
+    std::array<float, kNumOscillators>& prevCapRamp,
+    std::array<VoiceCrushState, kNumOscillators>& crushStates) noexcept {
+    uint8_t voiceRisingInFrame = 0u;
+    for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
+        std::array<float, kNumOscillators> subFreqs;
+        const float subAlpha = 0.25f * static_cast<float>(sub + 1u);
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            subFreqs[i] = startFreq[i] + (endFreq[i] - startFreq[i]) * subAlpha;
+        }
+        if (anyXmod) {
+            applyCrossPinFm4x(subFreqs, prevCapRamp, prevOscSamples, xmodDepths);
+        }
+        oscBank.processSample(oscOut, subFreqs, pw, drifts, coupling, stasisFreeze, hardSync);
+        prevOscSamples = oscOut.samples;
+        prevCapRamp = oscOut.capRamp;
+        std::array<float, kNumOscillators> patched = oscOut.samples;
+        if (anyXmod) {
+            applyCrossPinXor4x(patched, oscOut.capRamp, xmodDepths);
+        }
+        if (anyFold) {
+            applyCapacitorWavefold4x(patched, oscOut.capRamp, foldDepths);
+        }
+        if (anyCrush) {
+            applyRippleSubXorPreFilter4x(patched, oscOut.risingMask, crushDepths, crushStates);
+        } else if (oscOut.risingMask != 0u) {
+            for (size_t v = 0u; v < kNumOscillators; ++v) {
+                if (((oscOut.risingMask >> v) & 1u) != 0u) {
+                    crushStates[v].divCounter =
+                        static_cast<uint8_t>((crushStates[v].divCounter + 1u) & 7u);
+                }
+            }
+        }
+        if (anyRing) {
+            applyRingXorMatrix4x(patched, ringModMix);
+        }
+        voiceRisingInFrame |= oscOut.risingMask;
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            voiceSub[i][sub] = patched[i];
+        }
+    }
+    return voiceRisingInFrame;
 }
 
 } // namespace ruido

@@ -1,3 +1,4 @@
+#include "../platforms/fm1/fm1_audio_io.h"
 #include "core/Config.h"
 #include "core/DspMath.h"
 #include "core/LfoMath.h"
@@ -2953,6 +2954,344 @@ void testRhythmLabClockDividersEuclidPumpPluckAndSwingDsp() {
                 static_cast<double>(peakGroove));
 }
 
+// 18. FM-1 1-LSB TPDF Dither, SPSC Audio Block Ring & +-50 ppm USB-C Drift Resampler
+void testFm1TpdfDitherSpscRingAndUsbDriftResampler() {
+    std::printf(
+        "[Test 18] FM-1 1-LSB TPDF dither, SPSC audio ring & +-50 ppm USB drift resampler...\n");
+
+    // 1. +-1.45f dacSafetyClip ceiling headroom + 1-LSB TPDF statistics & L/R decorrelation
+    ruido::Fm1TpdfQuantizer quant;
+    quant.reset();
+    int16_t maxPosPeak = 0;
+    int16_t minNegPeak = 0;
+    for (int i = 0; i < 4096; ++i) {
+        maxPosPeak = std::max(maxPosPeak, quant.quantizeLeft(1.45f, 1.0f));
+        minNegPeak = std::min(minNegPeak, quant.quantizeRight(-1.45f, 1.0f));
+    }
+    EXPECT_TRUE(maxPosPeak <= 32765 && maxPosPeak >= 32761,
+                "+1.45f ceiling unexpected Q15 peak (%d)", static_cast<int>(maxPosPeak));
+    EXPECT_TRUE(minNegPeak >= -32765 && minNegPeak <= -32761,
+                "-1.45f ceiling unexpected Q15 trough (%d)", static_cast<int>(minNegPeak));
+
+    quant.reset();
+    constexpr int kNoiseN = 65536;
+    double sumL = 0.0;
+    double sumR = 0.0;
+    double sqL = 0.0;
+    double sqR = 0.0;
+    double crossLR = 0.0;
+    int maxZeroDitherAbs = 0;
+    for (int i = 0; i < kNoiseN; ++i) {
+        const int16_t dL = quant.quantizeLeft(0.0f, 1.0f);
+        const int16_t dR = quant.quantizeRight(0.0f, 1.0f);
+        maxZeroDitherAbs = std::max(maxZeroDitherAbs, std::max(std::abs(dL), std::abs(dR)));
+        sumL += static_cast<double>(dL);
+        sumR += static_cast<double>(dR);
+        sqL += static_cast<double>(dL) * static_cast<double>(dL);
+        sqR += static_cast<double>(dR) * static_cast<double>(dR);
+        crossLR += static_cast<double>(dL) * static_cast<double>(dR);
+    }
+    const double meanL = sumL / static_cast<double>(kNoiseN);
+    const double meanR = sumR / static_cast<double>(kNoiseN);
+    const double varL = sqL / static_cast<double>(kNoiseN) - meanL * meanL;
+    const double varR = sqR / static_cast<double>(kNoiseN) - meanR * meanR;
+    const double corrLR = crossLR / std::sqrt(sqL * sqR);
+    // Rounded 1-LSB TPDF at x=0 yields {-1, 0, +1} with P(+-1) = 1/8 each -> exact var = 0.25 LSB^2
+    EXPECT_TRUE(maxZeroDitherAbs == 1, "Zero-input 1-LSB TPDF dither exceeded +-1 LSB (%d)",
+                maxZeroDitherAbs);
+    EXPECT_TRUE(std::fabs(meanL) < 0.008 && std::fabs(meanR) < 0.008,
+                "TPDF dither DC bias too high (%.5f, %.5f)", meanL, meanR);
+    EXPECT_TRUE(varL > 0.238 && varL < 0.262 && varR > 0.238 && varR < 0.262,
+                "TPDF dither variance expected ~0.2500 LSB^2, got (%.4f, %.4f)", varL, varR);
+    EXPECT_TRUE(std::fabs(corrLR) < 0.02, "Stereo TPDF dither channels correlated (%.4f)", corrLR);
+
+    // Pre-dither float32 masterGain preserves a sub-LSB (-96 dBFS, 0.35 LSB peak after 0.25x gain)
+    // coherent sine fundamental cleanly without post-quantization dead-zone or >>12 DC bias!
+    constexpr size_t kFftN = 16384u;
+    constexpr size_t kToneBin = 197u; // Prime bin -> coherent FFT without window leakage
+    std::array<double, kFftN> fftRe{};
+    std::array<double, kFftN> fftIm{};
+    quant.reset();
+    int maxNaivePos = 0;
+    double naiveSum = 0.0;
+    for (size_t n = 0u; n < kFftN; ++n) {
+        const double ph = (2.0 * 3.14159265358979323846 * static_cast<double>(kToneBin) *
+                           static_cast<double>(n)) /
+                          static_cast<double>(kFftN);
+        // 1.4 LSB before masterGain=0.25 -> 0.35 LSB peak (< 0.5 LSB rounding dead-zone!)
+        const float rawFloat = static_cast<float>(
+            (1.4 / static_cast<double>(ruido::Fm1TpdfQuantizer::kFloatToQ15Scale)) * std::sin(ph));
+        const int16_t dithered = quant.quantizeLeft(rawFloat, 0.25f);
+        fftRe[n] = static_cast<double>(dithered);
+        // Naive undithered Q15 (+/-1) followed by master_q12 = 1024 (>> 12): +1 -> 0, -1 -> -1!
+        const auto naiveQ15 = static_cast<int32_t>(std::lround(rawFloat * 22595.0f));
+        const int32_t postScaled = (naiveQ15 * 1024) >> 12;
+        maxNaivePos = std::max(maxNaivePos, postScaled);
+        naiveSum += static_cast<double>(postScaled);
+    }
+    radix2Fft(fftRe.data(), fftIm.data(), kFftN);
+    const double toneMag = std::hypot(fftRe[kToneBin], fftIm[kToneBin]) * (2.0 / kFftN);
+    double maxSpurMag = 0.0;
+    for (size_t k = 1u; k < kFftN / 2u; ++k) {
+        if (k != kToneBin) {
+            maxSpurMag = std::max(maxSpurMag, std::hypot(fftRe[k], fftIm[k]) * (2.0 / kFftN));
+        }
+    }
+    EXPECT_TRUE(maxNaivePos == 0 && (naiveSum / static_cast<double>(kFftN)) < -0.25,
+                "Expected post-quantized >>12 shift to clip +peaks to 0 with negative DC bias");
+    EXPECT_TRUE(std::fabs(toneMag - 0.35) < 0.04 && toneMag > maxSpurMag * 6.0,
+                "Pre-dither float32 masterGain failed sub-LSB recovery (mag=%.4f, maxSpur=%.4f)",
+                toneMag, maxSpurMag);
+
+    // 2. Lock-free SPSC Fm1AudioBlockRing capacity & multi-threaded TSan verification
+    static ruido::Fm1AudioBlockRing blockRing;
+    blockRing.reset();
+    for (uint32_t b = 0u; b < ruido::Fm1AudioBlockRing::kNumBlocks; ++b) {
+        auto* slot = blockRing.beginPush();
+        EXPECT_TRUE(slot != nullptr, "Ring unexpectedly full at block %u", b);
+        if (slot != nullptr) {
+            slot->lr[0] = static_cast<int16_t>(100 + b);
+            slot->peakAbsQ15 = static_cast<int32_t>(1000 + b);
+            blockRing.commitPush();
+        }
+    }
+    EXPECT_TRUE(blockRing.beginPush() == nullptr, "9th push must return nullptr when ring is full");
+    for (uint32_t b = 0u; b < ruido::Fm1AudioBlockRing::kNumBlocks; ++b) {
+        const auto* slot = blockRing.beginPop();
+        EXPECT_TRUE(slot != nullptr && slot->lr[0] == static_cast<int16_t>(100 + b) &&
+                        slot->peakAbsQ15 == static_cast<int32_t>(1000 + b),
+                    "Ring FIFO mismatch at block %u", b);
+        if (slot != nullptr) {
+            blockRing.commitPop();
+        }
+    }
+    EXPECT_TRUE(blockRing.beginPop() == nullptr, "Empty ring must return nullptr");
+
+    blockRing.reset();
+    constexpr uint32_t kThreadBlocks = 1024u;
+    std::atomic<bool> fifoOrderOk{true};
+    std::thread prod([&]() {
+        for (uint32_t b = 0u; b < kThreadBlocks; ++b) {
+            ruido::Fm1AudioBlock* slot = nullptr;
+            while ((slot = blockRing.beginPush()) == nullptr) {
+                std::this_thread::yield();
+            }
+            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                slot->lr[2u * i] = static_cast<int16_t>((b + i) & 0x3FFFu);
+                slot->lr[2u * i + 1u] = static_cast<int16_t>(-static_cast<int>(b & 0x3FFFu));
+            }
+            slot->peakAbsQ15 = static_cast<int32_t>(b);
+            blockRing.commitPush();
+        }
+    });
+    std::thread cons([&]() {
+        for (uint32_t b = 0u; b < kThreadBlocks; ++b) {
+            const ruido::Fm1AudioBlock* slot = nullptr;
+            while ((slot = blockRing.beginPop()) == nullptr) {
+                std::this_thread::yield();
+            }
+            if (slot->peakAbsQ15 != static_cast<int32_t>(b) ||
+                slot->lr[0] != static_cast<int16_t>(b & 0x3FFFu) ||
+                slot->lr[1] != static_cast<int16_t>(-static_cast<int>(b & 0x3FFFu))) {
+                fifoOrderOk.store(false, std::memory_order_relaxed);
+            }
+            blockRing.commitPop();
+        }
+    });
+    prod.join();
+    cons.join();
+    EXPECT_TRUE(fifoOrderOk.load(), "Concurrent SPSC Fm1AudioBlockRing corrupted payload");
+
+    // 3. Fm1UsbDriftResampler under +-50 ppm crystal-vs-USB-SOF drift at 44.1 kHz & 48 kHz
+    auto runDriftScenario = [&](bool rate48k, double ppmDrift) {
+        constexpr uint32_t kRingSize = 512u;
+        constexpr uint32_t kRingMask = kRingSize - 1u;
+        constexpr uint32_t kHalfFrames = 256u;
+        const int32_t targetFill = rate48k ? 113 : 104;
+        const int32_t bandLo = rate48k ? 87 : 80;
+        const int32_t bandHi = rate48k ? 139 : 128;
+
+        std::array<uint32_t, kRingSize> usbRing{};
+        std::array<int32_t, 2u * kHalfFrames> inBuf{};
+        ruido::Fm1UsbDriftResampler resampler;
+        resampler.reset(rate48k, targetFill);
+
+        uint32_t uaW = static_cast<uint32_t>(targetFill);
+        uint32_t uaR = 0u;
+        uint32_t patAcc = 0u;
+        double alnkTimeMs = 0.0;
+        double nextSofMs = 0.35; // Arbitrary initial SOF phase offset
+        const double sofPeriodMs = 1.0 / (1.0 + ppmDrift * 1.0e-6);
+        const double alnkPeriodMs = (static_cast<double>(kHalfFrames) * 1000.0) / 44100.0;
+
+        uint32_t inSampleIdx = 0u;
+        uint32_t outSampleCount = 0u;
+        int32_t steadyMinFill = 10000;
+        int32_t steadyMaxFill = -10000;
+        int maxStepL = 0;
+        int maxStepR = 0;
+        int16_t prevL = 0;
+        int16_t prevR = 0;
+        bool underran = false;
+        bool overran = false;
+
+        // 2,000 ALNK0 half-buffers = ~11.6 seconds of continuous USB streaming
+        for (int blk = 0; blk < 2000; ++blk) {
+            const auto fillBefore = static_cast<int32_t>(uaW - uaR);
+            if (blk >= 600) {
+                steadyMinFill = std::min(steadyMinFill, fillBefore);
+                steadyMaxFill = std::max(steadyMaxFill, fillBefore);
+            }
+
+            for (uint32_t i = 0u; i < kHalfFrames; ++i) {
+                const double t = static_cast<double>(inSampleIdx++) / 44100.0;
+                inBuf[2u * i] =
+                    static_cast<int32_t>(std::lround(16000.0 * std::sin(2.0 * M_PI * 440.0 * t)));
+                inBuf[2u * i + 1u] =
+                    static_cast<int32_t>(std::lround(16000.0 * std::sin(2.0 * M_PI * 660.0 * t)));
+            }
+
+            const uint32_t freeSlots = kRingSize - (uaW - uaR);
+            const uint32_t written = resampler.processBlockToRing(
+                inBuf.data(), kHalfFrames, rate48k, fillBefore, targetFill, usbRing.data(),
+                kRingMask, uaW, freeSlots, 1u);
+            if (written == 0u) {
+                overran = true;
+            }
+            uaW += written;
+            alnkTimeMs += alnkPeriodMs;
+
+            // Drain 1 ms USB SOF isochronous packets up to `alnkTimeMs`
+            while (nextSofMs <= alnkTimeMs) {
+                uint32_t pktFrames = rate48k ? 48u : 44u;
+                if (!rate48k) {
+                    patAcc += 100u;
+                    if (patAcc >= 1000u) {
+                        patAcc -= 1000u;
+                        ++pktFrames;
+                    }
+                }
+                if ((uaW - uaR) < pktFrames) {
+                    underran = true;
+                    break;
+                }
+                for (uint32_t k = 0u; k < pktFrames; ++k) {
+                    const uint32_t packed = usbRing[(uaR + k) & kRingMask];
+                    const auto sL = static_cast<int16_t>(packed & 0xFFFFu);
+                    const auto sR = static_cast<int16_t>(packed >> 16u);
+                    if (outSampleCount > 16000u) {
+                        maxStepL = std::max(maxStepL, std::abs(static_cast<int>(sL) - prevL));
+                        maxStepR = std::max(maxStepR, std::abs(static_cast<int>(sR) - prevR));
+                    }
+                    prevL = sL;
+                    prevR = sR;
+                    ++outSampleCount;
+                }
+                uaR += pktFrames;
+                nextSofMs += sofPeriodMs;
+            }
+        }
+
+        const double outRate = rate48k ? 48000.0 : 44100.0;
+        const int expectedSlopeL =
+            static_cast<int>(std::ceil(16000.0 * 2.0 * M_PI * 440.0 / outRate)) + 8;
+        const int expectedSlopeR =
+            static_cast<int>(std::ceil(16000.0 * 2.0 * M_PI * 660.0 / outRate)) + 8;
+
+        EXPECT_TRUE(!underran && !overran, "USB ring underrun/overrun at %s (%+.0f ppm)",
+                    rate48k ? "48k" : "44.1k", ppmDrift);
+        EXPECT_TRUE(steadyMinFill >= bandLo && steadyMaxFill <= bandHi,
+                    "USB fill [%d, %d] exited packet-safe band [%d, %d] at %s (%+.0f ppm)",
+                    steadyMinFill, steadyMaxFill, bandLo, bandHi, rate48k ? "48k" : "44.1k",
+                    ppmDrift);
+        EXPECT_TRUE(maxStepL <= expectedSlopeL && maxStepR <= expectedSlopeR,
+                    "USB resampler discontinuity at %s (%+.0f ppm): step=(%d,%d) vs (%d,%d)",
+                    rate48k ? "48k" : "44.1k", ppmDrift, maxStepL, maxStepR, expectedSlopeL,
+                    expectedSlopeR);
+    };
+
+    runDriftScenario(false, +50.0);
+    runDriftScenario(false, -50.0);
+    runDriftScenario(true, +50.0);
+    runDriftScenario(true, -50.0);
+
+    // (e) Multi-threaded Dual-Core 2+2 VoiceFilterCoProcessor bit-exact parity & TSan stress:
+    {
+        static ruido::DroneEngine soloEngine;
+        static ruido::DroneEngine dualEngine;
+        static ruido::VoiceFilterCoProcessor coProc;
+        coProc.reset();
+
+        ruido::EngineControlState st{};
+        for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
+            auto& v = st.voices[i];
+            v.frequencyHz = 110.0f * static_cast<float>(i + 1u);
+            v.pulseWidth = 0.32f;
+            v.drift = 0.35f;
+            v.hpCutoffHz = 220.0f;
+            v.hpResonance = 0.55f;
+            v.lpCutoffHz = 1100.0f;
+            v.lpResonance = 0.72f;
+            v.amplitude = 0.88f;
+            v.pan = ((i & 1u) != 0u) ? 0.45f : -0.45f;
+            v.lfoTarget = ruido::LfoTarget::LpCutoff;
+            v.lfoShape = 0.65f;
+            v.lfoRateHz = 3.5f;
+            v.lfoDepth = 0.55f;
+            v.lfoBTarget = ruido::LfoTarget::Pitch;
+            v.lfoBShape = 0.90f;
+            v.lfoBRateHz = 7.0f;
+            v.lfoBDepth = 0.35f;
+        }
+        soloEngine.init(ruido::kBaseSampleRate);
+        dualEngine.init(ruido::kBaseSampleRate);
+        dualEngine.core().attachFilterCoProcessor(&coProc);
+        soloEngine.controlBus().publish(st);
+        dualEngine.controlBus().publish(st);
+        soloEngine.snapParametersToLatest();
+        dualEngine.snapParametersToLatest();
+
+        coProc.setHelperArmed(true);
+        std::atomic<bool> stopHelper{false};
+        std::thread helperThread([&]() {
+            while (!stopHelper.load(std::memory_order_relaxed)) {
+                if (!coProc.tryAssist()) {
+                    std::this_thread::yield();
+                }
+            }
+        });
+
+        float maxDiff = 0.0f;
+        std::array<float, ruido::kBlockFrames> soloL{}, soloR{}, dualL{}, dualR{};
+        std::array<ruido::ScopeFrame, ruido::kBlockFrames> drain{};
+        for (int blk = 0; blk < 300; ++blk) {
+            soloEngine.processBlock(soloL.data(), soloR.data(), ruido::kBlockFrames);
+            dualEngine.processBlock(dualL.data(), dualR.data(), ruido::kBlockFrames);
+            soloEngine.scopeBuffer().popBatch(drain.data(), drain.size());
+            dualEngine.scopeBuffer().popBatch(drain.data(), drain.size());
+            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                maxDiff = std::max(maxDiff, std::fabs(soloL[i] - dualL[i]));
+                maxDiff = std::max(maxDiff, std::fabs(soloR[i] - dualR[i]));
+            }
+        }
+        coProc.setHelperArmed(false);
+        stopHelper.store(true, std::memory_order_relaxed);
+        helperThread.join();
+        dualEngine.core().attachFilterCoProcessor(nullptr);
+
+        EXPECT_TRUE(maxDiff == 0.0f,
+                    "Dual-core VoiceFilterCoProcessor diverged from solo engine (maxDiff=%.3e)",
+                    static_cast<double>(maxDiff));
+        EXPECT_TRUE(coProc.assistedSpans() > 0u,
+                    "Helper thread failed to assist any 2-voice ZDF filter spans");
+        std::printf("  Dual-core 2+2 VoiceFilterCoProcessor: assisted=%u spans, maxDiff=%.1e\n",
+                    coProc.assistedSpans(), static_cast<double>(maxDiff));
+    }
+
+    std::printf("  TPDF var=%.4f LSB^2 (corr=%+.4f), sub-LSB mag=%.3f, +-50 ppm 44.1k/48k clean!\n",
+                varL, corrLR, toneMag);
+}
+
 } // namespace
 
 int main() {
@@ -2975,6 +3314,7 @@ int main() {
     testLiveMixerAndSnapshotMorphDsp();
     testCircuitLabPatchMatrixHardSyncTurboAndScreamDsp();
     testRhythmLabClockDividersEuclidPumpPluckAndSwingDsp();
+    testFm1TpdfDitherSpscRingAndUsbDriftResampler();
 
     if (gFailures == 0) {
         std::printf("\n[PASS] All Milestone 1 DSP verification gates passed!\n");

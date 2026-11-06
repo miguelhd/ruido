@@ -40,30 +40,24 @@ class StereoHalfBandDecimator4x {
         std::array<float, 2u * kStage1OddPeriod> odd1{};
         std::array<float, kStage2Pairs> even2{};
         std::array<float, 2u * kStage2OddPeriod> odd2{};
-        size_t ew1 = 0u;
-        size_t ow1 = 0u;
-        size_t ew2 = 0u;
-        size_t ow2 = 0u;
 
         void reset() noexcept {
             even1.fill(0.0f);
             odd1.fill(0.0f);
             even2.fill(0.0f);
             odd2.fill(0.0f);
-            ew1 = 0u;
-            ow1 = 0u;
-            ew2 = 0u;
-            ow2 = 0u;
         }
     };
 
-    static StereoFrame decimate2xStage1Stereo(ChannelState& chL, ChannelState& chR, StereoFrame s0,
-                                              StereoFrame s1) noexcept;
-    static StereoFrame decimate2xStage2Stereo(ChannelState& chL, ChannelState& chR, StereoFrame s0,
-                                              StereoFrame s1) noexcept;
+    StereoFrame decimate2xStage1Stereo(StereoFrame s0, StereoFrame s1) noexcept;
+    StereoFrame decimate2xStage2Stereo(StereoFrame s0, StereoFrame s1) noexcept;
 
     ChannelState left_{};
     ChannelState right_{};
+    size_t ew1_ = 0u;
+    size_t ow1_ = 0u;
+    size_t ew2_ = 0u;
+    size_t ow2_ = 0u;
 };
 
 } // namespace ruido

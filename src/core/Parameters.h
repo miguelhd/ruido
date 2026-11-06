@@ -218,8 +218,10 @@ static_assert(std::atomic<size_t>::is_always_lock_free,
 static_assert(std::atomic<float>::is_always_lock_free,
               "float atomics must be lock-free on target architecture");
 
-// Lock-free triple-buffered control bus (Core 0 writer -> Core 1 audio reader).
-// Never blocks either core and guarantees tear-free multi-parameter reads.
+// Lock-free, 100% CAS-free / spinlock-free triple-buffered SPSC control bus
+// (Core 0 writer -> Core 1 audio reader). Uses Dekker store-load ordering on the 3-slot index
+// handoff so neither core ever executes `compare_exchange` or hardware `lockset` spinlocks, and
+// Core 1 (`consumeLatest`) executes zero loops.
 class LockFreeControlBus {
   public:
     LockFreeControlBus() noexcept {
@@ -232,60 +234,51 @@ class LockFreeControlBus {
     // Called from Core 0 (UI / GPIO / SARADC thread). Single-producer only.
     void publish(const EngineControlState& state) noexcept {
         buffers_[writeIdx_] = state;
-        // Atomically swap writeIdx_ with the clean middle slot holding latest data.
-        // Uses acq_rel so reclaiming readyIdx synchronizes-with Core 1's prior release.
-        uint32_t prevReady = sharedState_.load(std::memory_order_relaxed);
-        uint32_t nextState = 0u;
-        do {
-            const uint32_t readyIdx = prevReady & 0x3u;
-            nextState = (writeIdx_ & 0x3u) | kNewDataBit;
-            if (sharedState_.compare_exchange_weak(prevReady, nextState, std::memory_order_acq_rel,
-                                                   std::memory_order_relaxed)) {
-                writeIdx_ = readyIdx;
-                break;
-            }
-        } while (true);
+        c0Swapping_.store(1u, std::memory_order_seq_cst);
+        uint32_t spins = 0u;
+        while (c1Swapping_.load(std::memory_order_seq_cst) != 0u &&
+               c1Faulted_.load(std::memory_order_relaxed) == 0u && ++spins < 8388608u) {
+        }
+        const uint32_t prevReady = readySlot_.load(std::memory_order_acquire);
+        readySlot_.store(writeIdx_, std::memory_order_release);
+        hasNew_.store(1u, std::memory_order_release);
+        writeIdx_ = prevReady;
+        c0Swapping_.store(0u, std::memory_order_release);
     }
 
-    // Called from Core 1 at block start (Audio thread). Single-consumer only.
+    void abortFromFault() noexcept { c1Faulted_.store(1u, std::memory_order_release); }
+
+    // Called from Core 1 at block start (Audio thread). Single-consumer only, O(1) wait-free.
     const EngineControlState& consumeLatest() noexcept {
-        uint32_t current = sharedState_.load(std::memory_order_acquire);
-        if ((current & kNewDataBit) != 0u) {
-            do {
-                const uint32_t newReadIdx = current & 0x3u;
-                // Return old readIdx_ to pool and clear kNewDataBit
-                const uint32_t replacement = readIdx_ & 0x3u;
-                if (sharedState_.compare_exchange_weak(current, replacement,
-                                                       std::memory_order_acq_rel,
-                                                       std::memory_order_acquire)) {
-                    readIdx_ = newReadIdx;
-                    break;
-                }
-            } while ((current & kNewDataBit) != 0u);
+        if (hasNew_.load(std::memory_order_acquire) != 0u) {
+            c1Swapping_.store(1u, std::memory_order_seq_cst);
+            if (c0Swapping_.load(std::memory_order_seq_cst) == 0u &&
+                hasNew_.load(std::memory_order_acquire) != 0u) {
+                const uint32_t nextRead = readySlot_.load(std::memory_order_acquire);
+                readySlot_.store(readIdx_, std::memory_order_release);
+                hasNew_.store(0u, std::memory_order_release);
+                readIdx_ = nextRead;
+            }
+            c1Swapping_.store(0u, std::memory_order_release);
         }
         return buffers_[readIdx_];
     }
 
   private:
-    static constexpr uint32_t kNewDataBit = 0x4u;
-
     std::array<EngineControlState, 3> buffers_{};
     uint32_t writeIdx_ = 0u;
     alignas(64) uint32_t readIdx_ = 1u;
-    alignas(64) std::atomic<uint32_t> sharedState_{2u}; // Slot 2 initially parked in middle
+    std::atomic<uint32_t> c1Swapping_{0u};
+    alignas(64) std::atomic<uint32_t> c0Swapping_{0u};
+    std::atomic<uint32_t> readySlot_{2u}; // Slot 2 initially parked in middle
+    std::atomic<uint32_t> hasNew_{0u};
+    std::atomic<uint32_t> c1Faulted_{0u};
 };
 
 // Quantize per-voice scope tap in [-3.5, +3.5] to signed int16 (1/8192 ~= 0.0095 px step)
 inline int16_t quantizeVoiceScopeQ13(float sample) noexcept {
-    const float scaled = clampf(sample, -3.5f, 3.5f) * 8192.0f;
-    const int32_t q = static_cast<int32_t>(scaled + ((scaled >= 0.0f) ? 0.5f : -0.5f));
-    if (q < -28672) {
-        return -28672;
-    }
-    if (q > 28672) {
-        return 28672;
-    }
-    return static_cast<int16_t>(q);
+    const float scaled = clampf(sample * 8192.0f, -28672.0f, 28672.0f);
+    return static_cast<int16_t>(static_cast<int32_t>(scaled + ((scaled >= 0.0f) ? 0.5f : -0.5f)));
 }
 
 inline constexpr float unquantizeVoiceScopeQ13(int16_t q) noexcept {
@@ -313,6 +306,25 @@ class ScopeRingBuffer {
         buffer_[w & kScopeRingMask] = frame;
         writePos_.store(w + 1u, std::memory_order_release);
         return true;
+    }
+
+    // Batch SPSC span writer: amortizes acquire/release memory barriers across 16-frame DSP spans.
+    size_t beginPushSpan(size_t maxCount, size_t& outWritePos) const noexcept {
+        const size_t w = writePos_.load(std::memory_order_relaxed);
+        const size_t r = readPos_.load(std::memory_order_acquire);
+        outWritePos = w;
+        const size_t used = w - r;
+        if (used >= kScopeRingCapacity) {
+            return 0u;
+        }
+        const size_t freeSlots = kScopeRingCapacity - used;
+        return (freeSlots < maxCount) ? freeSlots : maxCount;
+    }
+
+    ScopeFrame& slotAt(size_t pos) noexcept { return buffer_[pos & kScopeRingMask]; }
+
+    void commitPushSpan(size_t newWritePos) noexcept {
+        writePos_.store(newWritePos, std::memory_order_release);
     }
 
     size_t popBatch(ScopeFrame* dst, size_t maxCount) noexcept {

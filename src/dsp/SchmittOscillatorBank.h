@@ -42,6 +42,22 @@ class SchmittOscillatorBank {
                        float circuitCoupling, bool freezeDrift = false,
                        float hardSync = 0.0f) noexcept;
 
+    // Fast 4x-oversampled multi-frame span synthesis path for unpatched voices (hoists coupling,
+    // hard-sync thresholds, PWM duty reciprocals, and denormal scrubbing across `numFrames`).
+    void processSpan4x(std::array<std::array<float, kOversampleFactor>, 16>* __restrict spanSub,
+                       uint8_t* __restrict spanRising,
+                       std::array<uint8_t, kNumOscillators>& totalRisingCounts, size_t numFrames,
+                       const std::array<float, kNumOscillators>& __restrict startFreqHz,
+                       const std::array<float, kNumOscillators>& __restrict endFreqHz,
+                       const std::array<float, kNumOscillators>& __restrict startPw,
+                       const std::array<float, kNumOscillators>& __restrict endPw,
+                       const std::array<float, kNumOscillators>& __restrict drift,
+                       float circuitCoupling, bool freezeDrift, float hardSync,
+                       std::array<float, kNumOscillators>& outLastSamples,
+                       std::array<float, kNumOscillators>& outLastCapRamp,
+                       std::array<float, kNumOscillators>* optGateHigh = nullptr,
+                       std::array<float, kNumOscillators>* optDriftNorm = nullptr) noexcept;
+
     OscillatorBankOutput processSample(const std::array<float, kNumOscillators>& freqHz,
                                        const std::array<float, kNumOscillators>& pulseWidth,
                                        const std::array<float, kNumOscillators>& drift,
@@ -82,6 +98,12 @@ class SchmittOscillatorBank {
 
         // Rail sag transient emitted on this voice's previous sample
         float lastEdgePulse = 0.0f;
+
+        // Cached PWM duty reciprocals (eliminates 2 hardware fdivs/frame when duty is unchanged)
+        float cachedPw = -1.0f;
+        float cachedMinSafeDuty = -1.0f;
+        float cachedHalfInvHigh = 1.0f;
+        float cachedHalfInvLow = 1.0f;
     };
 
     static void addCubicBsplineBlep(std::array<float, 4>& res, float d, float delta) noexcept;

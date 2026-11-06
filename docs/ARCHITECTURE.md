@@ -5,9 +5,9 @@
 | Subsystem | Hardware Component | Key Constraints & Notes |
 | :--- | :--- | :--- |
 | **SoC** | Zhuhai JieLi **AC791N** (`WL82`) | AIoT multimedia + BLE SoC |
-| **CPU** | **Dual-core 32-bit `pi32v2`** @ **240-320 MHz** | Proprietary Blackfin-derived RISC/DSP ISA; hardware **single-precision FPU** (`-mcpu=r3 -mfprev1`: single-cycle `fadds`/`fsubs`/`fmuls`, 2-step NR reciprocals avoiding `__divsf3`, strict IEEE-754 `-fno-math-errno -ffp-contract=off`, never `-ffast-math`), shared cache, MMU |
-| **SRAM** | **~578 KB internal SRAM** | Hosts `Core 1` `.c1_text` DSP code + `.rodata` (`~28–36 KB`, zero XIP stall/cache contention) + DSP state (`47.19 KB`), uncached `Core 0 <-> Core 1` shared bus, `Core 0` UI renderer (`86.98 KB` + `15.36 KB` strips), and `dinghy`/`felucca-bsp` USB/audio buffers |
-| **Flash** | **1 MB XIP NOR Flash** (`0x02000000`) | Code executes in-place on `Core 0`; **~600 KB strict ceiling** for our compiled `.fwsc` application + assets, plus `dinghy` (`felucca-bsp`) CRC-verified `settings_*` / `slot_*` flash partitions |
+| **CPU** | **Dual-core 32-bit `pi32v2`** @ **240-320 MHz** | Proprietary Blackfin-derived RISC/DSP ISA; hardware **single-precision FPU** (`-mcpu=r3 -mfprev1`: single-cycle `fadds`/`fsubs`/`fmuls` + `2.66`-cycle native `fdiv` with `0` `__divsf3`, strict IEEE-754 `-fno-math-errno -ffp-contract=off`, never `-ffast-math`), shared cache, MMU |
+| **SRAM** | **~578 KB internal SRAM** | Hosts `Core 1` `.c1_text` DSP code + `.rodata` (`64.5 KiB` @ `0x01C0E000`, `0` XIP refs, zero Flash stall/cache contention) + hot `DroneEngineCore` (`5.96 KiB`), cache-line-isolated `.pool` shared buses (`EngineSharedBuses` `41.88 KiB` + `Fm1AudioBlockRing` + `VoiceFilterCoProcessor`), `Core 0` UI renderer (`85.48 KiB` + `15.0 KiB` strips), and `dinghy` USB/audio buffers (`~245.0 KiB` total static SRAM, `> 330 KiB` free headroom) |
+| **Flash** | **1 MB XIP NOR Flash** (`0x02000000`; `P25Q80` `0x856014` & `UC25HQ80` `0xB36014`) | Code executes in-place on `Core 0`; **~600 KB strict ceiling** for our compiled `.fwsc` application + assets, plus `dinghy` CRC-verified `settings_*` / `slot_*` flash partitions accepting both FM-1 NOR flash chips |
 | **Audio I/O** | **~44.1 kHz (`44,118 Hz`)** stereo, **64-frame blocks** | `~1.45 ms` block budget paced strictly by hardware **`ALNK0` I2S `24 MHz` crystal DMA** (`±1.45f`-calibrated 16-bit `int16_t` headroom + **1-LSB TPDF dither** -> zero hard clipping or truncation fuzz into pedals). Stereo 3.5mm TRS out (~1-2 Vpp), auto-muting internal speaker, plus fractional-interpolated USB-C digital stereo audio (`44.1 / 48 kHz`) |
 | **Display** | **1.54" `240x240` RGB565 TFT LCD** | Driven over high-speed `SPI1` with non-blocking DMA (`LCD_IDLE` strip streaming via `zvenson/dinghy`) |
 | **Rotary Controls** | **1x `MASTER` analog pot + 7x endless encoders** | Left: `SELECT`, `PRESETS`, `ALGORITHM` (no push switches); Right: `KNOB1`-`KNOB4` |
@@ -30,7 +30,8 @@ On the M-VAVE FM-1, **there is no separate factory USB-MIDI DFU partition outsid
 | **`0xFC000 – 0xFFFFF`** | `16 KB` (High System Tail) | **Reserved SoC / calibration tail.** Never written by application code. |
 
 1. **Unconditional Power-On `Hold OCT-` USB Rescue Priority:** At power-on, `dinghy` checks whether **`OCT-` is physically held** *before* initializing the synth engine, entering a minimal USB-MIDI rescue updater if held. To guarantee synth bugs can never run before that check, portable C++ code enforces **zero global static constructors or exit destructors** (`-Wglobal-constructors -Wexit-time-destructors` under `-Werror`, zero `.init_array` entries); engine instances are constructed in `.bss` RAM via placement `new` strictly *after* `Hold OCT-` rescue has cleared.
-2. **Mandatory `fm1-emu` Gate Before Physical Flashing:** Every `.fwsc` image must verify partition bounds (`>= 0x4000`, `< 600 KB`), clean boot, NVS round-trip, and `Hold OCT-` USB rescue entry inside `joakimeriksson/fm1-emu` before ever being transmitted to a physical FM-1.
+2. **Dual Flash JEDEC ID Support (`P25Q80` `0x856014` + `UC25HQ80` `0xB36014`):** Units shipped since Autumn 2026 populate a `UC25HQ80` (`0xB36014`) 1 MiB SPI NOR instead of Puya `P25Q80` (`0x856014`). Both the embedded USB update loader (`usb_hid_ota.bin` / `ldr_flash_known`) and the app NVS driver (`fl_jedec_ram`) MUST accept both JEDEC IDs (enforced automatically by `build_fm1.py`) so newer hardware never refuses USB firmware updates or drops `USR` saves to RAM.
+3. **Mandatory `fm1-emu` Gate Before Physical Flashing:** Every `.fwsc` image must verify partition bounds (`>= 0x4000`, `< 600 KB`), clean boot, NVS round-trip, and `Hold OCT-` USB rescue entry inside `joakimeriksson/fm1-emu` before ever being transmitted to a physical FM-1.
 
 ---
 
@@ -79,13 +80,11 @@ Each voice (`Osc 1..4`) owns **2 dedicated analog-modeled modulation oscillators
 - **Stepless `C^1` Log-Potentiometer Smoothing, Vactrol Mute, Pad Pressure & Pan:** Continuous rotary controls (`freqHz`, `hpCutoffHz`, `lpCutoffHz`, `lfoRateHz`, `lfoBRateHz` in `log2(Hz)` octave space via `LogFreqSmoother`; `pulseWidth`, `drift`, `amplitude`, `pan`, `hpResonance`, `lpResonance`, `lfoShape`, `lfoDepth`, `lfoBShape`, `lfoBDepth`, `circuitCoupling`, `masterTrim` via `CriticallyDampedSmoother`) use 2-pole critically-damped cascades (`14 ms/pole`, `~28 ms` mean S-curve glide, `0%` overshoot); White Keys `5-8` drive uncapped MS-20 filter crossover/resonance or muted Buchla-style Vactrol LPG swells via `VactrolSmoother` (`4.5 ms` attack / `26.0 ms` release, `0.000 Hz` pitch shift).
 - **Master Bus Sag & Post-Decimator DAC Seatbelt:** High-headroom (`0.75` linear knee, `±1.25` soft ceiling) summing bus followed by two cascaded 2x **Linear-Phase Symmetric Polyphase Half-Band FIR** stages (`> 87 dB` stopband rejection to `20 kHz`, `0°` phase dispersion) and a transparent `dacSafetyClip` guard (`100%` bit-exact linear for `|x| <= 1.15f`, smooth `±1.45f` ceiling catching FIR Gibbs overshoot on `21–28 kHz` ultrasonic edges).
 
-### 3.5 Cycle Budget Estimate (Core 1 @ 240-320 MHz)
-Available cycles per `44.118 kHz` stereo frame: **`~5,440 - 7,250` cycles**.
-- `4x` Schmitt PolyBLEP PWM + `1/f` drift + rail coupling / hard-sync (@ `4x` OS): `~720` cycles
-- `8x` Nonlinear `Rev 2 -> Korg35` Sallen-Key ZDF stages + pre-drive (`4 voices` @ `4x` OS, 4-lane lockstep): `~1,580` cycles
-- `8x` Dual per-voice `0.01–2,000 Hz` analog LFOs (`LFO A/B OSC 1..4`) + `B -> A` cross-mod + `C^2` B-spline drift + 10-target laws (@ `1x` base rate): `~340` cycles
-- Slews, pressure routing, stereo pan, master bus saturation, FIR decimator & DAC clip: `~465` cycles
-- **Estimated Total:** **`~3,105` cycles/frame (`~43-57%` of Core 1)**, leaving generous safety margin (`sizeof(DroneEngine) = 47.19 KB`; `24.8x` real-time single-core host throughput).
+### 3.5 Verified Target Cycle Budget (`fm1-emu` Dual-Core @ 240-320 MHz, `ADR-045`)
+Available cycles per `44.118 kHz` stereo frame: **`5,442` cycles (`240 MHz`) – `7,256` cycles (`320 MHz`)**.
+- **`Core 0` `ALNK0` `256`-Frame DMA Drain ISR:** **`~8.8` insns/frame** (`0.16%` @ `240 MHz`) draining the 8-block `Fm1AudioBlockRing` (`0` underruns)
+- **Dual-Core Idle (`4x` PolyBLEP + `1/f` drift + rail coupling + parked ZDF + FIR + TPDF):** **`~4,523` insns/frame** (`83.1%` @ `240 MHz`, **`62.3%` @ `320 MHz`**)
+- **Dual-Core Full Stress (`4` voices simultaneous `HPF+LPF` Korg35 ZDF self-oscillation + overdrive + `8x` LFOs, `2+2` Dekker work-stealing `VoiceFilterCoProcessor`):** **`~6,976` insns/frame** (**`96.1%` @ `320 MHz`**; `32.8x` real-time single-core host throughput, `0.0e+00` float32 dual-core parity)
 
 ---
 

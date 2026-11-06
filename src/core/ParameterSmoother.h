@@ -48,6 +48,20 @@ class OnePoleSmoother {
         return stepActive();
     }
 
+    RUIDO_ALWAYS_INLINE float nextN(uint32_t steps) noexcept {
+        if (state_ == target_ || steps == 0u) {
+            return state_;
+        }
+        float out = state_;
+        for (uint32_t k = 0u; k < steps; ++k) {
+            out = stepActive();
+            if (state_ == target_) {
+                break;
+            }
+        }
+        return out;
+    }
+
   private:
     float stepActive() noexcept {
         const float diff = target_ - state_;
@@ -101,6 +115,21 @@ template <size_t N> class OnePoleSmootherBank {
         return stepActive(idx);
     }
 
+    RUIDO_ALWAYS_INLINE float nextN(size_t idx, uint32_t steps) noexcept {
+        const float tgt = target_[idx];
+        if (state_[idx] == tgt || steps == 0u) {
+            return state_[idx];
+        }
+        float out = state_[idx];
+        for (uint32_t k = 0u; k < steps; ++k) {
+            out = stepActive(idx);
+            if (state_[idx] == tgt) {
+                break;
+            }
+        }
+        return out;
+    }
+
   private:
     float stepActive(size_t idx) noexcept {
         const float cur = state_[idx];
@@ -142,6 +171,8 @@ class VactrolSmoother {
 
     void setTarget(float target) noexcept { target_ = sanitizeState(target); }
 
+    float target() const noexcept { return target_; }
+
     float current() const noexcept { return state_; }
 
     RUIDO_ALWAYS_INLINE float next() noexcept {
@@ -149,6 +180,20 @@ class VactrolSmoother {
             return state_;
         }
         return stepActive();
+    }
+
+    RUIDO_ALWAYS_INLINE float nextN(uint32_t steps) noexcept {
+        if (state_ == target_ || steps == 0u) {
+            return state_;
+        }
+        float out = state_;
+        for (uint32_t k = 0u; k < steps; ++k) {
+            out = stepActive();
+            if (state_ == target_) {
+                break;
+            }
+        }
+        return out;
     }
 
   private:
@@ -224,6 +269,20 @@ class CriticallyDampedSmoother {
         return stepActive();
     }
 
+    RUIDO_ALWAYS_INLINE float nextN(uint32_t steps) noexcept {
+        if ((s2_ == target_ && s1_ == target_) || steps == 0u) {
+            return s2_;
+        }
+        float out = s2_;
+        for (uint32_t k = 0u; k < steps; ++k) {
+            out = stepActive();
+            if (s2_ == target_ && s1_ == target_) {
+                break;
+            }
+        }
+        return out;
+    }
+
   private:
     float stepActive() noexcept {
         const float next1 = s1_ + coeff_ * (target_ - s1_);
@@ -275,6 +334,21 @@ template <size_t N> class CriticallyDampedSmootherBank {
             return cur2;
         }
         return stepActive(idx);
+    }
+
+    RUIDO_ALWAYS_INLINE float nextN(size_t idx, uint32_t steps) noexcept {
+        const float tgt = target_[idx];
+        if ((s2_[idx] == tgt && s1_[idx] == tgt) || steps == 0u) {
+            return s2_[idx];
+        }
+        float out = s2_[idx];
+        for (uint32_t k = 0u; k < steps; ++k) {
+            out = stepActive(idx);
+            if (s2_[idx] == tgt && s1_[idx] == tgt) {
+                break;
+            }
+        }
+        return out;
     }
 
   private:
@@ -332,6 +406,8 @@ class LogFreqSmoother {
         octSmoother_.setTarget(fastLog2(cleanHz));
     }
 
+    float target() const noexcept { return targetHz_; }
+
     float current() const noexcept { return currentHz_; }
 
     RUIDO_ALWAYS_INLINE float next() noexcept {
@@ -339,6 +415,15 @@ class LogFreqSmoother {
             return currentHz_;
         }
         return stepActive();
+    }
+
+    RUIDO_ALWAYS_INLINE float nextN(uint32_t steps) noexcept {
+        if (octSmoother_.isSettled() || steps == 0u) {
+            return currentHz_;
+        }
+        const float oct = octSmoother_.nextN(steps);
+        currentHz_ = octSmoother_.isSettled() ? targetHz_ : fastExp2(oct);
+        return currentHz_;
     }
 
   private:

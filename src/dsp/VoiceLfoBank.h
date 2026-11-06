@@ -38,8 +38,15 @@ class VoiceLfoBank {
 
     void updateTargets(const EngineControlState& state, bool snapImmediate) noexcept;
 
+    bool hasFastModulation() const noexcept;
+
+    void stepSubBlock(std::array<VoiceLfoFrame, kNumVoiceLfos>& out, uint32_t stride,
+                      bool freeze = false, bool forceWaveEval = true) noexcept;
+
     void stepFrame(std::array<VoiceLfoFrame, kNumVoiceLfos>& out, bool freeze = false,
-                   bool forceWaveEval = true) noexcept;
+                   bool forceWaveEval = true) noexcept {
+        stepSubBlock(out, 1u, freeze, forceWaveEval);
+    }
 
     std::array<VoiceLfoFrame, kNumVoiceLfos> stepFrame(bool freeze = false) noexcept;
 
@@ -70,8 +77,8 @@ class VoiceLfoBank {
 
     static float nextUniformBipolar(uint32_t& rng) noexcept;
     static int8_t nextDriftKnot(VoiceState& v) noexcept;
-    void stepSlot(size_t idx, float rateModDepth, float depthModDepth, float modBipolar,
-                  float turbo, float turboMul, bool freeze, bool forceWaveEval,
+    void stepSlot(size_t idx, uint32_t stride, float rateModDepth, float depthModDepth,
+                  float modBipolar, float turbo, float turboMul, bool freeze, bool forceWaveEval,
                   VoiceLfoFrame& out) noexcept;
 
     std::array<VoiceState, kNumVoiceLfos> voices_{};

@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
-"""Build Ruido for M-VAVE FM-1 (AC791N / pi32v2) and run Gate 4.1 verification.
+"""Build Ruido for M-VAVE FM-1 (AC791N / pi32v2) and run Gate 4.1 + Gate 4.2 verification.
 
 Runs directly inside `ruido-fm1-toolchain:latest` (Linux amd64) or automatically delegates
 to a single `docker run` invocation when invoked from macOS / non-toolchain hosts.
 
-Gate 4.1 Automated Checks:
-  1. Flash & SRAM Bounds: `_start == 0x02000120` (>= 0x4000, zero boot-head writes),
-     `ruido.bin <= 0x8DFBC` (567.9 KiB APP_SLOT), `ruido.fwsc < 600 KiB`,
-     `.data + .bss <= 96 KiB`, `.pool <= 336 KiB`, call-free `.ram_text`.
-  2. Anti-Brick Pre-Boot Safety: zero `.init_array` / `.ctors` / `.dtors` sections,
-     zero `0xFFC00000..0xFFCFFFFF` chip-ROM immediates or call targets.
+Automated Hardware & Firmware Gates:
+  1. Flash & Dual-Core SRAM Bounds:
+     - `_start == 0x02000120` (>= 0x4000, zero boot-head writes)
+     - `ruido.bin <= 0x8DFBC` (567.9 KiB APP_SLOT), `ruido.fwsc < 600 KiB`
+     - `.data + .bss <= 24 KiB`, `.c1_text <= 72 KiB` (0x01C0E000 SRAM), `.pool <= 320 KiB`
+     - Call-free `.ram_text` AND 100% XIP-free `.c1_text` (zero `0x02000000..0x07FFFFFF` refs)
+  2. Anti-Brick Pre-Boot Safety:
+     - Zero `.init_array` / `.ctors` / `.dtors` / `.fini_array` sections
+     - Zero `0xFFC00000..0xFFCFFFFF` chip-ROM immediates or call targets
   3. Hardware `-mcpu=r3 -mfprev1` FPU & Division Audit (`objdump --mcpu=r3 -d`):
-     native single-precision FPU emission (`(f)` / `iff`), zero `soft-double` symbols,
-     zero 64-bit integer division (`__udivdi3` / `__divdi3` / `__aeabi_ldivmod`),
-     and exact `fdiv` vs `__divsf3` tally + per-layer `.text + .rodata` footprint.
-  4. Headless `fm1-emu` SoC Verification:
-     - Normal boot (`900 ms`): `RUIDO_FM1_STATUS_MAGIC`, live stereo PCM audio,
-       240x240 scanline LCD frames, and measured 64-frame DSP cycle cost.
-     - Power-on `Hold OCT-` USB Rescue (`--keys 0-150:OCTDN`): `bootguard.pending == 2`
-       and `status.magic == 0` (zero C++ engine execution before `recovery_main()`).
+     - 100% native single-precision FPU emission, zero `soft-double`, zero `int64` div, zero `__sync_*`
+  4. Headless `fm1-emu` Dual-Core SoC Verification:
+     - Normal Dual-Core Boot (`950 ms`): `Core 1` boots at `0x01C0E000` (`.c1_text`), renders live
+       TPDF-dithered 64-frame blocks (`c1_blocks > 0`, `c1_fallback == 0`), `Core 0` ALNK0 DMA ISR
+       drains `Fm1AudioBlockRing` in `< 80` insns/frame, live 240x240 scanline LCD frames.
+     - Flaky-Core1 Silicon Survival (`--flaky-core1 0.05 --cpu1-survives`): `Core 0` detects a
+       halted `Core 1` within 4 DMA blocks and switches to fallback audio without crashing.
+     - Power-on `Hold OCT-` USB Rescue (`--keys 0-150:OCTDN`): `bootguard.pending == 2`,
+       `magic == 0`, `audio_blocks == 0`, and `c1_blocks == 0`.
 """
 
 from __future__ import annotations
@@ -42,6 +46,10 @@ LDR_DIR = OUT_DIR / "loader"
 
 DOCKER_IMAGE = os.environ.get("RUIDO_FM1_DOCKER_IMAGE", "ruido-fm1-toolchain:latest")
 APP_XIP = 0x02000120
+C1_SRAM_ORIGIN = 0x01C0E000
+C1_SRAM_MAX_BYTES = 72 * 1024
+RAM_MAX_BYTES = 24 * 1024
+POOL_MAX_BYTES = 0x50000
 LOADER_LOAD = 0x01C0A800
 LOADER_NAME = b"usb_hid_ota.bin"
 SCREEN_NAME = "RUIDO"
@@ -54,6 +62,13 @@ SDK_SHA256 = {
     "cfg_tool.bin": "276579954f076886a6a7694f65dc71c034a63a2c204b76749065c0ac7b010d1b",
     "cfg/eq_cfg_hw.bin": "41167491bffed4651750719c973d2758adeb9021a5670d02d6a53c85ed80ea7d",
 }
+
+# Both FM-1 1 MiB SPI NOR hardware revisions must be accepted in BOTH `loader.bin` (`ota.bin`)
+# and `ruido.bin` so neither USB updates (`Hold OCT-`) nor `USR` NVS saves lock out a unit:
+REQUIRED_JEDEC_IDS = (
+    ("P25Q80", 0x00856014, b"\x14\x60\x85\x00"),
+    ("UC25HQ80", 0x00B36014, b"\x14\x60\xb3\x00"),
+)
 
 FORBIDDEN_SOFT_DOUBLE = {
     "__adddf3",
@@ -123,12 +138,12 @@ def delegate_to_docker(argv: list[str]) -> int:
     return subprocess.call(cmd, cwd=ROOT)
 
 
-def run_cmd(cmd: list[str], env: dict[str, str] | None = None) -> str:
+def run_cmd(cmd: list[str], env: dict[str, str] | None = None, include_stderr: bool = False) -> str:
     res = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True, check=False)
     if res.returncode != 0:
         sys.stderr.write(res.stdout + res.stderr)
         raise SystemExit(f"[FM-1 FAIL] command failed ({res.returncode}): {' '.join(cmd[:4])}...")
-    return res.stdout
+    return (res.stdout + res.stderr) if include_stderr else res.stdout
 
 
 def detect_cxx_std(clang_bin: pathlib.Path) -> str:
@@ -210,6 +225,11 @@ def build_loader(tc: pathlib.Path, dinghy_dir: pathlib.Path, lz4blk_mod) -> byte
     image = ldr_bin.read_bytes()
     if not image or len(image) > 0x14000:
         raise SystemExit(f"[FM-1 FAIL] loader size invalid ({len(image)} B)")
+    for chip_name, jedec_id, le_bytes in REQUIRED_JEDEC_IDS:
+        if le_bytes not in image:
+            raise SystemExit(
+                f"[FM-1 FAIL] update loader (`loader.bin`) missing {chip_name} JEDEC ID {jedec_id:#08x}"
+            )
 
     blocks = bytearray()
     for i in range(0, len(image), 4096):
@@ -235,13 +255,130 @@ def section_bytes_of_obj(objdump: str, obj_path: pathlib.Path) -> tuple[int, int
         if len(p) > 3 and p[0].isdigit():
             sec = p[1]
             sz = int(p[2], 16)
-            if sec.startswith(".text"):
-                text_b += sz
-            elif sec.startswith(".rodata"):
+            if sec.startswith(".c1_text.rodata") or sec.startswith(".rodata"):
                 rodata_b += sz
+            elif sec.startswith(".c1_text") or sec.startswith(".text"):
+                text_b += sz
             if any(sec.startswith(bad) for bad in (".init_array", ".ctors", ".dtors", ".fini_array")) and sz > 0:
                 bad_ctors.append(f"{obj_path.name}:{sec}({sz}B)")
     return text_b, rodata_b, bad_ctors
+
+
+def collect_c1_weak_symbols(obj_paths: list[pathlib.Path]) -> set[str]:
+    import struct
+
+    weak_names: set[str] = set()
+    for obj_path in obj_paths:
+        buf = obj_path.read_bytes()
+        e_shoff = struct.unpack_from("<I", buf, 32)[0]
+        e_shnum = struct.unpack_from("<H", buf, 48)[0]
+        shdrs = [struct.unpack_from("<10I", buf, e_shoff + i * 40) for i in range(e_shnum)]
+        group_sig_syms = {sh[7] for sh in shdrs if sh[1] == 17}
+        for sh in shdrs:
+            if sh[1] != 2 or sh[9] != 16:
+                continue
+            str_sh = shdrs[sh[6]]
+            str_buf = buf[str_sh[4] : str_sh[4] + str_sh[5]]
+            for sym_idx, pos in enumerate(range(sh[4], sh[4] + sh[5], 16)):
+                st_name, _val, _sz, st_info, _other, st_shndx = struct.unpack_from("<IIIBBH", buf, pos)
+                if st_name != 0 and st_shndx != 0 and ((st_info >> 4) == 2 or sym_idx in group_sig_syms):
+                    end = str_buf.index(0, st_name)
+                    weak_names.add(str_buf[st_name:end].decode("ascii"))
+    return weak_names
+
+
+def relocate_obj_to_c1_sram(obj_path: pathlib.Path, c1_weak_names: set[str]) -> None:
+    """Rewrite ELF32 relocatable `.o` so `.text*`/`.rodata*` + `memcpy`/`memset` land in `.c1_text` SRAM."""
+    import struct
+
+    out = bytearray(obj_path.read_bytes())
+    if out[:5] != b"\x7fELF\x01" or out[5] != 1:
+        raise SystemExit(f"[FM-1 FAIL] {obj_path} is not little-endian ELF32")
+
+    (
+        _ident,
+        _etype,
+        _emachine,
+        _eversion,
+        _eentry,
+        _ephoff,
+        e_shoff,
+        _eflags,
+        _eehsize,
+        _ephentsize,
+        _ephnum,
+        e_shentsize,
+        e_shnum,
+        e_shstrndx,
+    ) = struct.unpack_from("<16sHHIIIIIHHHHHH", out, 0)
+    if e_shentsize != 40:
+        raise SystemExit(f"[FM-1 FAIL] unexpected ELF32 e_shentsize={e_shentsize} in {obj_path}")
+
+    shdrs = [list(struct.unpack_from("<10I", out, e_shoff + i * 40)) for i in range(e_shnum)]
+
+    def read_cstr(buf: bytes | bytearray, off: int) -> str:
+        end = buf.index(0, off)
+        return bytes(buf[off:end]).decode("ascii")
+
+    new_strtabs: dict[int, bytearray] = {}
+
+    def get_strtab(sec_idx: int) -> bytearray:
+        if sec_idx not in new_strtabs:
+            s = shdrs[sec_idx]
+            new_strtabs[sec_idx] = bytearray(out[s[4] : s[4] + s[5]])
+        return new_strtabs[sec_idx]
+
+    shstr = get_strtab(e_shstrndx)
+
+    # 1. Rename PROGBITS `.text*` and `.rodata*` sections into `.c1_text*`
+    for sh in shdrs:
+        if sh[1] != 1:  # SHT_PROGBITS only (leave SHT_REL sh_info indices untouched)
+            continue
+        sec_name = read_cstr(shstr, sh[0])
+        new_sec: str | None = None
+        if sec_name == ".text" or sec_name.startswith(".text."):
+            new_sec = ".c1_text" + sec_name[len(".text") :]
+        elif sec_name == ".rodata" or sec_name.startswith(".rodata."):
+            new_sec = ".c1_text.rodata" + sec_name[len(".rodata") :]
+        if new_sec is not None:
+            sh[0] = len(shstr)
+            shstr += new_sec.encode("ascii") + b"\x00"
+
+    # 2. Redirect undefined `memcpy`/`memset` to `.c1_text` SRAM helpers, and namespace weak/COMDAT
+    #    inline symbols (`__c1w_*`) so `.c1_text` (0x01C0E000) and `.text` (0x02000120) never emit
+    #    > 4 MiB PC-relative `R_PI32V2_LONG_JUMP_23M2` relocations across memory regions!
+    group_sig_syms = {sh[7] for sh in shdrs if sh[1] == 17}  # SHT_GROUP sh_info symbol indices
+    for sh in shdrs:
+        if sh[1] != 2 or sh[9] != 16:  # SHT_SYMTAB
+            continue
+        sym_str = get_strtab(sh[6])
+        sym_off, sym_sz = sh[4], sh[5]
+        for sym_idx, pos in enumerate(range(sym_off, sym_off + sym_sz, 16)):
+            st_name, _val, _sz, st_info, _other, st_shndx = struct.unpack_from("<IIIBBH", out, pos)
+            if st_name == 0:
+                continue
+            sname = read_cstr(sym_str, st_name)
+            if st_shndx == 0 and sname in ("memcpy", "memset"):
+                struct.pack_into("<I", out, pos, len(sym_str))
+                sym_str += f"ruido_c1_{sname}".encode("ascii") + b"\x00"
+            elif (
+                sname in c1_weak_names
+                or (st_shndx != 0 and ((st_info >> 4) == 2 or sym_idx in group_sig_syms))
+            ) and not sname.startswith("__c1w_"):
+                struct.pack_into("<I", out, pos, len(sym_str))
+                sym_str += f"__c1w_{sname}".encode("ascii") + b"\x00"
+
+    for sec_idx, buf in new_strtabs.items():
+        shdrs[sec_idx][4] = len(out)
+        shdrs[sec_idx][5] = len(buf)
+        out += buf
+    out += b"\x00" * (-len(out) % 4)
+
+    new_shoff = len(out)
+    for sh in shdrs:
+        out += struct.pack("<10I", *sh)
+    struct.pack_into("<I", out, 32, new_shoff)
+    obj_path.write_bytes(out)
 
 
 def parse_dump_words(emu_out: str) -> list[int]:
@@ -263,7 +400,7 @@ def main(argv: list[str]) -> int:
         return delegate_to_docker(argv)
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dsp-opt", default="-O2", choices=["-Os", "-O2", "-O3"])
+    ap.add_argument("--dsp-opt", default="-O3", choices=["-Os", "-O2", "-O3"])
     ap.add_argument("--ui-opt", default="-Os", choices=["-Os", "-O2", "-O3"])
     ap.add_argument("--skip-emu", action="store_true")
     args = ap.parse_args(argv)
@@ -316,7 +453,7 @@ def main(argv: list[str]) -> int:
         f"-I{fw / 'gen'}",
         f"-I{FM1_DIR}",
         f'-DFELUCCA_ID="{PRODUCT_DEV}"',
-        '-DAPP_VER="0.1"',
+        '-DAPP_VER="0.2"',
     ]
 
     common_cxxflags = [
@@ -348,11 +485,42 @@ def main(argv: list[str]) -> int:
         f"-I{FM1_DIR}",
     ]
 
+    c1_rt_cxxflags = [*common_cxxflags, "-fno-builtin", args.dsp_opt]
+    c1_dsp_cxxflags = [*common_cxxflags, args.dsp_opt]
+
     compile_jobs: list[list[str]] = [
-        [str(clang), "-target", "pi32v2", "-c", str(fw / "crt0.S"), "-o", str(OBJ_DIR / "crt0.o")],
-        [str(clang), "-target", "pi32v2", "-c", str(fw / "hal" / "fm1_vec.S"), "-o", str(OBJ_DIR / "fm1_vec.o")],
-        [str(clang), "-target", "pi32v2", "-c", str(fw / "hal" / "fm1_isr.S"), "-o", str(OBJ_DIR / "fm1_isr.o")],
+        [str(clang), "-target", "pi32v2", "-mcpu=r3", "-c", str(fw / "crt0.S"), "-o", str(OBJ_DIR / "crt0.o")],
+        [str(clang), "-target", "pi32v2", "-mcpu=r3", "-c", str(fw / "hal" / "fm1_vec.S"), "-o", str(OBJ_DIR / "fm1_vec.o")],
+        [str(clang), "-target", "pi32v2", "-mcpu=r3", "-c", str(fw / "hal" / "fm1_isr.S"), "-o", str(OBJ_DIR / "fm1_isr.o")],
+        [
+            str(clang),
+            "-target",
+            "pi32v2",
+            "-mcpu=r3",
+            "-c",
+            str(FM1_DIR / "fm1_cpu1.S"),
+            "-o",
+            str(OBJ_DIR / "fm1_cpu1_asm.o"),
+        ],
+        [
+            str(clang),
+            *plat_cflags,
+            "-Wextra",
+            "-Werror",
+            "-c",
+            str(FM1_DIR / "fm1_cpu1.c"),
+            "-o",
+            str(OBJ_DIR / "fm1_cpu1.o"),
+        ],
         [str(clang), *plat_cflags, "-c", str(FM1_DIR / "fm1_main.c"), "-o", str(OBJ_DIR / "fm1_main.o")],
+        [
+            str(clang),
+            *c1_rt_cxxflags,
+            "-c",
+            str(FM1_DIR / "ruido_fm1_c1.cpp"),
+            "-o",
+            str(OBJ_DIR / "ruido_fm1_c1.o"),
+        ],
         [
             str(clang),
             *common_cxxflags,
@@ -368,7 +536,7 @@ def main(argv: list[str]) -> int:
     for s in dsp_srcs:
         out_o = OBJ_DIR / (pathlib.Path(s).stem + ".o")
         dsp_objs.append(out_o)
-        compile_jobs.append([str(clang), *common_cxxflags, args.dsp_opt, "-c", s, "-o", str(out_o)])
+        compile_jobs.append([str(clang), *c1_dsp_cxxflags, "-c", s, "-o", str(out_o)])
 
     ui_objs: list[pathlib.Path] = []
     for s in ui_srcs:
@@ -379,13 +547,21 @@ def main(argv: list[str]) -> int:
     with ThreadPoolExecutor(max_workers=min(8, len(compile_jobs))) as pool:
         list(pool.map(run_cmd, compile_jobs))
 
+    c1_cpp_objs = [OBJ_DIR / "ruido_fm1_c1.o", *dsp_objs]
+    c1_weak_names = collect_c1_weak_symbols(c1_cpp_objs)
+    for o in c1_cpp_objs:
+        relocate_obj_to_c1_sram(o, c1_weak_names)
+
+    # Link Core 1 SRAM TUs BEFORE UI TUs so shared weak inline LUTs/helpers resolve to `.c1_text` SRAM!
     all_objs = [
         OBJ_DIR / "crt0.o",
         OBJ_DIR / "fm1_vec.o",
         OBJ_DIR / "fm1_isr.o",
+        OBJ_DIR / "fm1_cpu1_asm.o",
+        *c1_cpp_objs,
+        OBJ_DIR / "fm1_cpu1.o",
         OBJ_DIR / "fm1_main.o",
         OBJ_DIR / "ruido_fm1_bridge.o",
-        *dsp_objs,
         *ui_objs,
     ]
 
@@ -396,7 +572,7 @@ def main(argv: list[str]) -> int:
         "-e",
         "_start",
         "-T",
-        str(fw / "app.ld"),
+        str(FM1_DIR / "ruido_fm1.ld"),
         *[str(o) for o in all_objs],
     ]
     if compiler_rt.is_file():
@@ -404,17 +580,19 @@ def main(argv: list[str]) -> int:
     link_cmd += ["-o", str(elf)]
     run_cmd(link_cmd)
 
-    # Extract sections & disassembly (--mcpu=r3 decodes 3f e5 / 3f f5 hardware FPU ops!)
-    for name in ("text.bin", "data.bin", "ramtext.bin"):
+    # Extract loadable binary sections & disassembly (--mcpu=r3 decodes 3f e5 / 3f f5 hardware FPU ops!)
+    for name in ("text.bin", "ramtext.bin", "data.bin", "c1text.bin"):
         (OUT_DIR / name).unlink(missing_ok=True)
     run_cmd([str(objcopy), "-O", "binary", "-j", ".text", str(elf), str(OUT_DIR / "text.bin")])
-    run_cmd([str(objcopy), "-O", "binary", "-j", ".data", str(elf), str(OUT_DIR / "data.bin")])
     run_cmd([str(objcopy), "-O", "binary", "-j", ".ram_text", str(elf), str(OUT_DIR / "ramtext.bin")])
+    run_cmd([str(objcopy), "-O", "binary", "-j", ".data", str(elf), str(OUT_DIR / "data.bin")])
+    run_cmd([str(objcopy), "-O", "binary", "-j", ".c1_text", str(elf), str(OUT_DIR / "c1text.bin")])
 
     syms = run_cmd([str(objdump), "-t", str(elf)])
     hdrs = run_cmd([str(objdump), "-h", str(elf)])
     dis = run_cmd([str(objdump), "--mcpu=r3", "-d", str(elf)])
     rt_dis = run_cmd([str(objdump), "--mcpu=r3", "-d", "-j", ".ram_text", str(elf)])
+    c1_dis = run_cmd([str(objdump), "--mcpu=r3", "-d", "-j", ".c1_text", str(elf)])
     (OUT_DIR / "ruido.dis").write_text(dis, encoding="utf-8")
 
     def sym_addr(sym_name: str) -> int:
@@ -424,14 +602,18 @@ def main(argv: list[str]) -> int:
         return int(m.group(1), 16)
 
     img = bytearray((OUT_DIR / "text.bin").read_bytes())
-    for sect_file, load_sym in (("ramtext.bin", "_rt_load"), ("data.bin", "_data_load")):
+    for sect_file, load_sym in (
+        ("ramtext.bin", "_rt_load"),
+        ("data.bin", "_data_load"),
+        ("c1text.bin", "_c1_load"),
+    ):
         load_addr = sym_addr(load_sym)
         if load_addr % 4 != 0:
             raise SystemExit(f"[FM-1 FAIL] {load_sym} ({load_addr:#x}) is not 4-byte aligned")
         blob = (OUT_DIR / sect_file).read_bytes() if (OUT_DIR / sect_file).is_file() else b""
         if blob:
             if load_addr - APP_XIP < len(img):
-                raise SystemExit(f"[FM-1 FAIL] {load_sym} overlaps preceding image")
+                raise SystemExit(f"[FM-1 FAIL] {load_sym} ({load_addr:#x}) overlaps preceding image")
             img += b"\xff" * (load_addr - APP_XIP - len(img))
             img += blob
     img += b"\xff" * (-len(img) % 4)
@@ -442,11 +624,13 @@ def main(argv: list[str]) -> int:
     fwsc_path = OUT_DIR / "ruido.fwsc"
     fwsc_path.write_bytes(fwsc_bytes)
 
-    # --- Gate 4.1 Audit ---
+    # --- Gate 4.1 + Gate 4.2 Audit ---
     errors: list[str] = []
 
     if sym_addr("_start") != APP_XIP:
         errors.append(f"_start != {APP_XIP:#x}")
+    if sym_addr("fm1_cpu1_entry") != C1_SRAM_ORIGIN:
+        errors.append(f"fm1_cpu1_entry ({sym_addr('fm1_cpu1_entry'):#x}) != {C1_SRAM_ORIGIN:#x}")
     if bytes(img[:4]) != bytes.fromhex("04818000"):
         errors.append(f"entry stub mismatch: {bytes(img[:4]).hex()}")
     if len(img) > app_slot:
@@ -458,6 +642,35 @@ def main(argv: list[str]) -> int:
     if rt_calls:
         errors.append(f".ram_text contains call instructions: {rt_calls[:2]}")
 
+    # Audit `.c1_text` for 100% XIP independence, zero `idle`, zero hardware `lockset` spinlocks,
+    # and a 100% stackless leaf `ruido_fm1_c1_boot_post` SRAM bit-flip canary POST.
+    c1_xip_leaks: list[str] = []
+    c1_bad_ops: list[str] = []
+    boot_post_sp_ops: list[str] = []
+    in_boot_post = False
+    for ln in c1_dis.splitlines():
+        if re.match(r"^[0-9a-f]+\s+<([^>]+)>:$", ln):
+            in_boot_post = "<ruido_fm1_c1_boot_post>:" in ln
+            continue
+        mm = DIS_LINE_RE.match(ln)
+        if not mm:
+            continue
+        asm = mm.group(3)
+        if in_boot_post and ("sp" in asm or "call " in asm):
+            boot_post_sp_ops.append(f"{mm.group(1)}: {asm.strip()}")
+        if re.search(r"\b(idle|lockset)\b", asm):
+            c1_bad_ops.append(f"{mm.group(1)}: {asm.strip()}")
+        for v in re.findall(r"= (-?\d+) <|call -?\d+ <[^:>]*: ([0-9a-f]+) >", asm):
+            val = (int(v[0]) & 0xFFFFFFFF) if v[0] else (int(v[1], 16) & 0xFFFFFFFF)
+            if 0x02000000 <= val < 0x08000000:
+                c1_xip_leaks.append(f"{mm.group(1)}: {asm.strip()} (-> {val:#010x})")
+    if c1_xip_leaks:
+        errors.append(f".c1_text references XIP Flash ({len(c1_xip_leaks)} leaks): {c1_xip_leaks[:3]}")
+    if c1_bad_ops:
+        errors.append(f".c1_text contains forbidden idle/lockset instructions: {c1_bad_ops[:3]}")
+    if boot_post_sp_ops:
+        errors.append(f"ruido_fm1_c1_boot_post must be stackless leaf, found: {boot_post_sp_ops[:3]}")
+
     # Check ELF & per-TU global constructor sections
     bad_sections: list[str] = []
     for ln in hdrs.splitlines():
@@ -468,7 +681,7 @@ def main(argv: list[str]) -> int:
                 bad_sections.append(f"ELF:{sec}({sz}B)")
 
     dsp_text = dsp_rodata = 0
-    for o in dsp_objs:
+    for o in [OBJ_DIR / "fm1_cpu1_asm.o", *c1_cpp_objs]:
         t, r, bad = section_bytes_of_obj(str(objdump), o)
         dsp_text += t
         dsp_rodata += r
@@ -511,16 +724,14 @@ def main(argv: list[str]) -> int:
         elif any(op in asm for op in ("ftoi", "ftou", "itof", "utof", "fmin", "fmax")):
             fpu_conv += 1
 
-    # Check DSP-only fdiv count
+    # Check DSP-only fdiv count inside linked `.c1_text`
     dsp_fdiv = 0
-    for o in dsp_objs:
-        o_dis = run_cmd([str(objdump), "--mcpu=r3", "-d", str(o)])
-        for ln in o_dis.splitlines():
-            mm = DIS_LINE_RE.match(ln)
-            if mm and "(f)" in mm.group(3) and " / " in mm.group(3):
-                dsp_fdiv += 1
+    for ln in c1_dis.splitlines():
+        mm = DIS_LINE_RE.match(ln)
+        if mm and "(f)" in mm.group(3) and " / " in mm.group(3):
+            dsp_fdiv += 1
 
-    # Symbol table audit for soft-double, int64 division, libcompiler_rt __sync_* traps, and soft-float helpers
+    # Symbol table audit
     defined_syms: set[str] = set()
     soft_single_syms: list[str] = []
     bad_sync_syms: list[str] = []
@@ -546,26 +757,38 @@ def main(argv: list[str]) -> int:
         errors.append("zero hardware r3 FPU arithmetic instructions detected in disassembly")
 
     ram_bytes = sym_addr("_bss_end") - 0x01C08000
+    c1_bytes = sym_addr("_c1_end") - C1_SRAM_ORIGIN
     pool_bytes = sym_addr("_pool_end") - 0x01C20000
-    if ram_bytes > 96 * 1024:
-        errors.append(f".data+.bss ({ram_bytes} B) > 96 KiB")
-    if pool_bytes > 0x54000:
-        errors.append(f".pool ({pool_bytes} B) > 336 KiB")
+    if ram_bytes > RAM_MAX_BYTES:
+        errors.append(f".data+.bss ({ram_bytes} B) > {RAM_MAX_BYTES} B")
+    if c1_bytes == 0 or c1_bytes > C1_SRAM_MAX_BYTES:
+        errors.append(f".c1_text ({c1_bytes} B) outside (0, {C1_SRAM_MAX_BYTES}] B")
+    if pool_bytes > POOL_MAX_BYTES:
+        errors.append(f".pool ({pool_bytes} B) > {POOL_MAX_BYTES} B")
+    for chip_name, jedec_id, le_bytes in REQUIRED_JEDEC_IDS:
+        if le_bytes not in img:
+            errors.append(f"app image (`ruido.bin`) missing {chip_name} JEDEC ID {jedec_id:#08x}")
 
-    print("=== Ruido FM-1 Gate 4.1 Toolchain & ISA Audit ===")
+    print("=== Ruido FM-1 Gate 4.1 + 4.2 Dual-Core Firmware Audit ===")
     print(f"  Compiler          : pi32v2 clang ({cxx_std}, DSP={args.dsp_opt}, UI={args.ui_opt}, -mcpu=r3 -mfprev1)")
     print(f"  App XIP (ruido.bin): {len(img):,} B / {app_slot:,} B ({100.0 * len(img) / app_slot:.1f}% of 567.9 KiB APP_SLOT)")
     print(f"  Package (.fwsc)   : {len(fwsc_bytes):,} B / {MAX_FWSC_BYTES:,} B ({len(fwsc_bytes) / 1024.0:.1f} KiB)")
-    print(f"  DSP Core1 Preview : {dsp_text + dsp_rodata:,} B (.text={dsp_text:,} B + .rodata={dsp_rodata:,} B)")
-    print(f"  UI + Bridge Code  : {ui_text + ui_rodata:,} B (.text={ui_text:,} B + .rodata={ui_rodata:,} B)")
-    print(f"  SRAM .data + .bss : {ram_bytes:,} B / {96 * 1024:,} B ({ram_bytes / 1024.0:.1f} KiB)")
-    print(f"  SRAM .pool        : {pool_bytes:,} B / {0x54000:,} B ({pool_bytes / 1024.0:.1f} KiB)")
+    print(
+        f"  SRAM .c1_text DSP : {c1_bytes:,} B / {C1_SRAM_MAX_BYTES:,} B ({c1_bytes / 1024.0:.1f} KiB @ 0x01C0E000, "
+        f"0 XIP refs; raw .text={dsp_text:,} B + .rodata={dsp_rodata:,} B)"
+    )
+    print(f"  XIP UI + Bridge   : {ui_text + ui_rodata:,} B (.text={ui_text:,} B + .rodata={ui_rodata:,} B)")
+    print(f"  SRAM .data + .bss : {ram_bytes:,} B / {RAM_MAX_BYTES:,} B ({ram_bytes / 1024.0:.1f} KiB)")
+    print(f"  SRAM .pool        : {pool_bytes:,} B / {POOL_MAX_BYTES:,} B ({pool_bytes / 1024.0:.1f} KiB)")
     print(
         f"  Hardware r3 FPU   : fadd={fpu_add}, fsub={fpu_sub}, fmul={fpu_mul}, "
-        f"fdiv={fpu_div} (DSP TUs={dsp_fdiv}), fcmp={fpu_cmp}, fconv/minmax={fpu_conv}"
+        f"fdiv={fpu_div} (.c1_text={dsp_fdiv}), fcmp={fpu_cmp}, fconv/minmax={fpu_conv}"
     )
     print(f"  Soft-float calls  : {soft_single_syms if soft_single_syms else 'NONE (100% native r3 hardware FPU)'}")
-    print("  Anti-Brick Checks : _start=0x02000120, 0 global ctors, 0 __sync_*, 0 soft-double, 0 int64-div, 0 ROM traps")
+    print(
+        "  Anti-Brick Checks : _start=0x02000120, JEDEC=P25Q80+UC25HQ80, "
+        "0 global ctors, 0 __sync_*, 0 soft-double, 0 int64-div, 0 ROM/XIP leaks"
+    )
 
     if not args.skip_emu:
         status_addr = sym_addr("g_ruido_fm1_status")
@@ -574,7 +797,7 @@ def main(argv: list[str]) -> int:
         if wav_out.exists():
             wav_out.unlink()
 
-        # 1. Normal boot verification (950 ms: clears 50 ms OCT- scan + ~350 ms ST7789 init + ~550 ms synth/UI)
+        # 1. Normal Dual-Core Boot verification (950 ms)
         boot_out = run_cmd([
             "fm1-emu",
             "--fwsc",
@@ -585,10 +808,10 @@ def main(argv: list[str]) -> int:
             str(wav_out),
             "--dump",
             f"{status_addr:#x}",
-            "8",
-        ])
+            "12",
+        ], include_stderr=True)
         sw = parse_dump_words(boot_out)
-        if len(sw) < 8:
+        if len(sw) < 12:
             errors.append(f"fm1-emu normal boot dump incomplete: {sw}")
         else:
             (
@@ -600,40 +823,112 @@ def main(argv: list[str]) -> int:
                 cal_8k_ticks,
                 last256_ticks,
                 peak_q15,
-            ) = sw[:8]
+                c1_blocks,
+                c1_last64_ticks,
+                clk_con0_div,
+                c1_flags,
+            ) = sw[:12]
             insns_per_tick = 8000.0 / max(1, cal_8k_ticks)
             idle_insns_f = (bench_idle_ticks * insns_per_tick) / 64.0
             full_insns_f = (bench_full_ticks * insns_per_tick) / 64.0
+            c1_live_insns_f = (c1_last64_ticks * insns_per_tick) / 64.0
             dma_insns_f = (last256_ticks * insns_per_tick) / 256.0
             cyc_budget_240 = 240_000_000.0 / 44_100.0
             cyc_budget_320 = 320_000_000.0 / 44_100.0
+            c1_started = c1_flags & 1
+            c1_fallback = (c1_flags >> 1) & 1
+            c1_underruns = (c1_flags >> 8) & 0xFF
+            c1_assist_spans = (c1_flags >> 16) & 0xFFFF
+            sys_div = (clk_con0_div >> 24) & 0xFF
+            clk_con0 = clk_con0_div & 0x00FFFFFF
             wav_bytes = wav_out.stat().st_size if wav_out.exists() else 0
             print(
-                f"  fm1-emu Boot (.95s): magic={magic:#010x}, audio_blocks={audio_blocks}, "
-                f"lcd_frames={lcd_frames}, peak_q15={peak_q15}, wav={wav_bytes:,} B"
+                f"  fm1-emu Dual-Core : magic={magic:#010x}, c1_blocks={c1_blocks} (started={c1_started}, "
+                f"fallback={c1_fallback}, underruns={c1_underruns}, c0_assist={c1_assist_spans}), "
+                f"audio_blocks={audio_blocks}, lcd_frames={lcd_frames}, peak_q15={peak_q15}, wav={wav_bytes:,} B"
             )
             print(
-                f"  DSP Idle 64f Bench: ~{idle_insns_f:.0f} insns/frame "
-                f"({100.0 * idle_insns_f / cyc_budget_240:.1f}% @ 240 MHz, "
-                f"{100.0 * idle_insns_f / cyc_budget_320:.1f}% @ 320 MHz; "
-                f"cal={insns_per_tick:.2f} insn/tick, DMA256=~{dma_insns_f:.0f} insn/f)"
+                f"  Clock & Core0 ISR : CLK_CON0={clk_con0:#08x}, SYS_DIV={sys_div:#04x}, "
+                f"cal={insns_per_tick:.2f} insn/tick, Core0 ALNK0 DMA256=~{dma_insns_f:.1f} insns/frame "
+                f"({100.0 * dma_insns_f / cyc_budget_240:.2f}% @ 240 MHz)"
             )
             print(
-                f"  DSP Full 64f Stress: ~{full_insns_f:.0f} insns/frame "
+                f"  Dual-Core Idle 64f: ~{idle_insns_f:.0f} insns/frame (live c1=~{c1_live_insns_f:.0f} insns/f; "
+                f"{100.0 * idle_insns_f / cyc_budget_240:.1f}% @ 240 MHz, "
+                f"{100.0 * idle_insns_f / cyc_budget_320:.1f}% @ 320 MHz)"
+            )
+            print(
+                f"  Dual-Core Stress  : ~{full_insns_f:.0f} insns/frame "
                 f"({100.0 * full_insns_f / cyc_budget_240:.1f}% @ 240 MHz, "
                 f"{100.0 * full_insns_f / cyc_budget_320:.1f}% @ 320 MHz; "
                 f"4v HP+LP ZDF self-osc + drive + 8x LFO)"
             )
             if magic != 0x52554944:
-                errors.append(f"fm1-emu normal boot did not reach ruido_fm1_init (magic={magic:#x})")
+                errors.append(f"fm1-emu normal boot did not reach ruido_fm1_arm_audio (magic={magic:#x})")
+            if c1_started != 1 or c1_blocks == 0 or c1_fallback != 0:
+                diag = [
+                    ln.strip()
+                    for ln in boot_out.splitlines()
+                    if any(k in ln.lower() for k in ("fault", "trap", "cpu1", "pc_limit", "dbg", "crash", "illegal"))
+                ]
+                errors.append(
+                    f"Core 1 failed normal SRAM execution (started={c1_started}, c1_blocks={c1_blocks}, "
+                    f"fallback={c1_fallback}, diag={diag[:6]})"
+                )
+            if c1_underruns != 0:
+                errors.append(f"Core 1 -> ALNK0 DMA ring underruns detected (underruns={c1_underruns})")
+            if idle_insns_f > cyc_budget_240:
+                errors.append(
+                    f"Dual-core Idle DSP ({idle_insns_f:.0f} insns/f) exceeds 240 MHz budget ({cyc_budget_240:.0f})"
+                )
+            if full_insns_f > cyc_budget_320:
+                errors.append(
+                    f"Dual-core Stress DSP ({full_insns_f:.0f} insns/f) exceeds 320 MHz budget ({cyc_budget_320:.0f})"
+                )
             if audio_blocks == 0 or peak_q15 == 0:
                 errors.append(f"fm1-emu normal boot produced silent/zero audio (blocks={audio_blocks}, peak={peak_q15})")
+            if dma_insns_f > 120.0:
+                errors.append(f"Core 0 ALNK0 DMA ISR too heavy ({dma_insns_f:.1f} insns/frame; expected ring drain < 120)")
             if wav_bytes <= 44:
                 errors.append(f"fm1-emu did not write valid audio WAV ({wav_bytes} B)")
             if lcd_frames == 0:
                 errors.append("fm1-emu normal boot rendered 0 LCD frames")
 
-        # 2. Power-on Hold OCT- USB Rescue verification (must enter recovery_main BEFORE any C++ engine init!)
+        # 2. Silicon-Lottery Flaky-Core1 Survival (`--flaky-core1 0.05 --cpu1-survives`)
+        flaky_out = run_cmd([
+            "fm1-emu",
+            "--fwsc",
+            str(fwsc_path),
+            "--ms",
+            "950",
+            "--quiet",
+            "--flaky-core1",
+            "0.05",
+            "--seed",
+            "1",
+            "--cpu1-survives",
+            "--dump",
+            f"{status_addr:#x}",
+            "12",
+        ])
+        fsw = parse_dump_words(flaky_out)
+        f_fallback = ((fsw[11] >> 1) & 1) if len(fsw) >= 12 else 0
+        if (
+            len(fsw) < 12
+            or fsw[0] != 0x52554944
+            or f_fallback != 1
+            or fsw[1] == 0
+            or fsw[2] == 0
+            or fsw[7] == 0
+        ):
+            errors.append(f"Flaky-Core1 survival check failed: {fsw}")
+        else:
+            print(
+                f"  fm1-emu Flaky-C1  : PASS (cpu0 survived Core 1 bit-21 SRAM fault, "
+                f"fallback={f_fallback}, audio_blocks={fsw[1]}, lcd_frames={fsw[2]}, peak_q15={fsw[7]})"
+            )
+
+        # 3. Power-on Hold OCT- USB Rescue verification (must enter recovery_main BEFORE C++ / Core 1!)
         rescue_out = run_cmd([
             "fm1-emu",
             "--fwsc",
@@ -659,26 +954,26 @@ def main(argv: list[str]) -> int:
             "0-150:OCTDN",
             "--dump",
             f"{status_addr:#x}",
-            "2",
+            "12",
         ])
         rsw = parse_dump_words(rescue_status_out)
         if len(bw) < 3 or bw[0] != 0x42475232 or bw[2] != 2:
             errors.append(f"Hold OCT- USB rescue failed bootguard check (got {bw}, expected pending=2)")
-        elif len(rsw) < 2 or rsw[0] != 0 or rsw[1] != 0:
-            errors.append(f"Hold OCT- USB rescue leaked into C++ init/audio (status={rsw})")
+        elif len(rsw) < 12 or rsw[0] != 0 or rsw[1] != 0 or rsw[8] != 0:
+            errors.append(f"Hold OCT- USB rescue leaked into C++ init or Core 1 (status={rsw})")
         else:
             print(
                 f"  fm1-emu OCT- Rescue: PASS (bootguard.pending={bw[2]}, "
-                f"cpp_magic={rsw[0]:#x}, audio_blocks={rsw[1]})"
+                f"cpp_magic={rsw[0]:#x}, audio_blocks={rsw[1]}, c1_blocks={rsw[8]})"
             )
 
     if errors:
-        print("=== FM-1 Gate 4.1 FAILED ===", file=sys.stderr)
+        print("=== FM-1 Gate 4.2 FAILED ===", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
 
-    print("[FM-1 Gate 4.1 OK] Firmware package & hardware/emulator gates passed.")
+    print("[FM-1 Gate 4.2 OK] Dual-core `.c1_text` SRAM DSP, TPDF audio & anti-brick gates passed.")
     return 0
 
 

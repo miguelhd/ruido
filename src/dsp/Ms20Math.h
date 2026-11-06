@@ -126,40 +126,38 @@ RUIDO_ALWAYS_INLINE SatResult evalSiliconDiode(float w, float span, float invSpa
             kDiodeJunctionWeight * dDeriv + kDiodeOhmicSlope};
 }
 
-inline float stepHpNonlinear(float x, float& s1, float& s2, float& hist1, float& hist2, float g,
-                             float k, float otaScale, float invOtaScale, float diodeSpan,
-                             float invDiodeSpan) noexcept {
-    const float pos1 = kHpOta1Pos * otaScale;
-    const float neg1 = kHpOta1Neg * otaScale;
-    const float invPos1 = kInvHpOta1Pos * invOtaScale;
-    const float invNeg1 = kInvHpOta1Neg * invOtaScale;
-    const float rail2 = kHpOta2Rail * otaScale;
-    const float invRail2 = kInvHpOta2Rail * invOtaScale;
-
+RUIDO_ALWAYS_INLINE float stepHpNonlinearPrecomputed(float x, float& s1, float& s2, float& hist1,
+                                                     float& hist2, float g, float k, float pos1,
+                                                     float neg1, float invPos1, float invNeg1,
+                                                     float rail2, float invRail2, float diodeSpan,
+                                                     float invDiodeSpan) noexcept {
     const float xPlusS1 = x + s1;
     float y2 = x + clampf(2.0f * hist1 - hist2, -8.0f, 8.0f);
-    float finalOta2 = -y2;
 
-    for (int iter = 0; iter < 3; ++iter) {
-        const SatResult ota2 = evalOtaSymmetric(-y2, rail2, invRail2);
-        const float y1 = y2 - s2 - g * ota2.value;
+    const SatResult ota2_0 = evalOtaSymmetric(-y2, rail2, invRail2);
+    const float y1_0 = y2 - s2 - g * ota2_0.value;
+    const SatResult fb_0 = evalSiliconDiode(k * y2, diodeSpan, invDiodeSpan);
+    const SatResult ota1_0 = evalOta(fb_0.value - y1_0, pos1, neg1, invPos1, invNeg1);
 
-        const SatResult fb = evalSiliconDiode(k * y2, diodeSpan, invDiodeSpan);
-        const SatResult ota1 = evalOta(fb.value - y1, pos1, neg1, invPos1, invNeg1);
+    const float fHp0 = y1_0 - xPlusS1 - g * ota1_0.value;
+    const float d1_0 = g * ota1_0.deriv;
+    const float d2_0 = g * ota2_0.deriv;
+    const float dy2_0 = fHp0 / ((1.0f + d1_0) * (1.0f + d2_0) - d1_0 * (k * fb_0.deriv));
+    y2 -= dy2_0;
+    float finalOta2 = ota2_0.value + ota2_0.deriv * dy2_0;
 
-        const float fHp = y1 - xPlusS1 - g * ota1.value;
-        const float d1 = g * ota1.deriv;
-        const float d2 = g * ota2.deriv;
-        const float dFb = k * fb.deriv;
-        const float dfDy2 = (1.0f + d1) * (1.0f + d2) - d1 * dFb;
+    if (!(absf(dy2_0) < 1.0e-2f)) {
+        const SatResult ota2_1 = evalOtaSymmetric(-y2, rail2, invRail2);
+        const float y1_1 = y2 - s2 - g * ota2_1.value;
+        const SatResult fb_1 = evalSiliconDiode(k * y2, diodeSpan, invDiodeSpan);
+        const SatResult ota1_1 = evalOta(fb_1.value - y1_1, pos1, neg1, invPos1, invNeg1);
 
-        const float dy2 = fHp / dfDy2;
-        y2 -= dy2;
-        finalOta2 = ota2.value + ota2.deriv * dy2;
-
-        if (absf(dy2) < 1.0e-2f) {
-            break;
-        }
+        const float fHp1 = y1_1 - xPlusS1 - g * ota1_1.value;
+        const float d1_1 = g * ota1_1.deriv;
+        const float d2_1 = g * ota2_1.deriv;
+        const float dy2_1 = fHp1 / ((1.0f + d1_1) * (1.0f + d2_1) - d1_1 * (k * fb_1.deriv));
+        y2 -= dy2_1;
+        finalOta2 = ota2_1.value + ota2_1.deriv * dy2_1;
     }
 
     const float ic2 = g * finalOta2;
@@ -171,34 +169,47 @@ inline float stepHpNonlinear(float x, float& s1, float& s2, float& hist1, float&
     return y2;
 }
 
-inline float stepLpNonlinear(float x, float& s1, float& s2, float& hist1, float& hist2, float g,
-                             float k, float rail1, float invRail1, float pos2, float neg2,
-                             float invPos2, float invNeg2, float diodeSpan,
+inline float stepHpNonlinear(float x, float& s1, float& s2, float& hist1, float& hist2, float g,
+                             float k, float otaScale, float invOtaScale, float diodeSpan,
                              float invDiodeSpan) noexcept {
+    return stepHpNonlinearPrecomputed(x, s1, s2, hist1, hist2, g, k, kHpOta1Pos * otaScale,
+                                      kHpOta1Neg * otaScale, kInvHpOta1Pos * invOtaScale,
+                                      kInvHpOta1Neg * invOtaScale, kHpOta2Rail * otaScale,
+                                      kInvHpOta2Rail * invOtaScale, diodeSpan, invDiodeSpan);
+}
+
+RUIDO_ALWAYS_INLINE float stepLpNonlinear(float x, float& s1, float& s2, float& hist1, float& hist2,
+                                          float g, float k, float rail1, float invRail1, float pos2,
+                                          float neg2, float invPos2, float invNeg2, float diodeSpan,
+                                          float invDiodeSpan) noexcept {
     float w = clampf(2.0f * hist1 - hist2, -8.0f, 8.0f);
-    float finalOta2 = w;
 
-    for (int iter = 0; iter < 3; ++iter) {
-        const SatResult ota2 = evalOta(w, pos2, neg2, invPos2, invNeg2);
-        const float y2 = s2 + g * ota2.value;
-        const float y1 = w + y2;
+    const SatResult ota2_0 = evalOta(w, pos2, neg2, invPos2, invNeg2);
+    const float y2_0 = s2 + g * ota2_0.value;
+    const float y1_0 = w + y2_0;
+    const SatResult ota1_0 = evalOtaSymmetric(x - y1_0, rail1, invRail1);
+    const SatResult fb_0 = evalSiliconDiode(k * w, diodeSpan, invDiodeSpan);
 
-        const SatResult ota1 = evalOtaSymmetric(x - y1, rail1, invRail1);
-        const SatResult fb = evalSiliconDiode(k * w, diodeSpan, invDiodeSpan);
+    const float fLp0 = y1_0 - s1 - g * (ota1_0.value + fb_0.value);
+    const float d1_0 = g * ota1_0.deriv;
+    const float d2_0 = g * ota2_0.deriv;
+    const float dw0 = fLp0 / ((1.0f + d1_0) * (1.0f + d2_0) - g * (k * fb_0.deriv));
+    w -= dw0;
+    float finalOta2 = ota2_0.value - ota2_0.deriv * dw0;
 
-        const float fLp = y1 - s1 - g * (ota1.value + fb.value);
-        const float d1 = g * ota1.deriv;
-        const float d2 = g * ota2.deriv;
-        const float dFb = k * fb.deriv;
-        const float dfDw = (1.0f + d1) * (1.0f + d2) - g * dFb;
+    if (!(absf(dw0) < 1.0e-2f)) {
+        const SatResult ota2_1 = evalOta(w, pos2, neg2, invPos2, invNeg2);
+        const float y2_1 = s2 + g * ota2_1.value;
+        const float y1_1 = w + y2_1;
+        const SatResult ota1_1 = evalOtaSymmetric(x - y1_1, rail1, invRail1);
+        const SatResult fb_1 = evalSiliconDiode(k * w, diodeSpan, invDiodeSpan);
 
-        const float dw = fLp / dfDw;
-        w -= dw;
-        finalOta2 = ota2.value - ota2.deriv * dw;
-
-        if (absf(dw) < 1.0e-2f) {
-            break;
-        }
+        const float fLp1 = y1_1 - s1 - g * (ota1_1.value + fb_1.value);
+        const float d1_1 = g * ota1_1.deriv;
+        const float d2_1 = g * ota2_1.deriv;
+        const float dw1 = fLp1 / ((1.0f + d1_1) * (1.0f + d2_1) - g * (k * fb_1.deriv));
+        w -= dw1;
+        finalOta2 = ota2_1.value - ota2_1.deriv * dw1;
     }
 
     const float ic2 = g * finalOta2;

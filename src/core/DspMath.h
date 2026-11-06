@@ -7,8 +7,10 @@
 
 #if defined(__clang__) || defined(__GNUC__)
 #define RUIDO_ALWAYS_INLINE __attribute__((always_inline)) inline
+#define RUIDO_NOINLINE __attribute__((noinline))
 #else
 #define RUIDO_ALWAYS_INLINE inline
+#define RUIDO_NOINLINE
 #endif
 
 namespace ruido {

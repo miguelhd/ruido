@@ -3,6 +3,7 @@
 #include "core/Config.h"
 
 #include <array>
+#include <cstddef>
 
 namespace ruido {
 
@@ -22,6 +23,12 @@ class Ms20DualFilter {
         float kHp = 0.58578644f;
         float otaScaleHp = 20.0f;
         float invOtaScaleHp = 0.05f;
+        float hpPos1 = 39.9f;
+        float hpNeg1 = 41.1f;
+        float invHpPos1 = 0.02506f;
+        float invHpNeg1 = 0.02433f;
+        float hpRail2 = 40.5f;
+        float invHpRail2 = 0.02469f;
         float hpDiodeSpan = 31.0f;
         float invHpDiodeSpan = 0.032f;
         float invLinDetHp = 1.0f;
@@ -57,6 +64,12 @@ class Ms20DualFilter {
 
     float processPrepared(float input, const Coeffs& c) noexcept;
 
+    // Process `numFrames` consecutive 4x-oversampled frames for one voice with hoisted bypass
+    // and overdrive checks and register-resident integrator states across all `4 * numFrames`
+    // ticks.
+    void processSpan4x(std::array<float, kOversampleFactor>* frames4x, size_t numFrames,
+                       const Coeffs& c) noexcept;
+
     // Lockstep 4-voice x 4x-oversampled bank processor: evaluates all 4 independent voice filters
     // in parallel FPU/SIMD lanes per sub-step while preserving exact per-voice circuit isolation.
     static void processQuadBank4x(
@@ -87,6 +100,12 @@ class Ms20DualFilter {
 
     static float processHighPass(OtaSallenKeyStage& st, float x, const Coeffs& c) noexcept;
     static float processLowPass(OtaSallenKeyStage& st, float x, const Coeffs& c) noexcept;
+    static void processVoiceHpSpan4x(OtaSallenKeyStage& st,
+                                     std::array<float, kOversampleFactor>* frames4x,
+                                     size_t numFrames, const Coeffs& c) noexcept;
+    static void processVoiceLpSpan4x(OtaSallenKeyStage& st,
+                                     std::array<float, kOversampleFactor>* frames4x,
+                                     size_t numFrames, const Coeffs& c) noexcept;
 
     OtaSallenKeyStage hpf_{};
     OtaSallenKeyStage lpf_{};

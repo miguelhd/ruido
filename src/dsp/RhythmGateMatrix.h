@@ -68,6 +68,13 @@ struct RhythmClockState {
             }
         }
     }
+
+    bool hasFastRhythm() const noexcept {
+        const float tempo = (macroSmoothers.current(2u) > macroSmoothers.target(2u))
+                                ? macroSmoothers.current(2u)
+                                : macroSmoothers.target(2u);
+        return (clockBpm * computeTempoMultiplier(tempo)) > 360.0f;
+    }
 };
 
 struct RhythmFrameResult {
@@ -78,46 +85,31 @@ struct RhythmFrameResult {
     uint8_t gateMask = 0x0Fu;
 };
 
-inline RhythmFrameResult stepRhythmFrame(RhythmClockState& rs,
-                                         std::array<uint32_t, kNumOscillators>& stutterPhases,
-                                         const std::array<float, kNumOscillators>& stutterRatesHz,
-                                         const std::array<float, kNumOscillators>& stutterDepths,
-                                         float hzToBasePhaseU32, bool stasisFreeze) noexcept {
+inline RhythmFrameResult
+stepRhythmSubBlock(RhythmClockState& rs, std::array<uint32_t, kNumOscillators>& stutterPhases,
+                   const std::array<float, kNumOscillators>& stutterRatesHz,
+                   const std::array<float, kNumOscillators>& stutterDepths, float hzToBasePhaseU32,
+                   bool stasisFreeze, uint32_t stride) noexcept {
     RhythmFrameResult out{};
 
-    const float pump = rs.macroSmoothers.next(0u);
-    const float chase = rs.macroSmoothers.next(1u);
-    const float tempo = rs.macroSmoothers.next(2u);
-    const float pluck = rs.macroSmoothers.next(3u);
-    const float shrt = rs.macroSmoothers.next(4u);
-    const float swing = rs.macroSmoothers.next(5u);
+    const float pump = rs.macroSmoothers.nextN(0u, stride);
+    const float chase = rs.macroSmoothers.nextN(1u, stride);
+    const float tempo = rs.macroSmoothers.nextN(2u, stride);
+    const float pluck = rs.macroSmoothers.nextN(3u, stride);
+    const float shrt = rs.macroSmoothers.nextN(4u, stride);
+    const float swing = rs.macroSmoothers.nextN(5u, stride);
     out.pluckDepth = pluck;
 
     // 1. Advance 4-beat bar clock (1 bar = 4 quarter-note beats = 240 / BPM seconds)
     const float effBpm = clampf(rs.clockBpm * computeTempoMultiplier(tempo), kMinInternalClockBpm,
                                 kMaxEffectiveClockBpm);
     const float barHz = effBpm * (1.0f / 240.0f);
-    if (!stasisFreeze) {
+    if (!stasisFreeze && stride > 0u) {
         const auto barInc = static_cast<uint32_t>(barHz * hzToBasePhaseU32 + 0.5f);
-        rs.barPhaseU32 += barInc;
+        rs.barPhaseU32 += barInc * stride;
     }
 
     const float rawBar01 = static_cast<float>(rs.barPhaseU32) * (1.0f / 4294967296.0f);
-    const float bar01 = warpSwingBarPhase01(rawBar01, swing);
-    rs.warpedBar01 = bar01;
-
-    const float step16Scaled = bar01 * 16.0f;
-    const auto step16Idx = static_cast<uint32_t>(step16Scaled);
-    const uint8_t step16 = static_cast<uint8_t>(step16Idx & 15u);
-    const float step16Frac = step16Scaled - static_cast<float>(step16Idx);
-
-    // Stereo ping-pong bounce on odd swung 16th off-beats
-    const float panTarget =
-        (swing > 1.0e-4f) ? (((step16 & 1u) != 0u ? 0.56f : -0.56f) * swing) : 0.0f;
-    rs.swingPanSmoother.setTarget(panTarget);
-    out.swingPanOffset = rs.swingPanSmoother.next();
-
-    // Check active gate families
     const bool anyVoiceMode =
         ((rs.voiceMode[0] | rs.voiceMode[1] | rs.voiceMode[2] | rs.voiceMode[3]) != 0u);
     const bool hasChase = (chase > 0.02f);
@@ -130,13 +122,27 @@ inline RhythmFrameResult stepRhythmFrame(RhythmClockState& rs,
     const float stut23 =
         (stutterDepths[2] > stutterDepths[3]) ? stutterDepths[2] : stutterDepths[3];
     const float maxStut = (stut01 > stut23) ? stut01 : stut23;
-    if (!anyVoiceMode && !hasChase && !hasPump && !soloTopPulse && maxStut <= 1.0e-4f) {
-        if (swing <= 1.0e-4f && rs.swingPanSmoother.current() == 0.0f) {
-            rs.warpedBar01 = rawBar01;
-            stutterPhases = {0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u};
-            return out;
-        }
+    if (!anyVoiceMode && !hasChase && !hasPump && !soloTopPulse && maxStut <= 1.0e-4f &&
+        swing <= 1.0e-4f && rs.swingPanSmoother.current() == 0.0f) {
+        rs.swingPanSmoother.setTarget(0.0f);
+        rs.warpedBar01 = rawBar01;
+        stutterPhases = {0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u};
+        return out;
     }
+
+    const float bar01 = warpSwingBarPhase01(rawBar01, swing);
+    rs.warpedBar01 = bar01;
+
+    const float step16Scaled = bar01 * 16.0f;
+    const auto step16Idx = static_cast<uint32_t>(step16Scaled);
+    const uint8_t step16 = static_cast<uint8_t>(step16Idx & 15u);
+    const float step16Frac = step16Scaled - static_cast<float>(step16Idx);
+
+    // Stereo ping-pong bounce on odd swung 16th off-beats
+    const float panTarget =
+        (swing > 1.0e-4f) ? (((step16 & 1u) != 0u ? 0.56f : -0.56f) * swing) : 0.0f;
+    rs.swingPanSmoother.setTarget(panTarget);
+    out.swingPanOffset = rs.swingPanSmoother.nextN(stride);
 
     // Gate duty: 50% standard -> 6% pinpoint click with MONO SHORT (or 88% decay window on PLUCK)
     const float baseDuty = 0.50f - 0.44f * shrt;
@@ -174,9 +180,9 @@ inline RhythmFrameResult stepRhythmFrame(RhythmClockState& rs,
         if (mode == VoiceRhythmMode::Stutter) {
             hasGate = true;
             gateDepth = (rs.voiceMode[v] != 0u) ? 1.0f : rawStutDepth;
-            if (!stasisFreeze) {
+            if (!stasisFreeze && stride > 0u) {
                 const auto inc = static_cast<uint32_t>(stutterRatesHz[v] * hzToBasePhaseU32 + 0.5f);
-                stutterPhases[v] += inc;
+                stutterPhases[v] += inc * stride;
             }
             subFrac = static_cast<float>(stutterPhases[v]) * (1.0f / 4294967296.0f);
         } else {
@@ -227,6 +233,15 @@ inline RhythmFrameResult stepRhythmFrame(RhythmClockState& rs,
     }
 
     return out;
+}
+
+inline RhythmFrameResult stepRhythmFrame(RhythmClockState& rs,
+                                         std::array<uint32_t, kNumOscillators>& stutterPhases,
+                                         const std::array<float, kNumOscillators>& stutterRatesHz,
+                                         const std::array<float, kNumOscillators>& stutterDepths,
+                                         float hzToBasePhaseU32, bool stasisFreeze) noexcept {
+    return stepRhythmSubBlock(rs, stutterPhases, stutterRatesHz, stutterDepths, hzToBasePhaseU32,
+                              stasisFreeze, 1u);
 }
 
 } // namespace ruido

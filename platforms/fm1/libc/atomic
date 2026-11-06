@@ -67,6 +67,12 @@ struct atomic {
         return exchanged;
     }
 
+    bool compare_exchange_strong(T& expected, T desired,
+                                 memory_order success = memory_order_seq_cst,
+                                 memory_order failure = memory_order_seq_cst) noexcept {
+        return compare_exchange_weak(expected, desired, success, failure);
+    }
+
 private:
     alignas(sizeof(T)) T val_;
 };
