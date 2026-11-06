@@ -18,6 +18,7 @@ void RuidoController::resetPageNav() noexcept {
     hud_.focusedKnob = kNoFocusedKnob;
     closeAllPages();
     hud_.saveArmed = false;
+    hud_.saveDeleteMode = false;
 }
 
 void RuidoController::setLatchedPage(HudMode mode, ButtonId button) noexcept {
@@ -143,12 +144,12 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
             dismissedByHome_ = false;
             if (!wasRateHeld) {
                 knobTurnedDuringRateHold_ = false;
-                const bool unassignedToast = (hud_.mode == HudMode::UnassignedEncoder) ||
-                                             (hud_.mode == HudMode::UnassignedKey);
-                if ((env_.holdRemainingSec <= 0.0f || unassignedToast) &&
+                const bool nonRateToast = (hud_.mode == HudMode::ScopeTimebase);
+                if ((env_.holdRemainingSec <= 0.0f || nonRateToast) &&
                     latchedHudMode_ == HudMode::None && !keyboard_.anyKeyHeld() &&
                     !hud_.scopeFrozen) {
                     hud_.mode = HudMode::KnobRate;
+                    hud_.knobBank = KnobBankMode::Frequency;
                     hud_.focusedKnob = kNoFocusedKnob;
                 }
             }
@@ -233,6 +234,8 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
             triggerHud(HudMode::AudioOutput, hud_.focusedVoice, kNoFocusedKnob);
         } else {
             hud_.saveArmed = false;
+            hud_.saveDeleteMode = false;
+            hud_.knobBank = KnobBankMode::Frequency;
             latchSwitchHud(HudMode::AudioOutput, button);
         }
         publishState();
@@ -276,9 +279,12 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
     if (button == ButtonId::Save) {
         closeAllPages();
         hud_.snapshotSavedToast = false;
+        hud_.snapshotDeletedToast = false;
         hud_.saveArmed = !hud_.saveArmed;
         hud_.knobBank = KnobBankMode::Snapshot;
         if (hud_.saveArmed) {
+            hud_.saveDeleteMode = false;
+            selectTickAccum_ = 0;
             latchSwitchHud(HudMode::SaveArmed, ButtonId::Save);
         } else {
             setLatchedPage(HudMode::None, ButtonId::Count);
@@ -287,10 +293,10 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
         return;
     }
 
-    closeAllPages();
-    hud_.saveArmed = false;
-    hud_.knobBank = KnobBankMode::Frequency;
-    latchSwitchHud(HudMode::UnassignedButton, button);
+    // Unconnected switches (ENV, ARP, SEQ, REC): leave open pages, armed SAVE, HUD mode, and audio
+    // 100% undisturbed while firing a tactile capacitive CRT beam ripple + local LED glint.
+    hud_.phantomPinIndex = phantomPinSlot(button);
+    ++hud_.phantomPinSeq;
 }
 
 } // namespace ruido

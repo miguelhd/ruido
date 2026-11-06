@@ -22,6 +22,8 @@ void LedSmoothState::reset(const EngineControlState& state) noexcept {
     fxSync01 = 0.0f;
     lfoSync01 = 0.0f;
     subBreathWave01 = 0.5f;
+    phantomGlint.fill(0.0f);
+    lastPhantomSeq = 0u;
 }
 
 void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothState& smooth,
@@ -103,9 +105,28 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
         maxFilterEngagement = ctx.state.keyMod.filterScream;
     }
 
-    // Panel Tactile Buttons (unused switches ENV/ARP/SEQ/REC strictly 0% dark)
+    // Panel Tactile Buttons (unconnected switches ENV/ARP/SEQ/REC rest at 0% dark; tapping one
+    // brings its LED up to the exact 15% steady glow of assigned buttons, then fades dark in 120
+    // ms)
+    constexpr float kPhantomGlintDurationSec = 0.120f;
+    constexpr float kAssignedRestGlow = 0.15f;
+    if (dt > 0.0f) {
+        const float step = dt * (1.0f / kPhantomGlintDurationSec);
+        for (float& g : smooth.phantomGlint) {
+            g = (g > step) ? (g - step) : 0.0f;
+        }
+    }
+    if (ctx.hud.phantomPinSeq != smooth.lastPhantomSeq) {
+        smooth.lastPhantomSeq = ctx.hud.phantomPinSeq;
+        smooth.phantomGlint[ctx.hud.phantomPinIndex & 3u] = 1.0f;
+    }
+
     outLeds.buttonLeds.fill(0.0f);
     outLeds.stopLed = 0.0f;
+    for (size_t i = 0u; i < kPhantomPinButtons.size(); ++i) {
+        outLeds.buttonLeds[static_cast<size_t>(kPhantomPinButtons[i])] =
+            kAssignedRestGlow * smoothstep01(smooth.phantomGlint[i]);
+    }
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctMinus)] =
         (ctx.hud.knobRate == KnobRate::Fine) ? 1.0f : 0.15f;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctPlus)] =
@@ -120,7 +141,8 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::GloRight)] =
         ctx.hud.configPageOpen ? 1.0f : 0.15f;
 
-    // FX button (MS-20 Dual Filter Page): 100% open, 15% parked rest, 15%..85% breathing + live
+    // FX button (MS-20 Dual Filter Page): 100% open, 15% parked rest, 21%..37% tertiary breathing
+    // when closed (matched 1-to-1 with HOME per-osc FX modulator dots)
     const float fxBreath01 =
         0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(smooth.animPhase * kFxBreathHz)));
     smooth.fxSync01 = (maxFilterEngagement > 1.0e-3f)
@@ -129,10 +151,9 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     if (ctx.hud.fxPageOpen) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Fx)] = 1.0f;
     } else if (maxFilterEngagement > 1.0e-3f) {
-        const float baseLed = 0.15f + 0.58f * maxFilterEngagement;
-        const float breathSwing = 0.08f + 0.08f * maxFilterEngagement;
+        const float engGate = clampf(maxFilterEngagement * 50.0f, 0.0f, 1.0f);
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Fx)] =
-            clampf(baseLed + breathSwing * fxBreath01, 0.15f, 0.85f);
+            0.15f + engGate * (0.06f + 0.16f * smooth.fxSync01);
     } else {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Fx)] = 0.15f;
     }
@@ -165,12 +186,15 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
         const float raw = ctx.telemetry.lfoOutput[focusBankIdx].load(std::memory_order_relaxed);
         lfoWave01 = 0.5f * (clampf(raw, -1.0f, 1.0f) + 1.0f);
     }
+    // LFO button: 100% open, 15% parked rest, 21%..37% tertiary pulse when closed (matched 1-to-1
+    // with HOME per-osc LFO A/B modulator dots)
     smooth.lfoSync01 = lfoWave01;
     if (ctx.hud.lfoPageOpen) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] = 1.0f;
     } else if (maxLfoDepth > 1.0e-4f) {
+        const float depthGate = clampf(maxLfoDepth * 20.0f, 0.0f, 1.0f);
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] =
-            0.15f + (0.08f + 0.37f * clampf(maxLfoDepth, 0.0f, 1.0f)) * lfoWave01;
+            0.15f + depthGate * (0.06f + 0.16f * smooth.lfoSync01);
     } else {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] = 0.15f;
     }

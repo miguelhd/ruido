@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Ruido for M-VAVE FM-1 (AC791N / pi32v2) and run Gate 4.1 + Gate 4.2 verification.
+"""Build Ruido for M-VAVE FM-1 (AC791N / pi32v2) and run Gate 4.1 + 4.2 + 4.3 verification.
 
 Runs directly inside `ruido-fm1-toolchain:latest` (Linux amd64) or automatically delegates
 to a single `docker run` invocation when invoked from macOS / non-toolchain hosts.
@@ -15,10 +15,16 @@ Automated Hardware & Firmware Gates:
      - Zero `0xFFC00000..0xFFCFFFFF` chip-ROM immediates or call targets
   3. Hardware `-mcpu=r3 -mfprev1` FPU & Division Audit (`objdump --mcpu=r3 -d`):
      - 100% native single-precision FPU emission, zero `soft-double`, zero `int64` div, zero `__sync_*`
-  4. Headless `fm1-emu` Dual-Core SoC Verification:
-     - Normal Dual-Core Boot (`950 ms`): `Core 1` boots at `0x01C0E000` (`.c1_text`), renders live
-       TPDF-dithered 64-frame blocks (`c1_blocks > 0`, `c1_fallback == 0`), `Core 0` ALNK0 DMA ISR
-       drains `Fm1AudioBlockRing` in `< 80` insns/frame, live 240x240 scanline LCD frames.
+  4. Headless `fm1-emu` Dual-Core SoC + Gate 4.3 Peripheral & NVS Verification:
+     - Timed `SPI1` Scanline DMA (`FM1_LCD_TIMED=1`, `950 ms`): `Core 1` boots at `0x01C0E000`
+       (`.c1_text`), renders live TPDF-dithered 64-frame blocks (`c1_underruns == 0`), `Core 0`
+       pushes live 240x240 scanline frames and drives 42-channel `ΔΣ` LEDs (`STOP` red `(10, 2)`).
+     - Panel Matrix + `24 PPQN` MIDI Clock Lock (`--keys`): verifies buttons (`SEL`, `PLAY`),
+       encoders (`SELECT`, `KNOB1`), silicone key (`n7`), `MASTER` pot, `100.0 BPM` external MIDI
+       clock lock (`TIMER4` hardware timestamps), and split `PLAY` green `(8, 1)` LED toggle.
+     - 2-Boot `--raw-flash` `USR` NVS Persistence (`0xF4000..0xF8FFF`): saves modified Scene 2 +
+       `DeviceSettingsBlob`, audits all `1,048,576 B` of SPI NOR flash (`0` writes `< 0xEA000` or
+       `>= 0xFC000`), and verifies cold power-cycle restore before audio arm.
      - Flaky-Core1 Silicon Survival (`--flaky-core1 0.05 --cpu1-survives`): `Core 0` detects a
        halted `Core 1` within 4 DMA blocks and switches to fallback audio without crashing.
      - Power-on `Hold OCT-` USB Rescue (`--keys 0-150:OCTDN`): `bootguard.pending == 2`,
@@ -401,7 +407,7 @@ def main(argv: list[str]) -> int:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--dsp-opt", default="-O3", choices=["-Os", "-O2", "-O3"])
-    ap.add_argument("--ui-opt", default="-Os", choices=["-Os", "-O2", "-O3"])
+    ap.add_argument("--ui-opt", default="-O2", choices=["-Os", "-O2", "-O3"])
     ap.add_argument("--skip-emu", action="store_true")
     args = ap.parse_args(argv)
 
@@ -620,7 +626,8 @@ def main(argv: list[str]) -> int:
     app_bin = OUT_DIR / "ruido.bin"
     app_bin.write_bytes(img)
 
-    fwsc_bytes = fm1pkg_make.ufw(fm1pkg_make.flash_image(bytes(img), fm1pkg_make.KEY), ota, PRODUCT_DEV)
+    raw_flash_head = fm1pkg_make.flash_image(bytes(img), fm1pkg_make.KEY)
+    fwsc_bytes = fm1pkg_make.ufw(raw_flash_head, ota, PRODUCT_DEV)
     fwsc_path = OUT_DIR / "ruido.fwsc"
     fwsc_path.write_bytes(fwsc_bytes)
 
@@ -769,7 +776,7 @@ def main(argv: list[str]) -> int:
         if le_bytes not in img:
             errors.append(f"app image (`ruido.bin`) missing {chip_name} JEDEC ID {jedec_id:#08x}")
 
-    print("=== Ruido FM-1 Gate 4.1 + 4.2 Dual-Core Firmware Audit ===")
+    print("=== Ruido FM-1 Gate 4.1 + 4.2 + 4.3 Dual-Core Firmware Audit ===")
     print(f"  Compiler          : pi32v2 clang ({cxx_std}, DSP={args.dsp_opt}, UI={args.ui_opt}, -mcpu=r3 -mfprev1)")
     print(f"  App XIP (ruido.bin): {len(img):,} B / {app_slot:,} B ({100.0 * len(img) / app_slot:.1f}% of 567.9 KiB APP_SLOT)")
     print(f"  Package (.fwsc)   : {len(fwsc_bytes):,} B / {MAX_FWSC_BYTES:,} B ({len(fwsc_bytes) / 1024.0:.1f} KiB)")
@@ -797,21 +804,26 @@ def main(argv: list[str]) -> int:
         if wav_out.exists():
             wav_out.unlink()
 
-        # 1. Normal Dual-Core Boot verification (950 ms)
-        boot_out = run_cmd([
-            "fm1-emu",
-            "--fwsc",
-            str(fwsc_path),
-            "--ms",
-            "950",
-            "--wav",
-            str(wav_out),
-            "--dump",
-            f"{status_addr:#x}",
-            "12",
-        ], include_stderr=True)
+        # 1. Normal Dual-Core Boot + Timed SPI1 Scanline DMA verification (`FM1_LCD_TIMED=1`, 950 ms)
+        timed_env = {**os.environ, "FM1_LCD_TIMED": "1"}
+        boot_out = run_cmd(
+            [
+                "fm1-emu",
+                "--fwsc",
+                str(fwsc_path),
+                "--ms",
+                "950",
+                "--wav",
+                str(wav_out),
+                "--dump",
+                f"{status_addr:#x}",
+                "16",
+            ],
+            env=timed_env,
+            include_stderr=True,
+        )
         sw = parse_dump_words(boot_out)
-        if len(sw) < 12:
+        if len(sw) < 16:
             errors.append(f"fm1-emu normal boot dump incomplete: {sw}")
         else:
             (
@@ -827,7 +839,11 @@ def main(argv: list[str]) -> int:
                 c1_last64_ticks,
                 clk_con0_div,
                 c1_flags,
-            ) = sw[:12]
+                panel_state,
+                midi_clock_state,
+                led_summary,
+                nvs_osc1_state,
+            ) = sw[:16]
             insns_per_tick = 8000.0 / max(1, cal_8k_ticks)
             idle_insns_f = (bench_idle_ticks * insns_per_tick) / 64.0
             full_insns_f = (bench_full_ticks * insns_per_tick) / 64.0
@@ -842,8 +858,14 @@ def main(argv: list[str]) -> int:
             sys_div = (clk_con0_div >> 24) & 0xFF
             clk_con0 = clk_con0_div & 0x00FFFFFF
             wav_bytes = wav_out.stat().st_size if wav_out.exists() else 0
+            boot_hud = (panel_state >> 8) & 0x3F
+            boot_run = (panel_state >> 5) & 1
+            boot_bpm_x10 = midi_clock_state & 0xFFFF
+            boot_play_led = (led_summary >> 24) & 1
+            boot_stop_led = (led_summary >> 25) & 1
+            boot_osc1_x10 = (nvs_osc1_state >> 16) & 0xFFFF
             print(
-                f"  fm1-emu Dual-Core : magic={magic:#010x}, c1_blocks={c1_blocks} (started={c1_started}, "
+                f"  fm1-emu Timed LCD : magic={magic:#010x}, c1_blocks={c1_blocks} (started={c1_started}, "
                 f"fallback={c1_fallback}, underruns={c1_underruns}, c0_assist={c1_assist_spans}), "
                 f"audio_blocks={audio_blocks}, lcd_frames={lcd_frames}, peak_q15={peak_q15}, wav={wav_bytes:,} B"
             )
@@ -892,9 +914,208 @@ def main(argv: list[str]) -> int:
             if wav_bytes <= 44:
                 errors.append(f"fm1-emu did not write valid audio WAV ({wav_bytes} B)")
             if lcd_frames == 0:
-                errors.append("fm1-emu normal boot rendered 0 LCD frames")
+                errors.append("fm1-emu timed SPI1 boot rendered 0 LCD frames")
+            if boot_hud != 0 or boot_run != 1 or boot_bpm_x10 != 1200 or boot_osc1_x10 != 550:
+                errors.append(
+                    f"boot state mismatch (hud={boot_hud}, run={boot_run}, bpm_x10={boot_bpm_x10}, osc1_x10={boot_osc1_x10})"
+                )
+            if boot_stop_led != 1 or boot_play_led != 0 or (led_summary & 0x00FFFFFF) == 0:
+                errors.append(f"boot 42-LED summary mismatch (led_summary={led_summary:#010x})")
 
-        # 2. Silicon-Lottery Flaky-Core1 Survival (`--flaky-core1 0.05 --cpu1-survives`)
+        # 2. Gate 4.3 Panel Matrix + Encoders + Keys + MASTER Pot + 100.0 BPM 24-PPQN MIDI Clock Lock
+        # (`SCL` = BTN_SEL id 3, `enc0` = SELECT, `enc2` = KNOB1, `n7` = White Key 5, `PLAY` = BTN_PLAY)
+        # Note: `PLAY` tapped at 1050 ms gives 450 ms (> 3 * 80 ms tau) for LedEngine's STOP->PLAY fade!
+        midi_ticks_100bpm = ",".join(f"{t}:midi:f8" for t in range(700, 1450, 25))
+        ctrl_keys = (
+            "550-580:SCL,610:enc0:+2,640:enc2:+8,660:pot:900,680-900:n7,"
+            f"700:midi:fa,{midi_ticks_100bpm},1050-1080:PLAY"
+        )
+        ctrl_out = run_cmd(
+            [
+                "fm1-emu",
+                "--fwsc",
+                str(fwsc_path),
+                "--ms",
+                "1500",
+                "--quiet",
+                "--keys",
+                ctrl_keys,
+                "--dump",
+                f"{status_addr:#x}",
+                "16",
+            ],
+            env=timed_env,
+        )
+        csw = parse_dump_words(ctrl_out)
+        if len(csw) < 16:
+            errors.append(f"Gate 4.3 panel + MIDI clock dump incomplete: {csw}")
+        else:
+            p_model = csw[12] & 3
+            p_sync = (csw[12] >> 4) & 1
+            p_run = (csw[12] >> 5) & 1
+            p_events = (csw[12] >> 16) & 0xFFFF
+            m_bpm_x10 = csw[13] & 0xFFFF
+            m_events = (csw[13] >> 16) & 0xFFFF
+            l_play = (csw[14] >> 24) & 1
+            l_stop = (csw[14] >> 25) & 1
+            c_osc1_x10 = (csw[15] >> 16) & 0xFFFF
+            c_underruns = (csw[11] >> 8) & 0xFF
+            if (
+                p_model != 2
+                or p_sync != 1
+                or p_run != 0
+                or p_events < 6
+                or not (975 <= m_bpm_x10 <= 1025)
+                or m_events != 31
+                or l_play != 1
+                or l_stop != 0
+                or c_osc1_x10 <= 580
+                or c_underruns != 0
+            ):
+                errors.append(
+                    f"Gate 4.3 panel/MIDI check failed: model={p_model}, sync={p_sync}, run={p_run}, "
+                    f"events={p_events}, bpm_x10={m_bpm_x10}, midi_ev={m_events}, "
+                    f"play_led={l_play}, stop_led={l_stop}, osc1_x10={c_osc1_x10}, underruns={c_underruns}"
+                )
+            else:
+                print(
+                    f"  fm1-emu Panel+MIDI: PASS (model=RhythmLab, osc1={c_osc1_x10 / 10.0:.1f} Hz, "
+                    f"events={p_events}, MIDI={m_bpm_x10 / 10.0:.1f} BPM [{m_events} msgs], "
+                    f"PLAY_green={l_play}/STOP_red={l_stop}, underruns=0)"
+                )
+
+        # 3. Gate 4.3 2-Boot `--raw-flash` USR NVS Persistence (`0xF4000..0xF8FFF`) & SPI NOR Write Audit
+        # Note: `fm1-emu --raw-flash` is a read-only startup input image; we audit every SPI0 erase/program
+        # command via `FM1_FLASH_TRACE=1`, read back the exact SPI NOR sectors (`0x0F5000` + `0x0F8000`)
+        # written during Boot 1 (`st_read` -> `fl_read_ram`), splice them into a cold 1 MiB flash image,
+        # and verify Boot 2 cold-restores Scene 2 + DeviceSettingsBlob with zero `--keys` input!
+        import struct
+
+        raw_flash_path = OUT_DIR / "emu_nvs_flash.bin"
+        if len(raw_flash_head) > 0xEA000:
+            errors.append(f"encrypted app flash head ({len(raw_flash_head):#x}) overlaps USR NVS (0xEA000)")
+        else:
+            baseline_flash = bytearray(raw_flash_head) + bytearray(b"\xff" * (0x100000 - len(raw_flash_head)))
+            raw_flash_path.write_bytes(baseline_flash)
+
+            # Boot 1: raise OSC 1 frequency via KNOB1 (`enc2:+12`), arm SAVE, store to Scene 2 (`n23` = White 14)
+            nvs_boot1_out = run_cmd(
+                [
+                    "fm1-emu",
+                    "--fwsc",
+                    str(fwsc_path),
+                    "--raw-flash",
+                    str(raw_flash_path),
+                    "--ms",
+                    "1150",
+                    "--quiet",
+                    "--keys",
+                    "560:enc2:+12,620-650:SAVE,700-740:n23",
+                    "--dump",
+                    f"{status_addr:#x}",
+                    "58",
+                ],
+                env={**os.environ, "FM1_FLASH_TRACE": "1"},
+                include_stderr=True,
+            )
+            nsw1 = parse_dump_words(nvs_boot1_out)
+
+            flash_trace_re = re.compile(
+                r"flash cmd (?:0x)?([0-9a-fA-F]+) addr (?:0x)?([0-9a-fA-F]+) bytes (\d+)"
+            )
+            erase_ops: list[int] = []
+            prog_ops: list[tuple[int, int]] = []
+            bad_flash_ops: list[str] = []
+            for m_fl in flash_trace_re.finditer(nvs_boot1_out):
+                fl_cmd = int(m_fl.group(1), 16)
+                fl_addr = int(m_fl.group(2), 16)
+                fl_bytes = int(m_fl.group(3))
+                if fl_cmd in (0x20, 0x52, 0xD8, 0xC7, 0x60, 0x01, 0x31):
+                    if fl_cmd == 0x20 and fl_addr in (0x0F5000, 0x0F8000):
+                        erase_ops.append(fl_addr)
+                    else:
+                        bad_flash_ops.append(f"cmd={fl_cmd:#04x}@addr={fl_addr:#08x}")
+                elif fl_cmd == 0x02:
+                    if (0x0F5000 <= fl_addr < 0x0F5200) or (0x0F8000 <= fl_addr < 0x0F8200):
+                        prog_ops.append((fl_addr, fl_bytes))
+                    else:
+                        bad_flash_ops.append(f"prog@addr={fl_addr:#08x}(bytes={fl_bytes})")
+
+            slot1_raw = struct.pack("<35I", *nsw1[16:51]) if len(nsw1) >= 58 else b""
+            settings_raw = struct.pack("<7I", *nsw1[51:58]) if len(nsw1) >= 58 else b""
+            if len(slot1_raw) == 140 and len(settings_raw) == 28:
+                persisted_flash = bytearray(baseline_flash)
+                persisted_flash[0x0F5000 : 0x0F5000 + 140] = slot1_raw
+                persisted_flash[0x0F8000 : 0x0F8000 + 28] = settings_raw
+                raw_flash_path.write_bytes(persisted_flash)
+
+            # Boot 2: cold power-cycle from `--bin` + `--raw-flash` (since `--fwsc` unpacks a fresh
+            # blank USR flash image) with ZERO `--keys` input
+            xip_bin_path = OUT_DIR / "ruido_xip.bin"
+            xip_bin_path.write_bytes((b"\x00" * 0x120) + bytes(img))
+            nvs_boot2_out = run_cmd([
+                "fm1-emu",
+                "--bin",
+                str(xip_bin_path),
+                "--entry",
+                "0x02000120",
+                "--raw-flash",
+                str(raw_flash_path),
+                "--ms",
+                "750",
+                "--quiet",
+                "--dump",
+                f"{status_addr:#x}",
+                "16",
+            ])
+            nsw2 = parse_dump_words(nvs_boot2_out)
+
+            b1_slot = ((nsw1[12] >> 2) & 3) if len(nsw1) >= 58 else -1
+            b1_saves = ((nsw1[15] >> 8) & 0xFF) if len(nsw1) >= 58 else 0
+            b1_osc1 = ((nsw1[15] >> 16) & 0xFFFF) if len(nsw1) >= 58 else 0
+            b1_s1_magic = nsw1[16] if len(nsw1) >= 58 else 0
+            b1_s1_len = nsw1[17] if len(nsw1) >= 58 else 0
+            b1_cfg_magic = nsw1[51] if len(nsw1) >= 58 else 0
+            b1_cfg_len = nsw1[52] if len(nsw1) >= 58 else 0
+            b2_slot = ((nsw2[12] >> 2) & 3) if len(nsw2) >= 16 else -1
+            b2_mask = (nsw2[15] & 0xFF) if len(nsw2) >= 16 else 0
+            b2_osc1 = ((nsw2[15] >> 16) & 0xFFFF) if len(nsw2) >= 16 else 0
+
+            if bad_flash_ops or sorted(erase_ops) != [0x0F5000, 0x0F8000] or len(prog_ops) < 4:
+                errors.append(
+                    f"NVS SPI NOR write audit failed: bad={bad_flash_ops[:4]}, "
+                    f"erases={[hex(x) for x in erase_ops]}, progs={len(prog_ops)}"
+                )
+            elif (
+                b1_s1_magic != 0x52554944
+                or b1_s1_len != 128
+                or b1_cfg_magic != 0x52554944
+                or b1_cfg_len != 16
+            ):
+                errors.append(
+                    f"NVS SPI NOR sector readback mismatch: slot1=({b1_s1_magic:#x}, {b1_s1_len}B), "
+                    f"settings=({b1_cfg_magic:#x}, {b1_cfg_len}B)"
+                )
+            elif (
+                b1_slot != 1
+                or b1_saves < 2
+                or b1_osc1 <= 600
+                or b2_slot != 1
+                or b2_mask != 0x12
+                or b2_osc1 != b1_osc1
+            ):
+                errors.append(
+                    f"NVS 2-boot persistence mismatch: boot1(slot={b1_slot}, saves={b1_saves}, osc1={b1_osc1}) "
+                    f"vs boot2(slot={b2_slot}, loaded_mask={b2_mask:#x}, osc1={b2_osc1})"
+                )
+            else:
+                print(
+                    f"  fm1-emu USR NVS   : PASS (SPI0 erases={[hex(x) for x in erase_ops]}, "
+                    f"progs={len(prog_ops)}, cold-restored Scene 2 osc1={b2_osc1 / 10.0:.1f} Hz, "
+                    "0 writes outside 0xF4000..0xF8FFF)"
+                )
+
+        # 4. Silicon-Lottery Flaky-Core1 Survival (`--flaky-core1 0.05 --cpu1-survives`)
         flaky_out = run_cmd([
             "fm1-emu",
             "--fwsc",
@@ -909,12 +1130,12 @@ def main(argv: list[str]) -> int:
             "--cpu1-survives",
             "--dump",
             f"{status_addr:#x}",
-            "12",
+            "16",
         ])
         fsw = parse_dump_words(flaky_out)
-        f_fallback = ((fsw[11] >> 1) & 1) if len(fsw) >= 12 else 0
+        f_fallback = ((fsw[11] >> 1) & 1) if len(fsw) >= 16 else 0
         if (
-            len(fsw) < 12
+            len(fsw) < 16
             or fsw[0] != 0x52554944
             or f_fallback != 1
             or fsw[1] == 0
@@ -928,7 +1149,7 @@ def main(argv: list[str]) -> int:
                 f"fallback={f_fallback}, audio_blocks={fsw[1]}, lcd_frames={fsw[2]}, peak_q15={fsw[7]})"
             )
 
-        # 3. Power-on Hold OCT- USB Rescue verification (must enter recovery_main BEFORE C++ / Core 1!)
+        # 5. Power-on Hold OCT- USB Rescue verification (must enter recovery_main BEFORE C++ / Core 1!)
         rescue_out = run_cmd([
             "fm1-emu",
             "--fwsc",
@@ -954,12 +1175,12 @@ def main(argv: list[str]) -> int:
             "0-150:OCTDN",
             "--dump",
             f"{status_addr:#x}",
-            "12",
+            "16",
         ])
         rsw = parse_dump_words(rescue_status_out)
         if len(bw) < 3 or bw[0] != 0x42475232 or bw[2] != 2:
             errors.append(f"Hold OCT- USB rescue failed bootguard check (got {bw}, expected pending=2)")
-        elif len(rsw) < 12 or rsw[0] != 0 or rsw[1] != 0 or rsw[8] != 0:
+        elif len(rsw) < 16 or rsw[0] != 0 or rsw[1] != 0 or rsw[8] != 0:
             errors.append(f"Hold OCT- USB rescue leaked into C++ init or Core 1 (status={rsw})")
         else:
             print(
@@ -968,12 +1189,14 @@ def main(argv: list[str]) -> int:
             )
 
     if errors:
-        print("=== FM-1 Gate 4.2 FAILED ===", file=sys.stderr)
+        print("=== FM-1 Gate 4.3 FAILED ===", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
 
-    print("[FM-1 Gate 4.2 OK] Dual-core `.c1_text` SRAM DSP, TPDF audio & anti-brick gates passed.")
+    print(
+        "[FM-1 Gate 4.3 OK] Timed SPI1 DMA, 42-LED ΔΣ, panel/pressure, MIDI clock & USR NVS gates passed."
+    )
     return 0
 
 

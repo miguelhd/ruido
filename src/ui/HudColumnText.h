@@ -98,21 +98,6 @@ inline void formatHeaderDriveValue(float ampVal, char* rightText, size_t rightCa
     }
 }
 
-constexpr const char* unassignedButtonName(ButtonId button) noexcept {
-    switch (button) {
-    case ButtonId::Env:
-        return "ENV";
-    case ButtonId::Arp:
-        return "ARP";
-    case ButtonId::Seq:
-        return "SEQ";
-    case ButtonId::Rec:
-        return "REC";
-    default:
-        return "PANEL";
-    }
-}
-
 inline void formatHeaderEnsembleDrive(const EngineControlState& control,
                                       const LfoSignalArray& lfoOutput, uint8_t stutterGateMask,
                                       char* rightText, size_t rightCap) noexcept {
@@ -142,15 +127,38 @@ inline void formatSnapshotHeader(const HudState& hud, char* leftMain, size_t lef
     outShowBar = false;
     outBarNorm = 0.0f;
     if (hud.mode == HudMode::SaveArmed) {
-        appendStr(leftMain, 0u, leftMainCap, "STORE SCENE");
-        appendStr(rightText, 0u, rightCap, hud.saveArmed ? "TAP SCENE 1-4" : "CANCELLED");
+        appendStr(leftMain, 0u, leftMainCap, hud.saveDeleteMode ? "DELETE SCENE" : "STORE SCENE");
+        const char* status = !hud.saveArmed ? "CANCELLED"
+                             : (hud.saveDeleteMode && hud.snapshotOccupiedMask == 0u)
+                                 ? "ALL EMPTY"
+                                 : "TAP SCENE 1-4";
+        appendStr(rightText, 0u, rightCap, status);
         return;
     }
+    const bool isKeyRecall =
+        (hud.mode == HudMode::KeyboardPlay && hud.activePunch == KeyPunchKind::SnapshotRecall);
+    if (hud.snapshotOccupiedMask == 0u && !isKeyRecall && !hud.snapshotDeletedToast) {
+        appendStr(leftMain, 0u, leftMainCap, "SCENES");
+        appendStr(rightText, 0u, rightCap, "ALL EMPTY");
+        return;
+    }
+    const uint8_t activeSlot = hud.snapshotSlot & 3u;
+    const bool activeOcc = (hud.snapshotOccupiedMask & (1u << activeSlot)) != 0u;
+    const uint8_t dispSlot =
+        isKeyRecall ? (hud.activePunchVoice & 3u)
+                    : ((hud.snapshotSavedToast || hud.snapshotDeletedToast || !activeOcc)
+                           ? (hud.snapshotToastSlot & 3u)
+                           : activeSlot);
+    const bool dispOcc = (hud.snapshotOccupiedMask & (1u << dispSlot)) != 0u;
     appendStr(leftMain, 0u, leftMainCap, "SCENE");
     size_t sp = appendStr(leftSuffix, 0u, suffixCap, " ");
-    appendUInt(leftSuffix, sp, suffixCap, static_cast<uint32_t>((hud.snapshotSlot & 3u) + 1u));
-    if (hud.snapshotSavedToast) {
+    appendUInt(leftSuffix, sp, suffixCap, static_cast<uint32_t>(dispSlot + 1u));
+    if (hud.snapshotDeletedToast) {
+        appendStr(rightText, 0u, rightCap, "DELETED");
+    } else if (hud.snapshotSavedToast) {
         appendStr(rightText, 0u, rightCap, "SAVED");
+    } else if (!dispOcc) {
+        appendStr(rightText, 0u, rightCap, "EMPTY");
     } else if (hud.snapshotGliding) {
         outBarNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
         formatPercent(rightText, rightCap, outBarNorm);
@@ -306,7 +314,12 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
     case KnobBankMode::Snapshot: {
         size_t p = appendStr(roleLbl, 0u, roleCap, "SCENE ");
         appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
-        formatPercent(valStr, valCap, clampf(hud.snapshotWeights[k], 0.0f, 1.0f));
+        if ((hud.snapshotOccupiedMask & (1u << k)) == 0u) {
+            outGlobal.disabled = true;
+            appendStr(valStr, 0u, valCap, "EMPTY");
+        } else {
+            formatPercent(valStr, valCap, clampf(hud.snapshotWeights[k], 0.0f, 1.0f));
+        }
         break;
     }
     default:

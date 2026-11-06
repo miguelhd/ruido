@@ -1,3 +1,4 @@
+#include "TestFm1PanelIo.h"
 #include "TestGlobalAndInteraction.h"
 #include "core/Parameters.h"
 #include "core/RuidoController.h"
@@ -238,12 +239,21 @@ void testAllControlsDisplayOnScreen() {
         ctrl.onWhiteKeyGate(w, false);
     }
 
-    // 3. Every single Panel Switch (all 14, including HOME toggling Frequency HUD from idle)
+    // 3. All 14 Panel Switches: 10 functional switches wake HUD, 4 phantom-pin switches
+    //    (ENV/ARP/SEQ/REC) leave HUD silent while pulsing phantomPinSeq
     for (uint8_t btn = 0u; btn < static_cast<uint8_t>(ruido::ButtonId::Count); ++btn) {
         const auto button = static_cast<ruido::ButtonId>(btn);
         clearHudIfActive();
+        const uint8_t prevSeq = ctrl.hud().phantomPinSeq;
         ctrl.onButtonEvent(button, true);
-        CHECK(ctrl.hud().mode != ruido::HudMode::None);
+        const bool isPhantom = (button == ruido::ButtonId::Env || button == ruido::ButtonId::Arp ||
+                                button == ruido::ButtonId::Seq || button == ruido::ButtonId::Rec);
+        if (isPhantom) {
+            CHECK(ctrl.hud().mode == ruido::HudMode::None);
+            CHECK(ctrl.hud().phantomPinSeq == static_cast<uint8_t>(prevSeq + 1u));
+        } else {
+            CHECK(ctrl.hud().mode != ruido::HudMode::None);
+        }
         ctrl.onButtonEvent(button, false);
     }
 
@@ -262,12 +272,19 @@ void testButtonsOctavesKeybedAndPressure() {
     std::printf("[Test 4] Global Knobs, Octaves, Single-Taps & Keybed Pressure...\n");
     ruido::RuidoController ctrl;
 
-    // Global encoders & unassigned SELECT encoder reservation
+    // Global encoders & idle SELECT CRT Timebase selector
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 40);
     CHECK(ctrl.state().global.circuitCoupling > 0.30f);
 
+    CHECK(ctrl.hud().scopeTimebase == ruido::ScopeTimebase::Auto);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
+    CHECK(ctrl.hud().mode == ruido::HudMode::ScopeTimebase);
+    CHECK(ctrl.hud().scopeTimebase == ruido::ScopeTimebase::Zoom2x);
+    CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::None);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -40);
-    CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedEncoder);
+    CHECK(ctrl.hud().scopeTimebase == ruido::ScopeTimebase::Zoom4x);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8);
+    CHECK(ctrl.hud().scopeTimebase == ruido::ScopeTimebase::Auto);
 
     // Momentary OCT- / OCT+ Knob Rate holds, LIFO chording, LEDs & immediate release dissolve
     ruido::EngineTelemetry tel{};
@@ -306,7 +323,7 @@ void testButtonsOctavesKeybedAndPressure() {
     CHECK(near(ctrl.hud().opacity, 0.50f, 0.03f));
 
     // LFO and FX buttons open their latching pages without altering base voice frequency;
-    // unassigned switches (SEL, ENV, ARP, SEQ, REC) display UnassignedButton:
+    // unconnected switches (ENV, ARP, SEQ, REC) leave HUD mode untouched and spark a dim LED glint:
     const float v1BeforeLfo = ctrl.state().voices[1].frequencyHz;
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
@@ -326,9 +343,17 @@ void testButtonsOctavesKeybedAndPressure() {
     ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
     CHECK(!ctrl.hud().fxPageOpen);
 
+    const uint8_t prevPhantomSeq = ctrl.hud().phantomPinSeq;
     ctrl.onButtonEvent(ruido::ButtonId::Env, true);
-    CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedButton);
     ctrl.onButtonEvent(ruido::ButtonId::Env, false);
+    CHECK(ctrl.hud().phantomPinSeq == static_cast<uint8_t>(prevPhantomSeq + 1u));
+    CHECK(ctrl.hud().phantomPinIndex == 0u);
+    ctrl.tick(0.016f, tel);
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Env)], 0.15f));
+    ctrl.tick(0.060f, tel);
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Env)], 0.075f, 0.005f));
+    ctrl.tick(0.065f, tel);
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Env)], 0.0f));
 
     // PIT Ratio Magnet, stateless SEL Model Toast, momentary MONO/POLY spatial focus, PLAY/STOP
     const float v0BeforePit = ctrl.state().voices[0].frequencyHz;
@@ -495,41 +520,46 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFilter);
     CHECK(near(ctrl.hud().opacity, 1.0f));
 
-    // Tap ENV (unassigned) -> closes FX page and latches UnassignedButton until HOME:
+    // Tap ENV/ARP/SEQ/REC (phantom pins) -> NEVER closes open FX page or alters HUD mode:
     ctrl.onButtonEvent(ruido::ButtonId::Env, true);
     ctrl.onButtonEvent(ruido::ButtonId::Env, false);
-    CHECK(!ctrl.hud().fxPageOpen);
+    CHECK(ctrl.hud().fxPageOpen);
     CHECK(!ctrl.state().global.pitchPressureMode);
-    CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedButton);
+    CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFilter);
 
-    // Standalone knob tweak while switch is latched shows tweak for 1.5 s then returns to switch:
+    // Close FX via HOME, latch PLAY/STOP AudioOutput switch, and verify knob tweak returns to it:
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    CHECK(ctrl.hud().mode == ruido::HudMode::AudioOutput);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 2);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFrequency);
     for (int i = 0; i < 16; ++i) {
         ctrl.tick(0.100f, tel);
     }
-    CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedButton);
+    CHECK(ctrl.hud().mode == ruido::HudMode::AudioOutput);
     CHECK(near(ctrl.hud().opacity, 1.0f));
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
 
-    // LFO, ENV, and SAVE also stay latched until HOME or SAVE completion/cancel:
+    // LFO and SAVE stay latched across 6.0 s even if ARP/SEQ/REC are brushed:
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Arp, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Arp, false);
     for (int i = 0; i < 30; ++i) {
         ctrl.tick(0.200f, tel); // 6.0 s elapsed -> LFO page stays latched!
     }
+    CHECK(ctrl.hud().lfoPageOpen);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
-    CHECK(near(ctrl.hud().opacity, 1.0f));
-
-    ctrl.onButtonEvent(ruido::ButtonId::Env, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Env, false);
-    for (int i = 0; i < 30; ++i) {
-        ctrl.tick(0.200f, tel); // 6.0 s elapsed -> switch HUD still latched!
-    }
-    CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedButton);
     CHECK(near(ctrl.hud().opacity, 1.0f));
 
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Rec, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Rec, false);
+    CHECK(ctrl.hud().saveArmed);
     for (int i = 0; i < 30; ++i) {
         ctrl.tick(0.200f, tel); // 6.0 s elapsed -> SAVE stays armed & latched!
     }
@@ -1508,7 +1538,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
         ruido::EngineControlState hdrCtrl = ruido::EngineControlState::makeDefault();
         ruido::EngineTelemetry hdrTel{};
         std::array<uint16_t, 240u * 24u> hdrStrip{};
-        for (uint8_t m = 1u; m <= static_cast<uint8_t>(ruido::HudMode::KeyboardPlay); ++m) {
+        for (uint8_t m = 1u; m < static_cast<uint8_t>(ruido::HudMode::Count); ++m) {
             ruido::HudState hs{};
             hs.mode = static_cast<ruido::HudMode>(m);
             hs.opacity = 1.0f;
@@ -1879,9 +1909,9 @@ void testPerVoiceLfoPageAndHudGraph() {
     ctrl.tick(0.016f, customTel);
     const float ledCrest = ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)];
 
-    CHECK(ledTrough >= 0.11f && ledTrough < 0.25f);
-    CHECK(ledCrest > 0.45f && ledCrest <= 0.61f);
-    CHECK(ledCrest > ledTrough + 0.25f);
+    CHECK(ledTrough >= 0.15f && ledTrough < 0.25f);
+    CHECK(ledCrest > 0.34f && ledCrest <= 0.375f);
+    CHECK(ledCrest > ledTrough + 0.12f);
 }
 
 } // namespace
@@ -1900,6 +1930,7 @@ int main() {
     ruido_test::runEditChannelDrivePageAndAmpGraphTests(check);
     ruido_test::runKeyboardModelAndLiveMixerTests(check);
     ruido_test::runRhythmLabAndMidiClockTests(check);
+    ruido_test::runFm1PanelIoAndLedModulatorTests(check);
 
     if (gFailures == 0) {
         std::printf("\nALL UI & CONTROLLER VERIFICATION GATES PASSED (0 failures).\n");

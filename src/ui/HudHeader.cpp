@@ -3,6 +3,7 @@
 #include "core/DspMath.h"
 #include "core/EncoderMath.h"
 #include "core/GlobalConfig.h"
+#include "core/KeyPunchSpec.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
 #include "ui/FontSansAA.h"
@@ -11,6 +12,73 @@
 #include "ui/HudKeybedView.h"
 
 namespace ruido {
+
+namespace {
+
+constexpr int minHeaderBarSlotWidth(const HudState& hud) noexcept {
+    constexpr int kPctSlotW = measureSansText(kFontSansMedium, "100%", 0);
+    constexpr int kBpmSlotW = measureSansText(kFontSansMedium, "9999 BPM", 0);
+    constexpr int kBpmExtSlotW = measureSansText(kFontSansMedium, "999 BPM EXT", 0);
+    constexpr int kBpmMultExtSlotW = measureSansText(kFontSansMedium, "9999 BPM EXT", 0);
+    constexpr int kScopeSlotW = []() constexpr noexcept {
+        int maxW = 0;
+        for (uint8_t i = 0u; i < static_cast<uint8_t>(ScopeTimebase::Count); ++i) {
+            const int w = measureSansText(kFontSansMedium,
+                                          scopeTimebaseLabel(static_cast<ScopeTimebase>(i)), 0);
+            if (w > maxW) {
+                maxW = w;
+            }
+        }
+        return maxW;
+    }();
+
+    switch (hud.mode) {
+    case HudMode::MasterLevel:
+    case HudMode::RailCoupling:
+    case HudMode::VoicePressure:
+    case HudMode::SnapshotSlot:
+        return kPctSlotW;
+    case HudMode::MasterTempo:
+        return hud.midiClockSynced ? kBpmExtSlotW : kBpmSlotW;
+    case HudMode::ScopeTimebase:
+        return kScopeSlotW;
+    case HudMode::KeyboardPlay:
+        switch (keyPunchSpec(hud.activePunch).readoutKind) {
+        case PunchReadoutKind::Percent:
+        case PunchReadoutKind::SwingPct:
+        case PunchReadoutKind::Snapshot:
+            return kPctSlotW;
+        case PunchReadoutKind::SubOctave:
+            return measureSansText(kFontSansMedium, "-2.0 OCT", 0);
+        case PunchReadoutKind::PosOctave:
+            return measureSansText(kFontSansMedium, "+2.0 OCT", 0);
+        case PunchReadoutKind::JustRatio:
+            return measureSansText(kFontSansMedium, "9:8", 0);
+        case PunchReadoutKind::StutterHz:
+            return measureSansText(kFontSansMedium, "24.0 Hz", 0);
+        case PunchReadoutKind::FoldStages:
+            return measureSansText(kFontSansMedium, "6.2x", 0);
+        case PunchReadoutKind::CrushHz:
+            return measureSansText(kFontSansMedium, "9.9 kHz", 0);
+        case PunchReadoutKind::TurboMult:
+            return measureSansText(kFontSansMedium, "32.0x", 0);
+        case PunchReadoutKind::ClockDiv:
+            return measureSansText(kFontSansMedium, "X8", 0);
+        case PunchReadoutKind::EuclidHits:
+            return measureSansText(kFontSansMedium, "16/16", 0);
+        case PunchReadoutKind::TempoBpm:
+            return hud.midiClockSynced ? kBpmMultExtSlotW : kBpmSlotW;
+        case PunchReadoutKind::TapBpm:
+            return hud.midiClockSynced ? kBpmExtSlotW : kBpmSlotW;
+        default:
+            return 0;
+        }
+    default:
+        return 0;
+    }
+}
+
+} // namespace
 
 void compositeIdlePeakMeters(const MonoStripCanvas& idleCv, float smoothedPeakL,
                              float smoothedPeakR) noexcept {
@@ -51,6 +119,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     bool showHeaderBar = false;
     float headerBarNorm = 0.0f;
     float voiceLiveHz = 0.0f;
+    const int minBarSlotW = minHeaderBarSlotWidth(hud);
 
     const float hdrPitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
     const auto voiceAud = [&](size_t vi) noexcept {
@@ -193,10 +262,11 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         showHeaderBar = true;
         break;
     }
-    case HudMode::UnassignedEncoder:
-        appendStr(leftMain, 0u, sizeof(leftMain),
-                  (hud.lastEncoder == EncoderId::Presets) ? "PRESETS ENCODER" : "SELECT ENCODER");
-        appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
+    case HudMode::ScopeTimebase:
+        appendStr(leftMain, 0u, sizeof(leftMain), "OSCILLOSCOPE");
+        headerBarNorm = scopeTimebaseNorm01(hud.scopeTimebase);
+        appendStr(rightText, 0u, sizeof(rightText), scopeTimebaseLabel(hud.scopeTimebase));
+        showHeaderBar = true;
         break;
     case HudMode::KnobRate:
         appendStr(leftMain, 0u, sizeof(leftMain), "FREQUENCY");
@@ -226,10 +296,6 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     case HudMode::SaveArmed:
         formatSnapshotHeader(hud, leftMain, sizeof(leftMain), leftSuffix, sizeof(leftSuffix),
                              rightText, sizeof(rightText), showHeaderBar, headerBarNorm);
-        break;
-    case HudMode::UnassignedKey:
-        appendStr(leftMain, 0u, sizeof(leftMain), "KEY");
-        appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
         break;
     case HudMode::OutputRouting:
         appendStr(leftMain, 0u, sizeof(leftMain), "OUTPUT ROUTING");
@@ -266,16 +332,12 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         appendUInt(rightText, p, sizeof(rightText), static_cast<uint32_t>(kNumGlobalConfigItems));
         break;
     }
-    case HudMode::UnassignedButton: {
-        size_t p = appendStr(leftMain, 0u, sizeof(leftMain), unassignedButtonName(hud.lastButton));
-        appendStr(leftMain, p, sizeof(leftMain), " SWITCH");
-        appendStr(rightText, 0u, sizeof(rightText), "UNASSIGNED");
-        break;
-    }
     case HudMode::KeyboardModel:
     case HudMode::KeyboardPlay:
         formatKeybedTopHeader(hud, leftMain, sizeof(leftMain), leftSuffix, sizeof(leftSuffix),
                               rightText, sizeof(rightText), showHeaderBar, headerBarNorm);
+        break;
+    case HudMode::Count:
         break;
     }
 
@@ -297,8 +359,9 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             const int barTxtW = measureSansText(kFontSansMedium, rightText, 0);
             dstCv.drawSans(kFontSansMedium, 230 - barTxtW, 6, rightText, 255u, 0);
 
+            const int slotW = (barTxtW > minBarSlotW) ? barTxtW : minBarSlotW;
             const float barWf = 34.0f;
-            const float barXf = static_cast<float>(230 - barTxtW - 8) - barWf;
+            const float barXf = static_cast<float>(230 - slotW - 8) - barWf;
             const float barNorm = clampf(headerBarSmooth, 0.0f, 1.0f);
             dstCv.drawHorizontalFilament(barXf, barXf + barWf, 13.5f, 42.0f, 0.58f, true);
             if (barNorm > 0.008f) {

@@ -540,6 +540,44 @@ for (let i = 0; i < 12; i++) {
 assert.ok(Math.abs(f32[ledsIdx + 27 + 12] - 1.0) < 1e-4);
 assert.ok(Math.abs(f32[ledsIdx + 41] - 0.0) < 1e-4);
 
+// Idle SELECT (encoder 0) steps OSCILLOSCOPE timebase (keeping bottom strip hidden), while
+// unconnected switches ENV/ARP/SEQ/REC (buttons 4, 10, 11, 13) come up to the exact 15% steady
+// glow of assigned buttons and fade back to 0% dark in 120 ms without waking HUD text:
+ex.wasm_ui_button(8, 1); // HOME -> clear latched AudioOutput HUD
+ex.wasm_ui_button(8, 0);
+for (let i = 0; i < 6; i++) {
+  ex.wasm_ui_tick_and_render(0.05);
+}
+ex.wasm_ui_encoder(0, 4); // SELECT -> OSCILLOSCOPE Wide2x
+ex.wasm_ui_tick_and_render(0.05);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 9.0); // KnobBankMode::None (9)
+for (let i = 0; i < 20; i++) {
+  ex.wasm_ui_tick_and_render(0.1);
+}
+ex.wasm_ui_button(4, 1); // ENV phantom pin touch
+ex.wasm_ui_button(4, 0);
+ex.wasm_ui_tick_and_render(0.016);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 4] - 0.15) < 1e-4);
+ex.wasm_ui_tick_and_render(0.060);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 4] - 0.075) < 0.005);
+ex.wasm_ui_tick_and_render(0.065);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 4]) < 1e-4);
+
+// Arm SAVE (button 9), turn SELECT (encoder 0) to DELETE SCENE, delete SCENE 2 (white key 13),
+// and verify PRESETS (encoder 1) skips deleted SCENE 2 straight from SCENE 1 -> SCENE 3 (27.5 Hz):
+ex.wasm_ui_button(9, 1); // SAVE -> arm STORE SCENE
+ex.wasm_ui_button(9, 0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.SAVE_ARMED], 1.0);
+ex.wasm_ui_encoder(0, 4); // SELECT -> DELETE SCENE
+ex.wasm_ui_white_gate(13, 1); // Delete SCENE 2
+ex.wasm_ui_white_gate(13, 0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.SAVE_ARMED], 0.0);
+ex.wasm_ui_encoder(1, 4); // PRESETS +1 detent -> skips SCENE 2 -> lands on SCENE 3
+for (let i = 0; i < 12; i++) {
+  ex.wasm_ui_tick_and_render(0.06);
+}
+assert.ok(Math.abs(f32[summaryIdx + WASM_SUMMARY.VOICE_BASE] - 27.5) < 0.1);
+
 console.log(
   `[PASS] Wasm V8 verification (${(bytes.length / 1024).toFixed(1)} KB wasm, ${shades.size} neutral B&W shades).`
 );

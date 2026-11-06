@@ -258,16 +258,23 @@ class LockFreeControlBus {
                 readySlot_.store(readIdx_, std::memory_order_release);
                 hasNew_.store(0u, std::memory_order_release);
                 readIdx_ = nextRead;
+                if (++readSeq_ == 0u) {
+                    readSeq_ = 1u;
+                }
             }
             c1Swapping_.store(0u, std::memory_order_release);
         }
         return buffers_[readIdx_];
     }
 
+    // Monotonic non-zero consumer generation counter (changes only when `consumeLatest` swaps).
+    uint32_t readSeq() const noexcept { return readSeq_; }
+
   private:
     std::array<EngineControlState, 3> buffers_{};
     uint32_t writeIdx_ = 0u;
     alignas(64) uint32_t readIdx_ = 1u;
+    uint32_t readSeq_ = 1u;
     std::atomic<uint32_t> c1Swapping_{0u};
     alignas(64) std::atomic<uint32_t> c0Swapping_{0u};
     std::atomic<uint32_t> readySlot_{2u}; // Slot 2 initially parked in middle

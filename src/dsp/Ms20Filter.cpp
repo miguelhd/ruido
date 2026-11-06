@@ -174,7 +174,29 @@ Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& st,
     const float inScale = c.hpInScale;
     const float preDrive = c.preDrive;
     const float driveBlend = c.driveBlend;
-    const bool hasDrive = (driveBlend > 0.0f);
+    if (driveBlend > 0.0f) {
+        for (size_t k = 0u; k < numFrames; ++k) {
+            auto& vs = frames4x[k];
+            for (size_t sub = 0u; sub < 4u; ++sub) {
+                vs[sub] = applyMs20InputOverdrive(vs[sub], preDrive, driveBlend) * inScale;
+            }
+        }
+    } else if (inScale != 1.0f) {
+        for (size_t k = 0u; k < numFrames; ++k) {
+            auto& vs = frames4x[k];
+            for (size_t sub = 0u; sub < 4u; ++sub) {
+                vs[sub] = clampf(vs[sub], -16.0f, 16.0f) * inScale;
+            }
+        }
+    } else {
+        for (size_t k = 0u; k < numFrames; ++k) {
+            auto& vs = frames4x[k];
+            for (size_t sub = 0u; sub < 4u; ++sub) {
+                vs[sub] = clampf(vs[sub], -16.0f, 16.0f);
+            }
+        }
+    }
+
     float s1 = st.s1;
     float s2 = st.s2;
     float h1 = st.hist1;
@@ -188,20 +210,21 @@ Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& st,
         for (size_t k = 0u; k < numFrames; ++k) {
             auto& vs = frames4x[k];
             for (size_t sub = 0u; sub < 4u; ++sub) {
-                const float driven = hasDrive
-                                         ? applyMs20InputOverdrive(vs[sub], preDrive, driveBlend)
-                                         : clampf(vs[sub], -16.0f, 16.0f);
-                const float x = driven * inScale;
+                const float x = vs[sub];
                 const float y2 = (x + s1 + onePlusG * s2) * invDet;
                 const float y1 = onePlusG * y2 - s2;
                 const float ic1 = g * (kHp * y2 - y1);
                 const float ic2 = -g * y2;
-                s1 = scrubFilterState(s1 + 2.0f * ic1);
-                s2 = scrubFilterState(s2 + 2.0f * ic2);
+                s1 += 2.0f * ic1;
+                s2 += 2.0f * ic2;
                 h2 = h1;
-                h1 = scrubFilterState(y2 - x);
+                h1 = y2 - x;
                 vs[sub] = y2;
             }
+            s1 = scrubFilterState(s1);
+            s2 = scrubFilterState(s2);
+            h1 = scrubFilterState(h1);
+            h2 = scrubFilterState(h2);
         }
     } else {
         const float g = c.gHp;
@@ -217,16 +240,14 @@ Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& st,
         for (size_t k = 0u; k < numFrames; ++k) {
             auto& vs = frames4x[k];
             for (size_t sub = 0u; sub < 4u; ++sub) {
-                const float driven = hasDrive
-                                         ? applyMs20InputOverdrive(vs[sub], preDrive, driveBlend)
-                                         : clampf(vs[sub], -16.0f, 16.0f);
                 vs[sub] =
-                    stepHpNonlinearPrecomputed(driven * inScale, s1, s2, h1, h2, g, kHp, pos1, neg1,
-                                               invPos1, invNeg1, rail2, invRail2, dSpan, invDSpan);
-                s1 = scrubFilterState(s1);
-                s2 = scrubFilterState(s2);
-                h1 = scrubFilterState(h1);
+                    stepHpNonlinearPrecomputed(vs[sub], s1, s2, h1, h2, g, kHp, pos1, neg1, invPos1,
+                                               invNeg1, rail2, invRail2, dSpan, invDSpan);
             }
+            s1 = scrubFilterState(s1);
+            s2 = scrubFilterState(s2);
+            h1 = scrubFilterState(h1);
+            h2 = scrubFilterState(h2);
         }
     }
 
@@ -258,12 +279,16 @@ Ms20DualFilter::processVoiceLpSpan4x(OtaSallenKeyStage& st,
                 const float w = (s1 + g * x - onePlusG * s2) * invDet;
                 const float ic2 = g * w;
                 const float y2 = s2 + ic2;
-                s1 = scrubFilterState(2.0f * (w + y2) - s1);
-                s2 = scrubFilterState(s2 + 2.0f * ic2);
+                s1 = 2.0f * (w + y2) - s1;
+                s2 += 2.0f * ic2;
                 h2 = h1;
-                h1 = scrubFilterState(w);
+                h1 = w;
                 vs[sub] = y2 * outScale;
             }
+            s1 = scrubFilterState(s1);
+            s2 = scrubFilterState(s2);
+            h1 = scrubFilterState(h1);
+            h2 = scrubFilterState(h2);
         }
     } else {
         const float g = c.gLp;
@@ -282,11 +307,12 @@ Ms20DualFilter::processVoiceLpSpan4x(OtaSallenKeyStage& st,
                 const float y2 =
                     stepLpNonlinear(vs[sub] * interScale, s1, s2, h1, h2, g, kLp, rail1, invRail1,
                                     pos2, neg2, invPos2, invNeg2, dSpan, invDSpan);
-                s1 = scrubFilterState(s1);
-                s2 = scrubFilterState(s2);
-                h1 = scrubFilterState(h1);
                 vs[sub] = y2 * outScale;
             }
+            s1 = scrubFilterState(s1);
+            s2 = scrubFilterState(s2);
+            h1 = scrubFilterState(h1);
+            h2 = scrubFilterState(h2);
         }
     }
 

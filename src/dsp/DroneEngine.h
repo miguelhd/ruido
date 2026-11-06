@@ -102,6 +102,9 @@ class DroneEngineCore {
     OnePoleSmoother masterRunSmoother_{};        // 0.0 = Muted (STOP), 1.0 = Active (PLAY)
     OnePoleSmoother pitchModeSmoother_{};        // 0.0 = MS-20 Filter/LPG, 1.0 = Pitch Bend
     OnePoleSmootherBank<6> punchBusSmoothers_{}; // [0..5] surge, dubLpf, spatial, ring, sync, scrm
+    const EngineControlState* lastControlPtr_ = nullptr;
+    uint32_t lastControlSeq_ = 0u;
+    float prevStutterEdgeSec_ = -1.0f;
     bool stasisFreeze_ = false;
 
     // 36-frame delay aligning 4-voice rising edges & scope taps with PolyBLEP + FIR delay

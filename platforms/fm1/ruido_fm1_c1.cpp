@@ -56,19 +56,37 @@ inline void renderQuantizedBlock64(ruido::Fm1AudioBlock& outBlk) noexcept {
     int32_t blockPeak = 0;
     const bool gainSettled = (rt->masterGainSmoother.current() == rt->masterGainSmoother.target());
     const float staticGain = rt->masterGainSmoother.current();
-    for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
-        const float g = gainSettled ? staticGain : rt->masterGainSmoother.next();
-        const int16_t sL = rt->quantizer.quantizeLeft(left[i], g);
-        const int16_t sR = rt->quantizer.quantizeRight(right[i], g);
-        outBlk.lr[2u * i] = sL;
-        outBlk.lr[2u * i + 1u] = sR;
-        const int32_t aL = (sL < 0) ? -static_cast<int32_t>(sL) : static_cast<int32_t>(sL);
-        const int32_t aR = (sR < 0) ? -static_cast<int32_t>(sR) : static_cast<int32_t>(sR);
-        if (aL > blockPeak) {
-            blockPeak = aL;
+    auto* packedOut = reinterpret_cast<uint32_t*>(outBlk.lr.data());
+    if (gainSettled && staticGain == 1.0f) {
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            const int16_t sL = rt->quantizer.quantizeLeftUnity(left[i]);
+            const int16_t sR = rt->quantizer.quantizeRightUnity(right[i]);
+            packedOut[i] = static_cast<uint32_t>(static_cast<uint16_t>(sL)) |
+                           (static_cast<uint32_t>(static_cast<uint16_t>(sR)) << 16u);
+            const int32_t aL = (sL < 0) ? -static_cast<int32_t>(sL) : static_cast<int32_t>(sL);
+            const int32_t aR = (sR < 0) ? -static_cast<int32_t>(sR) : static_cast<int32_t>(sR);
+            if (aL > blockPeak) {
+                blockPeak = aL;
+            }
+            if (aR > blockPeak) {
+                blockPeak = aR;
+            }
         }
-        if (aR > blockPeak) {
-            blockPeak = aR;
+    } else {
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            const float g = gainSettled ? staticGain : rt->masterGainSmoother.next();
+            const int16_t sL = rt->quantizer.quantizeLeft(left[i], g);
+            const int16_t sR = rt->quantizer.quantizeRight(right[i], g);
+            packedOut[i] = static_cast<uint32_t>(static_cast<uint16_t>(sL)) |
+                           (static_cast<uint32_t>(static_cast<uint16_t>(sR)) << 16u);
+            const int32_t aL = (sL < 0) ? -static_cast<int32_t>(sL) : static_cast<int32_t>(sL);
+            const int32_t aR = (sR < 0) ? -static_cast<int32_t>(sR) : static_cast<int32_t>(sR);
+            if (aL > blockPeak) {
+                blockPeak = aL;
+            }
+            if (aR > blockPeak) {
+                blockPeak = aR;
+            }
         }
     }
     outBlk.peakAbsQ15 = blockPeak;
@@ -143,8 +161,8 @@ void ruido_fm1_c1_construct(float initial_master_gain) {
     ring->reset();
     coproc->reset();
     core->init(*buses, kSampleRateHz);
-    rt->masterGainSmoother.init(kSampleRateHz, kMasterPotSmoothSec,
-                                ruido::clampf(initial_master_gain, 0.0f, 1.0f));
+    rt->masterGainSmoother.init(ruido::clampf(initial_master_gain, 0.0f, 1.0f), kMasterPotSmoothSec,
+                                kSampleRateHz);
     rt->quantizer.reset();
 }
 

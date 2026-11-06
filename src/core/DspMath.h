@@ -31,8 +31,8 @@ RUIDO_ALWAYS_INLINE float sanitizeState(float x) noexcept {
     uint32_t bits = 0u;
     std::memcpy(&bits, &x, sizeof(bits));
     const uint32_t abs_bits = bits & 0x7FFFFFFFu;
-    // Flush subnormals / tiny < ~1.17e-38f AND scrub NaN/Inf (exponent == 0xFF)
-    if (abs_bits < 0x00800000u || abs_bits >= 0x7F800000u) {
+    // Single unsigned subtract catches both < 0x00800000 (subnormal/0) and >= 0x7F800000 (Inf/NaN)
+    if ((abs_bits - 0x00800000u) >= 0x7F000000u) {
         return 0.0f;
     }
     return x;
@@ -76,6 +76,9 @@ RUIDO_ALWAYS_INLINE float masterBusSoftClip(float x) noexcept {
     constexpr float kHeadroom = 0.50f; // Max asymptotic output = 0.75 + 0.50 = 1.25f
     constexpr float kInvHeadroom = 1.0f / kHeadroom;
 
+    if (absf(x) <= kKnee) {
+        return x;
+    }
     if (x > kKnee) {
         return kKnee + kHeadroom * padeClip((x - kKnee) * kInvHeadroom);
     }
@@ -91,6 +94,9 @@ RUIDO_ALWAYS_INLINE float dacSafetyClip(float x) noexcept {
     constexpr float kLinearCeil = 1.15f;
     constexpr float kMargin = 0.30f; // Max asymptotic DAC output = 1.15 + 0.30 = 1.45f
     constexpr float kInvMargin = 1.0f / kMargin;
+    if (absf(x) <= kLinearCeil) {
+        return x;
+    }
     if (x > kLinearCeil) {
         return kLinearCeil + kMargin * padeClip((x - kLinearCeil) * kInvMargin);
     }

@@ -13,6 +13,8 @@ struct LedSmoothState {
     float fxSync01 = 0.0f;
     float lfoSync01 = 0.0f;
     float subBreathWave01 = 0.5f;
+    std::array<float, 4> phantomGlint{};
+    uint8_t lastPhantomSeq = 0u;
 
     void reset(const EngineControlState& state) noexcept;
 };

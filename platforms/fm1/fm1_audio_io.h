@@ -42,22 +42,33 @@ class Fm1TpdfQuantizer {
         return quantizeChannel(sample * masterGain, rngR_);
     }
 
+    RUIDO_ALWAYS_INLINE int16_t quantizeLeftUnity(float sample) noexcept {
+        return quantizeChannel(sample, rngL_);
+    }
+
+    RUIDO_ALWAYS_INLINE int16_t quantizeRightUnity(float sample) noexcept {
+        return quantizeChannel(sample, rngR_);
+    }
+
   private:
-    static RUIDO_ALWAYS_INLINE float nextUniform01(uint32_t& state) noexcept {
+    // Single-step xorshift32 -> exact 1-LSB TPDF triangular dither in (-1.0f, +1.0f) with zero
+    // mean and variance = 1/6 LSB^2: subtracts two independent 16-bit uniform halves in integer
+    // registers (`[-65535, +65535]`) with a single hardware `itof`.
+    static RUIDO_ALWAYS_INLINE float nextTpdf1Lsb(uint32_t& state) noexcept {
         uint32_t x = (state != 0u) ? state : 0x6D2B79F5u;
         x ^= x << 13u;
         x ^= x >> 17u;
         x ^= x << 5u;
         state = x;
-        // 24-bit mantissa uniform on [0.0f, 1.0f) via signed int32 itof
-        return static_cast<float>(static_cast<int32_t>(x >> 8u)) * (1.0f / 16777216.0f);
+        const int32_t diff = static_cast<int32_t>(x >> 16u) - static_cast<int32_t>(x & 0xFFFFu);
+        return static_cast<float>(diff) * (1.0f / 65536.0f);
     }
 
     static RUIDO_ALWAYS_INLINE int16_t quantizeChannel(float scaledInput, uint32_t& rng) noexcept {
-        const float clean = sanitizeState(scaledInput);
-        // Exact 1-LSB TPDF triangular dither in (-1.0, +1.0) LSB (variance = 1/6 LSB^2)
-        const float tpdf = nextUniform01(rng) - nextUniform01(rng);
-        const float qFloat = clean * kFloatToQ15Scale + tpdf;
+        // Catch NaN via a single hardware `iff` without stack union bit-punning (`+-Inf` clamps
+        // cleanly at +-32767.0f below).
+        const float clean = (scaledInput == scaledInput) ? scaledInput : 0.0f;
+        const float qFloat = clean * kFloatToQ15Scale + nextTpdf1Lsb(rng);
         const float rounded = qFloat + ((qFloat >= 0.0f) ? 0.5f : -0.5f);
         if (rounded >= 32767.0f) {
             return 32767;
@@ -79,7 +90,7 @@ struct Fm1AudioBlock {
 
 class Fm1AudioBlockRing {
   public:
-    static constexpr uint32_t kNumBlocks = 8u; // Power of 2: 8 x 64 = 512 frames (2 DMA halves)
+    static constexpr uint32_t kNumBlocks = 16u; // Power of 2: 16 x 64 = 1024 frames (4 DMA halves)
     static constexpr uint32_t kMask = kNumBlocks - 1u;
 
     void reset() noexcept {

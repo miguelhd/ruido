@@ -76,6 +76,7 @@ void RuidoController::applyKeyboardPerformanceChange() noexcept {
         }
         if (sHeld[0] || sHeld[1] || sHeld[2] || sHeld[3]) {
             hud_.snapshotSavedToast = false;
+            hud_.snapshotDeletedToast = false;
         }
         snapshots_.syncHud(hud_);
     }
@@ -131,6 +132,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
                     }
                 }
             }
+            hud_.knobBank = baseKnobBank();
             triggerHud(HudMode::MasterTempo, hud_.focusedVoice, kNoFocusedKnob);
             publishState();
             return;
@@ -139,12 +141,25 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             adjustLinear01(state_.global.circuitCoupling, ticks, rate, 0.0f, 1.0f);
         snapshots_.notifyManualEdit(state_);
         snapshots_.syncHud(hud_);
+        hud_.knobBank = baseKnobBank();
         triggerHud(HudMode::RailCoupling, hud_.focusedVoice, kNoFocusedKnob);
         publishState();
         return;
     }
 
     if (encoder == EncoderId::Select) {
+        if (hud_.saveArmed) {
+            hud_.lastEncoder = EncoderId::Select;
+            const int32_t curMode = hud_.saveDeleteMode ? 1 : 0;
+            const int32_t nextMode = stepClampedDetent(curMode, 1, ticks, rate, selectTickAccum_);
+            hud_.saveDeleteMode = (nextMode != 0);
+            hud_.knobBank = KnobBankMode::Snapshot;
+            if (keyboard_.anyKeyHeld()) {
+                keyboard_.evaluate(state_, hud_);
+            }
+            latchSwitchHud(HudMode::SaveArmed, ButtonId::Save);
+            return;
+        }
         if (hud_.selPageOpen || (hud_.mode == HudMode::KeyboardModel && !dismissedByHome_)) {
             const KeyboardModel prevModel = keyboard_.model();
             const int32_t maxModel = static_cast<int32_t>(KeyboardModel::Count) - 1;
@@ -213,7 +228,14 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             return;
         }
         hud_.lastEncoder = EncoderId::Select;
-        triggerHud(HudMode::UnassignedEncoder, hud_.focusedVoice, kNoFocusedKnob);
+        const int32_t maxTb = static_cast<int32_t>(ScopeTimebase::Count) - 1;
+        const int32_t nextTb = stepClampedDetent(static_cast<int32_t>(hud_.scopeTimebase), maxTb,
+                                                 ticks, rate, selectTickAccum_);
+        hud_.scopeTimebase = static_cast<ScopeTimebase>(nextTb);
+        hud_.knobBank = hud_.saveArmed      ? KnobBankMode::Snapshot
+                        : hud_.freqPageOpen ? KnobBankMode::Frequency
+                                            : KnobBankMode::None;
+        triggerHud(HudMode::ScopeTimebase, hud_.focusedVoice, kNoFocusedKnob);
         return;
     }
 
@@ -221,31 +243,85 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         hud_.lastEncoder = EncoderId::Presets;
         if (hud_.saveArmed) {
             hud_.saveArmed = false;
+            hud_.saveDeleteMode = false;
             if (latchedHudMode_ == HudMode::SaveArmed) {
                 setLatchedPage(HudMode::None, ButtonId::Count);
             }
         }
-        const int32_t prevSlot = static_cast<int32_t>(snapshots_.activeSlot());
-        const int32_t maxSlot = static_cast<int32_t>(kNumSnapshots) - 1;
-        const int32_t prevAccum = presetTickAccum_;
-        const int32_t nextSlot =
-            stepClampedDetent(prevSlot, maxSlot, ticks, rate, presetTickAccum_);
-        const bool steppedAtRail = snapshots_.isDirty() && (nextSlot == prevSlot) &&
-                                   ((prevAccum + ticks >= 4) || (prevAccum + ticks <= -4));
-        if (nextSlot != prevSlot || steppedAtRail) {
-            if (nextSlot != prevSlot) {
+        hud_.snapshotSavedToast = false;
+        hud_.snapshotDeletedToast = false;
+
+        std::array<uint8_t, kNumSnapshots> occSlots{};
+        int32_t occCount = 0;
+        for (uint8_t s = 0u; s < kNumSnapshots; ++s) {
+            if (snapshots_.isSlotOccupied(s)) {
+                occSlots[static_cast<size_t>(occCount++)] = s;
+            }
+        }
+        if (occCount == 0) {
+            (void)stepClampedDetent(0, 0, ticks, rate, presetTickAccum_);
+            snapshots_.syncHud(hud_);
+            hud_.knobBank = KnobBankMode::Snapshot;
+            triggerHud(HudMode::SnapshotSlot, 0u, kNoFocusedKnob);
+            return;
+        }
+
+        const uint8_t curSlot = snapshots_.activeSlot() & 3u;
+        int32_t curOrd = -1;
+        for (int32_t i = 0; i < occCount; ++i) {
+            if (occSlots[static_cast<size_t>(i)] == curSlot) {
+                curOrd = i;
+                break;
+            }
+        }
+        uint8_t targetSlot = curSlot;
+        bool shouldRecall = false;
+        if (curOrd >= 0) {
+            const int32_t prevAccum = presetTickAccum_;
+            const int32_t nextOrd =
+                stepClampedDetent(curOrd, occCount - 1, ticks, rate, presetTickAccum_);
+            const bool steppedAtRail = snapshots_.isDirty() && (nextOrd == curOrd) &&
+                                       ((prevAccum + ticks >= 4) || (prevAccum + ticks <= -4));
+            targetSlot = occSlots[static_cast<size_t>(nextOrd)];
+            shouldRecall = (nextOrd != curOrd) || steppedAtRail;
+        } else {
+            presetTickAccum_ += ticks;
+            if (presetTickAccum_ >= 4) {
+                presetTickAccum_ %= 4;
+                targetSlot = occSlots[static_cast<size_t>(occCount - 1)];
+                for (int32_t i = 0; i < occCount; ++i) {
+                    if (occSlots[static_cast<size_t>(i)] > curSlot) {
+                        targetSlot = occSlots[static_cast<size_t>(i)];
+                        break;
+                    }
+                }
+                shouldRecall = true;
+            } else if (presetTickAccum_ <= -4) {
+                presetTickAccum_ %= 4;
+                targetSlot = occSlots[0];
+                for (int32_t i = occCount - 1; i >= 0; --i) {
+                    if (occSlots[static_cast<size_t>(i)] < curSlot) {
+                        targetSlot = occSlots[static_cast<size_t>(i)];
+                        break;
+                    }
+                }
+                shouldRecall = true;
+            }
+        }
+        if (shouldRecall) {
+            if (targetSlot != curSlot) {
                 settingsDirty_ = true;
             }
-            snapshots_.recallSlotStepped(static_cast<uint8_t>(nextSlot), rate, state_);
+            snapshots_.recallSlotStepped(targetSlot, rate, state_);
             if (keyboard_.anyKeyHeld()) {
                 keyboard_.evaluate(state_, hud_);
             }
             publishState();
         }
-        hud_.snapshotSavedToast = false;
         snapshots_.syncHud(hud_);
+        hud_.snapshotToastSlot = snapshots_.activeSlot();
         hud_.knobBank = KnobBankMode::Snapshot;
-        triggerHud(HudMode::SnapshotSlot, static_cast<uint8_t>(nextSlot), kNoFocusedKnob);
+        triggerHud(HudMode::SnapshotSlot, snapshots_.activeSlot(), kNoFocusedKnob);
         return;
     }
 
@@ -303,6 +379,7 @@ void RuidoController::onMasterPot(float normalizedLevel) noexcept {
         if (hud_.rateHoldActive) {
             knobTurnedDuringRateHold_ = true;
         }
+        hud_.knobBank = baseKnobBank();
         triggerHud(HudMode::MasterLevel, hud_.focusedVoice, kNoFocusedKnob);
     }
     publishState();
@@ -358,12 +435,26 @@ bool RuidoController::tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active
         return false;
     }
     saveSwallowedMask_ |= sBit;
-    savedSlotMask_ |= sBit;
-    settingsDirty_ = true;
+    const bool deleting = hud_.saveDeleteMode;
     hud_.saveArmed = false;
+    hud_.saveDeleteMode = false;
     setLatchedPage(HudMode::None, ButtonId::Count);
-    snapshots_.saveSlot(slot, state_);
-    hud_.snapshotSavedToast = true;
+    hud_.snapshotToastSlot = slot;
+    if (deleting) {
+        const bool deleted = snapshots_.deleteSlot(slot, state_);
+        hud_.snapshotSavedToast = false;
+        hud_.snapshotDeletedToast = deleted;
+        if (deleted) {
+            savedSlotMask_ |= sBit;
+            settingsDirty_ = true;
+        }
+    } else {
+        snapshots_.saveSlot(slot, state_);
+        hud_.snapshotSavedToast = true;
+        hud_.snapshotDeletedToast = false;
+        savedSlotMask_ |= sBit;
+        settingsDirty_ = true;
+    }
     snapshots_.syncHud(hud_);
     keyboard_.evaluate(state_, hud_);
     hud_.knobBank = KnobBankMode::Snapshot;
@@ -492,6 +583,7 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
     if (dissolvedToIdle) {
         dismissedByHome_ = false;
         hud_.mode = HudMode::None;
+        hud_.knobBank = baseKnobBank();
         hud_.focusedKnob = kNoFocusedKnob;
     }
 

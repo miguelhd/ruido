@@ -337,10 +337,15 @@ void choreographLiveMixerLeds(const KeyboardInputView& in, float animPhase, floa
             }
         }
         if (in.whiteHeld[12u + v]) {
-            const float p = in.whitePressure[12u + v];
-            outLeds.whiteKeyLeds[12u + v] = 1.0f;
-            if (p > maxSnapP) {
-                maxSnapP = p;
+            const bool occ = (hud.snapshotOccupiedMask & (1u << v)) != 0u;
+            if (occ) {
+                const float p = in.whitePressure[12u + v];
+                outLeds.whiteKeyLeds[12u + v] = 1.0f;
+                if (p > maxSnapP) {
+                    maxSnapP = p;
+                }
+            } else {
+                outLeds.whiteKeyLeds[12u + v] = 0.15f;
             }
         }
     }

@@ -30,17 +30,23 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
         out.headerBarNorm = normalizeClockBpmLog01(hud.effectiveClockBpm);
         out.hasHeaderBar = true;
         break;
+    case HudMode::ScopeTimebase:
+        out.headerBarNorm = scopeTimebaseNorm01(hud.scopeTimebase);
+        out.hasHeaderBar = true;
+        break;
     case HudMode::VoicePressure: {
         out.headerBarNorm = clampf(control.voicePressure[hud.focusedVoice & 3u], 0.0f, 1.0f);
         out.hasHeaderBar = true;
         break;
     }
-    case HudMode::SnapshotSlot:
-        if (hud.snapshotGliding) {
+    case HudMode::SnapshotSlot: {
+        const uint8_t s = hud.snapshotSlot & 3u;
+        if (hud.snapshotGliding && ((hud.snapshotOccupiedMask & (1u << s)) != 0u)) {
             out.headerBarNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
             out.hasHeaderBar = true;
         }
         break;
+    }
     case HudMode::KeyboardPlay:
         out.hasHeaderBar = evalKeyPunchHeaderBar(hud, out.headerBarNorm);
         break;
@@ -169,9 +175,17 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
             break;
         }
         case KnobBankMode::Snapshot: {
+            const bool occ = (hud.snapshotOccupiedMask & (1u << k)) != 0u;
+            if (!occ) {
+                out.posSigned[k] = -1.0f;
+                out.focused[k] = false;
+                out.dimAmount[k] = (hud.saveArmed && !hud.saveDeleteMode) ? 0.35f : 0.85f;
+                continue;
+            }
             const float w = clampf(hud.snapshotWeights[k], 0.0f, 1.0f);
             out.posSigned[k] = 2.0f * w - 1.0f;
-            out.focused[k] = (k == (hud.snapshotSlot & 3u));
+            out.focused[k] = !hud.saveDeleteMode && (k == (hud.snapshotSlot & 3u)) &&
+                             (hud.saveArmed || !hud.snapshotDirty || w > 0.01f);
             out.dimAmount[k] = hud.saveArmed ? 0.20f : (0.72f * (1.0f - w));
             continue;
         }
@@ -268,7 +282,8 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
         const auto valGray = static_cast<uint8_t>(baseVal + (255.0f - baseVal) * effFoc + 0.5f);
         cv.drawSansCentered(kFontSansMedium, cx, kHudBotValueY, valStr, valGray, 0);
 
-        if (hud.knobBank == KnobBankMode::Frequency) {
+        if (hud.freqPageOpen && hud.mode == HudMode::VoiceFrequency &&
+            hud.knobBank == KnobBankMode::Frequency) {
             constexpr int kTotalSpan = kHudHomeFxLfoGapPx + kHudHomeLfoPairGapPx;
             const int fxX = cx - (kTotalSpan / 2);
             const int lfoAX = fxX + kHudHomeFxLfoGapPx;

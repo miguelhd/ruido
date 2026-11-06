@@ -87,6 +87,64 @@ enum class KnobBankMode : uint8_t {
 // Encoder sweep rate selected via OCT- (Fine) and OCT+ (Coarse: ~1.3 turns full sweep)
 enum class KnobRate : int8_t { Fine = -1, Standard = 0, Coarse = 1 };
 
+// Notched CRT oscilloscope horizontal timebase selected via SELECT encoder when idle
+enum class ScopeTimebase : uint8_t {
+    Zoom4x = 0, // 0.25 samples/px (~1.4 ms window: 4x horizontal detail)
+    Zoom2x = 1, // 0.50 samples/px (~2.7 ms window: 2x horizontal detail)
+    Auto = 2,   // Boot default: auto 1.0 (5.4 ms) <-> 2.0 (11 ms) bass hysteresis
+    Wide2x = 3, // 2.00 samples/px (~11 ms fixed window)
+    Wide4x = 4, // 4.00 samples/px (~22 ms wide bass & chop window)
+    Wide8x = 5, // 8.00 samples/px (~44 ms sub-bass & rhythm envelope window)
+    Count = 6
+};
+
+constexpr const char* scopeTimebaseLabel(ScopeTimebase tb) noexcept {
+    switch (tb) {
+    case ScopeTimebase::Zoom4x:
+        return "4X";
+    case ScopeTimebase::Zoom2x:
+        return "2X";
+    case ScopeTimebase::Auto:
+        return "AUTO";
+    case ScopeTimebase::Wide2x:
+        return "1/2X";
+    case ScopeTimebase::Wide4x:
+        return "1/4X";
+    case ScopeTimebase::Wide8x:
+        return "1/8X";
+    case ScopeTimebase::Count:
+        break;
+    }
+    return "AUTO";
+}
+
+constexpr float scopeTimebaseNorm01(ScopeTimebase tb) noexcept {
+    const uint8_t idx = (tb < ScopeTimebase::Count) ? static_cast<uint8_t>(tb) : 2u;
+    return static_cast<float>(idx) * 0.2f;
+}
+
+inline constexpr std::array<ButtonId, 4> kPhantomPinButtons = {
+    ButtonId::Env,
+    ButtonId::Arp,
+    ButtonId::Seq,
+    ButtonId::Rec,
+};
+
+constexpr uint8_t phantomPinSlot(ButtonId button) noexcept {
+    switch (button) {
+    case ButtonId::Env:
+        return 0u;
+    case ButtonId::Arp:
+        return 1u;
+    case ButtonId::Seq:
+        return 2u;
+    case ButtonId::Rec:
+        return 3u;
+    default:
+        return 0u;
+    }
+}
+
 // Active function displayed in the top HUD header whenever any control or key is touched
 enum class HudMode : uint8_t {
     None = 0,
@@ -98,22 +156,21 @@ enum class HudMode : uint8_t {
     Panning = 6,
     MasterLevel = 7,
     RailCoupling = 8,
-    UnassignedEncoder = 9,
+    ScopeTimebase = 9,
     KnobRate = 10,
     VoiceGate = 11,
     VoicePressure = 12,
     SnapshotSlot = 13,
-    UnassignedKey = 14,
-    OutputRouting = 15,
-    AudioOutput = 16,
-    SaveArmed = 17,
-    ScopeFreeze = 18,
-    UnassignedButton = 19,
-    VoiceLfo = 20,
-    GlobalConfig = 21,
-    KeyboardModel = 22, // Latching SEL Keyboard Model status & guidance screen
-    KeyboardPlay = 23,  // Momentary live punch-in routed 1-to-1 to native Ruido views
-    MasterTempo = 24    // ALGORITHM encoder Master Tempo control in 3/3 RHYTHM LAB
+    OutputRouting = 14,
+    AudioOutput = 15,
+    SaveArmed = 16,
+    ScopeFreeze = 17,
+    VoiceLfo = 18,
+    GlobalConfig = 19,
+    KeyboardModel = 20, // Latching SEL Keyboard Model status & guidance screen
+    KeyboardPlay = 21,  // Momentary live punch-in routed 1-to-1 to native Ruido views
+    MasterTempo = 22,   // ALGORITHM encoder Master Tempo control in 3/3 RHYTHM LAB
+    Count = 23
 };
 
 // Active momentary punch-in family displayed in the top header during HudMode::KeyboardPlay
@@ -233,6 +290,8 @@ struct HudState {
     uint8_t lfoVoiceFocus = 0u;           // 0..7 = LFO A/B OSC 1..4 (SELECT encoder on LFO Page)
     uint8_t configCursor = 0u;            // 0..kNumGlobalConfigItems-1 (SELECT in GLOBAL CONFIG)
     uint8_t snapshotSlot = 0u;            // 0..3 active/selected Snapshot 1..4
+    uint8_t snapshotToastSlot = 0u;       // 0..3 target slot for SAVE / DELETE / EMPTY toast
+    uint8_t snapshotOccupiedMask = 0x0Fu; // Bits 0..3 = Scene 1..4 occupied (0 = deleted/EMPTY)
     std::array<float, kNumSnapshots> snapshotWeights{1.0f, 0.0f, 0.0f, 0.0f};
     KeyboardModel keyboardModel = KeyboardModel::LiveMixer;
     KeyPunchKind activePunch = KeyPunchKind::None;
@@ -252,17 +311,22 @@ struct HudState {
     bool rateHoldActive = false; // True whenever OCT- or OCT+ is physically held
     bool scopeFrozen = false;    // Momentary waveform freeze on 11th black key
     bool saveArmed = false;
-    bool snapshotDirty = false;      // True when knobs diverged from the recalled snapshot
-    bool snapshotSavedToast = false; // True right after SAVE + Key 13-16 stores a slot
-    bool snapshotGliding = false;    // True while actively gliding/morphing into a snapshot
-    bool freqPageOpen = false;       // Latching Frequency HUD toggle state (ButtonId::Home)
-    bool fxPageOpen = false;         // Latching MS-20 Filter page state (ButtonId::Fx)
+    bool saveDeleteMode = false;       // True when SELECT toggles armed SAVE to DELETE SCENE
+    bool snapshotDirty = false;        // True when knobs diverged from the recalled snapshot
+    bool snapshotSavedToast = false;   // True right after SAVE + Key 13-16 stores a slot
+    bool snapshotDeletedToast = false; // True right after DELETE SCENE + Key 13-16 clears a slot
+    bool snapshotGliding = false;      // True while actively gliding/morphing into a snapshot
+    bool freqPageOpen = false;         // Latching Frequency HUD toggle state (ButtonId::Home)
+    bool fxPageOpen = false;           // Latching MS-20 Filter page state (ButtonId::Fx)
     bool panPageOpen = false;    // Latching EDIT Page 2 Stereo Panning state (ButtonId::Edit x2)
     bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
     bool editPageOpen = false;   // Latching EDIT Page 1 Channel Mix state (ButtonId::Edit x1)
     bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
     bool selPageOpen = false;    // Latching KEYBOARD MODEL status & guidance page (ButtonId::Sel)
     uint8_t selWakeSeq = 0u;     // Incremented on SEL open or SELECT/ALGORITHM knob interaction
+    ScopeTimebase scopeTimebase = ScopeTimebase::Auto; // CRT horizontal timebase (idle SELECT)
+    uint8_t phantomPinSeq = 0u;   // Incremented when an unconnected switch (ENV/ARP/SEQ/REC) fires
+    uint8_t phantomPinIndex = 0u; // 0 = ENV, 1 = ARP, 2 = SEQ, 3 = REC
 };
 
 constexpr uint8_t resolveFilterViewVoice(const HudState& hud) noexcept {

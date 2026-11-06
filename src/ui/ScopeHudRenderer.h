@@ -45,6 +45,7 @@ class ScopeHudRenderer {
     }
 
   private:
+    int computeScanlineSyncShift(int py) const noexcept;
     void updateHudGauges(float dtClamped, bool snapImmediate) noexcept;
     void compositeHudStrip(uint16_t yStart, uint16_t stripHeight, uint8_t* lumBuf,
                            uint16_t* linScratch, uint8_t hudAlpha8) const noexcept;
@@ -75,9 +76,13 @@ class ScopeHudRenderer {
     float smoothedPeakL_ = 0.0f;
     float smoothedPeakR_ = 0.0f;
     float frameRhythmPhase_ = 0.0f;
+    float syncRecoilEnv_ = 0.0f;
+    float syncRecoilPhase_ = 0.0f;
     HudMode prevHeaderBarMode_ = HudMode::None;
     KnobBankMode prevKnobBank_ = KnobBankMode::Frequency;
     uint8_t frameStutterGateMask_ = 0x0Fu;
+    uint8_t lastPhantomSeq_ = 0u;
+    uint8_t phantomPin_ = 0u;
     bool releaseLatchActive_ = false;
     bool hudGaugesPrimed_ = false;
 };

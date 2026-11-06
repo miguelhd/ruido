@@ -472,14 +472,20 @@ void SchmittOscillatorBank::processSpan4x(
         }
     };
 
-    const auto advanceNormalPhase = [&](VoiceState& v, size_t i, uint32_t incHighU32,
-                                        uint32_t incLowU32, uint8_t& subRising, bool* osc0WrapPtr,
+    const auto toPhaseIncU32 = [](float scaled) noexcept -> uint32_t {
+        return static_cast<uint32_t>(static_cast<int32_t>(clampf(scaled, 1.0f, kMaxPhaseIncFloat)));
+    };
+
+    const auto advanceNormalPhase = [&](VoiceState& v, size_t i, float baseInc, float invH,
+                                        float invL, uint8_t& subRising, bool* osc0WrapPtr,
                                         float* osc0WrapDPtr) noexcept {
         if (v.phase < kHalfPhase) {
+            const uint32_t incHighU32 = toPhaseIncU32(baseInc * invH);
             const uint32_t remToHalf = kHalfPhase - v.phase;
             if (incHighU32 < remToHalf) {
                 v.phase += incHighU32;
             } else {
+                const uint32_t incLowU32 = toPhaseIncU32(baseInc * invL);
                 const uint32_t overHigh = incHighU32 - remToHalf;
                 const float d = static_cast<float>(overHigh) / static_cast<float>(incHighU32);
                 addCubicBsplineBlep(v.blepResidual, d, -2.0f);
@@ -492,10 +498,12 @@ void SchmittOscillatorBank::processSpan4x(
                 v.currentLevel = -1.0f;
             }
         } else {
+            const uint32_t incLowU32 = toPhaseIncU32(baseInc * invL);
             const uint32_t remToWrap = 0u - v.phase;
             if (incLowU32 < remToWrap) {
                 v.phase += incLowU32;
             } else {
+                const uint32_t incHighU32 = toPhaseIncU32(baseInc * invH);
                 const uint32_t overLow = incLowU32 - remToWrap;
                 const float d = static_cast<float>(overLow) / static_cast<float>(incLowU32);
                 addCubicBsplineBlep(v.blepResidual, d, 2.0f);
@@ -567,18 +575,17 @@ void SchmittOscillatorBank::processSpan4x(
 
                     const float baseIncFloat = clampf(curFreq[i] * curBaseScale[i] * railPullRatio,
                                                       minBaseInc, maxBaseInc);
-                    const uint32_t incHighU32 = static_cast<uint32_t>(static_cast<int32_t>(
-                        clampf(baseIncFloat * halfInvHigh[i], 1.0f, kMaxPhaseIncFloat)));
-                    const uint32_t incLowU32 = static_cast<uint32_t>(static_cast<int32_t>(
-                        clampf(baseIncFloat * halfInvLow[i], 1.0f, kMaxPhaseIncFloat)));
 
                     if constexpr (kFast) {
-                        advanceNormalPhase(v, i, incHighU32, incLowU32, subRising, nullptr,
-                                           nullptr);
+                        advanceNormalPhase(v, i, baseIncFloat, halfInvHigh[i], halfInvLow[i],
+                                           subRising, nullptr, nullptr);
                     } else {
                         const uint8_t neighborRose = static_cast<uint8_t>(
                             (lastRising | subRising) & static_cast<uint8_t>(~(1u << i)));
                         if (i > 0u && osc0Wrapped && syncActive && v.phase >= hardSyncThreshold) {
+                            const uint32_t incHighU32 =
+                                toPhaseIncU32(baseIncFloat * halfInvHigh[i]);
+                            const uint32_t incLowU32 = toPhaseIncU32(baseIncFloat * halfInvLow[i]);
                             const float preFrac = 1.0f - osc0WrapD;
                             if (v.currentLevel < 0.0f) {
                                 const uint32_t remToWrap = 0u - v.phase;
@@ -612,6 +619,8 @@ void SchmittOscillatorBank::processSpan4x(
                             v.currentLevel = 1.0f;
                         } else if (chaos > 0.02f && neighborRose != 0u && v.currentLevel < 0.0f &&
                                    v.phase >= syncCapturePhase) {
+                            const uint32_t incHighU32 =
+                                toPhaseIncU32(baseIncFloat * halfInvHigh[i]);
                             v.phase = (incHighU32 >> 1u);
                             addCubicBsplineBlep(v.blepResidual, 0.5f, 2.0f);
                             v.lastEdgePulse += 0.22f;
@@ -623,8 +632,8 @@ void SchmittOscillatorBank::processSpan4x(
                                 osc0WrapD = 0.5f;
                             }
                         } else {
-                            advanceNormalPhase(v, i, incHighU32, incLowU32, subRising, &osc0Wrapped,
-                                               &osc0WrapD);
+                            advanceNormalPhase(v, i, baseIncFloat, halfInvHigh[i], halfInvLow[i],
+                                               subRising, &osc0Wrapped, &osc0WrapD);
                         }
                     }
 

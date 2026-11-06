@@ -33,12 +33,15 @@ struct VoiceSnapshotBin {
 };
 static_assert(sizeof(VoiceSnapshotBin) == 30u, "VoiceSnapshotBin must be 30 bytes");
 
+inline constexpr uint8_t kSnapshotFlagOccupied = 0x01u;
+
 // CRC-verified 128-byte binary patch snapshot ready for FM-1 NVS flash (`slot_*`, ADR-025).
+// `flags & kSnapshotFlagOccupied`: 1 = valid stored scene, 0 = user-deleted (`EMPTY`) scene.
 struct PatchSnapshot {
     uint32_t crc32 = 0u;
     uint16_t circuitCouplingQ16 = 0u;
     uint8_t version = 1u;
-    uint8_t flags = 1u;
+    uint8_t flags = kSnapshotFlagOccupied;
     std::array<VoiceSnapshotBin, kNumOscillators> voices{};
 };
 static_assert(sizeof(PatchSnapshot) == 128u, "PatchSnapshot must be exactly 128 bytes");
@@ -52,6 +55,10 @@ struct PatchFrame {
 };
 
 PatchSnapshot encodePatchSnapshot(const EngineControlState& state) noexcept;
+PatchSnapshot makeEmptyPatchSnapshot() noexcept;
+constexpr bool isPatchSnapshotOccupied(const PatchSnapshot& snap) noexcept {
+    return (snap.flags & kSnapshotFlagOccupied) != 0u;
+}
 PatchFrame decodePatchSnapshot(const PatchSnapshot& snap) noexcept;
 bool verifyPatchSnapshotCrc(const PatchSnapshot& snap) noexcept;
 
@@ -68,6 +75,10 @@ class SnapshotBank {
     void reset() noexcept;
 
     uint8_t activeSlot() const noexcept { return activeSlot_; }
+    bool isSlotOccupied(size_t idx) const noexcept {
+        return isPatchSnapshotOccupied(slots_[idx & 3u]);
+    }
+    uint8_t occupiedMask() const noexcept;
     bool isDirty() const noexcept { return dirty_; }
     bool isTransitioning() const noexcept { return latchGliding_ || momentaryActive_; }
     float morphPosition() const noexcept { return morphPos_; }
@@ -76,6 +87,10 @@ class SnapshotBank {
 
     // Store current synthesis patch into slot 0..3 (`SAVE` + Key 13-16).
     void saveSlot(uint8_t slot, EngineControlState& state) noexcept;
+
+    // Clear slot 0..3 into a CRC-valid `EMPTY` state (`SAVE` -> `DELETE SCENE` + Key 13-16);
+    // returns true if the slot held a scene prior to deletion.
+    bool deleteSlot(uint8_t slot, EngineControlState& state) noexcept;
 
     // Load a CRC-verified binary snapshot from FM-1 NVS flash (`dinghy` `slot_*`) into slot 0..3;
     // returns false and preserves the existing/factory slot if `snap` fails version or CRC checks.

@@ -3265,6 +3265,24 @@ void testFm1TpdfDitherSpscRingAndUsbDriftResampler() {
         std::array<float, ruido::kBlockFrames> soloL{}, soloR{}, dualL{}, dualR{};
         std::array<ruido::ScopeFrame, ruido::kBlockFrames> drain{};
         for (int blk = 0; blk < 300; ++blk) {
+            if (blk == 100) {
+                // Switch to 1-voice nonlinear (Voice 0 active, Voices 1-3 parked -> 1+3 split)
+                auto oneSt = ruido::EngineControlState::makeDefault();
+                oneSt.voices[0] = st.voices[0];
+                soloEngine.controlBus().publish(oneSt);
+                dualEngine.controlBus().publish(oneSt);
+                soloEngine.snapParametersToLatest();
+                dualEngine.snapParametersToLatest();
+            } else if (blk == 200) {
+                // Switch to 2-voice nonlinear on Voices 0-1 (exercises asymmetric 2+2 pairing)
+                auto twoSt = ruido::EngineControlState::makeDefault();
+                twoSt.voices[0] = st.voices[0];
+                twoSt.voices[1] = st.voices[1];
+                soloEngine.controlBus().publish(twoSt);
+                dualEngine.controlBus().publish(twoSt);
+                soloEngine.snapParametersToLatest();
+                dualEngine.snapParametersToLatest();
+            }
             soloEngine.processBlock(soloL.data(), soloR.data(), ruido::kBlockFrames);
             dualEngine.processBlock(dualL.data(), dualR.data(), ruido::kBlockFrames);
             soloEngine.scopeBuffer().popBatch(drain.data(), drain.size());

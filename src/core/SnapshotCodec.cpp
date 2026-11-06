@@ -121,7 +121,7 @@ EngineControlState makeFactorySnapshotPreset(size_t slot) noexcept {
 PatchSnapshot encodePatchSnapshot(const EngineControlState& state) noexcept {
     PatchSnapshot snap{};
     snap.version = 1u;
-    snap.flags = 1u;
+    snap.flags = kSnapshotFlagOccupied;
     snap.circuitCouplingQ16 = quantizeNormQ16(state.global.circuitCoupling);
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
@@ -159,6 +159,14 @@ PatchSnapshot encodePatchSnapshot(const EngineControlState& state) noexcept {
         dst.flags = vp.muted ? 1u : 0u;
     }
 
+    snap.crc32 = computeSnapshotPayloadCrc32(snap);
+    return snap;
+}
+
+PatchSnapshot makeEmptyPatchSnapshot() noexcept {
+    PatchSnapshot snap{};
+    snap.version = 1u;
+    snap.flags = 0u;
     snap.crc32 = computeSnapshotPayloadCrc32(snap);
     return snap;
 }

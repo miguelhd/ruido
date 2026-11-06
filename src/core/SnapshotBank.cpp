@@ -8,13 +8,13 @@ namespace {
 
 inline size_t normalizeHeldWeights(const std::array<bool, kNumSnapshots>& held,
                                    const std::array<float, kNumSnapshots>& pressure,
-                                   std::array<float, kNumSnapshots>& outWeights,
+                                   uint8_t occMask, std::array<float, kNumSnapshots>& outWeights,
                                    float& outMaxP) noexcept {
     size_t count = 0u;
     float sumP = 0.0f;
     outMaxP = 0.0f;
     for (size_t s = 0u; s < kNumSnapshots; ++s) {
-        if (held[s]) {
+        if (held[s] && ((occMask & (1u << s)) != 0u)) {
             ++count;
             const float p = clampf(pressure[s], 0.02f, 1.0f);
             sumP += p;
@@ -25,7 +25,8 @@ inline size_t normalizeHeldWeights(const std::array<bool, kNumSnapshots>& held,
     }
     const float invSum = (sumP > 1.0e-5f) ? (1.0f / sumP) : 0.0f;
     for (size_t s = 0u; s < kNumSnapshots; ++s) {
-        outWeights[s] = held[s] ? (clampf(pressure[s], 0.02f, 1.0f) * invSum) : 0.0f;
+        const bool active = held[s] && ((occMask & (1u << s)) != 0u);
+        outWeights[s] = active ? (clampf(pressure[s], 0.02f, 1.0f) * invSum) : 0.0f;
     }
     return count;
 }
@@ -52,13 +53,23 @@ void SnapshotBank::reset() noexcept {
     momentaryActive_ = false;
 }
 
+uint8_t SnapshotBank::occupiedMask() const noexcept {
+    uint8_t mask = 0u;
+    for (size_t s = 0u; s < kNumSnapshots; ++s) {
+        if (isSlotOccupied(s)) {
+            mask |= static_cast<uint8_t>(1u << s);
+        }
+    }
+    return mask;
+}
+
 PatchFrame
 SnapshotBank::blendSlots(const std::array<float, kNumSnapshots>& normWeights) const noexcept {
     size_t domSlot = 0u;
     float domWeight = -1.0f;
     size_t nonZeroCount = 0u;
     for (size_t s = 0u; s < kNumSnapshots; ++s) {
-        if (normWeights[s] > 1.0e-4f) {
+        if (isSlotOccupied(s) && normWeights[s] > 1.0e-4f) {
             ++nonZeroCount;
             if (normWeights[s] > domWeight) {
                 domWeight = normWeights[s];
@@ -66,13 +77,16 @@ SnapshotBank::blendSlots(const std::array<float, kNumSnapshots>& normWeights) co
             }
         }
     }
-    if (nonZeroCount <= 1u) {
+    if (nonZeroCount == 0u) {
+        return originFrame_;
+    }
+    if (nonZeroCount == 1u) {
         return decodePatchSnapshot(slots_[domSlot]);
     }
 
     std::array<PatchFrame, kNumSnapshots> decoded{};
     for (size_t s = 0u; s < kNumSnapshots; ++s) {
-        if (normWeights[s] > 1.0e-4f) {
+        if (isSlotOccupied(s) && normWeights[s] > 1.0e-4f) {
             decoded[s] = decodePatchSnapshot(slots_[s]);
         }
     }
@@ -90,7 +104,7 @@ SnapshotBank::blendSlots(const std::array<float, kNumSnapshots>& normWeights) co
         bool allMuted = true;
 
         for (size_t s = 0u; s < kNumSnapshots; ++s) {
-            const float w = normWeights[s];
+            const float w = isSlotOccupied(s) ? normWeights[s] : 0.0f;
             if (w <= 1.0e-4f) {
                 continue;
             }
@@ -158,6 +172,49 @@ void SnapshotBank::saveSlot(uint8_t slot, EngineControlState& state) noexcept {
     targetWeights_ = slotWeights_;
 }
 
+bool SnapshotBank::deleteSlot(uint8_t slot, EngineControlState& state) noexcept {
+    const uint8_t idx = slot & 3u;
+    if (momentaryActive_) {
+        applyPatchFrame(originFrame_, state);
+        momentaryActive_ = false;
+        momentaryBlend_ = 0.0f;
+    }
+    if (latchGliding_) {
+        originFrame_ = extractPatchFrame(state);
+        latchGliding_ = false;
+        latchHybridHeld_ = false;
+        glideProgress_ = 1.0f;
+    }
+    const bool wasOccupied = isSlotOccupied(idx);
+    slots_[idx] = makeEmptyPatchSnapshot();
+    slotWeights_[idx] = 0.0f;
+    originWeights_[idx] = 0.0f;
+    targetWeights_[idx] = 0.0f;
+    if (idx == activeSlot_) {
+        slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
+        originWeights_ = slotWeights_;
+        targetWeights_ = slotWeights_;
+        morphPos_ = 0.0f;
+        dirty_ = true;
+    } else {
+        float sumW = 0.0f;
+        for (float w : slotWeights_) {
+            sumW += w;
+        }
+        if (sumW > 1.0e-5f) {
+            const float invSum = 1.0f / sumW;
+            for (float& w : slotWeights_) {
+                w *= invSum;
+            }
+        } else {
+            dirty_ = true;
+        }
+        originWeights_ = slotWeights_;
+        targetWeights_ = slotWeights_;
+    }
+    return wasOccupied;
+}
+
 bool SnapshotBank::loadSlotBinary(uint8_t slot, const PatchSnapshot& snap,
                                   EngineControlState& state) noexcept {
     if (!verifyPatchSnapshotCrc(snap)) {
@@ -165,15 +222,43 @@ bool SnapshotBank::loadSlotBinary(uint8_t slot, const PatchSnapshot& snap,
     }
     const uint8_t idx = slot & 3u;
     slots_[idx] = snap;
-    if (idx == activeSlot_ && !dirty_ && !isTransitioning()) {
-        originFrame_ = decodePatchSnapshot(slots_[idx]);
-        applyPatchFrame(originFrame_, state);
+    if (!isTransitioning()) {
+        if (idx == activeSlot_ && !dirty_) {
+            selectActiveSlotImmediate(activeSlot_, state);
+        } else if (!isSlotOccupied(activeSlot_) && isSlotOccupied(idx)) {
+            selectActiveSlotImmediate(idx, state);
+        }
     }
     return true;
 }
 
 void SnapshotBank::selectActiveSlotImmediate(uint8_t slot, EngineControlState& state) noexcept {
-    const uint8_t idx = slot & 3u;
+    uint8_t idx = slot & 3u;
+    if (!isSlotOccupied(idx)) {
+        const uint8_t mask = occupiedMask();
+        if (mask == 0u) {
+            activeSlot_ = 0u;
+            dirty_ = true;
+            latchGliding_ = false;
+            latchHybridHeld_ = false;
+            momentaryActive_ = false;
+            glideProgress_ = 1.0f;
+            momentaryBlend_ = 0.0f;
+            morphPos_ = 0.0f;
+            slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
+            originWeights_ = slotWeights_;
+            targetWeights_ = slotWeights_;
+            originFrame_ = extractPatchFrame(EngineControlState::makeDefault());
+            applyPatchFrame(originFrame_, state);
+            return;
+        }
+        for (uint8_t s = 0u; s < kNumSnapshots; ++s) {
+            if (isSlotOccupied(s)) {
+                idx = s;
+                break;
+            }
+        }
+    }
     activeSlot_ = idx;
     dirty_ = false;
     latchGliding_ = false;
@@ -193,12 +278,27 @@ void SnapshotBank::selectActiveSlotImmediate(uint8_t slot, EngineControlState& s
 void SnapshotBank::recallSlotStepped(uint8_t slot, KnobRate rate,
                                      EngineControlState& state) noexcept {
     const uint8_t idx = slot & 3u;
+    if (!isSlotOccupied(idx)) {
+        return;
+    }
     if (momentaryActive_) {
         momentaryActive_ = false;
         momentaryBlend_ = 0.0f;
     }
     originFrame_ = extractPatchFrame(state);
-    originWeights_ = slotWeights_;
+    float keptSum = 0.0f;
+    for (size_t s = 0u; s < kNumSnapshots; ++s) {
+        const float w = isSlotOccupied(s) ? slotWeights_[s] : 0.0f;
+        originWeights_[s] = (w >= 0.035f) ? w : 0.0f;
+        keptSum += originWeights_[s];
+    }
+    if (keptSum > 1.0e-5f) {
+        const float invSum = 1.0f / keptSum;
+        for (float& w : originWeights_) {
+            w *= invSum;
+        }
+    }
+    slotWeights_ = originWeights_;
     targetWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
     targetWeights_[idx] = 1.0f;
     activeSlot_ = idx;
@@ -215,14 +315,18 @@ void SnapshotBank::recallSlotStepped(uint8_t slot, KnobRate rate,
 bool SnapshotBank::onSnapKeysChanged(const std::array<bool, kNumSnapshots>& held,
                                      const std::array<float, kNumSnapshots>& pressure,
                                      KeySwitchMode snapMode, EngineControlState& state) noexcept {
+    const uint8_t occMask = occupiedMask();
     std::array<float, kNumSnapshots> normW{};
     float maxP = 0.0f;
-    const size_t heldCount = normalizeHeldWeights(held, pressure, normW, maxP);
+    const size_t heldCount = normalizeHeldWeights(held, pressure, occMask, normW, maxP);
     uint8_t domSlot = activeSlot_;
     float domP = -1.0f;
     bool anyRising = false;
 
     for (size_t s = 0u; s < kNumSnapshots; ++s) {
+        if ((occMask & (1u << s)) == 0u) {
+            continue;
+        }
         if (held[s] && !prevHeld_[s]) {
             anyRising = true;
         }
@@ -305,7 +409,8 @@ bool SnapshotBank::step(float dtSec, const std::array<bool, kNumSnapshots>& held
         } else {
             float maxP = 0.0f;
             std::array<float, kNumSnapshots> liveW{};
-            const size_t heldCount = normalizeHeldWeights(held, pressure, liveW, maxP);
+            const size_t heldCount =
+                normalizeHeldWeights(held, pressure, occupiedMask(), liveW, maxP);
             if (heldCount > 0u) {
                 targetWeights_ = liveW;
                 const float alphaAtk = 1.0f - fastExp2(-1.44269504f * dt * (1.0f / 0.032f));
@@ -318,7 +423,7 @@ bool SnapshotBank::step(float dtSec, const std::array<bool, kNumSnapshots>& held
                     momentaryActive_ = false;
                     morphPos_ = dirty_ ? 0.0f : 1.0f;
                     slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
-                    if (!dirty_) {
+                    if (!dirty_ && isSlotOccupied(activeSlot_)) {
                         slotWeights_[activeSlot_] = 1.0f;
                     }
                     applyPatchFrame(originFrame_, state);
@@ -344,7 +449,7 @@ bool SnapshotBank::step(float dtSec, const std::array<bool, kNumSnapshots>& held
         float maxHeldP = 0.0f;
         size_t heldCount = 0u;
         for (size_t s = 0u; s < kNumSnapshots; ++s) {
-            if (held[s]) {
+            if (held[s] && isSlotOccupied(s)) {
                 ++heldCount;
                 if (pressure[s] > maxHeldP) {
                     maxHeldP = pressure[s];
@@ -380,8 +485,14 @@ bool SnapshotBank::step(float dtSec, const std::array<bool, kNumSnapshots>& held
 
     const float eased = smoothstep01(glideProgress_);
     morphPos_ = eased;
+    // Endpoint deadband on visual scene weights keeps intermediate detents brushed past on
+    // `PRESETS` locked at 0% (eliminating `0% -> 1% -> 0%` wobble) while audio morphs continuously.
+    const float wEased = (eased < 0.015f) ? 0.0f : ((eased > 0.985f) ? 1.0f : eased);
     for (size_t s = 0u; s < kNumSnapshots; ++s) {
-        slotWeights_[s] = originWeights_[s] + eased * (targetWeights_[s] - originWeights_[s]);
+        slotWeights_[s] =
+            isSlotOccupied(s)
+                ? (originWeights_[s] + wEased * (targetWeights_[s] - originWeights_[s]))
+                : 0.0f;
     }
     applyPatchFrame(morphPatchFrames(originFrame_, targetFrame, eased), state);
     return true;
@@ -406,7 +517,7 @@ bool SnapshotBank::cancelMomentaryIfActive(EngineControlState& state) noexcept {
     momentaryBlend_ = 0.0f;
     morphPos_ = dirty_ ? 0.0f : 1.0f;
     slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
-    if (!dirty_) {
+    if (!dirty_ && isSlotOccupied(activeSlot_)) {
         slotWeights_[activeSlot_] = 1.0f;
     }
     applyPatchFrame(originFrame_, state);
@@ -415,6 +526,7 @@ bool SnapshotBank::cancelMomentaryIfActive(EngineControlState& state) noexcept {
 
 void SnapshotBank::syncHud(HudState& hud) const noexcept {
     hud.snapshotSlot = activeSlot_;
+    hud.snapshotOccupiedMask = occupiedMask();
     hud.snapshotWeights = slotWeights_;
     hud.morphPosition = morphPos_;
     hud.snapshotDirty = dirty_;

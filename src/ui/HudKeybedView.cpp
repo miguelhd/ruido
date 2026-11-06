@@ -83,19 +83,39 @@ inline void fillStadiumSDF(const MonoStripCanvas& cv, float x0, float y0, float 
     const float alphaScale =
         static_cast<float>(maxAlpha8) * (static_cast<float>(cv.masterAlpha8) * (1.0f / 255.0f));
 
+    const auto interiorA8 = static_cast<uint8_t>(alphaScale + 0.5f);
+    const float fillBase = static_cast<float>(fillGray);
+    const float borderDelta = static_cast<float>(borderGray) - fillBase;
+    const float innerThresh = (r < 1.15f) ? (r - 1.15f) : 0.0f;
+
     for (int py = py0; py <= py1; ++py) {
-        const float fy = static_cast<float>(py);
+        const float dy = absf(static_cast<float>(py) - cy) - hy;
+        const float qy = (dy > 0.0f) ? dy : 0.0f;
+        const float qy2 = qy * qy;
+        const bool rowInner = (dy <= innerThresh);
         uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
         for (int px = px0; px <= px1; ++px) {
-            const float d = sdfRoundedBox(static_cast<float>(px), fy, cx, cy, hx, hy, r);
+            const float dx = absf(static_cast<float>(px) - cx) - hx;
+            if (rowInner && dx <= innerThresh) {
+                if (interiorA8 > 0u) {
+                    row[px] = blendLum8(row[px], fillGray, interiorA8);
+                }
+                continue;
+            }
+            float d;
+            if (dx <= 0.0f && dy <= 0.0f) {
+                d = ((dx > dy) ? dx : dy) - r;
+            } else {
+                const float qx = (dx > 0.0f) ? dx : 0.0f;
+                const float q2 = qx * qx + qy2;
+                d = ((q2 > 1.0e-6f) ? (q2 * fastInvSqrt(q2)) : 0.0f) - r;
+            }
             if (d >= 0.65f) {
                 continue;
             }
             const float outerCov = clampf(0.55f - d, 0.0f, 1.0f);
             const float rimMix = clampf(1.15f + d, 0.0f, 1.0f);
-            const float grayF =
-                static_cast<float>(fillGray) +
-                (static_cast<float>(borderGray) - static_cast<float>(fillGray)) * rimMix;
+            const float grayF = fillBase + borderDelta * rimMix;
             const auto a8 = static_cast<uint8_t>(outerCov * alphaScale + 0.5f);
             if (a8 > 0u) {
                 row[px] = blendLum8(row[px], static_cast<uint8_t>(grayF + 0.5f), a8);
@@ -377,7 +397,10 @@ void HudKeybedView::update(float dtClamped, const EngineControlState& control,
     }
     for (size_t i = kNumOscillators; i < kNumWhiteKeys; ++i) {
         if (((rawHud.heldWhiteMask >> i) & 1u) != 0u) {
-            tgtWhite[i] = 1.0f;
+            const bool emptySnapKey = (i >= 12u) &&
+                                      (rawHud.keyboardModel == KeyboardModel::LiveMixer) &&
+                                      ((rawHud.snapshotOccupiedMask & (1u << (i - 12u))) == 0u);
+            tgtWhite[i] = emptySnapKey ? 0.15f : 1.0f;
         }
     }
 

@@ -237,14 +237,137 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     }
     RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::MasterLevel);
 
-    // (b) SELECT unassigned when idle vs PRESETS stepped SNAP 1..4 recall & glide
+    // (b) Idle SELECT steps ScopeTimebase (4X..1/8X) with stationary scroll indicator + CRT recoil
     ctrl.reset();
+    RTEST_CHECK(ctrl.hud().scopeTimebase == ruido::ScopeTimebase::Auto);
+    RTEST_CHECK(std::strcmp(ruido::scopeTimebaseLabel(ruido::ScopeTimebase::Zoom4x), "4X") == 0);
+    RTEST_CHECK(std::strcmp(ruido::scopeTimebaseLabel(ruido::ScopeTimebase::Zoom2x), "2X") == 0);
+    RTEST_CHECK(std::strcmp(ruido::scopeTimebaseLabel(ruido::ScopeTimebase::Auto), "AUTO") == 0);
+    RTEST_CHECK(std::strcmp(ruido::scopeTimebaseLabel(ruido::ScopeTimebase::Wide2x), "1/2X") == 0);
+    RTEST_CHECK(std::strcmp(ruido::scopeTimebaseLabel(ruido::ScopeTimebase::Wide4x), "1/4X") == 0);
+    RTEST_CHECK(std::strcmp(ruido::scopeTimebaseLabel(ruido::ScopeTimebase::Wide8x), "1/8X") == 0);
+
+    const auto findHeaderBarLeftX = [&](const ruido::HudState& h, int scanStartX) -> int {
+        ruido::ScopeHudRenderer tbRend;
+        tbRend.prepareFrame(0.016f, silentSt, h, tel);
+        std::array<uint16_t, 240u * 24u> strip{};
+        tbRend.renderStrip(0u, 24u, strip.data());
+        for (int x = scanStartX; x < 200; ++x) {
+            if (((strip[13u * 240u + static_cast<size_t>(x)] >> 5u) & 0x3Fu) > 0u) {
+                return x;
+            }
+        }
+        return -1;
+    };
+    const auto findScopeBarLeftX = [&](ruido::ScopeTimebase tb) -> int {
+        ruido::HudState tbHud = ctrl.hud();
+        tbHud.mode = ruido::HudMode::ScopeTimebase;
+        tbHud.opacity = 1.0f;
+        tbHud.scopeTimebase = tb;
+        return findHeaderBarLeftX(tbHud, 135);
+    };
+    const int barLeft2x = findScopeBarLeftX(ruido::ScopeTimebase::Zoom2x);
+    const int barLeftAuto = findScopeBarLeftX(ruido::ScopeTimebase::Auto);
+    const int barLeftHalf = findScopeBarLeftX(ruido::ScopeTimebase::Wide2x);
+    const int barLeftEighth = findScopeBarLeftX(ruido::ScopeTimebase::Wide8x);
+    RTEST_CHECK(barLeftAuto > 140);
+    RTEST_CHECK(barLeft2x == barLeftAuto);
+    RTEST_CHECK(barLeftHalf == barLeftAuto);
+    RTEST_CHECK(barLeftEighth == barLeftAuto);
+
+    // Scene glide ("20%" vs "100%"), MasterTempo ("25.5 BPM" vs "1920 BPM"), and KeyboardPlay
+    // ("2.4 Hz" vs "24.0 Hz", "9.9 kHz" vs "400 Hz", "/2" vs "X8", "3/16" vs "16/16") keep barXf
+    // stationary too:
+    {
+        ruido::HudState snapA = ctrl.hud();
+        snapA.mode = ruido::HudMode::SnapshotSlot;
+        snapA.opacity = 1.0f;
+        snapA.snapshotGliding = true;
+        snapA.morphPosition = 0.20f;
+        ruido::HudState snapB = snapA;
+        snapB.morphPosition = 1.00f;
+        RTEST_CHECK(findHeaderBarLeftX(snapA, 120) == findHeaderBarLeftX(snapB, 120));
+
+        ruido::HudState bpmA = ctrl.hud();
+        bpmA.mode = ruido::HudMode::MasterTempo;
+        bpmA.opacity = 1.0f;
+        bpmA.effectiveClockBpm = 55.5f;
+        ruido::HudState bpmB = bpmA;
+        bpmB.effectiveClockBpm = 120.0f;
+        ruido::HudState bpmC = bpmA;
+        bpmC.effectiveClockBpm = 1920.0f;
+        const int bpmLeftA = findHeaderBarLeftX(bpmA, 90);
+        RTEST_CHECK(bpmLeftA == findHeaderBarLeftX(bpmB, 90));
+        RTEST_CHECK(bpmLeftA == findHeaderBarLeftX(bpmC, 90));
+
+        const auto checkPunchStationary = [&](ruido::KeyPunchKind kind, float vLow, float vHigh,
+                                              int scanX) {
+            ruido::HudState pA = ctrl.hud();
+            pA.mode = ruido::HudMode::KeyboardPlay;
+            pA.opacity = 1.0f;
+            pA.activePunch = kind;
+            pA.activePunchValue = vLow;
+            ruido::HudState pB = pA;
+            pB.activePunchValue = vHigh;
+            RTEST_CHECK(findHeaderBarLeftX(pA, scanX) == findHeaderBarLeftX(pB, scanX));
+        };
+        checkPunchStationary(ruido::KeyPunchKind::VoiceStutter, 0.20f, 1.00f, 125);
+        checkPunchStationary(ruido::KeyPunchKind::VoiceCrush, 0.20f, 0.90f, 125);
+        checkPunchStationary(ruido::KeyPunchKind::VoiceDivide, 0.20f, 0.90f, 140);
+        checkPunchStationary(ruido::KeyPunchKind::VoiceEuclid, 0.20f, 1.00f, 130);
+    }
+
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     ctrl.tick(0.200f, tel);
-    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::UnassignedEncoder);
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::ScopeTimebase);
+    RTEST_CHECK(ctrl.hud().scopeTimebase == ruido::ScopeTimebase::Wide2x);
+    RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::None);
     RTEST_CHECK(ctrl.hud().lastEncoder == ruido::EncoderId::Select);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 16);
+    RTEST_CHECK(ctrl.hud().scopeTimebase == ruido::ScopeTimebase::Wide8x);
     renderer.prepareFrame(0.016f, silentSt, ctrl.hud(), tel);
     renderer.renderStrip(0u, 24u, hdrRateOnly.data());
+
+    // Phantom pin touch on flatline (ENV..REC): deflects CRT trace, keeps 8/16-row strip parity,
+    // and settles back to exact flatline after ~0.40 s without waking any HUD mode!
+    {
+        ruido::ScopeHudRenderer pinRendA;
+        ruido::ScopeHudRenderer pinRendB;
+        ruido::HudState pinHud{};
+        std::array<uint16_t, 240u * 32u> baseBand{};
+        std::array<uint16_t, 240u * 32u> rippleBand16{};
+        std::array<uint16_t, 240u * 32u> rippleBand8{};
+        std::array<uint16_t, 240u * 32u> settledBand{};
+        pinRendA.prepareFrame(0.016f, silentSt, pinHud, tel);
+        pinRendA.renderStrip(104u, 32u, baseBand.data());
+
+        pinHud.phantomPinIndex = 2u; // SEQ
+        pinHud.phantomPinSeq = 1u;
+        pinRendA.prepareFrame(0.016f, silentSt, pinHud, tel);
+        pinRendB.prepareFrame(0.016f, silentSt, pinHud, tel);
+        pinRendA.renderStrip(104u, 16u, rippleBand16.data());
+        pinRendA.renderStrip(120u, 16u, rippleBand16.data() + 240u * 16u);
+        for (uint16_t s = 0u; s < 4u; ++s) {
+            pinRendB.renderStrip(static_cast<uint16_t>(104u + s * 8u), 8u,
+                                 rippleBand8.data() + static_cast<size_t>(s) * 240u * 8u);
+        }
+        size_t rippleDiffs = 0u;
+        for (size_t i = 0u; i < baseBand.size(); ++i) {
+            RTEST_CHECK(rippleBand16[i] == rippleBand8[i]);
+            if (rippleBand16[i] != baseBand[i]) {
+                ++rippleDiffs;
+            }
+        }
+        RTEST_CHECK(rippleDiffs > 120u);
+
+        for (int f = 0; f < 24; ++f) {
+            pinRendA.prepareFrame(0.020f, silentSt, pinHud, tel);
+        }
+        pinRendA.renderStrip(104u, 32u, settledBand.data());
+        for (size_t i = 0u; i < baseBand.size(); ++i) {
+            RTEST_CHECK(settledBand[i] == baseBand[i]);
+        }
+    }
 
     ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4); // Step SNAP 1 -> SNAP 2
     ctrl.tick(0.200f, tel);
@@ -1515,7 +1638,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
             const int slots[3] = {cx - 8, cx + 2, cx + 8};
             for (int sx : slots) {
                 const uint32_t g = g6At(amp8, sx, kModY);
-                RTEST_CHECK(g >= 14u && g <= 18u);
+                RTEST_CHECK(g >= 8u && g <= 12u);
                 RTEST_CHECK(neighborSum(amp8, sx, kModY) == 0u);
             }
         }
@@ -1529,7 +1652,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         }
         RTEST_CHECK(dryZeroDiff);
 
-        // Non-FREQUENCY pages (`EDIT`) hide the modulator status row cleanly
+        // Non-FREQUENCY pages (`EDIT`), transient unlatched `KNOB 1` turns (`freqPageOpen ==
+        // false`), and `KnobBankMode::Frequency` keybed screens like `MUTE` & `SOLO` (even when
+        // pressed on top of latched `HOME`!) ALL hide the `y = 234` modulator status row cleanly:
         ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
         ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
         for (int f = 0; f < 16; ++f) {
@@ -1541,7 +1666,26 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         RTEST_CHECK(g6At(clean16, 32, kModY) == 0u);
         RTEST_CHECK(g6At(clean16, 38, kModY) == 0u);
 
-        // Return to latched HOME (`FREQUENCY`)
+        // Close EDIT -> idle -> turn KNOB 1 (unlatched VoiceFrequency toast, freqPageOpen == false)
+        ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+        ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+        for (int f = 0; f < 12; ++f) {
+            ctrl.tick(0.02f, modTel);
+            renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
+        }
+        ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4);
+        RTEST_CHECK(!ctrl.hud().freqPageOpen &&
+                    ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
+        for (int f = 0; f < 10; ++f) {
+            ctrl.tick(0.02f, modTel);
+            renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
+        }
+        renderer.renderFullScreenStrips(clean16.data());
+        RTEST_CHECK(g6At(clean16, 22, kModY) == 0u);
+        RTEST_CHECK(g6At(clean16, 32, kModY) == 0u);
+        RTEST_CHECK(g6At(clean16, 38, kModY) == 0u);
+
+        // Dismiss toast -> Return to latched HOME (`FREQUENCY`)
         ctrl.onButtonEvent(ruido::ButtonId::Home, true);
         ctrl.onButtonEvent(ruido::ButtonId::Home, false);
         for (int f = 0; f < 12; ++f) {
@@ -1555,6 +1699,28 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
             ctrl.tick(0.02f, modTel);
             renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
         }
+
+        // Pressing MUTE 1 (white 0) or SOLO 1 (OP1) — even while HOME is latched open — hides the
+        // modulator dots on the MUTE/SOLO screen and restores them upon key release:
+        ctrl.onWhiteKeyPressure(0u, 0.80f); // MUTE 1
+        ctrl.tick(0.02f, modTel);
+        renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
+        renderer.renderFullScreenStrips(clean16.data());
+        RTEST_CHECK(g6At(clean16, 22, kModY) == 0u && g6At(clean16, 32, kModY) == 0u &&
+                    g6At(clean16, 38, kModY) == 0u);
+        ctrl.onWhiteKeyGate(0u, false);
+
+        ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op1, 0.80f); // SOLO 1
+        ctrl.tick(0.02f, modTel);
+        renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
+        renderer.renderFullScreenStrips(clean16.data());
+        RTEST_CHECK(g6At(clean16, 22, kModY) == 0u && g6At(clean16, 32, kModY) == 0u &&
+                    g6At(clean16, 38, kModY) == 0u);
+        ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
+        ctrl.tick(0.02f, modTel);
+        renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
+        renderer.renderFullScreenStrips(clean16.data());
+        RTEST_CHECK(g6At(clean16, 22, kModY) >= 8u);
 
         // 2. Dial OSC 1 LPF below 28 kHz with 0% LFO depth -> FX button LED breathes steadily at
         //    0.25 Hz and ONLY OSC 1's left (`FX`) slot promotes to a tertiary circle (`g6 <= 44`)
@@ -1586,7 +1752,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
             renderer.prepareFrame(0.10f, ctrl.state(), ctrl.hud(), modTel);
             renderer.renderFullScreenStrips(amp24.data());
             const float fxLed = ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)];
-            RTEST_CHECK(fxLed > 0.15f && fxLed <= 0.85f);
+            RTEST_CHECK(fxLed > 0.15f && fxLed <= 0.375f);
             if (fxLed < minFxLed) {
                 minFxLed = fxLed;
             }
@@ -1600,8 +1766,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
             if (cG6 > maxFxG6) {
                 maxFxG6 = cG6;
             }
-            // Active tertiary cap: solid multi-pixel circle, strictly capped well below 100% white
-            RTEST_CHECK(cG6 >= 24u && cG6 <= 44u);
+            // Active tertiary cap: solid multi-pixel circle, strictly subordinate even to secondary
+            // labels (`g6 = 38`) and primary readouts (`g6 = 56..63`)
+            RTEST_CHECK(cG6 >= 12u && cG6 <= 25u);
             RTEST_CHECK(neighborSum(amp24, 22, kModY) >= 40u);
             // OSC 1 LFO A/B and OSC 2-4 all remain crisp 1x1 muted dots
             RTEST_CHECK(neighborSum(amp24, 32, kModY) == 0u);
@@ -1650,9 +1817,10 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         renderer.renderFullScreenStrips(amp16.data());
         const float lfoLedHi = ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)];
 
+        RTEST_CHECK(lfoLedLo >= 0.15f && lfoLedHi <= 0.375f);
         RTEST_CHECK(lfoLedHi > lfoLedLo + 0.12f);
-        RTEST_CHECK(g6At(amp16, 98, kModY) > g6At(amp8, 98, kModY) + 6u);
-        RTEST_CHECK(g6At(amp16, 98, kModY) <= 44u);
+        RTEST_CHECK(g6At(amp16, 98, kModY) > g6At(amp8, 98, kModY) + 4u);
+        RTEST_CHECK(g6At(amp16, 98, kModY) <= 25u);
         RTEST_CHECK(neighborSum(amp16, 98, kModY) >= 40u);
         // Sibling `LFO A` on OSC 2 (`92, 234`) stays a crisp 1x1 placeholder dot
         RTEST_CHECK(neighborSum(amp16, 92, kModY) == 0u);
@@ -2664,6 +2832,153 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     }
     RTEST_CHECK(!ctrl.hud().snapshotGliding);
     RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, 55.0f, 0.05f));
+
+    // (f) Scrolling PRESETS rapidly across multiple detents (1 -> 2 -> 3 -> 4 at ~33 ms/detent)
+    //     never blips brushed-past intermediate scenes to "1%" or wobbles 0% <-> 1%:
+    ctrl.reset();
+    {
+        ruido::LfoSignalArray zeroLfo{};
+        ruido::GlobalColumnSummary gs{};
+        char rl[12]{}, vs[16]{};
+        // Step 1 -> 2, advance 2 frames (33.3 ms), then step -> 3, 2 frames, then -> 4
+        ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4); // -> Scene 2
+        ctrl.tick(0.0166f, tel);
+        ctrl.tick(0.0166f, tel);
+        ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, 0x0Fu, 1u, rl,
+                                        sizeof(rl), vs, sizeof(vs), gs);
+        RTEST_CHECK(std::strcmp(vs, "0%") == 0);
+        ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4); // -> Scene 3
+        ctrl.tick(0.0166f, tel);
+        ctrl.tick(0.0166f, tel);
+        ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4); // -> Scene 4
+        for (int f = 0; f < 40; ++f) {
+            ctrl.tick(0.0166f, tel);
+            // Passed-through Scenes 2 & 3 stay rock-solid at "0%" for the entire glide!
+            ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, 0x0Fu, 1u, rl,
+                                            sizeof(rl), vs, sizeof(vs), gs);
+            RTEST_CHECK(std::strcmp(vs, "0%") == 0);
+            ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, 0x0Fu, 2u, rl,
+                                            sizeof(rl), vs, sizeof(vs), gs);
+            RTEST_CHECK(std::strcmp(vs, "0%") == 0);
+        }
+    }
+
+    // (g) Scene Deletion (`SAVE` -> `SELECT` -> `"DELETE SCENE"` + Key 13-16), skipping `EMPTY`
+    //     slots on `PRESETS` & `LIVE MIXER`, deleting all 4 scenes, & NVS reboot persistence:
+    ctrl.reset();
+    ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+    RTEST_CHECK(ctrl.hud().saveArmed && !ctrl.hud().saveDeleteMode);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // STORE SCENE -> DELETE SCENE
+    RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().saveDeleteMode);
+    {
+        char lm[24]{}, ls[16]{}, rt[32]{};
+        bool sb = false;
+        float bn = 0.0f;
+        ruido::formatSnapshotHeader(ctrl.hud(), lm, sizeof(lm), ls, sizeof(ls), rt, sizeof(rt), sb,
+                                    bn);
+        RTEST_CHECK(std::strcmp(lm, "DELETE SCENE") == 0);
+        RTEST_CHECK(std::strcmp(rt, "TAP SCENE 1-4") == 0);
+    }
+    // Delete SCENE 2 (white key 13) -> slot 1 becomes EMPTY with valid CRC-32
+    ctrl.onWhiteKeyGate(13u, true);
+    ctrl.onWhiteKeyGate(13u, false);
+    RTEST_CHECK(!ctrl.hud().saveArmed && !ctrl.hud().saveDeleteMode);
+    RTEST_CHECK(ctrl.hud().snapshotDeletedToast);
+    RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == 0x0Du); // Scenes 1, 3, 4 occupied
+    RTEST_CHECK(ruido::verifyPatchSnapshotCrc(ctrl.snapshots().slotBinary(1u)));
+    RTEST_CHECK(!ruido::isPatchSnapshotOccupied(ctrl.snapshots().slotBinary(1u)));
+    RTEST_CHECK((ctrl.consumeSavedSlotMask() & (1u << 1u)) != 0u);
+    {
+        char lm[24]{}, ls[16]{}, rt[32]{}, rl[12]{}, vs[16]{};
+        bool sb = false;
+        float bn = 0.0f;
+        ruido::GlobalColumnSummary gs{};
+        ruido::LfoSignalArray zeroLfo{};
+        ruido::formatSnapshotHeader(ctrl.hud(), lm, sizeof(lm), ls, sizeof(ls), rt, sizeof(rt), sb,
+                                    bn);
+        RTEST_CHECK(std::strcmp(lm, "SCENE") == 0 && std::strcmp(ls, " 2") == 0 &&
+                    std::strcmp(rt, "DELETED") == 0);
+        ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, 0x0Fu, 1u, rl,
+                                        sizeof(rl), vs, sizeof(vs), gs);
+        RTEST_CHECK(gs.disabled && std::strcmp(vs, "EMPTY") == 0);
+    }
+    quietSt = ctrl.state();
+    quietSt.global.masterRun = false;
+    quietSt.global.masterTrim = 0.0f;
+    for (int f = 0; f < 6; ++f) {
+        ctrl.tick(0.020f, tel);
+        renderer.prepareFrame(0.020f, quietSt, ctrl.hud(), tel);
+    }
+    checkStripAndMono();
+
+    // Turning PRESETS +1 detent from SCENE 1 skips deleted SCENE 2 and lands directly on SCENE 3!
+    ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4);
+    RTEST_CHECK(ctrl.hud().snapshotSlot == 2u);
+    for (int f = 0; f < 30; ++f) {
+        ctrl.tick(0.020f, tel);
+    }
+    const float scene3Hz = ctrl.state().voices[0].frequencyHz;
+    RTEST_CHECK(nearF(scene3Hz, 27.5f, 0.05f));
+
+    // Tapping empty SCENE 2 key (white 13) on LIVE MIXER shows "SCENE 2 · EMPTY" without altering
+    // live Scene 3 audio!
+    ctrl.onWhiteKeyPressure(13u, 0.90f);
+    ctrl.tick(0.016f, tel);
+    {
+        char lm[24]{}, ls[16]{}, rt[32]{};
+        bool sb = false;
+        float bn = 0.0f;
+        ruido::formatKeybedTopHeader(ctrl.hud(), lm, sizeof(lm), ls, sizeof(ls), rt, sizeof(rt), sb,
+                                     bn);
+        RTEST_CHECK(std::strcmp(lm, "SCENE") == 0 && std::strcmp(ls, " 2") == 0 &&
+                    std::strcmp(rt, "EMPTY") == 0 && !sb);
+    }
+    RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, scene3Hz, 0.05f));
+    ctrl.onWhiteKeyGate(13u, false);
+    ctrl.tick(0.016f, tel);
+
+    // Deleting the currently active scene (SCENE 3) leaves live panel audio uninterrupted, and
+    // deleting remaining scenes (1 & 4) reaches "SCENES · ALL EMPTY" cleanly:
+    for (uint8_t s : {2u, 0u, 3u}) {
+        ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+        ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+        ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+        ctrl.onWhiteKeyGate(static_cast<uint8_t>(12u + s), true);
+        ctrl.onWhiteKeyGate(static_cast<uint8_t>(12u + s), false);
+    }
+    RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == 0u);
+    RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, scene3Hz, 0.05f));
+    ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4);
+    {
+        char lm[24]{}, ls[16]{}, rt[32]{};
+        bool sb = false;
+        float bn = 0.0f;
+        ruido::formatSnapshotHeader(ctrl.hud(), lm, sizeof(lm), ls, sizeof(ls), rt, sizeof(rt), sb,
+                                    bn);
+        RTEST_CHECK(std::strcmp(lm, "SCENES") == 0 && std::strcmp(rt, "ALL EMPTY") == 0);
+    }
+
+    // Re-saving into SCENE 2 restores occupation, and NVS boot reload preserves deleted slots:
+    ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+    ctrl.onWhiteKeyGate(13u, true);
+    ctrl.onWhiteKeyGate(13u, false);
+    RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == (1u << 1u));
+    const std::array<ruido::PatchSnapshot, 4> nvsSlots = {
+        ctrl.snapshots().slotBinary(0u), ctrl.snapshots().slotBinary(1u),
+        ctrl.snapshots().slotBinary(2u), ctrl.snapshots().slotBinary(3u)};
+    const ruido::DeviceSettingsBlob nvsBlob = ctrl.exportSettings();
+
+    ctrl.reset();
+    RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == 0x0Fu);
+    for (uint8_t s = 0u; s < 4u; ++s) {
+        RTEST_CHECK(ctrl.loadSnapshotSlot(s, nvsSlots[s]));
+    }
+    RTEST_CHECK(ctrl.loadSettings(nvsBlob));
+    RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == (1u << 1u));
+    RTEST_CHECK(ctrl.hud().snapshotSlot == 1u);
+    RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, scene3Hz, 0.05f));
 #undef RTEST_CHECK
 }
 

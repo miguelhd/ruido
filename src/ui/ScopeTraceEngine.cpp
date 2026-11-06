@@ -6,6 +6,28 @@
 
 namespace ruido {
 
+namespace {
+constexpr float baseStrideForTimebase(ScopeTimebase tb, bool bassZoom2x) noexcept {
+    switch (tb) {
+    case ScopeTimebase::Zoom4x:
+        return 0.25f;
+    case ScopeTimebase::Zoom2x:
+        return 0.50f;
+    case ScopeTimebase::Auto:
+        return bassZoom2x ? 2.0f : 1.0f;
+    case ScopeTimebase::Wide2x:
+        return 2.0f;
+    case ScopeTimebase::Wide4x:
+        return 4.0f;
+    case ScopeTimebase::Wide8x:
+        return 8.0f;
+    case ScopeTimebase::Count:
+        break;
+    }
+    return bassZoom2x ? 2.0f : 1.0f;
+}
+} // namespace
+
 void ScopeTraceEngine::reset() noexcept {
     history_.fill({});
     historyWrite_ = 0u;
@@ -79,7 +101,8 @@ void ScopeTraceEngine::pushScopeSamples(const ScopeFrame* frames, size_t count,
 }
 
 void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState& control,
-                                          bool scopeFrozen, uint8_t stutterGateMask) noexcept {
+                                          bool scopeFrozen, uint8_t stutterGateMask,
+                                          ScopeTimebase timebase) noexcept {
     if (scopeFrozen && scopeValid_) {
         return;
     }
@@ -109,7 +132,7 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
         }
     }
 
-    const float targetStride = bassZoom2x_ ? 2.0f : 1.0f;
+    const float targetStride = baseStrideForTimebase(timebase, bassZoom2x_);
     if (!phosphorPrimed_) {
         smoothStride_ = targetStride;
     } else {
@@ -118,14 +141,21 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
     }
 
     constexpr size_t kTrigPt = 120u;
-    constexpr size_t kLeftSpan = kTrigPt * 2u + 8u;
-    constexpr size_t kRightSpan = (kTracePoints - kTrigPt) * 2u + 44u;
+    constexpr size_t kMinLeftSpan = kTrigPt * 2u + 8u;
+    constexpr size_t kMinRightSpan = (kTracePoints - kTrigPt) * 2u + 44u;
 
-    if (historyCount_ < kLeftSpan + kRightSpan + 8u) {
+    if (historyCount_ < kMinLeftSpan + kMinRightSpan + 8u) {
         phosphorPrimed_ = true;
         scopeValid_ = true;
         return;
     }
+
+    const float maxFitStride =
+        clampf(static_cast<float>(historyCount_ - 64u) * (1.0f / 242.0f), 2.0f, 8.0f);
+    const float effStride = (smoothStride_ > maxFitStride) ? maxFitStride : smoothStride_;
+    const size_t strideCeil = (effStride > 2.0f) ? static_cast<size_t>(effStride + 0.999f) : 2u;
+    const size_t leftSpan = kTrigPt * strideCeil + 8u;
+    const size_t rightSpan = (kTracePoints - kTrigPt) * strideCeil + 44u;
 
     const bool streamStalled = (timeSinceScopePushSec_ > 0.065f);
 
@@ -134,12 +164,12 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
     std::array<std::array<float, kTracePoints>, kNumOscillators> voiceCur{};
     std::array<float, kNumOscillators> voicePeak{0.0f, 0.0f, 0.0f, 0.0f};
     float busPeak = 0.0f;
-    size_t chosenTrigInt = (historyWrite_ - kRightSpan) & kHistoryMask;
+    size_t chosenTrigInt = (historyWrite_ - rightSpan) & kHistoryMask;
     float totalShift = 0.0f;
 
     if (!streamStalled) {
-        const size_t latestEdgeLimit = (historyWrite_ - kRightSpan) & kHistoryMask;
-        const size_t maxBack = historyCount_ - kLeftSpan - kRightSpan;
+        const size_t latestEdgeLimit = (historyWrite_ - rightSpan) & kHistoryMask;
+        const size_t maxBack = historyCount_ - leftSpan - rightSpan;
         const size_t searchLen = (maxBack > 3480u) ? 3480u : maxBack;
 
         struct TrigCandidate {
@@ -203,8 +233,8 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
                     const float relOff =
                         cFrac + static_cast<float>(static_cast<int>(10u + k * 20u) -
                                                    static_cast<int>(kTrigPt)) *
-                                    smoothStride_;
-                    const int relFloor = static_cast<int>(relOff + 512.0f) - 512;
+                                    effStride;
+                    const int relFloor = static_cast<int>(relOff + 2048.0f) - 2048;
                     const float relFrac = clampf(relOff - static_cast<float>(relFloor), 0.0f, 1.0f);
                     const size_t p0 =
                         (cTrig + static_cast<size_t>(relFloor + static_cast<int>(kHistorySize))) &
@@ -239,8 +269,8 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
 
         for (size_t pt = 0u; pt < kTracePoints; ++pt) {
             const float relOff =
-                totalShift + (static_cast<float>(pt) - static_cast<float>(kTrigPt)) * smoothStride_;
-            const int offFloor = static_cast<int>(relOff + 512.0f) - 512;
+                totalShift + (static_cast<float>(pt) - static_cast<float>(kTrigPt)) * effStride;
+            const int offFloor = static_cast<int>(relOff + 2048.0f) - 2048;
             const float frac = clampf(relOff - static_cast<float>(offFloor), 0.0f, 1.0f);
             const size_t base =
                 (chosenTrigInt + static_cast<size_t>(offFloor + static_cast<int>(kHistorySize))) &
@@ -357,8 +387,8 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
     const float voiceVisGain = 1.12f + 0.24f * soloFactor;
     const float busSympathy = 0.22f * (1.0f - soloFactor);
 
-    const float startRelOff = totalShift - static_cast<float>(kTrigPt) * smoothStride_;
-    const int startOffFloor = static_cast<int>(startRelOff + 512.0f) - 512;
+    const float startRelOff = totalShift - static_cast<float>(kTrigPt) * effStride;
+    const int startOffFloor = static_cast<int>(startRelOff + 2048.0f) - 2048;
     const size_t startIdx =
         (chosenTrigInt + static_cast<size_t>(startOffFloor + static_cast<int>(kHistorySize))) &
         kHistoryMask;
@@ -366,12 +396,12 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
     const size_t preAvailSamples = streamStalled ? 0u : ((startIdx - oldestHistIdx) & kHistoryMask);
     size_t preWarmSteps =
         (preAvailSamples > 6u)
-            ? static_cast<size_t>(static_cast<float>(preAvailSamples - 4u) / smoothStride_)
+            ? static_cast<size_t>(static_cast<float>(preAvailSamples - 4u) / effStride)
             : 0u;
     if (preWarmSteps > 40u) {
         preWarmSteps = 40u;
     }
-    const float gCap = 0.017095f * smoothStride_;
+    const float gCap = 0.017095f * effStride;
     const float kCapG = gCap / (1.0f + gCap);
 
     std::array<float, kTracePoints> voiceCap{};
@@ -432,7 +462,7 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
         float capState = voiceCur[v][0] * 0.35f;
         if (preWarmSteps > 0u) {
             const int firstBack =
-                static_cast<int>(static_cast<float>(preWarmSteps) * smoothStride_ + 0.5f);
+                static_cast<int>(static_cast<float>(preWarmSteps) * effStride + 0.5f);
             const size_t firstWarm =
                 (startIdx + static_cast<size_t>(static_cast<int>(kHistorySize) - firstBack)) &
                 kHistoryMask;
@@ -440,7 +470,7 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
                 unpackVoiceEdgeSample(history_[firstWarm].voiceEdgeQ12[v]) * voiceVisGain * 0.35f;
             for (size_t step = preWarmSteps; step >= 1u; --step) {
                 const int backSamples =
-                    static_cast<int>(static_cast<float>(step) * smoothStride_ + 0.5f);
+                    static_cast<int>(static_cast<float>(step) * effStride + 0.5f);
                 const size_t wIdx =
                     (startIdx + static_cast<size_t>(static_cast<int>(kHistorySize) - backSamples)) &
                     kHistoryMask;

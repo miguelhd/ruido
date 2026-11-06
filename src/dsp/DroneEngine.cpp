@@ -49,7 +49,10 @@ void DroneEngineCore::init(EngineSharedBuses& buses, float baseSampleRate) noexc
 
     // Smoothers step once per 44.118 kHz output audio frame (100% sample-accurate audio rate
     // smoothing while saving 4x redundant coefficient / pan updates inside the 4x inner loop).
-    const EngineControlState initState = buses.controlBus.consumeLatest();
+    const EngineControlState& initState = buses.controlBus.consumeLatest();
+    lastControlPtr_ = &initState;
+    lastControlSeq_ = buses.controlBus.readSeq();
+    prevStutterEdgeSec_ = kStutterEdgeSec;
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         VoiceSmoothers& sm = voiceSmoothers_[i];
         sm.freqHz.init(initState.voices[i].frequencyHz, kPotPoleTauSec, baseSampleRate_);
@@ -87,13 +90,6 @@ void DroneEngineCore::init(EngineSharedBuses& buses, float baseSampleRate) noexc
     pitchModeSmoother_.init(initState.global.pitchPressureMode ? 1.0f : 0.0f, kControlSlewSec,
                             baseSampleRate_);
     punchBusSmoothers_.setTimeConstant(kPunchBusSlewSec, baseSampleRate_);
-    punchBusSmoothers_.snapChannel(0u, initState.keyMod.overloadSurge);
-    punchBusSmoothers_.snapChannel(1u, initState.keyMod.dubLpfDrop);
-    punchBusSmoothers_.snapChannel(2u, initState.keyMod.spatialFocus);
-    punchBusSmoothers_.snapChannel(3u, initState.keyMod.ringModMix);
-    punchBusSmoothers_.snapChannel(4u, initState.keyMod.hardSyncAmount);
-    punchBusSmoothers_.snapChannel(5u, initState.keyMod.filterScream);
-    stasisFreeze_ = initState.keyMod.stasisFreeze;
     buses.telemetry.stutterGateMask.store(0x0Fu, std::memory_order_relaxed);
     buses.telemetry.rhythmPhase.store(0.0f, std::memory_order_relaxed);
 
@@ -118,12 +114,15 @@ void DroneEngineCore::reset(EngineSharedBuses& buses) noexcept {
     voiceRisingMaskDelay_.fill(0u);
     voiceScopeDelay_ = {};
     voiceScopeDelayWrite_ = 0u;
+    prevStutterEdgeSec_ = -1.0f;
     snapParametersToLatest(buses);
     lfoBank_.writeInitialTelemetry(buses.telemetry);
 }
 
 void DroneEngineCore::snapParametersToLatest(EngineSharedBuses& buses) noexcept {
     const EngineControlState& state = buses.controlBus.consumeLatest();
+    lastControlPtr_ = &state;
+    lastControlSeq_ = buses.controlBus.readSeq();
     updateTargetsFromState(state, true);
 }
 
@@ -136,11 +135,16 @@ void DroneEngineCore::updateTargetsFromState(const EngineControlState& state,
         (effClockBpm > 300.0f)
             ? clampf(kStutterEdgeSec * (300.0f / effClockBpm), 0.00035f, kStutterEdgeSec)
             : kStutterEdgeSec;
+    if (adaptiveGateEdgeSec != prevStutterEdgeSec_ || snapImmediate) {
+        prevStutterEdgeSec_ = adaptiveGateEdgeSec;
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            voiceSmoothers_[i].stutterGate.setTimeConstant(adaptiveGateEdgeSec, baseSampleRate_);
+        }
+    }
 
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceParams& vp = state.voices[i];
         VoiceSmoothers& sm = voiceSmoothers_[i];
-        sm.stutterGate.setTimeConstant(adaptiveGateEdgeSec, baseSampleRate_);
 
         const float clampedBaseHz = clampf(vp.frequencyHz, kAudioFreqMinHz, kAudioFreqMaxHz);
         const float pw =
@@ -261,7 +265,12 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
     }
 
     const EngineControlState& latestState = buses.controlBus.consumeLatest();
-    updateTargetsFromState(latestState, false);
+    const uint32_t curSeq = buses.controlBus.readSeq();
+    if (curSeq != lastControlSeq_ || &latestState != lastControlPtr_) {
+        lastControlPtr_ = &latestState;
+        lastControlSeq_ = curSeq;
+        updateTargetsFromState(latestState, false);
+    }
 
     float blockPeakL = 0.0f;
     float blockPeakR = 0.0f;
@@ -479,15 +488,8 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
                     static_cast<uint8_t>((crushStates_[v].divCounter + risingCounts[v]) & 7u);
             }
 
-            const bool delegated = (coProc_ != nullptr && chunk >= 4u) &&
-                                   coProc_->submitVoices23(spanSub[2].data(), spanSub[3].data(),
-                                                           chunk, filters_, filterCoeffs_);
-            if (delegated) {
-                filters_[0].processSpan4x(spanSub[0].data(), chunk, filterCoeffs_[0]);
-                filters_[1].processSpan4x(spanSub[1].data(), chunk, filterCoeffs_[1]);
-                coProc_->joinVoices23(spanSub[2].data(), spanSub[3].data(), chunk, filters_,
-                                      filterCoeffs_);
-            } else {
+            if (coProc_ == nullptr || chunk < 4u ||
+                !coProc_->processBalanced4x(spanSub, chunk, filters_, filterCoeffs_)) {
 #if defined(__SSE__) || defined(__ARM_NEON) || defined(__wasm__)
                 for (size_t k = 0u; k < chunk; ++k) {
                     std::array<std::array<float, kOversampleFactor>, kNumOscillators> vs{
@@ -567,6 +569,8 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         size_t scopeWritePos = 0u;
         const size_t scopeAvail = buses.scopeBuffer.beginPushSpan(chunk, scopeWritePos);
 
+        std::array<float, kNumOscillators> chunkRawPeak{0.0f, 0.0f, 0.0f, 0.0f};
+
         for (size_t k = 0u; k < chunk; ++k) {
             const size_t frame = baseFrame + k;
             if (k + 1u == chunk) {
@@ -582,6 +586,7 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
                 }
                 curFinal += stepFinal;
             }
+            const float gL0 = curGainL[0], gL1 = curGainL[1], gL2 = curGainL[2], gL3 = curGainL[3];
             const auto& s0 = spanSub[0][k];
             const auto& s1 = spanSub[1][k];
             const auto& s2 = spanSub[2][k];
@@ -594,25 +599,27 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
                 s3[0] + s3[1] + s3[2] + s3[3],
             };
             for (size_t i = 0u; i < kNumOscillators; ++i) {
-                const float vAbs = absf(voiceScopeAccum[i]) * 0.25f * vcaGates[i];
-                if (vAbs > blockVoicePeak[i]) {
-                    blockVoicePeak[i] = vAbs;
+                const float vAbs = absf(voiceScopeAccum[i]);
+                if (vAbs > chunkRawPeak[i]) {
+                    chunkRawPeak[i] = vAbs;
                 }
             }
 
             if (chunkExactMono) {
                 for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
-                    const float sumMono = s0[sub] * curGainL[0] + s1[sub] * curGainL[1] +
-                                          s2[sub] * curGainL[2] + s3[sub] * curGainL[3];
+                    const float sumMono =
+                        s0[sub] * gL0 + s1[sub] * gL1 + s2[sub] * gL2 + s3[sub] * gL3;
                     const float busMono = masterBusSoftClip(sumMono) * curFinal;
                     osStereo[sub] = {busMono, busMono};
                 }
             } else {
+                const float gR0 = curGainR[0], gR1 = curGainR[1], gR2 = curGainR[2],
+                            gR3 = curGainR[3];
                 for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
-                    const float sumL = s0[sub] * curGainL[0] + s1[sub] * curGainL[1] +
-                                       s2[sub] * curGainL[2] + s3[sub] * curGainL[3];
-                    const float sumR = s0[sub] * curGainR[0] + s1[sub] * curGainR[1] +
-                                       s2[sub] * curGainR[2] + s3[sub] * curGainR[3];
+                    const float sumL =
+                        s0[sub] * gL0 + s1[sub] * gL1 + s2[sub] * gL2 + s3[sub] * gL3;
+                    const float sumR =
+                        s0[sub] * gR0 + s1[sub] * gR1 + s2[sub] * gR2 + s3[sub] * gR3;
                     osStereo[sub] = {masterBusSoftClip(sumL) * curFinal,
                                      masterBusSoftClip(sumR) * curFinal};
                 }
@@ -628,12 +635,8 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
 
             const float absL = absf(cleanL);
             const float absR = absf(cleanR);
-            if (absL > blockPeakL) {
-                blockPeakL = absL;
-            }
-            if (absR > blockPeakR) {
-                blockPeakR = absR;
-            }
+            blockPeakL = (absL > blockPeakL) ? absL : blockPeakL;
+            blockPeakR = (absR > blockPeakR) ? absR : blockPeakR;
 
             // Delay 4-voice rising-edge triggers & scope taps by 36 base frames to match FIR delay
             std::array<int16_t, kNumOscillators> curVoiceQ13;
@@ -653,6 +656,10 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
                 dst.voiceRisingMask = voiceRisingMaskDelay_[nextDelaySlot];
                 dst.voiceQ13 = voiceScopeDelay_[nextDelaySlot];
             }
+        }
+        for (size_t i = 0u; i < kNumOscillators; ++i) {
+            const float scaledPeak = chunkRawPeak[i] * 0.25f * vcaGates[i];
+            blockVoicePeak[i] = (scaledPeak > blockVoicePeak[i]) ? scaledPeak : blockVoicePeak[i];
         }
         if (scopeAvail > 0u) {
             buses.scopeBuffer.commitPushSpan(scopeWritePos + scopeAvail);

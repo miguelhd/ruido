@@ -156,12 +156,14 @@ inline bool evalKeyPunchHeaderBar(const HudState& hud, float& outNorm) noexcept 
     case PunchBarKind::PosTwoOct:
         outNorm = clampf(hud.activePunchValue * 0.5f, 0.0f, 1.0f);
         return true;
-    case PunchBarKind::SnapshotGlide:
-        if (!hud.snapshotGliding) {
+    case PunchBarKind::SnapshotGlide: {
+        const uint8_t s = hud.activePunchVoice & 3u;
+        if (!hud.snapshotGliding || (hud.snapshotOccupiedMask & (1u << s)) == 0u) {
             return false;
         }
         outNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
         return true;
+    }
     case PunchBarKind::LogTempo:
         outNorm = normalizeClockBpmLog01(hud.effectiveClockBpm);
         return true;

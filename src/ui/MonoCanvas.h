@@ -439,8 +439,9 @@ struct MonoStripCanvas {
     }
 
     // Two-tier tertiary monochrome indicator slot (HOME / FREQUENCY per-osc FX + LFO A/B row):
-    //  - Inactive (!active): crisp 1x1 integer pixel dot at 26% (zero anti-alias fringe)
-    //  - Active (active): solid circle (r = 1.55) capped in tertiary range (40%-66%) + subtle halo
+    //  - Inactive (!active): crisp 1x1 integer pixel dot at 16% (matching passive track, zero AA)
+    //  - Active (active): calm tertiary circle (r = 1.50) capped strictly at 21%-37% (well below
+    //    60% secondary column labels and 88%-100% primary readouts)
     void drawModulatorSlot(int cx, int cy, bool active, float sync01,
                            float colDim01) const noexcept {
         if (masterAlpha8 == 0u || cx < 0 || cx >= static_cast<int>(kDisplayWidth)) {
@@ -452,7 +453,7 @@ struct MonoStripCanvas {
             if (cy < y0 || cy >= y1) {
                 return;
             }
-            const float phAlpha = 0.26f * (1.0f - 0.35f * dim) * masterF;
+            const float phAlpha = 0.16f * (1.0f - 0.35f * dim) * masterF;
             const auto a8 = static_cast<uint8_t>(phAlpha * 255.0f + 0.5f);
             if (a8 > 0u) {
                 uint8_t* row = lum + static_cast<size_t>(cy - y0) * kDisplayWidth;
@@ -461,7 +462,7 @@ struct MonoStripCanvas {
             return;
         }
 
-        constexpr int kReach = 4;
+        constexpr int kReach = 3;
         if (cy + kReach < y0 || cy - kReach >= y1) {
             return;
         }
@@ -475,12 +476,12 @@ struct MonoStripCanvas {
         const float s = clampf(sync01, 0.0f, 1.0f);
         const float effSync = s * (1.0f - dim) + 0.35f * dim;
         const float dimKeep = 1.0f - 0.45f * dim;
-        const float circleAlpha = (0.40f + 0.26f * effSync) * dimKeep;
-        const float haloPeak = effSync * 0.19f * dimKeep;
+        const float circleAlpha = (0.21f + 0.16f * effSync) * dimKeep;
+        const float haloPeak = effSync * 0.08f * dimKeep;
 
-        constexpr float kCircleR = 1.55f;
-        constexpr float kHaloInnerR = 1.45f;
-        constexpr float kHaloOuterR = 3.15f;
+        constexpr float kCircleR = 1.50f;
+        constexpr float kHaloInnerR = 1.40f;
+        constexpr float kHaloOuterR = 2.70f;
         constexpr float kInvHaloSpan = 1.0f / (kHaloOuterR - kHaloInnerR);
 
         for (int py = pyStart; py <= pyEnd; ++py) {

@@ -72,14 +72,21 @@ inline void computeKeyboardModelRestLeds(KeyboardModel model, const EngineContro
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         outWhite[4u + v] = 0.42f;
         outWhite[8u + v] = 0.22f;
-        outWhite[12u + v] = 0.08f;
+        const bool occ = (hud.snapshotOccupiedMask & (1u << v)) != 0u;
+        outWhite[12u + v] = (model == KeyboardModel::LiveMixer && !occ) ? 0.0f : 0.08f;
     }
 
     if (hud.saveArmed) {
-        // When SAVE is armed, pulse SNAP 1-4 (Keys 13-16) unmistakably across any model
+        // Store mode pulses all 4 Scene keys; Delete mode pulses only occupied scenes (empty =
+        // dark)
         const float pulse = 0.25f + 0.70f * clampf(savePulse01, 0.0f, 1.0f);
         for (size_t s = 0u; s < kNumSnapshots; ++s) {
-            outWhite[12u + s] = (s == (hud.snapshotSlot & 3u)) ? 1.0f : pulse;
+            const bool occ = (hud.snapshotOccupiedMask & (1u << s)) != 0u;
+            if (hud.saveDeleteMode) {
+                outWhite[12u + s] = occ ? pulse : 0.0f;
+            } else {
+                outWhite[12u + s] = (occ && s == (hud.snapshotSlot & 3u)) ? 1.0f : pulse;
+            }
         }
     } else if (model == KeyboardModel::LiveMixer) {
         const bool snapBanner =
@@ -87,10 +94,12 @@ inline void computeKeyboardModelRestLeds(KeyboardModel model, const EngineContro
             (hud.mode == HudMode::KeyboardPlay && hud.activePunch == KeyPunchKind::SnapshotRecall);
         if (snapBanner) {
             for (size_t s = 0u; s < kNumSnapshots; ++s) {
+                const bool occ = (hud.snapshotOccupiedMask & (1u << s)) != 0u;
                 const float w = clampf(hud.snapshotWeights[s], 0.0f, 1.0f);
-                outWhite[12u + s] = 0.08f + 0.92f * w;
+                outWhite[12u + s] = occ ? (0.08f + 0.92f * w) : 0.0f;
             }
-        } else if (hud.config.snapMode == KeySwitchMode::Latching && !hud.snapshotDirty) {
+        } else if (hud.config.snapMode == KeySwitchMode::Latching && !hud.snapshotDirty &&
+                   ((hud.snapshotOccupiedMask & (1u << (hud.snapshotSlot & 3u))) != 0u)) {
             // Subtle active-slot landmark (< 22% of OCTAVE group so L->R gradient stays monotonic)
             outWhite[12u + (hud.snapshotSlot & 3u)] = 0.16f;
         }
