@@ -499,11 +499,17 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     RTEST_CHECK(ctrl.hud().config.clockSync == ruido::ClockSyncMode::Auto);
 
-    // Row 5 (MIDI TRANSPORT IN): PHASE (default) <-> RUN/STOP via SELECT/ALGORITHM
+    // Row 5 (MIDI TRANSPORT IN): OFF (default) -> PHASE -> RUN/STOP via SELECT/ALGORITHM
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 5u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::MidiTransport),
                             "MIDI TRANSPORT IN") == 0);
+    RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::Off);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MidiTransport,
+                                                          ctrl.hud().config, ctrl.state().global),
+                            "OFF") == 0);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
+    RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::PhaseOnly);
     RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MidiTransport,
                                                           ctrl.hud().config, ctrl.state().global),
                             "PHASE") == 0);
@@ -512,8 +518,8 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MidiTransport,
                                                           ctrl.hud().config, ctrl.state().global),
                             "RUN/STOP") == 0);
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -4);
-    RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::PhaseOnly);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -8);
+    RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::Off);
 
     // Row 6 (MIDI CHANNEL IN): OMNI (default) <-> CH 1..CH 16, clamped at last row (6) + scrolled
     // 6-row viewport check
@@ -2891,8 +2897,22 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     // 3. Port-agnostic 24-PPQN MIDI Clock In (TRS / USB / BLE-MIDI burst jitter immunity)
     RTEST_CHECK(!ctrl.hud().midiClockSynced);
     RTEST_CHECK(nearF(ctrl.hud().effectiveClockBpm, 120.0f));
+    RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::Off);
+    const uint8_t seqBeforeOffStart = ctrl.state().global.clockResetSeq;
+    ctrl.onMidiRealtime(0xFAu, 0.900f); // Default OFF ignores 0xFA Start (bar phase untouched)
+    RTEST_CHECK(ctrl.state().global.clockResetSeq == seqBeforeOffStart);
+
+    // Switch MIDI TRANSPORT IN -> PHASE and verify 0xFA Start resets Beat-1 bar phase
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 20);   // Row 5: MIDI TRANSPORT IN
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // OFF -> PHASE
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
+    RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::PhaseOnly);
+
     const uint8_t seqBeforeStart = ctrl.state().global.clockResetSeq;
-    ctrl.onMidiRealtime(0xFAu, 1.000f); // MIDI Start
+    ctrl.onMidiRealtime(0xFAu, 1.000f); // MIDI Start in PHASE mode
     RTEST_CHECK(ctrl.state().global.clockResetSeq == static_cast<uint8_t>(seqBeforeStart + 1u));
 
     // Steady 140.0 BPM USB/TRS clock (dt = 60 / (140 * 24) = 0.01785714 s)
@@ -2951,7 +2971,7 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     // GLOBAL CONFIG -> MIDI CLOCK IN: OFF ignores external clock immediately
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 16); // Row 4: MIDI CLOCK IN
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4); // Row 5 -> Row 4: MIDI CLOCK IN
     RTEST_CHECK(ctrl.hud().configCursor == 4u);
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -4); // AUTO -> OFF
     RTEST_CHECK(!ctrl.hud().midiClockSynced);
@@ -3064,7 +3084,7 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // Row 1: MuteMode
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 16);    // Row 5: MidiTransport
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);  // -> RunStop
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8);  // OFF -> RunStop (+2 detents)
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);     // Row 6: MidiChannel
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 28); // -> CH 7
     RTEST_CHECK(ctrl.consumeSettingsDirty());

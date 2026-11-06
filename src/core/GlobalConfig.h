@@ -22,8 +22,9 @@ enum class ClockSyncMode : uint8_t {
 
 // External MIDI System Real-Time Start/Continue/Stop (0xFA / 0xFB / 0xFC) transport behavior.
 enum class MidiTransportMode : uint8_t {
-    PhaseOnly = 0, // 0xFA Start resets Beat-1 bar phase; PLAY/STOP audio output stays independent
-    RunStop = 1,   // 0xFA/0xFB starts audio output (masterRun=true); 0xFC stops audio output
+    Off = 0,       // Ignore 0xFA/0xFB/0xFC transport; drone & bar phase stay uninterrupted
+    PhaseOnly = 1, // 0xFA Start resets Beat-1 bar phase; PLAY/STOP audio output stays independent
+    RunStop = 2,   // 0xFA/0xFB starts audio output (masterRun=true); 0xFC stops audio output
 };
 
 // Scalable descriptor IDs for the right-panel GLO vertical GLOBAL CONFIG list menu.
@@ -50,7 +51,7 @@ struct GlobalConfigState {
     KeySwitchMode soloMode = KeySwitchMode::Momentary;
     KeySwitchMode snapMode = KeySwitchMode::Latching;
     ClockSyncMode clockSync = ClockSyncMode::Auto;
-    MidiTransportMode midiTransport = MidiTransportMode::PhaseOnly;
+    MidiTransportMode midiTransport = MidiTransportMode::Off;
     uint8_t midiChannel = 0u; // 0 = OMNI, 1..16 = MIDI Channel 1..16
 };
 
@@ -95,8 +96,9 @@ constexpr int32_t globalConfigMaxIndex(ConfigItemId id) noexcept {
     case ConfigItemId::SoloMode:
     case ConfigItemId::SnapMode:
     case ConfigItemId::ClockSync:
-    case ConfigItemId::MidiTransport:
         return 1;
+    case ConfigItemId::MidiTransport:
+        return 2;
     case ConfigItemId::MidiChannel:
         return 16;
     case ConfigItemId::Count:
@@ -118,8 +120,10 @@ constexpr int32_t globalConfigGetIndex(ConfigItemId id, const GlobalConfigState&
         return (config.snapMode == KeySwitchMode::Latching) ? 1 : 0;
     case ConfigItemId::ClockSync:
         return (config.clockSync == ClockSyncMode::Auto) ? 1 : 0;
-    case ConfigItemId::MidiTransport:
-        return (config.midiTransport == MidiTransportMode::RunStop) ? 1 : 0;
+    case ConfigItemId::MidiTransport: {
+        const auto raw = static_cast<uint8_t>(config.midiTransport);
+        return (raw <= 2u) ? static_cast<int32_t>(raw) : 0;
+    }
     case ConfigItemId::MidiChannel:
         return (config.midiChannel <= 16u) ? static_cast<int32_t>(config.midiChannel) : 0;
     case ConfigItemId::Count:
@@ -162,8 +166,8 @@ inline bool globalConfigSetIndex(ConfigItemId id, int32_t idx, GlobalConfigState
         return changed;
     }
     case ConfigItemId::MidiTransport: {
-        const MidiTransportMode next =
-            (idx > 0) ? MidiTransportMode::RunStop : MidiTransportMode::PhaseOnly;
+        const int32_t clamped = (idx <= 0) ? 0 : ((idx >= 2) ? 2 : idx);
+        const auto next = static_cast<MidiTransportMode>(clamped);
         const bool changed = (config.midiTransport != next);
         config.midiTransport = next;
         return changed;
@@ -194,7 +198,15 @@ constexpr const char* globalConfigValueLabel(ConfigItemId id, const GlobalConfig
     case ConfigItemId::ClockSync:
         return (config.clockSync == ClockSyncMode::Internal) ? "OFF" : "AUTO";
     case ConfigItemId::MidiTransport:
-        return (config.midiTransport == MidiTransportMode::RunStop) ? "RUN/STOP" : "PHASE";
+        switch (config.midiTransport) {
+        case MidiTransportMode::Off:
+            return "OFF";
+        case MidiTransportMode::PhaseOnly:
+            return "PHASE";
+        case MidiTransportMode::RunStop:
+            return "RUN/STOP";
+        }
+        return "OFF";
     case ConfigItemId::MidiChannel:
         return kMidiChannelLabels[(config.midiChannel <= 16u) ? config.midiChannel : 0u];
     case ConfigItemId::Count:
@@ -262,9 +274,10 @@ inline DeviceSettingsBlob encodeDeviceSettings(const GlobalConfigState& config,
     if (config.clockSync == ClockSyncMode::Internal) {
         flags |= (1u << 5u);
     }
-    if (config.midiTransport == MidiTransportMode::RunStop) {
-        flags |= (1u << 6u);
-    }
+    const uint8_t transportBits = (config.midiTransport == MidiTransportMode::RunStop)     ? 2u
+                                  : (config.midiTransport == MidiTransportMode::PhaseOnly) ? 1u
+                                                                                           : 0u;
+    flags |= static_cast<uint8_t>(transportBits << 6u);
     blob.configFlags = flags;
     blob.masterTrimQ16 =
         static_cast<uint16_t>(clampf(global.masterTrim, 0.0f, 1.0f) * 65535.0f + 0.5f);
@@ -304,9 +317,10 @@ inline bool decodeDeviceSettings(const DeviceSettingsBlob& blob, GlobalConfigSta
                                                                  : KeySwitchMode::Momentary;
     outConfig.clockSync =
         ((blob.configFlags & (1u << 5u)) != 0u) ? ClockSyncMode::Internal : ClockSyncMode::Auto;
-    outConfig.midiTransport = ((blob.configFlags & (1u << 6u)) != 0u)
-                                  ? MidiTransportMode::RunStop
-                                  : MidiTransportMode::PhaseOnly;
+    const uint8_t rawTransport = static_cast<uint8_t>((blob.configFlags >> 6u) & 0x03u);
+    outConfig.midiTransport = (rawTransport == 2u)   ? MidiTransportMode::RunStop
+                              : (rawTransport == 1u) ? MidiTransportMode::PhaseOnly
+                                                     : MidiTransportMode::Off;
     outConfig.midiChannel = (blob.midiChannel <= 16u) ? blob.midiChannel : 0u;
     if (outInternalBpm != nullptr) {
         *outInternalBpm = (blob.internalBpmTenths == 0u)

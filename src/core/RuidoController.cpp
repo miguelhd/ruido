@@ -427,6 +427,10 @@ void RuidoController::onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) 
 }
 
 void RuidoController::onMidiRealtime(uint8_t statusByte, float msgTimestampSec) noexcept {
+    if ((statusByte == 0xFAu || statusByte == 0xFBu || statusByte == 0xFCu) &&
+        hud_.config.midiTransport == MidiTransportMode::Off) {
+        return;
+    }
     (void)midiClock_.onMidiRealtime(statusByte, hud_.config.clockSync, msgTimestampSec);
     bool dirty = syncClockState();
     if (hud_.config.clockSync == ClockSyncMode::Auto &&

@@ -487,19 +487,30 @@ for (let i = 0; i < rhyRgba.length; i += 4) {
 ex.wasm_ui_white_gate(12, 0);
 ex.wasm_ui_black_key(7, 0);
 ex.wasm_ui_black_key(9, 0);
-ex.wasm_ui_midi_realtime(0xFC, 6.0); // MIDI Stop -> falls back to tapped 150.0 BPM internal!
-assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CLOCK_SYNCED], 0.0);
-assert.ok(Math.abs(f32[summaryIdx + WASM_SUMMARY.EFFECTIVE_CLOCK_BPM] - 150.0) < 0.5);
+// Default MIDI TRANSPORT IN == OFF ignores 0xFC Stop (external 135 BPM clock & audio stay untouched)
+ex.wasm_ui_midi_realtime(0xFC, 6.0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CLOCK_SYNCED], 1.0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.MASTER_RUN], 1.0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CHANNEL_IN], 0.0); // Default OMNI (0)
 
-// GLOBAL CONFIG: verify MIDI TRANSPORT IN (RUN/STOP) & MIDI CHANNEL IN (CH 3) over Wasm ABI
+// GLOBAL CONFIG: verify MIDI TRANSPORT IN (OFF -> PHASE -> RUN/STOP) & MIDI CHANNEL IN (CH 3)
 ex.wasm_ui_button(7, 1); // ButtonId::GloRight -> open GLOBAL CONFIG
 ex.wasm_ui_button(7, 0);
 ex.wasm_ui_encoder(0, 20); // EncoderId::Select +5 detents -> Row 5: MIDI TRANSPORT IN
-ex.wasm_ui_encoder(2, 4); // EncoderId::Algorithm +1 detent -> RUN/STOP
-ex.wasm_ui_encoder(0, 4); // EncoderId::Select +1 detent -> Row 6: MIDI CHANNEL IN
+ex.wasm_ui_encoder(2, 4);  // EncoderId::Algorithm +1 detent -> PHASE
+ex.wasm_ui_button(7, 1);
+ex.wasm_ui_button(7, 0);
+ex.wasm_ui_midi_realtime(0xFC, 6.5); // Stop in PHASE mode releases clock lock to 150 BPM, keeps audio running
+assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CLOCK_SYNCED], 0.0);
+assert.ok(Math.abs(f32[summaryIdx + WASM_SUMMARY.EFFECTIVE_CLOCK_BPM] - 150.0) < 0.5);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.MASTER_RUN], 1.0);
+
+ex.wasm_ui_button(7, 1);
+ex.wasm_ui_button(7, 0);
+ex.wasm_ui_encoder(2, 4);  // EncoderId::Algorithm +1 detent -> RUN/STOP (cursor stays on Row 5)
+ex.wasm_ui_encoder(0, 4);  // EncoderId::Select +1 detent -> Row 6: MIDI CHANNEL IN
 ex.wasm_ui_encoder(2, 12); // EncoderId::Algorithm +3 detents -> CH 3
-ex.wasm_ui_button(7, 1); // Close GLOBAL CONFIG
+ex.wasm_ui_button(7, 1);   // Close GLOBAL CONFIG
 ex.wasm_ui_button(7, 0);
 ex.wasm_ui_tick_and_render(0.05);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CHANNEL_IN], 3.0);
@@ -509,13 +520,12 @@ assert.equal(f32[summaryIdx + WASM_SUMMARY.MASTER_RUN], 0.0);
 ex.wasm_ui_midi_realtime(0xFA, 7.1); // Start in RUN/STOP mode resumes masterRun
 ex.wasm_ui_tick_and_render(0.02);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.MASTER_RUN], 1.0);
-// Restore OMNI & PHASE and close GLOBAL CONFIG
+// Restore OMNI & OFF and close GLOBAL CONFIG
 ex.wasm_ui_button(7, 1);
 ex.wasm_ui_button(7, 0);
-ex.wasm_ui_encoder(0, 24); // Row 6: MIDI CHANNEL IN
-ex.wasm_ui_encoder(2, -12); // -> OMNI
-ex.wasm_ui_encoder(0, -4); // Row 5: MIDI TRANSPORT IN
-ex.wasm_ui_encoder(2, -4); // -> PHASE
+ex.wasm_ui_encoder(2, -12); // Row 6: MIDI CHANNEL IN -> OMNI
+ex.wasm_ui_encoder(0, -4);  // Row 5: MIDI TRANSPORT IN
+ex.wasm_ui_encoder(2, -8);  // RUN/STOP -> OFF
 ex.wasm_ui_button(7, 1);
 ex.wasm_ui_button(7, 0);
 ex.wasm_ui_tick_and_render(0.02);
