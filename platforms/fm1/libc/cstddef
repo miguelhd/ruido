@@ -1,0 +1,10 @@
+#pragma once
+
+using size_t = __SIZE_TYPE__;
+using ptrdiff_t = __PTRDIFF_TYPE__;
+
+namespace std {
+using size_t = ::size_t;
+using ptrdiff_t = ::ptrdiff_t;
+using nullptr_t = decltype(nullptr);
+} // namespace std

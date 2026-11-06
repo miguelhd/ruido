@@ -11,8 +11,9 @@
 namespace ruido {
 
 struct VoiceLfoFrame {
-    float raw = 0.0f;     // [-1.0, +1.0] bipolar LFO wave output
-    float phase01 = 0.0f; // [0.0, 1.0) instantaneous phase
+    float raw = 0.0f;         // [-1.0, +1.0] bipolar LFO wave output
+    float phase01 = 0.0f;     // [0.0, 1.0) instantaneous phase
+    float activeDepth = 0.0f; // > 0 when any targetDepths[t] > 0 (fast skip when LFO is idle)
     uint32_t driftPacked = 0u;
     // Per-target effective depths in [0.0, 1.0] (clicklessly crossfaded on live target changes)
     std::array<float, static_cast<size_t>(LfoTarget::Count)> targetDepths{};
@@ -36,6 +37,9 @@ class VoiceLfoBank {
     void setAnalogCharacterEnabled(bool enableDrift) noexcept { enableDrift_ = enableDrift; }
 
     void updateTargets(const EngineControlState& state, bool snapImmediate) noexcept;
+
+    void stepFrame(std::array<VoiceLfoFrame, kNumVoiceLfos>& out, bool freeze = false,
+                   bool forceWaveEval = true) noexcept;
 
     std::array<VoiceLfoFrame, kNumVoiceLfos> stepFrame(bool freeze = false) noexcept;
 
@@ -67,7 +71,8 @@ class VoiceLfoBank {
     static float nextUniformBipolar(uint32_t& rng) noexcept;
     static int8_t nextDriftKnot(VoiceState& v) noexcept;
     void stepSlot(size_t idx, float rateModDepth, float depthModDepth, float modBipolar,
-                  float turbo, float turboMul, bool freeze, VoiceLfoFrame& out) noexcept;
+                  float turbo, float turboMul, bool freeze, bool forceWaveEval,
+                  VoiceLfoFrame& out) noexcept;
 
     std::array<VoiceState, kNumVoiceLfos> voices_{};
     OnePoleSmoother turboSmoother_{};

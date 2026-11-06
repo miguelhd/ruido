@@ -1,0 +1,74 @@
+#pragma once
+
+namespace std {
+
+enum memory_order : int {
+    memory_order_relaxed = __ATOMIC_RELAXED,
+    memory_order_consume = __ATOMIC_CONSUME,
+    memory_order_acquire = __ATOMIC_ACQUIRE,
+    memory_order_release = __ATOMIC_RELEASE,
+    memory_order_acq_rel = __ATOMIC_ACQ_REL,
+    memory_order_seq_cst = __ATOMIC_SEQ_CST
+};
+
+// Native JieLi AC791N (pi32v2 dual-core) lock-free atomics:
+//  - Aligned 8/16/32-bit SRAM loads and stores are single-instruction hardware-atomic.
+//  - Acquire/release ordering uses `ssync` without calling libcompiler_rt's `__sync_*`
+//    routines (whose `rep { r3 = icfg; cli }` loop clobbers `icfg` bit 9 and takes `lockset`).
+//  - `compare_exchange_weak` uses the hardware-verified single-pass `icfg` save + `cli` +
+//    `lockset` inter-core spinlock (`Core 0` <-> `Core 1`).
+__attribute__((always_inline)) inline void fm1_memory_fence(memory_order order) noexcept {
+    if (order != memory_order_relaxed) {
+        __asm__ volatile("ssync" ::: "memory");
+    } else {
+        __asm__ volatile("" ::: "memory");
+    }
+}
+
+template <typename T>
+struct atomic {
+    static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4,
+                  "AC791N lock-free atomic requires 1/2/4-byte scalar");
+    static constexpr bool is_always_lock_free = true;
+
+    constexpr atomic() noexcept : val_{} {}
+    constexpr atomic(T desired) noexcept : val_(desired) {}
+
+    atomic(const atomic&) = delete;
+    atomic& operator=(const atomic&) = delete;
+
+    __attribute__((always_inline)) T load(memory_order order = memory_order_seq_cst) const noexcept {
+        const T out = *static_cast<const volatile T*>(&val_);
+        fm1_memory_fence(order);
+        return out;
+    }
+
+    __attribute__((always_inline)) void store(T desired,
+                                              memory_order order = memory_order_seq_cst) noexcept {
+        fm1_memory_fence(order);
+        *static_cast<volatile T*>(&val_) = desired;
+        if (order == memory_order_seq_cst) {
+            __asm__ volatile("ssync" ::: "memory");
+        }
+    }
+
+    bool compare_exchange_weak(T& expected, T desired, memory_order, memory_order) noexcept {
+        unsigned int saved_icfg = 0u;
+        __asm__ volatile("%0 = icfg\n\tcli\n\tlockset" : "=r"(saved_icfg)::"memory");
+        const T cur = *static_cast<const volatile T*>(&val_);
+        bool exchanged = false;
+        if (cur == expected) {
+            *static_cast<volatile T*>(&val_) = desired;
+            exchanged = true;
+        } else {
+            expected = cur;
+        }
+        __asm__ volatile("ssync\n\tlockclr\n\ticfg = %0" ::"r"(saved_icfg) : "memory");
+        return exchanged;
+    }
+
+private:
+    alignas(sizeof(T)) T val_;
+};
+
+} // namespace std

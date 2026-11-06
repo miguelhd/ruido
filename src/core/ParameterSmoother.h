@@ -41,10 +41,15 @@ class OnePoleSmoother {
 
     float current() const noexcept { return state_; }
 
-    float next() noexcept {
+    RUIDO_ALWAYS_INLINE float next() noexcept {
         if (state_ == target_) {
             return state_;
         }
+        return stepActive();
+    }
+
+  private:
+    float stepActive() noexcept {
         const float diff = target_ - state_;
         const float nextState = state_ + coeff_ * diff;
         const float rem = absf(target_ - nextState);
@@ -57,7 +62,6 @@ class OnePoleSmoother {
         return state_;
     }
 
-  private:
     float state_ = 0.0f;
     float target_ = 0.0f;
     float coeff_ = 1.0f;
@@ -89,12 +93,18 @@ template <size_t N> class OnePoleSmootherBank {
 
     float current(size_t idx) const noexcept { return state_[idx]; }
 
-    float next(size_t idx) noexcept {
+    RUIDO_ALWAYS_INLINE float next(size_t idx) noexcept {
         const float cur = state_[idx];
-        const float tgt = target_[idx];
-        if (cur == tgt) {
+        if (cur == target_[idx]) {
             return cur;
         }
+        return stepActive(idx);
+    }
+
+  private:
+    float stepActive(size_t idx) noexcept {
+        const float cur = state_[idx];
+        const float tgt = target_[idx];
         const float nextState = cur + coeff_ * (tgt - cur);
         const float snapTol = 1.0e-5f * (1.0f + absf(tgt));
         if (nextState == cur || absf(tgt - nextState) <= snapTol) {
@@ -105,7 +115,6 @@ template <size_t N> class OnePoleSmootherBank {
         return nextState;
     }
 
-  private:
     std::array<float, N> state_{};
     std::array<float, N> target_{};
     float coeff_ = 1.0f;
@@ -135,10 +144,15 @@ class VactrolSmoother {
 
     float current() const noexcept { return state_; }
 
-    float next() noexcept {
+    RUIDO_ALWAYS_INLINE float next() noexcept {
         if (state_ == target_) {
             return state_;
         }
+        return stepActive();
+    }
+
+  private:
+    float stepActive() noexcept {
         const float diff = target_ - state_;
         const float coeff = (diff > 0.0f) ? riseCoeff_ : fallCoeff_;
         const float nextState = state_ + coeff * diff;
@@ -152,7 +166,6 @@ class VactrolSmoother {
         return state_;
     }
 
-  private:
     static float computeCoeff(float tauSec, float sampleRate) noexcept {
         if (!(tauSec > 0.0f) || !(sampleRate > 0.0f)) {
             return 1.0f;
@@ -202,12 +215,17 @@ class CriticallyDampedSmoother {
 
     float current() const noexcept { return s2_; }
 
-    bool isSettled() const noexcept { return s2_ == target_ && s1_ == target_; }
+    RUIDO_ALWAYS_INLINE bool isSettled() const noexcept { return s2_ == target_ && s1_ == target_; }
 
-    float next() noexcept {
+    RUIDO_ALWAYS_INLINE float next() noexcept {
         if (s2_ == target_ && s1_ == target_) {
             return s2_;
         }
+        return stepActive();
+    }
+
+  private:
+    float stepActive() noexcept {
         const float next1 = s1_ + coeff_ * (target_ - s1_);
         const float next2 = s2_ + coeff_ * (next1 - s2_);
         const float snapTol = 1.0e-5f * (1.0f + absf(target_));
@@ -222,7 +240,6 @@ class CriticallyDampedSmoother {
         return s2_;
     }
 
-  private:
     float s1_ = 0.0f;
     float s2_ = 0.0f;
     float target_ = 0.0f;
@@ -251,13 +268,20 @@ template <size_t N> class CriticallyDampedSmootherBank {
 
     void setTarget(size_t idx, float target) noexcept { target_[idx] = sanitizeState(target); }
 
-    float next(size_t idx) noexcept {
+    RUIDO_ALWAYS_INLINE float next(size_t idx) noexcept {
+        const float cur2 = s2_[idx];
+        const float tgt = target_[idx];
+        if (cur2 == tgt && s1_[idx] == tgt) {
+            return cur2;
+        }
+        return stepActive(idx);
+    }
+
+  private:
+    float stepActive(size_t idx) noexcept {
         const float cur2 = s2_[idx];
         const float cur1 = s1_[idx];
         const float tgt = target_[idx];
-        if (cur2 == tgt && cur1 == tgt) {
-            return cur2;
-        }
         const float next1 = cur1 + coeff_ * (tgt - cur1);
         const float next2 = cur2 + coeff_ * (next1 - cur2);
         const float snapTol = 1.0e-5f * (1.0f + absf(tgt));
@@ -272,7 +296,6 @@ template <size_t N> class CriticallyDampedSmootherBank {
         return next2;
     }
 
-  private:
     std::array<float, N> s1_{};
     std::array<float, N> s2_{};
     std::array<float, N> target_{};
@@ -311,16 +334,19 @@ class LogFreqSmoother {
 
     float current() const noexcept { return currentHz_; }
 
-    float next() noexcept {
+    RUIDO_ALWAYS_INLINE float next() noexcept {
         if (octSmoother_.isSettled()) {
             return currentHz_;
         }
+        return stepActive();
+    }
+
+  private:
+    float stepActive() noexcept {
         const float oct = octSmoother_.next();
         currentHz_ = octSmoother_.isSettled() ? targetHz_ : fastExp2(oct);
         return currentHz_;
     }
-
-  private:
     CriticallyDampedSmoother octSmoother_{};
     float targetHz_ = 440.0f;
     float currentHz_ = 440.0f;

@@ -118,13 +118,25 @@ inline RhythmFrameResult stepRhythmFrame(RhythmClockState& rs,
     out.swingPanOffset = rs.swingPanSmoother.next();
 
     // Check active gate families
-    const bool anyVoiceMode = (rs.voiceMode[0] != 0u) || (rs.voiceMode[1] != 0u) ||
-                              (rs.voiceMode[2] != 0u) || (rs.voiceMode[3] != 0u);
+    const bool anyVoiceMode =
+        ((rs.voiceMode[0] | rs.voiceMode[1] | rs.voiceMode[2] | rs.voiceMode[3]) != 0u);
     const bool hasChase = (chase > 0.02f);
     const bool hasPump = (pump > 1.0e-4f);
     const bool soloTopPulse =
         !anyVoiceMode && !hasChase && !hasPump &&
         ((tempo > 0.02f) || (pluck > 0.02f) || (shrt > 0.02f) || (swing > 0.02f));
+    const float stut01 =
+        (stutterDepths[0] > stutterDepths[1]) ? stutterDepths[0] : stutterDepths[1];
+    const float stut23 =
+        (stutterDepths[2] > stutterDepths[3]) ? stutterDepths[2] : stutterDepths[3];
+    const float maxStut = (stut01 > stut23) ? stut01 : stut23;
+    if (!anyVoiceMode && !hasChase && !hasPump && !soloTopPulse && maxStut <= 1.0e-4f) {
+        if (swing <= 1.0e-4f && rs.swingPanSmoother.current() == 0.0f) {
+            rs.warpedBar01 = rawBar01;
+            stutterPhases = {0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u};
+            return out;
+        }
+    }
 
     // Gate duty: 50% standard -> 6% pinpoint click with MONO SHORT (or 88% decay window on PLUCK)
     const float baseDuty = 0.50f - 0.44f * shrt;

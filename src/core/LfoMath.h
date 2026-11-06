@@ -177,11 +177,11 @@ inline float evalMorphedLfoWave(float phase01, float shape01, float rateHz,
 // Headroom-aware MS-20 filter cutoff modulation (shared by LPF and HPF).
 // Shifts center smoothly inward when parked near 2 Hz or 28 kHz, and slams full rail-to-rail
 // (+-7.5 octaves / 15-octave span) at extreme depth.
-inline float applyLfoCutoffHz(float baseHz, float depth01, float lfoBipolar) noexcept {
-    const float d = clampf(depth01, 0.0f, 1.0f);
-    if (d <= 0.0f) {
+RUIDO_ALWAYS_INLINE float applyLfoCutoffHz(float baseHz, float depth01, float lfoBipolar) noexcept {
+    if (depth01 <= 0.0f) {
         return baseHz;
     }
+    const float d = clampf(depth01, 0.0f, 1.0f);
     constexpr float kOctMin = cxLog2Pos(kFilterCutoffMinHz);
     constexpr float kOctMax = cxLog2Pos(kFilterCutoffMaxHz);
     constexpr float kHalfRange = 0.5f * (kOctMax - kOctMin);
@@ -194,11 +194,12 @@ inline float applyLfoCutoffHz(float baseHz, float depth01, float lfoBipolar) noe
 }
 
 // Uncapped MS-20 Rev 2 / Korg35 resonance modulation across full [0.0, 1.0] self-oscillation span.
-inline float applyLfoResonance(float baseRes, float depth01, float lfoBipolar) noexcept {
-    const float d = clampf(depth01, 0.0f, 1.0f);
-    if (d <= 0.0f) {
+RUIDO_ALWAYS_INLINE float applyLfoResonance(float baseRes, float depth01,
+                                            float lfoBipolar) noexcept {
+    if (depth01 <= 0.0f) {
         return baseRes;
     }
+    const float d = clampf(depth01, 0.0f, 1.0f);
     const float cleanBase = clampf(baseRes, 0.0f, 1.0f);
     const float halfSpan = 0.54f * d;
     const float guard = (halfSpan < 0.5f) ? halfSpan : 0.5f;
@@ -207,11 +208,12 @@ inline float applyLfoResonance(float baseRes, float depth01, float lfoBipolar) n
 }
 
 // Concave audio-taper VCA / overdrive modulation (0.0 silence trough -> 1.0 full 4.5x drive crest).
-inline float applyLfoAmplitude(float baseAmp, float depth01, float lfoBipolar) noexcept {
-    const float d = clampf(depth01, 0.0f, 1.0f);
-    if (d <= 0.0f) {
+RUIDO_ALWAYS_INLINE float applyLfoAmplitude(float baseAmp, float depth01,
+                                            float lfoBipolar) noexcept {
+    if (depth01 <= 0.0f) {
         return baseAmp;
     }
+    const float d = clampf(depth01, 0.0f, 1.0f);
     const float cleanBase = clampf(baseAmp, 0.0f, 1.0f);
     const float ampMin = cleanBase * (1.0f - d);
     const float ampMax = clampf(cleanBase + (1.0f - cleanBase) * d, 0.0f, 1.0f);
@@ -221,22 +223,22 @@ inline float applyLfoAmplitude(float baseAmp, float depth01, float lfoBipolar) n
 }
 
 // Concave log-octave pitch vibrato -> +-5-octave audio-rate FM / dive-bomb sweep.
-inline float applyLfoPitchHz(float baseHz, float depth01, float lfoBipolar) noexcept {
-    const float d = clampf(depth01, 0.0f, 1.0f);
-    if (d <= 0.0f) {
+RUIDO_ALWAYS_INLINE float applyLfoPitchHz(float baseHz, float depth01, float lfoBipolar) noexcept {
+    if (depth01 <= 0.0f) {
         return baseHz;
     }
+    const float d = clampf(depth01, 0.0f, 1.0f);
     const float octSpan = 5.0f * d * (0.10f + 0.90f * d);
     return clampf(baseHz * fastExp2(octSpan * clampf(lfoBipolar, -1.0f, 1.0f)),
                   kAudioFreqMinHz * 0.5f, kAudioFreqMaxHz);
 }
 
 // Headroom-aware constant-power stereo panner orbit across [-1.0, +1.0].
-inline float applyLfoPan(float basePan, float depth01, float lfoBipolar) noexcept {
-    const float d = clampf(depth01, 0.0f, 1.0f);
-    if (d <= 0.0f) {
+RUIDO_ALWAYS_INLINE float applyLfoPan(float basePan, float depth01, float lfoBipolar) noexcept {
+    if (depth01 <= 0.0f) {
         return basePan;
     }
+    const float d = clampf(depth01, 0.0f, 1.0f);
     const float cleanBase = clampf(basePan, -1.0f, 1.0f);
     const float halfSpan = d;
     const float center = clampf(cleanBase, -1.0f + halfSpan, 1.0f - halfSpan);
@@ -244,11 +246,12 @@ inline float applyLfoPan(float basePan, float depth01, float lfoBipolar) noexcep
 }
 
 // Headroom-aware band-limited Schmitt PWM sweep across [kPulseWidthMin, kPulseWidthMax] (5%-95%).
-inline float applyLfoPulseWidth(float basePw, float depth01, float lfoBipolar) noexcept {
-    const float d = clampf(depth01, 0.0f, 1.0f);
-    if (d <= 0.0f) {
+RUIDO_ALWAYS_INLINE float applyLfoPulseWidth(float basePw, float depth01,
+                                             float lfoBipolar) noexcept {
+    if (depth01 <= 0.0f) {
         return basePw;
     }
+    const float d = clampf(depth01, 0.0f, 1.0f);
     constexpr float kHalfMax = 0.5f * (kPulseWidthMax - kPulseWidthMin);
     const float cleanBase = clampf(basePw, kPulseWidthMin, kPulseWidthMax);
     const float halfSpan = kHalfMax * d;

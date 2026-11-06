@@ -37,7 +37,7 @@ inline constexpr float kDiodeJunctionWeight = 1.0f - kDiodeOhmicSlope;
 
 // Pure-FPU branchless NaN/Inf/subnormal scrubber (under -ffp-contract=off, +1e-18f - 1e-18f
 // flushes |x| < ~3e-26f to bit-exact +0.0f).
-inline float scrubFilterState(float x) noexcept {
+RUIDO_ALWAYS_INLINE float scrubFilterState(float x) noexcept {
     const float bounded = clampf(x, -64.0f, 64.0f);
     return (bounded + 1.0e-18f) - 1.0e-18f;
 }
@@ -82,7 +82,8 @@ inline float compensateLpSelfOscPitch(float hz, float k) noexcept {
 
 // Pre-filter MS-20 ESP-style asymmetric transistor input overdrive (1.0x = bit-exact unity pass;
 // > 1.0x = asymmetric even/odd soft-clipping before HPF C1 capacitor strips input DC offset).
-inline float applyMs20InputOverdrive(float input, float preDrive, float driveBlend) noexcept {
+RUIDO_ALWAYS_INLINE float applyMs20InputOverdrive(float input, float preDrive,
+                                                  float driveBlend) noexcept {
     const float clean = clampf(input, -16.0f, 16.0f);
     if (driveBlend <= 0.0f) {
         return clean;
@@ -95,8 +96,8 @@ inline float applyMs20InputOverdrive(float input, float preDrive, float driveBle
 }
 
 // Pure-FPU C^2-continuous LM13600 diode-linearized OTA transconductor
-inline SatResult evalOta(float v, float posSpan, float negSpan, float invPosSpan,
-                         float invNegSpan) noexcept {
+RUIDO_ALWAYS_INLINE SatResult evalOta(float v, float posSpan, float negSpan, float invPosSpan,
+                                      float invNegSpan) noexcept {
     const float vc = clampf(v, -negSpan, posSpan);
     const float u = vc * ((vc >= 0.0f) ? invPosSpan : invNegSpan);
     const float u2 = u * u;
@@ -104,7 +105,7 @@ inline SatResult evalOta(float v, float posSpan, float negSpan, float invPosSpan
     return {vc * (1.0f - u2 * (0.66666667f - 0.20f * u2)), oneMinusU2 * oneMinusU2};
 }
 
-inline SatResult evalOtaSymmetric(float v, float span, float invSpan) noexcept {
+RUIDO_ALWAYS_INLINE SatResult evalOtaSymmetric(float v, float span, float invSpan) noexcept {
     const float vc = clampf(v, -span, span);
     const float u = vc * invSpan;
     const float u2 = u * u;
@@ -113,7 +114,7 @@ inline SatResult evalOtaSymmetric(float v, float span, float invSpan) noexcept {
 }
 
 // Pure-FPU C^4-deadband / C^2-rail 1S1588 anti-parallel silicon PN-junction feedback limiter
-inline SatResult evalSiliconDiode(float w, float span, float invSpan) noexcept {
+RUIDO_ALWAYS_INLINE SatResult evalSiliconDiode(float w, float span, float invSpan) noexcept {
     const float wc = clampf(w, -span, span);
     const float u = wc * invSpan;
     const float u2 = u * u;

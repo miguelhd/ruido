@@ -17,7 +17,7 @@ struct StereoFrame {
 //  - Exact linear phase (0 deg dispersion): preserves flat square-wave tops & peak crest factor.
 class StereoHalfBandDecimator4x {
   public:
-    StereoHalfBandDecimator4x() noexcept = default;
+    StereoHalfBandDecimator4x() noexcept {}
 
     void reset() noexcept;
 

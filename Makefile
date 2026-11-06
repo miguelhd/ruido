@@ -78,7 +78,7 @@ TEST_DSP_TSAN_BIN := $(BUILD_DIR)/test_dsp_tsan
 WASM_OUT := platforms/sim/web/ruido.wasm
 MACOS_SIM_BIN := $(BUILD_DIR)/ruido_sim_macos
 
-.PHONY: all check format test test-ui test-dsp wasm sim-macos serve tsan ubsan ubsan-ui clean
+.PHONY: all check format test test-ui test-dsp wasm sim-macos serve fm1-image fm1-check tsan ubsan ubsan-ui clean
 
 all: $(TEST_DSP_BIN) $(TEST_UI_BIN) $(WASM_OUT) $(MACOS_SIM_BIN)
 
@@ -86,7 +86,7 @@ check:
 	python3 tools/check_hygiene.py
 
 format:
-	@"$(CLANG_FORMAT)" -i $(wildcard src/core/*.h src/core/*.cpp src/dsp/*.h src/dsp/*.cpp src/ui/*.h src/ui/*.cpp tests/*.h tests/*.cpp platforms/sim/WasmAbiLayout.h)
+	@"$(CLANG_FORMAT)" -i $(wildcard src/core/*.h src/core/*.cpp src/dsp/*.h src/dsp/*.cpp src/ui/*.h src/ui/*.cpp tests/*.h tests/*.cpp platforms/sim/WasmAbiLayout.h platforms/fm1/*.h platforms/fm1/*.c platforms/fm1/*.cpp)
 
 $(BUILD_DIR)/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
@@ -174,6 +174,12 @@ ubsan-ui: $(TEST_UI_UBSAN_BIN)
 ubsan: $(TEST_DSP_UBSAN_BIN) $(TEST_UI_UBSAN_BIN)
 	./$(TEST_DSP_UBSAN_BIN)
 	./$(TEST_UI_UBSAN_BIN)
+
+fm1-image:
+	docker build --platform linux/amd64 -t ruido-fm1-toolchain:latest tools/fm1-docker
+
+fm1-check: check
+	python3 platforms/fm1/build_fm1.py
 
 clean:
 	rm -rf $(BUILD_DIR) $(WASM_OUT)

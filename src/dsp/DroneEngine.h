@@ -21,7 +21,7 @@ namespace ruido {
 // allocate `EngineSharedBuses` in uncached SRAM while keeping `DroneEngineCore` in Core 1 L1.
 class DroneEngineCore {
   public:
-    DroneEngineCore() noexcept = default;
+    DroneEngineCore() noexcept {}
 
     void init(EngineSharedBuses& buses, float baseSampleRate = kBaseSampleRate) noexcept;
     void reset(EngineSharedBuses& buses) noexcept;

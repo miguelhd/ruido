@@ -267,14 +267,14 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
     std::array<float, kNumOscillators> blockVoicePeak{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> lastGateHigh{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> lastDriftNorm{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<VoiceLfoFrame, kNumVoiceLfos> lastLfo{};
+    std::array<VoiceLfoFrame, kNumVoiceLfos> lfoFrames;
+    OscillatorBankOutput oscOut;
     uint8_t lastStutterMask = 0x0Fu;
 
     for (size_t frame = 0u; frame < numFrames; ++frame) {
         // Step audio-rate (44.118 kHz) smoothers, 8x dual voice LFOs & prepare filter/pan coeffs
-        const std::array<VoiceLfoFrame, kNumVoiceLfos> lfoFrames =
-            lfoBank_.stepFrame(stasisFreeze_);
-        lastLfo = lfoFrames;
+        const bool isLastFrame = ((frame + 1u) == numFrames);
+        lfoBank_.stepFrame(lfoFrames, stasisFreeze_, isLastFrame);
 
         const float surge = punchBusSmoothers_.next(0u);
         const float surgeDrive = surge * (0.62f + 0.38f * surge);
@@ -296,17 +296,17 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         const float pitchMode = pitchModeSmoother_.next();
         uint8_t frameStutterMask = 0x0Fu;
 
-        std::array<float, kNumOscillators> oscFreqs{};
-        std::array<float, kNumOscillators> oscPulseWidths{};
-        std::array<float, kNumOscillators> oscDrifts{};
-        std::array<float, kNumOscillators> stutDepths{};
-        std::array<float, kNumOscillators> xmodDepths{};
-        std::array<float, kNumOscillators> foldDepths{};
-        std::array<float, kNumOscillators> crushDepths{};
-        std::array<float, kNumOscillators> vcaGates{};
-        std::array<float, kNumOscillators> gainL{};
-        std::array<float, kNumOscillators> gainR{};
-        std::array<float, kNumOscillators> voiceScopeScale{};
+        std::array<float, kNumOscillators> oscFreqs;
+        std::array<float, kNumOscillators> oscPulseWidths;
+        std::array<float, kNumOscillators> oscDrifts;
+        std::array<float, kNumOscillators> stutDepths;
+        std::array<float, kNumOscillators> xmodDepths;
+        std::array<float, kNumOscillators> foldDepths;
+        std::array<float, kNumOscillators> crushDepths;
+        std::array<float, kNumOscillators> vcaGates;
+        std::array<float, kNumOscillators> gainL;
+        std::array<float, kNumOscillators> gainR;
+        std::array<float, kNumOscillators> voiceScopeScale;
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             stutDepths[i] = voiceSmoothers_[i].vactrolMods.next(2u);
         }
@@ -314,12 +314,17 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
             stepRhythmFrame(rhythmState_, stutterPhases_, stutterRatesHz_, stutDepths,
                             hzToBasePhaseU32_, stasisFreeze_);
         frameStutterMask = rhythmFrame.gateMask;
+        const bool anyFilterMacro = (surge > 0.22f) || (dubDrop > 1.0e-4f) ||
+                                    (filterScream > 1.0e-4f) || (rhythmFrame.pluckDepth > 1.0e-4f);
+        const bool refreshCoeffs = ((frame & 3u) == 0u) || isLastFrame;
 
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             VoiceSmoothers& sm = voiceSmoothers_[i];
             VoiceCoeffCache& cache = coeffCache_[i];
             const VoiceLfoFrame& lfoA = lfoFrames[i];
             const VoiceLfoFrame& lfoB = lfoFrames[4u + i];
+            const bool hasA = (lfoA.activeDepth > 0.0f);
+            const bool hasB = (lfoB.activeDepth > 0.0f);
             const auto& tdA = lfoA.targetDepths;
             const auto& tdB = lfoB.targetDepths;
 
@@ -333,58 +338,75 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
             sm.stutterGate.setTarget(rhythmFrame.vcaGateTarget[i]);
             const float stutMul = sm.stutterGate.next();
 
-            float baseHz = applyLfoPitchHz(sm.freqHz.next(),
-                                           tdA[static_cast<size_t>(LfoTarget::Pitch)], lfoA.raw);
-            baseHz = applyLfoPitchHz(baseHz, tdB[static_cast<size_t>(LfoTarget::Pitch)], lfoB.raw);
-            const float pitchMul = computeVoicePitchRatio(p, pitchMode) * kPitchMul;
+            float baseHz = sm.freqHz.next();
+            float modPw = sm.potSmoothers.next(0u);
+            oscDrifts[i] = sm.potSmoothers.next(1u);
+            float hpBase = sm.hpCutoffHz.next();
+            float hpResBase = sm.potSmoothers.next(2u);
+            float lpBase = sm.lpCutoffHz.next();
+            float lpResBase = sm.potSmoothers.next(3u);
+            float modAmp = sm.potSmoothers.next(4u);
+            float modPan = sm.potSmoothers.next(5u);
+
+            if (hasA) {
+                baseHz =
+                    applyLfoPitchHz(baseHz, tdA[static_cast<size_t>(LfoTarget::Pitch)], lfoA.raw);
+                modPw = applyLfoPulseWidth(modPw, tdA[static_cast<size_t>(LfoTarget::PulseWidth)],
+                                           lfoA.raw);
+                hpBase = applyLfoCutoffHz(hpBase, tdA[static_cast<size_t>(LfoTarget::HpCutoff)],
+                                          lfoA.raw);
+                hpResBase = applyLfoResonance(
+                    hpResBase, tdA[static_cast<size_t>(LfoTarget::HpResonance)], lfoA.raw);
+                lpBase = applyLfoCutoffHz(lpBase, tdA[static_cast<size_t>(LfoTarget::LpCutoff)],
+                                          lfoA.raw);
+                lpResBase = applyLfoResonance(
+                    lpResBase, tdA[static_cast<size_t>(LfoTarget::LpResonance)], lfoA.raw);
+                modAmp = applyLfoAmplitude(modAmp, tdA[static_cast<size_t>(LfoTarget::Amplitude)],
+                                           lfoA.raw);
+                modPan = applyLfoPan(modPan, tdA[static_cast<size_t>(LfoTarget::Pan)], lfoA.raw);
+            }
+            if (hasB) {
+                baseHz =
+                    applyLfoPitchHz(baseHz, tdB[static_cast<size_t>(LfoTarget::Pitch)], lfoB.raw);
+                modPw = applyLfoPulseWidth(modPw, tdB[static_cast<size_t>(LfoTarget::PulseWidth)],
+                                           lfoB.raw);
+                hpBase = applyLfoCutoffHz(hpBase, tdB[static_cast<size_t>(LfoTarget::HpCutoff)],
+                                          lfoB.raw);
+                hpResBase = applyLfoResonance(
+                    hpResBase, tdB[static_cast<size_t>(LfoTarget::HpResonance)], lfoB.raw);
+                lpBase = applyLfoCutoffHz(lpBase, tdB[static_cast<size_t>(LfoTarget::LpCutoff)],
+                                          lfoB.raw);
+                lpResBase = applyLfoResonance(
+                    lpResBase, tdB[static_cast<size_t>(LfoTarget::LpResonance)], lfoB.raw);
+                modAmp = applyLfoAmplitude(modAmp, tdB[static_cast<size_t>(LfoTarget::Amplitude)],
+                                           lfoB.raw);
+                modPan = applyLfoPan(modPan, tdB[static_cast<size_t>(LfoTarget::Pan)], lfoB.raw);
+            }
+
+            const float pitchMul =
+                (p > 0.0f) ? (computeVoicePitchRatio(p, pitchMode) * kPitchMul) : kPitchMul;
             oscFreqs[i] = (pitchMul != 1.0f)
                               ? clampf(baseHz * pitchMul, 0.005f, kAudioFreqMaxHz * 4.0f)
                               : baseHz;
+            oscPulseWidths[i] = modPw;
 
-            float modPw =
-                applyLfoPulseWidth(sm.potSmoothers.next(0u),
-                                   tdA[static_cast<size_t>(LfoTarget::PulseWidth)], lfoA.raw);
-            oscPulseWidths[i] = applyLfoPulseWidth(
-                modPw, tdB[static_cast<size_t>(LfoTarget::PulseWidth)], lfoB.raw);
-            oscDrifts[i] = sm.potSmoothers.next(1u);
+            ModulatedFilterParams mod = computeVoicePressureMacro(
+                hpBase, hpResBase, lpBase, lpResBase, p, baseGate, pitchMode);
+            if (anyFilterMacro) {
+                const FilterMacroContext fltMacros{
+                    dubDrop, surge, filterScream, rhythmFrame.pluckDepth, rhythmFrame.pluckEnv01[i],
+                };
+                mod = applyFilterPerformanceMacros(mod, fltMacros);
+            }
 
-            float hpBase = applyLfoCutoffHz(
-                sm.hpCutoffHz.next(), tdA[static_cast<size_t>(LfoTarget::HpCutoff)], lfoA.raw);
-            hpBase =
-                applyLfoCutoffHz(hpBase, tdB[static_cast<size_t>(LfoTarget::HpCutoff)], lfoB.raw);
-            float hpResBase =
-                applyLfoResonance(sm.potSmoothers.next(2u),
-                                  tdA[static_cast<size_t>(LfoTarget::HpResonance)], lfoA.raw);
-            hpResBase = applyLfoResonance(
-                hpResBase, tdB[static_cast<size_t>(LfoTarget::HpResonance)], lfoB.raw);
-            float lpBase = applyLfoCutoffHz(
-                sm.lpCutoffHz.next(), tdA[static_cast<size_t>(LfoTarget::LpCutoff)], lfoA.raw);
-            lpBase =
-                applyLfoCutoffHz(lpBase, tdB[static_cast<size_t>(LfoTarget::LpCutoff)], lfoB.raw);
-            float lpResBase =
-                applyLfoResonance(sm.potSmoothers.next(3u),
-                                  tdA[static_cast<size_t>(LfoTarget::LpResonance)], lfoA.raw);
-            lpResBase = applyLfoResonance(
-                lpResBase, tdB[static_cast<size_t>(LfoTarget::LpResonance)], lfoB.raw);
-
-            const FilterMacroContext fltMacros{
-                dubDrop, surge, filterScream, rhythmFrame.pluckDepth, rhythmFrame.pluckEnv01[i],
-            };
-            ModulatedFilterParams mod = applyFilterPerformanceMacros(
-                computeVoicePressureMacro(hpBase, hpResBase, lpBase, lpResBase, p, baseGate,
-                                          pitchMode),
-                fltMacros);
-
-            float modAmp = applyLfoAmplitude(
-                sm.potSmoothers.next(4u), tdA[static_cast<size_t>(LfoTarget::Amplitude)], lfoA.raw);
-            modAmp =
-                applyLfoAmplitude(modAmp, tdB[static_cast<size_t>(LfoTarget::Amplitude)], lfoB.raw);
-            modAmp = clampf(modAmp + (1.0f - modAmp) * surgeDrive, 0.0f, 1.0f);
+            if (surgeDrive > 0.0f) {
+                modAmp = clampf(modAmp + (1.0f - modAmp) * surgeDrive, 0.0f, 1.0f);
+            }
             const VoiceChannelGain chGain = computeVoiceChannelGain(modAmp);
 
-            if (mod.hpCutoffHz != cache.hpHz || mod.hpResonance != cache.hpRes ||
-                mod.lpCutoffHz != cache.lpHz || mod.lpResonance != cache.lpRes ||
-                chGain.preDrive != cache.preDrive) {
+            if (refreshCoeffs && (mod.hpCutoffHz != cache.hpHz || mod.hpResonance != cache.hpRes ||
+                                  mod.lpCutoffHz != cache.lpHz || mod.lpResonance != cache.lpRes ||
+                                  chGain.preDrive != cache.preDrive)) {
                 cache.hpHz = mod.hpCutoffHz;
                 cache.hpRes = mod.hpResonance;
                 cache.lpHz = mod.lpCutoffHz;
@@ -399,14 +421,14 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
             vcaGates[i] = ampGate;
             const float voiceGain = ampGate * kVoiceSumScale;
             voiceScopeScale[i] = ampGate * finalScale * 0.25f;
-            float modPan = applyLfoPan(sm.potSmoothers.next(5u),
-                                       tdA[static_cast<size_t>(LfoTarget::Pan)], lfoA.raw);
-            modPan = applyLfoPan(modPan, tdB[static_cast<size_t>(LfoTarget::Pan)], lfoB.raw);
             if (spatialFocus > 0.0f) {
                 modPan += (kWideFanPans[i] - modPan) * spatialFocus;
             }
-            modPan = clampf(modPan + rhythmFrame.swingPanOffset, -1.0f, 1.0f);
-            const float panEff = clampf(modPan * panScale, -1.0f, 1.0f);
+            if (rhythmFrame.swingPanOffset != 0.0f) {
+                modPan = clampf(modPan + rhythmFrame.swingPanOffset, -1.0f, 1.0f);
+            }
+            const float panEff =
+                (panScale == 1.0f) ? modPan : clampf(modPan * panScale, -1.0f, 1.0f);
             if (panEff != cache.panEff) {
                 cache.panEff = panEff;
                 equalPowerPan(panEff, cache.panL, cache.panR);
@@ -417,40 +439,77 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         lastStutterMask = frameStutterMask;
 
         // Run unified 4x oversampled (176.472 kHz) synthesis, rail coupling, ZDF filters & bus sag
-        std::array<std::array<float, kOversampleFactor>, kNumOscillators> voiceSub{};
-        std::array<StereoFrame, kOversampleFactor> osStereo{};
-        std::array<float, kNumOscillators> voiceScopeAccum{0.0f, 0.0f, 0.0f, 0.0f};
+        std::array<std::array<float, kOversampleFactor>, kNumOscillators> voiceSub;
+        std::array<StereoFrame, kOversampleFactor> osStereo;
+        std::array<float, kNumOscillators> voiceScopeAccum;
         uint8_t voiceRisingInFrame = 0u;
+        const auto max4 = [](const std::array<float, kNumOscillators>& a) noexcept -> float {
+            const float m01 = (a[0] > a[1]) ? a[0] : a[1];
+            const float m23 = (a[2] > a[3]) ? a[2] : a[3];
+            return (m01 > m23) ? m01 : m23;
+        };
+        const bool anyXmod = max4(xmodDepths) > 1.0e-4f;
+        const bool anyFold = max4(foldDepths) > 1.0e-4f;
+        const bool anyCrush = max4(crushDepths) > 1.0e-4f;
+        const bool anyRing = (ringModMix > 1.0e-4f);
 
         for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
-            std::array<float, kNumOscillators> subFreqs{};
+            std::array<float, kNumOscillators> subFreqs;
             const float subAlpha = 0.25f * static_cast<float>(sub + 1u);
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 subFreqs[i] = prevOscFreqHz_[i] + (oscFreqs[i] - prevOscFreqHz_[i]) * subAlpha;
             }
-            applyCrossPinFm4x(subFreqs, prevCapRamp_, prevOscSamples_, xmodDepths);
-            const OscillatorBankOutput oscOut = oscBank_.processSample(
-                subFreqs, oscPulseWidths, oscDrifts, coupling, stasisFreeze_, hardSync);
+            if (anyXmod) {
+                applyCrossPinFm4x(subFreqs, prevCapRamp_, prevOscSamples_, xmodDepths);
+            }
+            oscBank_.processSample(oscOut, subFreqs, oscPulseWidths, oscDrifts, coupling,
+                                   stasisFreeze_, hardSync);
             prevOscSamples_ = oscOut.samples;
             prevCapRamp_ = oscOut.capRamp;
             std::array<float, kNumOscillators> patchedSamples = oscOut.samples;
-            applyCrossPinXor4x(patchedSamples, oscOut.capRamp, xmodDepths);
-            applyCapacitorWavefold4x(patchedSamples, oscOut.capRamp, foldDepths);
-            applyRippleSubXorPreFilter4x(patchedSamples, oscOut.risingMask, crushDepths,
-                                         crushStates_);
-            applyRingXorMatrix4x(patchedSamples, ringModMix);
+            if (anyXmod) {
+                applyCrossPinXor4x(patchedSamples, oscOut.capRamp, xmodDepths);
+            }
+            if (anyFold) {
+                applyCapacitorWavefold4x(patchedSamples, oscOut.capRamp, foldDepths);
+            }
+            if (anyCrush) {
+                applyRippleSubXorPreFilter4x(patchedSamples, oscOut.risingMask, crushDepths,
+                                             crushStates_);
+            } else if (oscOut.risingMask != 0u) {
+                for (size_t v = 0u; v < kNumOscillators; ++v) {
+                    if (((oscOut.risingMask >> v) & 1u) != 0u) {
+                        crushStates_[v].divCounter =
+                            static_cast<uint8_t>((crushStates_[v].divCounter + 1u) & 7u);
+                    }
+                }
+            }
+            if (anyRing) {
+                applyRingXorMatrix4x(patchedSamples, ringModMix);
+            }
             voiceRisingInFrame |= oscOut.risingMask;
-            lastGateHigh = oscOut.gateHigh;
-            lastDriftNorm = oscOut.driftNorm;
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 voiceSub[i][sub] = patchedSamples[i];
             }
         }
         prevOscFreqHz_ = oscFreqs;
+        if (isLastFrame) {
+            lastGateHigh = oscOut.gateHigh;
+            lastDriftNorm = oscOut.driftNorm;
+        }
 
         Ms20DualFilter::processQuadBank4x(filters_, voiceSub, filterCoeffs_);
-        applySampleHoldCrushPostFilter4x(voiceSub, crushDepths, hzToOversampledPhaseU32_,
-                                         crushStates_);
+        if (anyCrush) {
+            applySampleHoldCrushPostFilter4x(voiceSub, crushDepths, hzToOversampledPhaseU32_,
+                                             crushStates_);
+        } else {
+            for (size_t v = 0u; v < kNumOscillators; ++v) {
+                crushStates_[v].snhPhase = 0u;
+                const float rest = sanitizeState(voiceSub[v][kOversampleFactor - 1u]);
+                crushStates_[v].heldSample = rest;
+                crushStates_[v].capSample = rest;
+            }
+        }
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             voiceScopeAccum[i] = voiceSub[i][0] + voiceSub[i][1] + voiceSub[i][2] + voiceSub[i][3];
             const float vAbs = absf(voiceScopeAccum[i]) * 0.25f * vcaGates[i];
@@ -495,7 +554,7 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         }
 
         // Delay 4-voice rising-edge triggers & scope taps by 36 base frames to match FIR delay
-        std::array<int16_t, kNumOscillators> curVoiceQ13{};
+        std::array<int16_t, kNumOscillators> curVoiceQ13;
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             curVoiceQ13[i] = quantizeVoiceScopeQ13(voiceScopeAccum[i] * voiceScopeScale[i]);
         }
@@ -527,9 +586,10 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
     buses.telemetry.stutterGateMask.store(lastStutterMask, std::memory_order_relaxed);
     buses.telemetry.rhythmPhase.store(rhythmState_.warpedBar01, std::memory_order_relaxed);
     for (size_t s = 0u; s < kNumVoiceLfos; ++s) {
-        buses.telemetry.lfoOutput[s].store(lastLfo[s].raw, std::memory_order_relaxed);
-        buses.telemetry.lfoPhase[s].store(lastLfo[s].phase01, std::memory_order_relaxed);
-        buses.telemetry.lfoDriftPacked[s].store(lastLfo[s].driftPacked, std::memory_order_relaxed);
+        buses.telemetry.lfoOutput[s].store(lfoFrames[s].raw, std::memory_order_relaxed);
+        buses.telemetry.lfoPhase[s].store(lfoFrames[s].phase01, std::memory_order_relaxed);
+        buses.telemetry.lfoDriftPacked[s].store(lfoFrames[s].driftPacked,
+                                                std::memory_order_relaxed);
     }
 }
 

@@ -96,7 +96,8 @@ Ms20DualFilter::Coeffs Ms20DualFilter::prepareCoeffs(float hpCutoffHz, float hpR
     return c;
 }
 
-float Ms20DualFilter::processHighPass(OtaSallenKeyStage& st, float x, const Coeffs& c) noexcept {
+RUIDO_ALWAYS_INLINE float Ms20DualFilter::processHighPass(OtaSallenKeyStage& st, float x,
+                                                          const Coeffs& c) noexcept {
     if (c.hpLinearBypass) {
         const float onePlusG = 1.0f + c.gHp;
         const float y2 = (x + st.s1 + onePlusG * st.s2) * c.invLinDetHp;
@@ -123,7 +124,8 @@ float Ms20DualFilter::processHighPass(OtaSallenKeyStage& st, float x, const Coef
     return y2;
 }
 
-float Ms20DualFilter::processLowPass(OtaSallenKeyStage& st, float x, const Coeffs& c) noexcept {
+RUIDO_ALWAYS_INLINE float Ms20DualFilter::processLowPass(OtaSallenKeyStage& st, float x,
+                                                         const Coeffs& c) noexcept {
     if (c.lpLinearBypass) {
         const float onePlusG = 1.0f + c.gLp;
         const float w = (st.s1 + c.gLp * x - onePlusG * st.s2) * c.invLinDetLp;
@@ -163,7 +165,20 @@ void Ms20DualFilter::processQuadBank4x(
     std::array<std::array<float, kOversampleFactor>, kNumOscillators>& voiceSamples,
     const std::array<Coeffs, kNumOscillators>& coeffs) noexcept {
     static_assert(kNumOscillators == 4u && kOversampleFactor == 4u, "Expects 4 voices x 4x OS");
-
+#if !(defined(__SSE__) || defined(__ARM_NEON) || defined(__wasm__))
+    // On scalar embedded FPU targets (e.g. JieLi AC791N pi32v2 with 16 GPRs and no 4-wide SIMD),
+    // keeping a single voice's HPF/LPF states in scalar registers across all 4 oversampled ticks
+    // avoids 560+ SoA stack spills while producing bit-identical IEEE-754 output (0.000e+00 diff).
+    for (size_t v = 0u; v < 4u; ++v) {
+        Ms20DualFilter& flt = filters[v];
+        const Coeffs& c = coeffs[v];
+        std::array<float, kOversampleFactor>& vs = voiceSamples[v];
+        for (size_t sub = 0u; sub < 4u; ++sub) {
+            vs[sub] = flt.processPrepared(vs[sub], c);
+        }
+    }
+    return;
+#else
     // --- Stage 1: 4-voice High-Pass ---
     const bool allHpBypass = coeffs[0].hpLinearBypass && coeffs[1].hpLinearBypass &&
                              coeffs[2].hpLinearBypass && coeffs[3].hpLinearBypass;
@@ -484,6 +499,7 @@ void Ms20DualFilter::processQuadBank4x(
             }
         }
     }
+#endif
 }
 
 } // namespace ruido

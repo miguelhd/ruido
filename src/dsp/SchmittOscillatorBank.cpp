@@ -102,13 +102,13 @@ float SchmittOscillatorBank::nextWhiteNoise(uint32_t& state) noexcept {
     return static_cast<float>(static_cast<int32_t>(x)) * 4.65661287e-10f;
 }
 
-OscillatorBankOutput
-SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& freqHz,
-                                     const std::array<float, kNumOscillators>& pulseWidth,
-                                     const std::array<float, kNumOscillators>& drift,
-                                     float circuitCoupling, bool freezeDrift,
-                                     float hardSync) noexcept {
-    OscillatorBankOutput out{};
+void SchmittOscillatorBank::processSample(
+    OscillatorBankOutput& __restrict out,
+    const std::array<float, kNumOscillators>& __restrict freqHz,
+    const std::array<float, kNumOscillators>& __restrict pulseWidth,
+    const std::array<float, kNumOscillators>& __restrict drift, float circuitCoupling,
+    bool freezeDrift, float hardSync) noexcept {
+    out.risingMask = 0u;
     const float coupling = clampf(circuitCoupling, 0.0f, 1.0f);
     const float syncAmt = clampf(hardSync, 0.0f, 1.0f);
     const float syncShaped = smoothstep01(syncAmt * 1.45f);
@@ -328,7 +328,6 @@ SchmittOscillatorBank::processSample(const std::array<float, kNumOscillators>& f
     }
 
     prevRisingMask_ = out.risingMask;
-    return out;
 }
 
 } // namespace ruido

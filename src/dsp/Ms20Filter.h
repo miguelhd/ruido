@@ -47,7 +47,7 @@ class Ms20DualFilter {
         float lpOutScale = 1.0f;
     };
 
-    Ms20DualFilter() noexcept = default;
+    Ms20DualFilter() noexcept {}
 
     void reset() noexcept;
 

@@ -145,17 +145,23 @@ void VoiceLfoBank::updateTargets(const EngineControlState& state, bool snapImmed
 }
 
 void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth, float modBipolar,
-                            float turbo, float turboMul, bool freeze, VoiceLfoFrame& out) noexcept {
+                            float turbo, float turboMul, bool freeze, bool forceWaveEval,
+                            VoiceLfoFrame& out) noexcept {
     VoiceState& v = voices_[idx];
 
     const float baseRate = v.rateHz.next();
     const float curShape = v.shape.next();
     const float baseDepth = v.depth.next();
 
-    const float curRate = clampf(applyLfoModRateHz(baseRate, rateModDepth, modBipolar) * turboMul,
-                                 kLfoFreqMinHz, kLfoFreqMaxHz);
-    float curDepth = applyLfoModDepth(baseDepth, depthModDepth, modBipolar);
-    if (idx < kNumOscillators && turbo > 1.0e-4f && voices_[4u + idx].depth.current() < 0.05f) {
+    const bool modInactive = (rateModDepth <= 0.0f && depthModDepth <= 0.0f && turbo <= 1.0e-4f);
+    const float curRate =
+        modInactive ? baseRate
+                    : clampf(applyLfoModRateHz(baseRate, rateModDepth, modBipolar) * turboMul,
+                             kLfoFreqMinHz, kLfoFreqMaxHz);
+    float curDepth =
+        modInactive ? baseDepth : applyLfoModDepth(baseDepth, depthModDepth, modBipolar);
+    if (!modInactive && idx < kNumOscillators && turbo > 1.0e-4f &&
+        voices_[4u + idx].depth.current() < 0.05f) {
         const float turboFloor = 0.42f * turbo;
         if (turboFloor > curDepth) {
             curDepth = turboFloor;
@@ -175,7 +181,11 @@ void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth,
     const float phase01 = static_cast<float>(v.phase >> 8u) * kInv24Bit;
     out.phase01 = phase01;
     out.driftPacked = v.packedKnots;
-    out.raw = evalMorphedLfoWave(phase01, curShape, curRate, v.knots);
+    const bool slotActive = (curDepth > 0.0f) || v.crossfading;
+    out.activeDepth = slotActive ? (curDepth > 0.0f ? curDepth : 1.0e-6f) : 0.0f;
+    out.raw = (forceWaveEval || slotActive)
+                  ? evalMorphedLfoWave(phase01, curShape, curRate, v.knots)
+                  : 0.0f;
 
     if (v.crossfading) {
         bool allSettled = true;
@@ -189,7 +199,10 @@ void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth,
         if (allSettled) {
             v.crossfading = false;
         }
-    } else {
+    } else if (curDepth > 0.0f) {
+        for (size_t t = 0u; t < kNumTargets; ++t) {
+            out.targetDepths[t] = 0.0f;
+        }
         out.targetDepths[v.activeTarget] = curDepth;
     }
 
@@ -210,23 +223,31 @@ void VoiceLfoBank::stepSlot(size_t idx, float rateModDepth, float depthModDepth,
     v.phase = nextPhase;
 }
 
-std::array<VoiceLfoFrame, kNumVoiceLfos> VoiceLfoBank::stepFrame(bool freeze) noexcept {
-    std::array<VoiceLfoFrame, kNumVoiceLfos> frames{};
+void VoiceLfoBank::stepFrame(std::array<VoiceLfoFrame, kNumVoiceLfos>& frames, bool freeze,
+                             bool forceWaveEval) noexcept {
     const float turbo = turboSmoother_.next();
     const float turboMul = (turbo > 1.0e-4f) ? fastExp2(5.0f * turbo) : 1.0f;
 
     // 1. Step LFO B [4..7] first so LFO B -> LFO A Rate/Depth cross-modulation has zero delay
     for (size_t i = 0u; i < kNumOscillators; ++i) {
-        stepSlot(4u + i, 0.0f, 0.0f, 0.0f, turbo, turboMul, freeze, frames[4u + i]);
+        stepSlot(4u + i, 0.0f, 0.0f, 0.0f, turbo, turboMul, freeze, forceWaveEval, frames[4u + i]);
     }
     // 2. Step LFO A [0..3] with instantaneous LFO B Rate/Depth cross-modulation
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceLfoFrame& bOut = frames[4u + i];
-        stepSlot(i, bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoARate)],
-                 bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoADepth)], bOut.raw, turbo,
-                 turboMul, freeze, frames[i]);
+        const float rMod = (bOut.activeDepth > 0.0f)
+                               ? bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoARate)]
+                               : 0.0f;
+        const float dMod = (bOut.activeDepth > 0.0f)
+                               ? bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoADepth)]
+                               : 0.0f;
+        stepSlot(i, rMod, dMod, bOut.raw, turbo, turboMul, freeze, forceWaveEval, frames[i]);
     }
+}
 
+std::array<VoiceLfoFrame, kNumVoiceLfos> VoiceLfoBank::stepFrame(bool freeze) noexcept {
+    std::array<VoiceLfoFrame, kNumVoiceLfos> frames{};
+    stepFrame(frames, freeze, true);
     return frames;
 }
 
