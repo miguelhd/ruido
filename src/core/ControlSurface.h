@@ -289,6 +289,8 @@ struct HudState {
     uint8_t fxVoiceFocus = 0u;            // 0..3 = OSC 1..4 (SELECT encoder on FX Filter Page)
     uint8_t lfoVoiceFocus = 0u;           // 0..7 = LFO A/B OSC 1..4 (SELECT encoder on LFO Page)
     uint8_t configCursor = 0u;            // 0..kNumGlobalConfigItems-1 (SELECT in GLOBAL CONFIG)
+    ConfigSubView configSubView = ConfigSubView::List; // Operational sub-screen in GLOBAL CONFIG
+    uint8_t configResetTicks = 0u;        // 0..8 CW confirmation ticks in FactoryResetConfirm
     uint8_t snapshotSlot = 0u;            // 0..3 active/selected Snapshot 1..4
     uint8_t snapshotToastSlot = 0u;       // 0..3 target slot for SAVE / DELETE / EMPTY toast
     uint8_t snapshotOccupiedMask = 0x0Fu; // Bits 0..3 = Scene 1..4 occupied (0 = deleted/EMPTY)

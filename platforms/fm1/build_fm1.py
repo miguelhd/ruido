@@ -459,7 +459,7 @@ def main(argv: list[str]) -> int:
         f"-I{fw / 'gen'}",
         f"-I{FM1_DIR}",
         f'-DFELUCCA_ID="{PRODUCT_DEV}"',
-        '-DAPP_VER="0.2"',
+        '-DAPP_VER="1.0"',
     ]
 
     common_cxxflags = [

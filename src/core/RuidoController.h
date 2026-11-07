@@ -94,10 +94,10 @@ class RuidoController {
         return hud_.freqPageOpen || hud_.fxPageOpen || hud_.panPageOpen || hud_.lfoPageOpen ||
                hud_.editPageOpen || hud_.configPageOpen || hud_.selPageOpen;
     }
-    void closeAllPages() noexcept {
-        hud_.freqPageOpen = hud_.fxPageOpen = hud_.panPageOpen = false;
-        hud_.lfoPageOpen = hud_.editPageOpen = hud_.configPageOpen = hud_.selPageOpen = false;
-    }
+    void exitConfigSubView(bool restoreAudio = true) noexcept;
+    void performFactoryReset() noexcept;
+    void handleConfigEncoder(EncoderId encoder, int32_t ticks, KnobRate rate) noexcept;
+    void closeAllPages() noexcept;
     void resetPageNav() noexcept;
     void setLatchedPage(HudMode mode, ButtonId button) noexcept;
     void restoreLatchedFields() noexcept;
@@ -128,6 +128,8 @@ class RuidoController {
     bool dismissedByHome_ = false;
     bool stateDirty_ = false;
     bool settingsDirty_ = false;
+    bool firmwareStandbyActive_ = false;
+    bool firmwareStandbyPrevRun_ = true;
     uint8_t saveSwallowedMask_ = 0u;
     uint8_t savedSlotMask_ = 0u;
     int8_t selectTickAccum_ = 0;

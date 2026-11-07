@@ -27,6 +27,19 @@ enum class MidiTransportMode : uint8_t {
     RunStop = 2,   // 0xFA/0xFB starts audio output (masterRun=true); 0xFC stops audio output
 };
 
+// Canonical Ruido firmware release version & FM-1 OTA package identity (`FM-1_96N`).
+inline constexpr char kRuidoVersionStr[] = "1.0";
+inline constexpr char kRuidoPackageIdStr[] = "FM-1_960";
+
+// Active sub-screen inside the right-panel GLO `GLOBAL CONFIG` overlay.
+enum class ConfigSubView : uint8_t {
+    List = 0,
+    FirmwareUpdate = 1,
+    FactoryResetConfirm = 2,
+    FactoryResetDone = 3,
+    Credits = 4,
+};
+
 // Scalable descriptor IDs for the right-panel GLO vertical GLOBAL CONFIG list menu.
 enum class ConfigItemId : uint8_t {
     OutputRouting = 0,
@@ -36,10 +49,18 @@ enum class ConfigItemId : uint8_t {
     ClockSync = 4,
     MidiTransport = 5,
     MidiChannel = 6,
-    Count = 7
+    FirmwareUpdate = 7,
+    FactoryReset = 8,
+    Credits = 9,
+    Count = 10
 };
 
 inline constexpr size_t kNumGlobalConfigItems = static_cast<size_t>(ConfigItemId::Count);
+
+constexpr bool isGlobalConfigActionItem(ConfigItemId id) noexcept {
+    return id == ConfigItemId::FirmwareUpdate || id == ConfigItemId::FactoryReset ||
+           id == ConfigItemId::Credits;
+}
 
 inline constexpr std::array<const char*, 17> kMidiChannelLabels = {
     "OMNI", "CH 1",  "CH 2",  "CH 3",  "CH 4",  "CH 5",  "CH 6",  "CH 7",  "CH 8",
@@ -83,6 +104,12 @@ constexpr const char* globalConfigItemLabel(ConfigItemId id) noexcept {
         return "MIDI TRANSPORT IN";
     case ConfigItemId::MidiChannel:
         return "MIDI CHANNEL IN";
+    case ConfigItemId::FirmwareUpdate:
+        return "FIRMWARE UPDATE";
+    case ConfigItemId::FactoryReset:
+        return "FACTORY RESET";
+    case ConfigItemId::Credits:
+        return "CREDITS";
     case ConfigItemId::Count:
         break;
     }
@@ -101,6 +128,9 @@ constexpr int32_t globalConfigMaxIndex(ConfigItemId id) noexcept {
         return 2;
     case ConfigItemId::MidiChannel:
         return 16;
+    case ConfigItemId::FirmwareUpdate:
+    case ConfigItemId::FactoryReset:
+    case ConfigItemId::Credits:
     case ConfigItemId::Count:
         break;
     }
@@ -126,6 +156,9 @@ constexpr int32_t globalConfigGetIndex(ConfigItemId id, const GlobalConfigState&
     }
     case ConfigItemId::MidiChannel:
         return (config.midiChannel <= 16u) ? static_cast<int32_t>(config.midiChannel) : 0;
+    case ConfigItemId::FirmwareUpdate:
+    case ConfigItemId::FactoryReset:
+    case ConfigItemId::Credits:
     case ConfigItemId::Count:
         break;
     }
@@ -178,6 +211,9 @@ inline bool globalConfigSetIndex(ConfigItemId id, int32_t idx, GlobalConfigState
         config.midiChannel = next;
         return changed;
     }
+    case ConfigItemId::FirmwareUpdate:
+    case ConfigItemId::FactoryReset:
+    case ConfigItemId::Credits:
     case ConfigItemId::Count:
         break;
     }
@@ -209,6 +245,12 @@ constexpr const char* globalConfigValueLabel(ConfigItemId id, const GlobalConfig
         return "OFF";
     case ConfigItemId::MidiChannel:
         return kMidiChannelLabels[(config.midiChannel <= 16u) ? config.midiChannel : 0u];
+    case ConfigItemId::FirmwareUpdate:
+        return "ENTER >";
+    case ConfigItemId::FactoryReset:
+        return "RESET >";
+    case ConfigItemId::Credits:
+        return "v1.0 >";
     case ConfigItemId::Count:
         break;
     }

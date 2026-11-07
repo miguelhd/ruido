@@ -992,6 +992,56 @@ inline constexpr GlyphMetrics kFontSansBoldMetrics[95] = {
 
 inline constexpr SansFont kFontSansBold = {16u, kFontSansBoldMetrics, kFontSansBoldBitmaps};
 
+// Decode printable ASCII (`32..126`) plus 2-byte UTF-8 Latin-1 acute-accented vowels (`0xC3
+// 0x81..0xBA`: Á, É, Í, Ó, Ú, á, é, í, ó, ú) into their base ASCII glyph + acute accent flag (`0 B`
+// extra ROM).
+inline constexpr unsigned char decodeSansGlyphChar(const char* str, size_t& ioIndex,
+                                                   bool& outAcute) noexcept {
+    outAcute = false;
+    const auto uc = static_cast<unsigned char>(str[ioIndex]);
+    if (uc == 0xC3u) {
+        const auto next = static_cast<unsigned char>(str[ioIndex + 1u]);
+        if (next != 0u) {
+            ++ioIndex;
+            switch (next) {
+            case 0x81u:
+                outAcute = true;
+                return 'A';
+            case 0x89u:
+                outAcute = true;
+                return 'E';
+            case 0x8Du:
+                outAcute = true;
+                return 'I';
+            case 0x93u:
+                outAcute = true;
+                return 'O';
+            case 0x9Au:
+                outAcute = true;
+                return 'U';
+            case 0xA1u:
+                outAcute = true;
+                return 'a';
+            case 0xA9u:
+                outAcute = true;
+                return 'e';
+            case 0xADu:
+                outAcute = true;
+                return 'i';
+            case 0xB3u:
+                outAcute = true;
+                return 'o';
+            case 0xBAu:
+                outAcute = true;
+                return 'u';
+            default:
+                return ' ';
+            }
+        }
+    }
+    return (uc >= 32u && uc <= 126u) ? uc : ' ';
+}
+
 inline constexpr int measureSansText(const SansFont& font, const char* str,
                                      int tracking = 0) noexcept {
     if (str == nullptr || str[0] == '\0') {
@@ -999,8 +1049,9 @@ inline constexpr int measureSansText(const SansFont& font, const char* str,
     }
     int w = 0;
     for (size_t i = 0u; str[i] != '\0'; ++i) {
-        const unsigned char uc = static_cast<unsigned char>(str[i]);
-        const size_t idx = (uc >= 32u && uc <= 126u) ? (uc - 32u) : 0u;
+        bool acute = false;
+        const unsigned char baseUc = decodeSansGlyphChar(str, i, acute);
+        const size_t idx = static_cast<size_t>(baseUc - 32u);
         w += static_cast<int>(font.metrics[idx].advance);
         if (str[i + 1u] != '\0') {
             w += tracking;

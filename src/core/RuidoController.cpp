@@ -29,6 +29,8 @@ void RuidoController::reset() noexcept {
     knobTurnedDuringRateHold_ = false;
     dismissedByHome_ = false;
     settingsDirty_ = false;
+    firmwareStandbyActive_ = false;
+    firmwareStandbyPrevRun_ = true;
     saveSwallowedMask_ = 0u;
     savedSlotMask_ = 0u;
     latchedHudMode_ = HudMode::None;
@@ -97,23 +99,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
 
     if (encoder == EncoderId::Algorithm) {
         if (hud_.configPageOpen) {
-            const auto item = static_cast<ConfigItemId>(
-                (hud_.configCursor < kNumGlobalConfigItems) ? hud_.configCursor : 0u);
-            const int32_t curVal = globalConfigGetIndex(item, hud_.config, state_.global);
-            const int32_t maxVal = globalConfigMaxIndex(item);
-            const int32_t nextVal =
-                stepClampedDetent(curVal, maxVal, ticks, rate, configTickAccum_);
-            if (globalConfigSetIndex(item, nextVal, hud_.config, state_.global)) {
-                settingsDirty_ = true;
-                keyboard_.syncConfig(hud_.config);
-                snapshots_.cancelMomentaryIfActive(state_);
-                snapshots_.syncHud(hud_);
-                (void)syncClockState();
-                keyboard_.evaluate(state_, hud_);
-                publishState();
-            }
-            hud_.knobBank = KnobBankMode::None;
-            latchSwitchHud(HudMode::GlobalConfig, ButtonId::GloRight);
+            handleConfigEncoder(encoder, ticks, rate);
             return;
         }
         if (hud_.selPageOpen) {
@@ -180,13 +166,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             return;
         }
         if (hud_.configPageOpen) {
-            const int32_t maxItem = static_cast<int32_t>(kNumGlobalConfigItems) - 1;
-            const int32_t nextRow = stepClampedDetent(static_cast<int32_t>(hud_.configCursor),
-                                                      maxItem, ticks, rate, selectTickAccum_);
-            hud_.configCursor = static_cast<uint8_t>(nextRow);
-            configTickAccum_ = 0;
-            hud_.knobBank = KnobBankMode::None;
-            latchSwitchHud(HudMode::GlobalConfig, ButtonId::GloRight);
+            handleConfigEncoder(encoder, ticks, rate);
             return;
         }
         if (hud_.fxPageOpen || hud_.lfoPageOpen) {
@@ -240,6 +220,9 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
     }
 
     if (encoder == EncoderId::Presets) {
+        if (hud_.configSubView != ConfigSubView::List) {
+            exitConfigSubView(true);
+        }
         hud_.lastEncoder = EncoderId::Presets;
         if (hud_.saveArmed) {
             hud_.saveArmed = false;
@@ -330,6 +313,9 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         return;
     }
     const uint8_t kIdx = static_cast<uint8_t>(knobIdx);
+    if (hud_.configSubView != ConfigSubView::List) {
+        exitConfigSubView(true);
+    }
 
     if (hud_.fxPageOpen) {
         const size_t vIdx = static_cast<size_t>(hud_.fxVoiceFocus & 3u);

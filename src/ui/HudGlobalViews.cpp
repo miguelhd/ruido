@@ -5,6 +5,7 @@
 #include "core/HudEnvelope.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
+#include "ui/BootIntroData.h"
 #include "ui/FontSansAA.h"
 #include "ui/GraphStyle.h"
 #include "ui/MonoCanvas.h"
@@ -274,13 +275,145 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
     }
 }
 
+namespace {
+
+void fillConfigPillStrip(const MonoStripCanvas& cv, int xLeft, int xRight, int pillTop, int pillBot,
+                         uint8_t baseAlpha8) noexcept {
+    const int fillTop = (pillTop < cv.y0) ? cv.y0 : pillTop;
+    const int fillBot = (pillBot > cv.y1) ? cv.y1 : pillBot;
+    const auto fillAlpha = static_cast<uint8_t>(
+        (static_cast<uint32_t>(baseAlpha8) * static_cast<uint32_t>(cv.masterAlpha8) + 127u) / 255u);
+    if (fillAlpha == 0u || fillTop >= fillBot) {
+        return;
+    }
+    for (int py = fillTop; py < fillBot; ++py) {
+        uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
+        for (int px = xLeft; px <= xRight; ++px) {
+            row[px] = blendLum8(row[px], 255u, fillAlpha);
+        }
+    }
+}
+
+// 16x16 supersampled half-scale (110x29) RUIDO vector wordmark derived directly from
+// `kLogoCore4Bit` (`0 B` extra Flash or SRAM).
+void drawHalfScaleRuidoWordmark(const MonoStripCanvas& cv, int topY, uint8_t peakLum) noexcept {
+    constexpr int kHalfW = intro_data::kCoreW / 2;                         // 110 px
+    constexpr int kHalfH = intro_data::kCoreH / 2;                         // 29 px
+    constexpr int kLeftX = (static_cast<int>(kDisplayWidth) - kHalfW) / 2; // 65 px
+    if (cv.masterAlpha8 == 0u || topY + kHalfH <= cv.y0 || topY >= cv.y1) {
+        return;
+    }
+    const int hyStart = (topY < cv.y0) ? (cv.y0 - topY) : 0;
+    const int hyEnd = (topY + kHalfH > cv.y1) ? (cv.y1 - topY) : kHalfH;
+    for (int hy = hyStart; hy < hyEnd; ++hy) {
+        const int py = topY + hy;
+        uint8_t* dstRow = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
+        const size_t sy0 =
+            static_cast<size_t>(hy * 2) * static_cast<size_t>(intro_data::kCoreRowBytes);
+        const uint8_t* r0 = &intro_data::kLogoCore4Bit[sy0];
+        const uint8_t* r1 = r0 + intro_data::kCoreRowBytes;
+        for (int hx = 0; hx < kHalfW; ++hx) {
+            const uint8_t b0 = r0[hx];
+            const uint8_t b1 = r1[hx];
+            const uint32_t sum4 =
+                static_cast<uint32_t>(b0 >> 4u) + static_cast<uint32_t>(b0 & 0x0Fu) +
+                static_cast<uint32_t>(b1 >> 4u) + static_cast<uint32_t>(b1 & 0x0Fu);
+            if (sum4 != 0u) {
+                const uint32_t cov8 = (sum4 * 17u + 2u) >> 2u;
+                const auto a8 = static_cast<uint8_t>(
+                    (cov8 * static_cast<uint32_t>(cv.masterAlpha8) + 127u) / 255u);
+                dstRow[kLeftX + hx] = blendLum8(dstRow[kLeftX + hx], peakLum, a8);
+            }
+        }
+    }
+}
+
+void compositeConfigSubViewStrip(const MonoStripCanvas& cv, const HudState& hud) noexcept {
+    // Calm dark backdrop scrim so operational cards & fine attributions stay legible over live
+    // scope
+    const int scrimTop = (cv.y0 < 24) ? 24 : cv.y0;
+    if (scrimTop < cv.y1) {
+        const uint32_t keepQ8 =
+            256u - ((208u * static_cast<uint32_t>(cv.masterAlpha8) + 127u) / 255u);
+        for (int py = scrimTop; py < cv.y1; ++py) {
+            uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
+            for (size_t x = 0u; x < kDisplayWidth; ++x) {
+                row[x] = static_cast<uint8_t>((static_cast<uint32_t>(row[x]) * keepQ8) >> 8u);
+            }
+        }
+    }
+
+    if (hud.configSubView == ConfigSubView::FirmwareUpdate) {
+        drawHalfScaleRuidoWordmark(cv, 36, 232u);
+        cv.drawSansCentered(kFontSansSmall, 120, 70, "INSTALLED: v1.0  |  ID: FM-1_960", 168u, 0);
+        fillConfigPillStrip(cv, 10, 230, 94, 120, 30u);
+        cv.drawSansCentered(kFontSansMedium, 120, 99, "READY FOR USB UPDATE", 255u, 0);
+        cv.drawSansCentered(kFontSansSmall, 120, 132, "Connect USB-C & run installer", 190u, 0);
+        cv.drawSansCentered(kFontSansSmall, 120, 149, "App slot only (boot sector safe)", 148u, 0);
+        cv.drawSansCentered(kFontSansSmall, 120, 166, "Rescue: Hold OCT- at power-on", 148u, 0);
+        cv.drawSans(kFontSansSmall, 14, 192, "< SELECT: BACK", 114u, 0);
+        cv.drawSansRight(kFontSansSmall, 226, 192, "GLO: EXIT", 114u, 0);
+        return;
+    }
+
+    if (hud.configSubView == ConfigSubView::FactoryResetConfirm) {
+        cv.drawSansCentered(kFontSansMedium, 120, 44, "RESTORE FACTORY STATE?", 255u, 0);
+        cv.drawSansCentered(kFontSansSmall, 120, 70, "Resets Scenes 1-4, Global Config", 174u, 0);
+        cv.drawSansCentered(kFontSansSmall, 120, 87, "and live patch to v1.0 defaults.", 174u, 0);
+        fillConfigPillStrip(cv, 10, 230, 114, 140, 30u);
+        cv.drawSansCentered(kFontSansMedium, 120, 119, "TURN ALGORITHM CW TO RESET", 255u, 0);
+
+        const float prog01 =
+            clampf(static_cast<float>(hud.configResetTicks) * (1.0f / 8.0f), 0.0f, 1.0f);
+        cv.drawHorizontalFilament(56.0f, 184.0f, 158.0f, 44.0f, 0.58f, true);
+        if (prog01 > 0.01f) {
+            cv.drawHorizontalFilament(56.0f, 56.0f + prog01 * 128.0f, 158.0f, 232.0f, 0.68f, false);
+        }
+        cv.drawOpticalBead(56.0f + prog01 * 128.0f, 158.0f, 0.90f, 2.0f);
+
+        cv.drawSans(kFontSansSmall, 14, 192, "< SELECT / CCW: CANCEL", 114u, 0);
+        cv.drawSansRight(kFontSansSmall, 226, 192, "GLO: EXIT", 114u, 0);
+        return;
+    }
+
+    if (hud.configSubView == ConfigSubView::FactoryResetDone) {
+        fillConfigPillStrip(cv, 10, 230, 68, 96, 30u);
+        cv.drawSansCentered(kFontSansMedium, 120, 74, "DEFAULTS RESTORED", 255u, 0);
+        cv.drawSansCentered(kFontSansSmall, 120, 110, "Scenes 1-4 & Global Config", 182u, 0);
+        cv.drawSansCentered(kFontSansSmall, 120, 127, "reset to factory v1.0 state.", 182u, 0);
+        cv.drawSans(kFontSansSmall, 14, 192, "< SELECT: BACK", 114u, 0);
+        cv.drawSansRight(kFontSansSmall, 226, 192, "GLO: EXIT", 114u, 0);
+        return;
+    }
+
+    // ConfigSubView::Credits
+    drawHalfScaleRuidoWordmark(cv, 34, 242u);
+    cv.drawSansCentered(kFontSansSmall, 120, 67, "4-Oscillator Drone Synthesizer", 152u, 0);
+    cv.drawSansCentered(kFontSansMedium, 120, 90, "Miguel Hern\xC3\xA1ndez Domenech", 252u, 0);
+    cv.drawSansCentered(kFontSansSmall, 120, 110, "(c) 2026  |  GPL-3.0-only", 184u, 0);
+    cv.drawSansCentered(kFontSansSmall, 120, 134, "BSP: Felucca / SLOOP / Dinghy", 156u, 0);
+    cv.drawSansCentered(kFontSansSmall, 120, 150, "SDK: JieLi AC79  |  Terminus OFL", 156u, 0);
+    cv.drawSansCentered(kFontSansSmall, 120, 166, "github.com/miguelhd/Ruido", 174u, 0);
+    cv.drawSans(kFontSansSmall, 14, 192, "< SELECT: BACK", 114u, 0);
+    cv.drawSansRight(kFontSansSmall, 226, 192, "ID: FM-1_960", 114u, 0);
+}
+
+} // namespace
+
 void HudGlobalViews::compositeGlobalConfigStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
                                                 const EngineControlState& control,
                                                 const HudState& hud) const noexcept {
-    if (alpha8 == 0u || y1 <= 38 || y0 >= 232) {
+    if (alpha8 == 0u || y1 <= 24 || y0 >= 234) {
         return;
     }
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
+    if (hud.configSubView != ConfigSubView::List) {
+        compositeConfigSubViewStrip(cv, hud);
+        return;
+    }
+    if (y1 <= 38 || y0 >= 232) {
+        return;
+    }
     constexpr size_t kMaxVisibleRows = 6u;
     constexpr int kRowStartY = 44;
     constexpr int kRowPitch = 28;

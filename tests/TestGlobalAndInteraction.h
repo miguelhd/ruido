@@ -644,11 +644,8 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -8);
     RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::Off);
 
-    // Row 6 (MIDI CHANNEL IN): OMNI (default) <-> CH 1..CH 16, clamped at last row (6) + scrolled
-    // 6-row viewport check
+    // Row 6 (MIDI CHANNEL IN): OMNI (default) <-> CH 1..CH 16 + scrolled 6-row viewport check
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
-    RTEST_CHECK(ctrl.hud().configCursor == 6u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8); // Clamped at last row (6)
     RTEST_CHECK(ctrl.hud().configCursor == 6u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::MidiChannel),
                             "MIDI CHANNEL IN") == 0);
@@ -669,6 +666,78 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     verifyViewStripsAndCenter(false); // Scrolled 6-row viewport renders cleanly without bottom bar
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -80); // Clamped back to OMNI (0)
     RTEST_CHECK(ctrl.hud().config.midiChannel == 0u);
+
+    // Rows 7..9: Operational sub-screens (FIRMWARE UPDATE, FACTORY RESET, CREDITS)
+    // 7a. FIRMWARE UPDATE mutes live audio while open and restores prior masterRun on back/exit
+    RTEST_CHECK(ctrl.state().global.masterRun);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    RTEST_CHECK(ctrl.hud().configCursor == 7u);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::FirmwareUpdate),
+                            "FIRMWARE UPDATE") == 0);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FirmwareUpdate);
+    RTEST_CHECK(!ctrl.state().global.masterRun); // Muted automatically during USB update standby!
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+    verifyViewStripsAndCenter(false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4); // Step back to list
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::List);
+    RTEST_CHECK(ctrl.state().global.masterRun); // Restored automatically!
+
+    // 7b. FACTORY RESET requires 2 CW detents (8 ticks), cancels on CCW, and resets NVS + patch
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    RTEST_CHECK(ctrl.hud().configCursor == 8u);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::FactoryReset),
+                            "FACTORY RESET") == 0);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetConfirm);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // 1 detent (50% progress) -> NOT reset yet
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetConfirm);
+    RTEST_CHECK(ctrl.hud().configResetTicks == 4u);
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+    verifyViewStripsAndCenter(false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -8); // CCW cancels back to list safely
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::List);
+
+    // Mutate config + delete Scene 1, then run full 2-detent FACTORY RESET confirmation
+    ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // DELETE SCENE
+    ctrl.onWhiteKeyGate(12u, true);
+    ctrl.onWhiteKeyGate(12u, false);
+    RTEST_CHECK(!ctrl.snapshots().isSlotOccupied(0u));
+    (void)ctrl.consumeSavedSlotMask();
+    (void)ctrl.consumeSettingsDirty();
+
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
+    ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // Back to row 8 if needed (preserved at 8)
+    RTEST_CHECK(ctrl.hud().configCursor >= 8u);
+    if (ctrl.hud().configCursor != 8u) {
+        ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
+    }
+    RTEST_CHECK(ctrl.hud().configCursor == 8u);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // Enter confirm
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8); // 2 CW detents -> confirm reset!
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetDone);
+    RTEST_CHECK(ctrl.snapshots().occupiedMask() == 0x0Fu);
+    RTEST_CHECK(ctrl.consumeSavedSlotMask() == 0x0Fu);
+    RTEST_CHECK(ctrl.consumeSettingsDirty());
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+    verifyViewStripsAndCenter(false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::List);
+
+    // 7c. CREDITS (last row = 9): clamped at bottom, UTF-8 'á' acute width & monochrome render
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 16); // Clamped at last row (9)
+    RTEST_CHECK(ctrl.hud().configCursor == 9u);
+    RTEST_CHECK(
+        std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::Credits), "CREDITS") == 0);
+    RTEST_CHECK(ruido::measureSansText(ruido::kFontSansMedium, "Hern\xC3\xA1ndez", 0) ==
+                ruido::measureSansText(ruido::kFontSansMedium, "Hernandez", 0));
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::Credits);
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+    verifyViewStripsAndCenter(false);
 
     // Close GLOBAL CONFIG via 2nd GloRight tap -> 150 ms smooth fade-out
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);

@@ -323,13 +323,41 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         break;
     }
     case HudMode::GlobalConfig: {
-        appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
-        appendStr(leftSuffix, 0u, sizeof(leftSuffix), " CONFIG");
-        const uint32_t cur = static_cast<uint32_t>(
-            (hud.configCursor < kNumGlobalConfigItems) ? (hud.configCursor + 1u) : 1u);
-        size_t p = appendUInt(rightText, 0u, sizeof(rightText), cur);
-        p = appendStr(rightText, p, sizeof(rightText), " / ");
-        appendUInt(rightText, p, sizeof(rightText), static_cast<uint32_t>(kNumGlobalConfigItems));
+        switch (hud.configSubView) {
+        case ConfigSubView::FirmwareUpdate:
+            appendStr(leftMain, 0u, sizeof(leftMain), "FIRMWARE");
+            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " UPDATE");
+            appendStr(rightText, 0u, sizeof(rightText), "AUDIO MUTED");
+            break;
+        case ConfigSubView::FactoryResetConfirm:
+            appendStr(leftMain, 0u, sizeof(leftMain), "FACTORY");
+            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " RESET");
+            appendStr(rightText, 0u, sizeof(rightText), "CONFIRM");
+            break;
+        case ConfigSubView::FactoryResetDone:
+            appendStr(leftMain, 0u, sizeof(leftMain), "FACTORY");
+            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " RESET");
+            appendStr(rightText, 0u, sizeof(rightText), "COMPLETE");
+            break;
+        case ConfigSubView::Credits: {
+            appendStr(leftMain, 0u, sizeof(leftMain), "CREDITS");
+            size_t p = appendStr(rightText, 0u, sizeof(rightText), "v");
+            appendStr(rightText, p, sizeof(rightText), kRuidoVersionStr);
+            break;
+        }
+        case ConfigSubView::List:
+        default: {
+            appendStr(leftMain, 0u, sizeof(leftMain), "GLOBAL");
+            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " CONFIG");
+            const uint32_t cur = static_cast<uint32_t>(
+                (hud.configCursor < kNumGlobalConfigItems) ? (hud.configCursor + 1u) : 1u);
+            size_t p = appendUInt(rightText, 0u, sizeof(rightText), cur);
+            p = appendStr(rightText, p, sizeof(rightText), " / ");
+            appendUInt(rightText, p, sizeof(rightText),
+                       static_cast<uint32_t>(kNumGlobalConfigItems));
+            break;
+        }
+        }
         break;
     }
     case HudMode::KeyboardModel:

@@ -387,8 +387,9 @@ struct MonoStripCanvas {
         }
         int penX = tx;
         for (size_t i = 0u; str[i] != '\0'; ++i) {
-            const unsigned char uc = static_cast<unsigned char>(str[i]);
-            const size_t idx = (uc >= 32u && uc <= 126u) ? (uc - 32u) : 0u;
+            bool hasAcute = false;
+            const unsigned char baseUc = decodeSansGlyphChar(str, i, hasAcute);
+            const size_t idx = static_cast<size_t>(baseUc - 32u);
             const GlyphMetrics& gm = font.metrics[idx];
 
             const int gx0 = penX + static_cast<int>(gm.xOffset);
@@ -418,6 +419,35 @@ struct MonoStripCanvas {
                             const auto a8 = static_cast<uint8_t>(
                                 (cov8 * static_cast<uint32_t>(masterAlpha8) + 127u) / 255u);
                             row[px] = blendLum8(row[px], gray, a8);
+                        }
+                    }
+                }
+            }
+            if (hasAcute) {
+                constexpr uint8_t kAcute3x3[3][3] = {
+                    {0u, 10u, 15u},
+                    {4u, 15u, 6u},
+                    {13u, 5u, 0u},
+                };
+                const int ax0 = penX + (static_cast<int>(gm.advance) / 2) - 1;
+                const int ayRaw = gy0 - 4;
+                const int ay0 = (ayRaw < ty) ? ty : ayRaw;
+                if (ay0 + 3 > y0 && ay0 < y1) {
+                    for (int ary = 0; ary < 3; ++ary) {
+                        const int py = ay0 + ary;
+                        if (py < y0 || py >= y1) {
+                            continue;
+                        }
+                        uint8_t* row = lum + static_cast<size_t>(py - y0) * kDisplayWidth;
+                        for (int arx = 0; arx < 3; ++arx) {
+                            const int px = ax0 + arx;
+                            const uint8_t nib = kAcute3x3[ary][arx];
+                            if (nib != 0u && px >= 0 && px < static_cast<int>(kDisplayWidth)) {
+                                const uint32_t cov8 = static_cast<uint32_t>(nib) * 17u;
+                                const auto a8 = static_cast<uint8_t>(
+                                    (cov8 * static_cast<uint32_t>(masterAlpha8) + 127u) / 255u);
+                                row[px] = blendLum8(row[px], gray, a8);
+                            }
                         }
                     }
                 }

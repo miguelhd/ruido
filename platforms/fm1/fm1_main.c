@@ -4,6 +4,7 @@
  * clears. */
 
 #define APP_NAME "RUIDO"
+#define APP_VER "1.0"
 #define STORE_MAGIC 0x52554944u /* "RUID": distinct NVS magic from stock dinghy forks */
 #define CV_MAX (240u * 32u)     /* 15 KiB canvas for platform rescue/OTA FONT_S/FONT_L text boxes */
 #define LCD_BAUD 1u /* Fast ~30 MHz SPI1 ST7789 scanline DMA (vs default BAUD 4 = 12 MHz) */

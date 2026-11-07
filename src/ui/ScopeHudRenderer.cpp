@@ -250,6 +250,8 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.editPageOpen = releaseLatchHud_.editPageOpen;
         effectiveHud.editTarget = releaseLatchHud_.editTarget;
         effectiveHud.configCursor = releaseLatchHud_.configCursor;
+        effectiveHud.configSubView = releaseLatchHud_.configSubView;
+        effectiveHud.configResetTicks = releaseLatchHud_.configResetTicks;
         effectiveHud.config = releaseLatchHud_.config;
         effectiveHud.selPageOpen = releaseLatchHud_.selPageOpen;
         effectiveHud.selWakeSeq = releaseLatchHud_.selWakeSeq;
