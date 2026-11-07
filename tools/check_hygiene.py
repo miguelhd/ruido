@@ -19,6 +19,7 @@ WASM_ABI_JS = ROOT / "platforms" / "sim" / "web" / "wasm-abi.js"
 
 MAX_HANDWRITTEN_LINES = 700
 LINE_CAP_EXEMPT = {
+    pathlib.Path("src/ui/BootIntroData.h"),
     pathlib.Path("src/ui/FontSansAA.h"),
 }
 

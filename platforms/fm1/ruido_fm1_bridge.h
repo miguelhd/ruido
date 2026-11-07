@@ -75,6 +75,10 @@ void ruido_fm1_arm_audio(uint32_t enable_core1);
  * and switches `ruido_fm1_audio` seamlessly to Core 0 fallback rendering. */
 void ruido_fm1_on_c1_fault(void);
 
+/* Cleanly pause Core 1 and switch to Core 0 solo mode ahead of a live USB-MIDI OTA session or
+ * UBOOT soft-key jump (leaves live audio/UI intact on Core 0 if an OTA check is cancelled). */
+void ruido_fm1_quiesce_for_ota(void);
+
 /* Opportunistically assist Core 1 by claiming a pending `Voices 2-3` 4x ZDF filter span in
  * `.c1_text` SRAM (`0` branch cost when no span is waiting). Safe from `app_idle` & main loop. */
 void ruido_fm1_assist_dsp(void);

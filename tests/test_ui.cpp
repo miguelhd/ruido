@@ -1914,6 +1914,103 @@ void testPerVoiceLfoPageAndHudGraph() {
     CHECK(ledCrest > ledTrough + 0.12f);
 }
 
+void testBootIntroCrtSequence() {
+    std::printf("[Test 8] Cold-Boot CRT RUIDO Intro Sequence, Scanlines & Fast-Dismiss...\n");
+    static ruido::ScopeHudRenderer renderer{};
+    ruido::EngineControlState ctrl = ruido::EngineControlState::makeDefault();
+    ctrl.global.masterRun = false; // Silent flatline after intro so background check is isolated
+    ruido::HudState hud{};
+    ruido::EngineTelemetry tel{};
+    static std::array<uint16_t, ruido::kDisplayWidth * ruido::kDisplayHeight> frame{};
+
+    renderer.reset();
+    CHECK(!renderer.isBootIntroActive());
+
+    // 1. Arm cold-boot intro -> Phase 1 Beam Strike (~40 ms)
+    renderer.armBootIntro();
+    CHECK(renderer.isBootIntroActive());
+    renderer.prepareFrame(0.040f, ctrl, hud, tel);
+    renderer.renderFullScreenStrips(frame.data());
+
+    bool neutralAll = true;
+    uint32_t outerLit = 0u;
+    for (size_t y = 0u; y < ruido::kDisplayHeight; ++y) {
+        for (size_t x = 0u; x < ruido::kDisplayWidth; ++x) {
+            const uint16_t px = frame[y * ruido::kDisplayWidth + x];
+            const uint16_t r5 = (px >> 11u) & 0x1Fu;
+            const uint16_t b5 = px & 0x1Fu;
+            if (r5 != b5) {
+                neutralAll = false;
+            }
+            if ((y < 64u || y >= 176u) && px != 0x0000u) {
+                ++outerLit;
+            }
+        }
+    }
+    CHECK(neutralAll);
+    CHECK(outerLit == 0u); // Pure #000000 background outside CRT beam
+    const uint16_t beamCenterR5 = (frame[120u * 240u + 120u] >> 11u) & 0x1Fu;
+    CHECK(beamCenterR5 >= 28u);
+
+    // 2. Advance into settled RUIDO Hold (~1.90 s): verify 1.16x wordmark, O counter hole,
+    //    0.74 scanline depth (even > odd), and wide horizontal electron-beam halo!
+    for (int i = 0; i < 37; ++i) {
+        renderer.prepareFrame(0.050f, ctrl, hud, tel);
+    }
+    CHECK(renderer.isBootIntroActive());
+    renderer.renderFullScreenStrips(frame.data());
+
+    uint32_t evenSum = 0u;
+    uint32_t oddSum = 0u;
+    uint32_t wideHaloEdgeLit = 0u;
+    for (size_t y = 92u; y < 146u; ++y) {
+        for (size_t x = 0u; x < ruido::kDisplayWidth; ++x) {
+            const uint16_t px = frame[y * 240u + x];
+            if (((px >> 11u) & 0x1Fu) != (px & 0x1Fu)) {
+                neutralAll = false;
+            }
+            const uint32_t r5 = (px >> 11u) & 0x1Fu;
+            if ((y & 1u) == 0u) {
+                evenSum += r5;
+            } else {
+                oddSum += r5;
+            }
+            if ((x < 9u || x >= 231u) && r5 > 0u) {
+                ++wideHaloEdgeLit;
+            }
+        }
+    }
+    CHECK(neutralAll);
+    CHECK(evenSum > oddSum * 2u); // 0.74 scanline mask depth clearly darkens odd scanlines
+    CHECK(wideHaloEdgeLit > 12u); // sigma_x = 20 px horizontal phosphor bleed reaches bezel edges
+
+    // 'I' vertical stem around x=114, y=120 (even row) vs 'O' inner counter hole around x=202,
+    // y=120
+    const uint16_t stemI = (frame[120u * 240u + 114u] >> 11u) & 0x1Fu;
+    const uint16_t ringO = (frame[120u * 240u + 222u] >> 11u) & 0x1Fu;
+    const uint16_t holeO = (frame[120u * 240u + 202u] >> 11u) & 0x1Fu;
+    CHECK(stemI == 25u); // Settled coreLum=205 -> exact 5-bit CRT level 25!
+    CHECK(ringO == 25u);
+    CHECK(holeO < ringO - 6u);
+
+    // 3. Advance through 1000 ms flash-out exit (> 3.34 s total) -> hands off cleanly
+    for (int i = 0; i < 32; ++i) {
+        renderer.prepareFrame(0.050f, ctrl, hud, tel);
+    }
+    CHECK(!renderer.isBootIntroActive());
+
+    // 4. Touching any control mid-intro triggers smooth ~180 ms fast-dissolve (not jarring cut)
+    renderer.armBootIntro();
+    renderer.prepareFrame(0.050f, ctrl, hud, tel);
+    renderer.prepareFrame(0.050f, ctrl, hud, tel);
+    renderer.notifyUserInput();
+    CHECK(renderer.isBootIntroActive());
+    for (int i = 0; i < 5; ++i) {
+        renderer.prepareFrame(0.050f, ctrl, hud, tel);
+    }
+    CHECK(!renderer.isBootIntroActive());
+}
+
 } // namespace
 
 int main() {
@@ -1925,6 +2022,7 @@ int main() {
     testHudEnvelopeAndVaribrightLeds();
     testMonochromeCrtScanlineAndUncompressedWave();
     testPerVoiceLfoPageAndHudGraph();
+    testBootIntroCrtSequence();
     ruido_test::runUnified150msFadesAndRateSplitHeaderTests(check);
     ruido_test::runGlobalFiveModesAndConfigMenuTests(check);
     ruido_test::runEditChannelDrivePageAndAmpGraphTests(check);

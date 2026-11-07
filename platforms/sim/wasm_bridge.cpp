@@ -61,6 +61,7 @@ size_t strlen(const char* s) {
 #include "dsp/Ms20Filter.cpp"
 #include "dsp/SchmittOscillatorBank.cpp"
 #include "dsp/VoiceLfoBank.cpp"
+#include "ui/BootIntroRender.cpp"
 #include "ui/HudAmpGraph.cpp"
 #include "ui/HudChrome.cpp"
 #include "ui/HudGlobalViews.cpp"
@@ -316,6 +317,7 @@ void wasm_ui_init() {
     memset(rendMem, 0, sizeof(ruido::ScopeHudRenderer));
     gCtrl = new (ctrlMem) ruido::RuidoController();
     gRenderer = new (rendMem) ruido::ScopeHudRenderer();
+    gRenderer->armBootIntro();
     gUiTelemetry = new (gUiTelemetryStorage) ruido::EngineTelemetry();
     gTelemetryIn[WasmTelemetryIdx::kStutterGateMask] = 15.0f;
     gControlDirty = true;
@@ -326,6 +328,9 @@ RUIDO_EXPORT("wasm_ui_encoder")
 void wasm_ui_encoder(uint32_t encoderId, int32_t ticks) {
     if (gCtrl == nullptr || encoderId >= static_cast<uint32_t>(ruido::EncoderId::Count)) {
         return;
+    }
+    if (gRenderer != nullptr) {
+        gRenderer->notifyUserInput();
     }
     gCtrl->onEncoderDelta(static_cast<ruido::EncoderId>(encoderId), ticks);
     gControlDirty = true;
@@ -347,6 +352,9 @@ void wasm_ui_button(uint32_t buttonId, int32_t pressed) {
     if (gCtrl == nullptr || buttonId >= static_cast<uint32_t>(ruido::ButtonId::Count)) {
         return;
     }
+    if (gRenderer != nullptr) {
+        gRenderer->notifyUserInput();
+    }
     gCtrl->onButtonEvent(static_cast<ruido::ButtonId>(buttonId), pressed != 0);
     gControlDirty = true;
     refreshSummary();
@@ -356,6 +364,9 @@ RUIDO_EXPORT("wasm_ui_black_key")
 void wasm_ui_black_key(uint32_t keyId, int32_t pressed) {
     if (gCtrl == nullptr || keyId >= static_cast<uint32_t>(ruido::BlackKeyId::Count)) {
         return;
+    }
+    if (gRenderer != nullptr) {
+        gRenderer->notifyUserInput();
     }
     gCtrl->onBlackKeyEvent(static_cast<ruido::BlackKeyId>(keyId), pressed != 0);
     gControlDirty = true;
@@ -367,6 +378,9 @@ void wasm_ui_black_pressure(uint32_t keyId, float pressure) {
     if (gCtrl == nullptr || keyId >= static_cast<uint32_t>(ruido::BlackKeyId::Count)) {
         return;
     }
+    if (gRenderer != nullptr) {
+        gRenderer->notifyUserInput();
+    }
     gCtrl->onBlackKeyPressure(static_cast<ruido::BlackKeyId>(keyId), pressure);
     gControlDirty = true;
     refreshSummary();
@@ -377,6 +391,9 @@ void wasm_ui_white_gate(uint32_t whiteIdx, int32_t pressed) {
     if (gCtrl == nullptr) {
         return;
     }
+    if (gRenderer != nullptr) {
+        gRenderer->notifyUserInput();
+    }
     gCtrl->onWhiteKeyGate(static_cast<uint8_t>(whiteIdx), pressed != 0);
     gControlDirty = true;
     refreshSummary();
@@ -386,6 +403,9 @@ RUIDO_EXPORT("wasm_ui_white_pressure")
 void wasm_ui_white_pressure(uint32_t whiteIdx, float pressure) {
     if (gCtrl == nullptr) {
         return;
+    }
+    if (gRenderer != nullptr) {
+        gRenderer->notifyUserInput();
     }
     gCtrl->onWhiteKeyPressure(static_cast<uint8_t>(whiteIdx), pressure);
     gControlDirty = true;

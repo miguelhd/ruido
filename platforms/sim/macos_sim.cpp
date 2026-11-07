@@ -111,6 +111,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    renderer.armBootIntro();
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
 

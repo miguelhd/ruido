@@ -60,7 +60,7 @@ LOADER_LOAD = 0x01C0A800
 LOADER_NAME = b"usb_hid_ota.bin"
 SCREEN_NAME = "RUIDO"
 SCREEN_COLOUR = 0xFFFF  # Monochrome white
-PRODUCT_DEV = "FM-1_990"
+PRODUCT_DEV = "FM-1_960"  # Dedicated Ruido package identity (`FM-1_96N`)
 MAX_FWSC_BYTES = 600 * 1024
 
 SDK_SHA256 = {
@@ -631,8 +631,18 @@ def main(argv: list[str]) -> int:
     fwsc_path = OUT_DIR / "ruido.fwsc"
     fwsc_path.write_bytes(fwsc_bytes)
 
+    install_tool = dinghy_dir / "tools" / "fm1_install.py"
+    if install_tool.is_file():
+        (OUT_DIR / "fm1_install.py").write_bytes(install_tool.read_bytes())
+
     # --- Gate 4.1 + Gate 4.2 Audit ---
     errors: list[str] = []
+
+    import fm1_install  # type: ignore
+
+    pkg_prod, _ = fm1_install.load_package(str(fwsc_path), force=False)
+    if pkg_prod != PRODUCT_DEV:
+        errors.append(f"fwsc product identity mismatch: {pkg_prod!r} != {PRODUCT_DEV!r}")
 
     if sym_addr("_start") != APP_XIP:
         errors.append(f"_start != {APP_XIP:#x}")

@@ -2,6 +2,7 @@
 
 #include "core/ControlSurface.h"
 #include "core/Parameters.h"
+#include "ui/BootIntroRender.h"
 #include "ui/HudAmpGraph.h"
 #include "ui/HudGlobalViews.h"
 #include "ui/HudGraphs.h"
@@ -21,6 +22,14 @@ class ScopeHudRenderer {
     ScopeHudRenderer() noexcept;
 
     void reset() noexcept;
+
+    // Arm the cold-boot CRT `RUIDO` power-on intro sequence.
+    void armBootIntro() noexcept { bootIntro_.arm(); }
+
+    // Smoothly fast-dissolve (or skip before frame 1) the boot intro on hardware user input.
+    void notifyUserInput() noexcept { bootIntro_.notifyUserInput(); }
+
+    bool isBootIntroActive() const noexcept { return bootIntro_.isActive(); }
 
     // Drain available audio scope samples from Core 1's lock-free SPSC ring buffer.
     void ingestScopeRing(ScopeRingBuffer& ring) noexcept;
@@ -50,6 +59,7 @@ class ScopeHudRenderer {
     void compositeHudStrip(uint16_t yStart, uint16_t stripHeight, uint8_t* lumBuf,
                            uint16_t* linScratch, uint8_t hudAlpha8) const noexcept;
 
+    BootIntroRenderer bootIntro_{};
     ScopeTraceEngine traceEngine_{};
     HudGraphs graphs_{};
     HudAmpGraph ampGraph_{};

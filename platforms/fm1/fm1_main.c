@@ -379,6 +379,12 @@ static void app_main(void) {
 
         if (now_ms != last_poll_ms) {
             last_poll_ms = now_ms;
+            if (usb.ota_req || usb.uboot_req) {
+                /* Pause Core 1 into clean solo fallback, finish in-flight SPI1 LCD DMA, and silence
+                 * ALNK0 DMA halves before `ota_session()` erases 5 x 4 KiB staging sectors. */
+                ruido_fm1_quiesce_for_ota();
+                prepare_for_nvs_erase();
+            }
             g_in_platform_poll = 1u;
             platform_poll();
             g_in_platform_poll = 0u;

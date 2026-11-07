@@ -9,7 +9,7 @@ import { WASM_SUMMARY, WASM_TELEMETRY } from '../platforms/sim/web/wasm-abi.js';
 
 const wasmPath = new URL('../platforms/sim/web/ruido.wasm', import.meta.url);
 const bytes = fs.readFileSync(wasmPath);
-assert.ok(bytes.length > 4096 && bytes.length < 550000, `Unexpected wasm size: ${bytes.length}`);
+assert.ok(bytes.length > 4096 && bytes.length < 600000, `Unexpected wasm size: ${bytes.length}`);
 
 const mod = await WebAssembly.compile(bytes);
 const imports = WebAssembly.Module.imports(mod);
@@ -46,6 +46,24 @@ const rightIdx = ex.wasm_dsp_get_right_ptr() >> 2;
 const scopeOut = ex.wasm_dsp_get_scope_ptr();
 const scopeIn = ex.wasm_ui_get_scope_in_ptr();
 const scopeFrameBytes = ex.wasm_dsp_get_scope_frame_size();
+
+// Verify cold-boot CRT `RUIDO` intro renders neutral B&W scanlines on initial frames, then reset UI
+{
+  for (let i = 0; i < 5; i++) {
+    ex.wasm_ui_tick_and_render(0.08); // Advance 5 x 80 ms = 400 ms into settled RUIDO hold
+  }
+  const introPtr = ex.wasm_ui_get_rgba_ptr();
+  const introRgba = u8.subarray(introPtr, introPtr + 240 * 240 * 4);
+  let litLogoPx = 0;
+  for (let i = 0; i < introRgba.length; i += 4) {
+    assert.equal(introRgba[i], introRgba[i + 1]);
+    assert.equal(introRgba[i + 1], introRgba[i + 2]);
+    if (introRgba[i] > 180) litLogoPx++;
+  }
+  assert.ok(litLogoPx > 1200, `Expected lit RUIDO boot wordmark pixels, got ${litLogoPx}`);
+  assert.equal(introRgba[0], 0); // Pure #000000 top-left corner
+  ex.wasm_ui_init();
+}
 
 // Exercise latching FX Filter Page (button 2) + SELECT voice focus + controller -> DSP bus transfer
 ex.wasm_ui_button(2, 1);

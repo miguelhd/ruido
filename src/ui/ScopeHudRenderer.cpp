@@ -15,6 +15,7 @@ ScopeHudRenderer::ScopeHudRenderer() noexcept {
 }
 
 void ScopeHudRenderer::reset() noexcept {
+    bootIntro_.reset();
     traceEngine_.reset();
     graphs_.reset();
     ampGraph_.reset();
@@ -106,6 +107,10 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     frameHud_.scopeFrozen = hud.scopeFrozen;
 
     const float dtClamped = clampf(dtSec, 0.001f, 0.250f);
+    if (bootIntro_.isActive()) {
+        const bool hudActive = (hud.mode != HudMode::None) || (hud.opacity > 0.001f);
+        bootIntro_.step(dtClamped, hudActive);
+    }
     traceEngine_.advanceWatchdog(dtClamped, hud.scopeFrozen);
     const bool streamStalled = traceEngine_.isStreamStalled(hud.scopeFrozen);
     if (!hud.scopeFrozen) {
@@ -334,9 +339,12 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,
                                   ? kDisplayHeight
                                   : static_cast<uint16_t>(yStart + stripHeight);
 
+    const float scopeVis = bootIntro_.scopeVisibility01();
     const float bgDim01 = smoothstep01(clampf(graphs_.backdropDim(), 0.0f, 1.0f));
     const uint32_t bgKeepQ8 =
-        static_cast<uint32_t>((1.0f - kFilterBgDimDepth * bgDim01) * 256.0f + 0.5f);
+        static_cast<uint32_t>((1.0f - kFilterBgDimDepth * bgDim01) * scopeVis * 256.0f + 0.5f);
+    const uint8_t hudAlpha8 =
+        static_cast<uint8_t>(clampf(frameHud_.opacity, 0.0f, 1.0f) * 255.0f + 0.5f);
 
     constexpr uint16_t kSubStripRows = 8u;
     std::array<uint16_t, kDisplayWidth * kSubStripRows> linBuf;
@@ -350,14 +358,25 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,
         const int y0 = static_cast<int>(curY);
         const int y1 = y0 + static_cast<int>(chunkH);
 
-        traceEngine_.renderBackgroundChunk(y0, chunkH, bgKeepQ8, linBuf.data(), lumBuf.data());
+        if (scopeVis <= 0.001f) {
+            if (hudAlpha8 > 0u) {
+                linBuf.fill(0u);
+            }
+            bootIntro_.compositeStripChunk(y0, chunkH, lumBuf.data(), false);
+        } else {
+            traceEngine_.renderBackgroundChunk(y0, chunkH, bgKeepQ8, linBuf.data(), lumBuf.data());
 
-        const uint8_t hudAlpha8 =
-            static_cast<uint8_t>(clampf(frameHud_.opacity, 0.0f, 1.0f) * 255.0f + 0.5f);
-        if (hudAlpha8 < 255u && y0 < 18 && y1 > 4) {
-            const MonoStripCanvas idleCv{lumBuf.data(), y0, y1,
-                                         static_cast<uint8_t>(255u - hudAlpha8)};
-            compositeIdlePeakMeters(idleCv, smoothedPeakL_, smoothedPeakR_);
+            if (hudAlpha8 < 255u && y0 < 18 && y1 > 4) {
+                const uint8_t idleAlpha8 =
+                    static_cast<uint8_t>(static_cast<float>(255u - hudAlpha8) * scopeVis + 0.5f);
+                if (idleAlpha8 > 0u) {
+                    const MonoStripCanvas idleCv{lumBuf.data(), y0, y1, idleAlpha8};
+                    compositeIdlePeakMeters(idleCv, smoothedPeakL_, smoothedPeakR_);
+                }
+            }
+            if (bootIntro_.isActive()) {
+                bootIntro_.compositeStripChunk(y0, chunkH, lumBuf.data(), true);
+            }
         }
 
         if (hudAlpha8 > 0u && frameHud_.mode != HudMode::None) {

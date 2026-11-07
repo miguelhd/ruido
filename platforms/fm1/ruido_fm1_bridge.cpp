@@ -212,6 +212,7 @@ void ruido_fm1_construct(uint32_t initial_master_q12) {
 
     ruido::fm1::callC1Far(ruido_fm1_c1_snap_latest);
     ui->reset();
+    ui->armBootIntro();
     usbRs->reset();
 
     g_last_seen_c1_blocks = 0u;
@@ -413,6 +414,13 @@ void ruido_fm1_on_c1_fault(void) {
     }
 }
 
+void ruido_fm1_quiesce_for_ota(void) {
+    if (g_ruido_ic_ctrl.c1FallbackActive.load(std::memory_order_acquire) == 0u) {
+        engageCore1Fallback();
+    }
+    ruido::fm1::hwMemoryBarrier();
+}
+
 void ruido_fm1_assist_dsp(void) {
     if (checkCore1SelfFault()) {
         return;
@@ -443,6 +451,7 @@ void ruido_fm1_poll_panel(uint32_t now_ms, uint32_t pressed_btns, uint32_t relea
     const bool keyTouched = pnl->pollKeysAndPressure(*ctrl, cur_notes, note_press_edges);
     if (btnOrEnc || keyTouched) {
         g_last_panel_touch_ms = now_ms;
+        renderer()->notifyUserInput();
     }
 }
 
