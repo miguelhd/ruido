@@ -89,6 +89,27 @@ def main() -> int:
     test_files = sorted(
         p for p in TESTS_DIR.rglob("*") if p.suffix in {".h", ".cpp"} and p.is_file()
     )
+    fm1_dir = ROOT / "platforms" / "fm1"
+    fm1_c_files = sorted(
+        p for p in fm1_dir.glob("*") if p.suffix in {".h", ".c", ".cpp"} and p.is_file()
+    )
+    fm1_py_files = sorted(
+        p for p in fm1_dir.glob("*.py") if p.is_file()
+    )
+    tool_py_files = sorted(
+        p for p in (ROOT / "tools").glob("*.py") if p.is_file()
+    )
+
+    for path in [*fm1_c_files, *fm1_py_files, *tool_py_files]:
+        rel = path.relative_to(ROOT)
+        text = path.read_text(encoding="utf-8")
+        line_count = text.count("\n") + (
+            1 if text and not text.endswith("\n") else 0
+        )
+        if rel not in LINE_CAP_EXEMPT and line_count > MAX_HANDWRITTEN_LINES:
+            errors.append(
+                f"[line-cap] {rel} has {line_count} lines (max {MAX_HANDWRITTEN_LINES})"
+            )
 
     # 1. File line-count cap & include/layer isolation checks
     for path in src_files:
@@ -224,7 +245,7 @@ def main() -> int:
     if not cf_bin:
         errors.append("[clang-format] clang-format binary not found")
     else:
-        cf_targets = [str(p) for p in (src_files + test_files)]
+        cf_targets = [str(p) for p in (src_files + test_files + fm1_c_files)]
         res = subprocess.run(
             [cf_bin, "--dry-run", "--Werror", *cf_targets],
             cwd=ROOT,

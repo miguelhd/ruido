@@ -29,8 +29,6 @@ void RuidoController::reset() noexcept {
     knobTurnedDuringRateHold_ = false;
     dismissedByHome_ = false;
     settingsDirty_ = false;
-    firmwareStandbyActive_ = false;
-    firmwareStandbyPrevRun_ = true;
     saveSwallowedMask_ = 0u;
     savedSlotMask_ = 0u;
     latchedHudMode_ = HudMode::None;
@@ -221,7 +219,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
 
     if (encoder == EncoderId::Presets) {
         if (hud_.configSubView != ConfigSubView::List) {
-            exitConfigSubView(true);
+            exitConfigSubView();
         }
         hud_.lastEncoder = EncoderId::Presets;
         if (hud_.saveArmed) {
@@ -314,7 +312,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
     }
     const uint8_t kIdx = static_cast<uint8_t>(knobIdx);
     if (hud_.configSubView != ConfigSubView::List) {
-        exitConfigSubView(true);
+        exitConfigSubView();
     }
 
     if (hud_.fxPageOpen) {

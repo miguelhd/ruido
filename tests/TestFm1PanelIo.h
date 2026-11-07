@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../platforms/fm1/fm1_ops_screen.h"
 #include "../platforms/fm1/fm1_panel_io.h"
 #include "core/RuidoController.h"
 
@@ -207,6 +208,113 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
     const double measuredDuty = dutySumCol3 / 256.0;
     RUIDO_FM1_CHECK(std::fabs(measuredDuty - static_cast<double>(expectedDuty)) < 0.01);
     RUIDO_FM1_CHECK(diffPhaseFrames > 32u); // Staggered VDDIO switching across columns!
+
+    // 5. Verify all 12 FM-1 Hardware Operational Screens (monochrome neutrality, strip invariance,
+    //    10 px left/right bezel margins, big-endian SPI1 swap, and 1 px bar accuracy):
+    static std::array<uint16_t, 240u * 240u> opsFullLe{};
+    static std::array<uint16_t, 240u * 240u> opsStrips16Le{};
+    static std::array<uint16_t, 240u * 16u> opsStripBe{};
+    for (uint8_t k = 0u; k <= static_cast<uint8_t>(RUIDO_OPS_UBOOT); ++k) {
+        RuidoOpsState st{};
+        st.kind = k;
+        st.percent = 57u;
+        st.bar_px = (k == RUIDO_OPS_LDR_WAITING) ? 84u : 125u;
+        st.fault_vec = 0x00000004u;
+        st.fault_pc = 0x0201A4C8u;
+        st.fault_rets = 0x0201A310u;
+
+        renderOpsScreenStripImpl(st, 0u, 240u, opsFullLe.data(), false);
+        for (uint16_t y = 0u; y < 240u; y = static_cast<uint16_t>(y + 16u)) {
+            renderOpsScreenStripImpl(st, y, 16u, opsStrips16Le.data() + y * 240u, false);
+        }
+        renderOpsScreenStripImpl(st, 112u, 16u, opsStripBe.data(), true);
+
+        bool stripsEq = true;
+        bool monoOk = true;
+        bool marginsClean = true;
+        uint32_t litPixels = 0u;
+        for (size_t y = 0u; y < 240u; ++y) {
+            for (size_t x = 0u; x < 240u; ++x) {
+                const uint16_t px = opsFullLe[y * 240u + x];
+                if (px != opsStrips16Le[y * 240u + x]) {
+                    stripsEq = false;
+                }
+                const uint16_t r5 = (px >> 11u) & 0x1Fu;
+                const uint16_t g6 = (px >> 5u) & 0x3Fu;
+                const uint16_t b5 = px & 0x1Fu;
+                if (r5 != b5 || g6 != ((r5 << 1u) | (r5 >> 4u))) {
+                    monoOk = false;
+                }
+                if ((x < 9u || x > 231u) && px != 0u) {
+                    marginsClean = false;
+                }
+                if (px != 0u) {
+                    ++litPixels;
+                }
+            }
+        }
+        bool beSwapOk = true;
+        for (size_t i = 0u; i < 240u * 16u; ++i) {
+            const uint16_t le = opsFullLe[112u * 240u + i];
+            const auto expectedBe = static_cast<uint16_t>((le >> 8u) | (le << 8u));
+            if (opsStripBe[i] != expectedBe) {
+                beSwapOk = false;
+            }
+        }
+        RUIDO_FM1_CHECK(stripsEq);
+        RUIDO_FM1_CHECK(monoOk);
+        RUIDO_FM1_CHECK(marginsClean);
+        RUIDO_FM1_CHECK(beSwapOk);
+        RUIDO_FM1_CHECK(litPixels > 350u);
+    }
+
+    // Verify 1 px progress bar accuracy at y = 112..115 across 0%, 50% (110 px), and 100% (220 px)
+    for (uint16_t fill : {uint16_t{0u}, uint16_t{110u}, uint16_t{220u}}) {
+        RuidoOpsState wrSt{
+            RUIDO_OPS_LDR_WRITING, static_cast<uint8_t>((fill * 100u) / 220u), fill, 0u, 0u, 0u};
+        renderOpsScreenStripImpl(wrSt, 112u, 16u, opsStripBe.data(), false);
+        uint32_t whiteCols = 0u;
+        uint32_t trackCols = 0u;
+        for (size_t x = 10u; x < 230u; ++x) {
+            const uint16_t px = opsStripBe[1u * 240u + x]; // y = 113
+            if (px == 0xFFFFu) {
+                ++whiteCols;
+            } else if (px != 0u) {
+                ++trackCols;
+            }
+        }
+        RUIDO_FM1_CHECK(whiteCols == fill);
+        RUIDO_FM1_CHECK(whiteCols + trackCols == 220u);
+    }
+
+    // Verify standalone RAM `loader.bin` renderer (`renderOpsScreenStripLdrImpl` + sparse 2-bit
+    // SoA font tables) matches full `FontSansAA` on every solid stroke, background, and progress
+    // bar pixel, with bounded 2-bit vs 4-bit edge AA delta (`<= 4` in 5-bit RGB565 channel)
+    for (uint8_t ldrKind :
+         {static_cast<uint8_t>(RUIDO_OPS_LDR_WAITING), static_cast<uint8_t>(RUIDO_OPS_LDR_WRITING),
+          static_cast<uint8_t>(RUIDO_OPS_LDR_FAILED)}) {
+        for (uint8_t pct : {uint8_t{0u}, uint8_t{64u}, uint8_t{100u}}) {
+            RuidoOpsState ldrSt{ldrKind, pct, 110u, 0u, 0u, 0u};
+            renderOpsScreenStripFullImpl(ldrSt, 0u, 240u, opsFullLe.data(), false);
+            renderOpsScreenStripLdrImpl(ldrSt, 0u, 240u, opsStrips16Le.data(), false);
+            int maxChanDiff = 0;
+            for (size_t i = 0u; i < opsFullLe.size(); ++i) {
+                const uint16_t a = opsFullLe[i];
+                const uint16_t b = opsStrips16Le[i];
+                const size_t y = i / 240u;
+                if (a == 0xFFFFu || (y >= 112u && y < 116u)) {
+                    RUIDO_FM1_CHECK(a == b);
+                }
+                const int ga = static_cast<int>(a & 0x1Fu);
+                const int gb = static_cast<int>(b & 0x1Fu);
+                const int d = (ga > gb) ? (ga - gb) : (gb - ga);
+                if (d > maxChanDiff) {
+                    maxChanDiff = d;
+                }
+            }
+            RUIDO_FM1_CHECK(maxChanDiff <= 4);
+        }
+    }
 
 #undef RUIDO_FM1_CHECK
 }

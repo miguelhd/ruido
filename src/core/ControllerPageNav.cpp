@@ -14,22 +14,15 @@ KnobBankMode RuidoController::baseKnobBank() const noexcept {
                                                      : KnobBankMode::Frequency;
 }
 
-void RuidoController::exitConfigSubView(bool restoreAudio) noexcept {
+void RuidoController::exitConfigSubView() noexcept {
     hud_.configSubView = ConfigSubView::List;
     hud_.configResetTicks = 0u;
     configTickAccum_ = 0;
     selectTickAccum_ = 0;
-    if (firmwareStandbyActive_) {
-        firmwareStandbyActive_ = false;
-        if (restoreAudio && state_.global.masterRun != firmwareStandbyPrevRun_) {
-            state_.global.masterRun = firmwareStandbyPrevRun_;
-            publishState();
-        }
-    }
 }
 
 void RuidoController::performFactoryReset() noexcept {
-    exitConfigSubView(false);
+    exitConfigSubView();
     state_ = EngineControlState::makeDefault();
     state_.global.masterTrim = masterPot_;
     hud_.config = GlobalConfigState{};
@@ -52,14 +45,14 @@ void RuidoController::handleConfigEncoder(EncoderId encoder, int32_t ticks,
         if (encoder == EncoderId::Select) {
             const int32_t nextSel = static_cast<int32_t>(selectTickAccum_) + ticks;
             if (nextSel >= 4 || nextSel <= -4) {
-                exitConfigSubView(true);
+                exitConfigSubView();
             } else {
                 selectTickAccum_ = static_cast<int8_t>(nextSel);
             }
         } else if (hud_.configSubView == ConfigSubView::FactoryResetConfirm) {
             const int32_t nextAcc = static_cast<int32_t>(configTickAccum_) + ticks;
             if (nextAcc <= -4) {
-                exitConfigSubView(true);
+                exitConfigSubView();
             } else if (nextAcc >= 8) {
                 performFactoryReset();
                 hud_.configSubView = ConfigSubView::FactoryResetDone;
@@ -71,14 +64,14 @@ void RuidoController::handleConfigEncoder(EncoderId encoder, int32_t ticks,
         } else if (hud_.configSubView == ConfigSubView::FactoryResetDone) {
             const int32_t nextAcc = static_cast<int32_t>(configTickAccum_) + ticks;
             if (nextAcc >= 4 || nextAcc <= -4) {
-                exitConfigSubView(true);
+                exitConfigSubView();
             } else {
                 configTickAccum_ = static_cast<int8_t>(nextAcc);
             }
         } else {
             const int32_t nextAcc = static_cast<int32_t>(configTickAccum_) + ticks;
             if (nextAcc <= -4) {
-                exitConfigSubView(true);
+                exitConfigSubView();
             } else {
                 configTickAccum_ = static_cast<int8_t>((nextAcc > 0) ? 0 : nextAcc);
             }
@@ -107,19 +100,9 @@ void RuidoController::handleConfigEncoder(EncoderId encoder, int32_t ticks,
             configTickAccum_ = 0;
             selectTickAccum_ = 0;
             hud_.configResetTicks = 0u;
-            if (item == ConfigItemId::FirmwareUpdate) {
-                firmwareStandbyPrevRun_ = state_.global.masterRun;
-                firmwareStandbyActive_ = true;
-                hud_.configSubView = ConfigSubView::FirmwareUpdate;
-                if (state_.global.masterRun) {
-                    state_.global.masterRun = false;
-                    publishState();
-                }
-            } else if (item == ConfigItemId::FactoryReset) {
-                hud_.configSubView = ConfigSubView::FactoryResetConfirm;
-            } else {
-                hud_.configSubView = ConfigSubView::Credits;
-            }
+            hud_.configSubView = (item == ConfigItemId::FactoryReset)
+                                     ? ConfigSubView::FactoryResetConfirm
+                                     : ConfigSubView::Credits;
         } else {
             configTickAccum_ = static_cast<int8_t>((nextAcc < 0) ? 0 : nextAcc);
         }
@@ -145,7 +128,7 @@ void RuidoController::handleConfigEncoder(EncoderId encoder, int32_t ticks,
 }
 
 void RuidoController::closeAllPages() noexcept {
-    exitConfigSubView(true);
+    exitConfigSubView();
     hud_.freqPageOpen = hud_.fxPageOpen = hud_.panPageOpen = false;
     hud_.lfoPageOpen = hud_.editPageOpen = hud_.configPageOpen = hud_.selPageOpen = false;
 }
@@ -365,9 +348,6 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
     }
 
     if (button == ButtonId::PlayStop) {
-        if (firmwareStandbyActive_) {
-            exitConfigSubView(false);
-        }
         state_.global.masterRun = !state_.global.masterRun;
         if (anyPageOpen()) {
             hud_.lastButton = button;

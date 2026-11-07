@@ -6,6 +6,7 @@
 #include "core/KeyPunchSpec.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
+#include "ui/BootIntroData.h"
 #include "ui/FontSansAA.h"
 #include "ui/HudColumnText.h"
 #include "ui/HudFormat.h"
@@ -38,6 +39,8 @@ constexpr int minHeaderBarSlotWidth(const HudState& hud) noexcept {
     case HudMode::VoicePressure:
     case HudMode::SnapshotSlot:
         return kPctSlotW;
+    case HudMode::GlobalConfig:
+        return (hud.configSubView == ConfigSubView::FactoryResetConfirm) ? kPctSlotW : 0;
     case HudMode::MasterTempo:
         return hud.midiClockSynced ? kBpmExtSlotW : kBpmSlotW;
     case HudMode::ScopeTimebase:
@@ -75,6 +78,44 @@ constexpr int minHeaderBarSlotWidth(const HudState& hud) noexcept {
         }
     default:
         return 0;
+    }
+}
+
+// 3x3 supersampled (73x19 px) RUIDO vector wordmark derived directly from `kLogoCore4Bit` (`0 B`
+// extra Flash or SRAM), aligned flush at `leftX = 10, topY = 6` (`y = 6..24`).
+void drawHeaderRuidoWordmark(const MonoStripCanvas& cv, int leftX, int topY) noexcept {
+    constexpr int kOutW = 73;
+    constexpr int kOutH = 19;
+    if (cv.masterAlpha8 == 0u || topY + kOutH <= cv.y0 || topY >= cv.y1) {
+        return;
+    }
+    const int hyStart = (topY < cv.y0) ? (cv.y0 - topY) : 0;
+    const int hyEnd = (topY + kOutH > cv.y1) ? (cv.y1 - topY) : kOutH;
+    for (int hy = hyStart; hy < hyEnd; ++hy) {
+        const int py = topY + hy;
+        uint8_t* dstRow = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
+        const int syBase = 1 + hy * 3;
+        for (int hx = 0; hx < kOutW; ++hx) {
+            const int sxBase = 1 + hx * 3;
+            uint32_t sum9 = 0u;
+            for (int dy = 0; dy < 3; ++dy) {
+                const uint8_t* srcRow =
+                    &intro_data::kLogoCore4Bit[static_cast<size_t>(syBase + dy) *
+                                               static_cast<size_t>(intro_data::kCoreRowBytes)];
+                for (int dx = 0; dx < 3; ++dx) {
+                    const int sx = sxBase + dx;
+                    const uint8_t b = srcRow[sx >> 1];
+                    sum9 += ((sx & 1) == 0) ? static_cast<uint32_t>(b >> 4u)
+                                            : static_cast<uint32_t>(b & 0x0Fu);
+                }
+            }
+            if (sum9 != 0u) {
+                const uint32_t cov8 = (sum9 * 255u + 67u) / 135u;
+                const auto a8 = static_cast<uint8_t>(
+                    (cov8 * static_cast<uint32_t>(cv.masterAlpha8) + 127u) / 255u);
+                dstRow[leftX + hx] = blendLum8(dstRow[leftX + hx], 255u, a8);
+            }
+        }
     }
 }
 
@@ -324,20 +365,16 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
     }
     case HudMode::GlobalConfig: {
         switch (hud.configSubView) {
-        case ConfigSubView::FirmwareUpdate:
-            appendStr(leftMain, 0u, sizeof(leftMain), "FIRMWARE");
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " UPDATE");
-            appendStr(rightText, 0u, sizeof(rightText), "AUDIO MUTED");
-            break;
         case ConfigSubView::FactoryResetConfirm:
-            appendStr(leftMain, 0u, sizeof(leftMain), "FACTORY");
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " RESET");
-            appendStr(rightText, 0u, sizeof(rightText), "CONFIRM");
+            appendStr(leftMain, 0u, sizeof(leftMain), "FACTORY RESET");
+            headerBarNorm =
+                clampf(static_cast<float>(hud.configResetTicks) * (1.0f / 8.0f), 0.0f, 1.0f);
+            formatPercent(rightText, sizeof(rightText), headerBarNorm);
+            showHeaderBar = true;
             break;
         case ConfigSubView::FactoryResetDone:
-            appendStr(leftMain, 0u, sizeof(leftMain), "FACTORY");
-            appendStr(leftSuffix, 0u, sizeof(leftSuffix), " RESET");
-            appendStr(rightText, 0u, sizeof(rightText), "COMPLETE");
+            appendStr(leftMain, 0u, sizeof(leftMain), "FACTORY RESET");
+            appendStr(rightText, 0u, sizeof(rightText), "DONE");
             break;
         case ConfigSubView::Credits: {
             appendStr(leftMain, 0u, sizeof(leftMain), "CREDITS");
@@ -376,10 +413,19 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
         appendStr(rightText, 0u, sizeof(rightText), defStatus);
     }
 
-    cv.drawSans(kFontSansBold, 10, 6, leftMain, 255u, 0);
-    if (leftSuffix[0] != '\0') {
-        const int suffixX = 10 + measureSansText(kFontSansBold, leftMain, 0);
-        cv.drawSans(kFontSansBold, suffixX, 6, leftSuffix, 118u, 0);
+    const bool isRuidoAbout =
+        (hud.mode == HudMode::GlobalConfig) && (hud.configSubView == ConfigSubView::Credits);
+    const bool isConfigSubText = (hud.mode == HudMode::GlobalConfig) &&
+                                 (hud.configSubView != ConfigSubView::List) && !showHeaderBar;
+
+    if (isRuidoAbout) {
+        drawHeaderRuidoWordmark(cv, 10, 6);
+    } else {
+        cv.drawSans(kFontSansBold, 10, 6, leftMain, 255u, 0);
+        if (leftSuffix[0] != '\0') {
+            const int suffixX = 10 + measureSansText(kFontSansBold, leftMain, 0);
+            cv.drawSans(kFontSansBold, suffixX, 6, leftSuffix, 118u, 0);
+        }
     }
 
     const auto drawNormalRight = [&](const MonoStripCanvas& dstCv) noexcept {
@@ -398,7 +444,12 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const EngineControlState
             }
             dstCv.drawOpticalBead(barXf + barNorm * barWf, 13.5f, 0.95f, 2.1f);
         } else if (rightText[0] != '\0') {
-            dstCv.drawSansRight(kFontSansSmall, 230, 6, rightText, 168u, 1);
+            if (isConfigSubText) {
+                dstCv.drawSansRight(kFontSansMedium, 230, isRuidoAbout ? 10 : 6, rightText, 174u,
+                                    0);
+            } else {
+                dstCv.drawSansRight(kFontSansSmall, 230, 6, rightText, 168u, 1);
+            }
         }
     };
 

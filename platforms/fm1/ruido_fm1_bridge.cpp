@@ -415,6 +415,9 @@ void ruido_fm1_on_c1_fault(void) {
 }
 
 void ruido_fm1_quiesce_for_ota(void) {
+    if (g_panel_constructed != 0u) {
+        ledMod()->updateTargets(ruido::LedState{});
+    }
     if (g_ruido_ic_ctrl.c1FallbackActive.load(std::memory_order_acquire) == 0u) {
         engageCore1Fallback();
     }

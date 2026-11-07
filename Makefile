@@ -79,7 +79,7 @@ TEST_DSP_TSAN_BIN := $(BUILD_DIR)/test_dsp_tsan
 WASM_OUT := platforms/sim/web/ruido.wasm
 MACOS_SIM_BIN := $(BUILD_DIR)/ruido_sim_macos
 
-.PHONY: all check format test test-ui test-dsp wasm sim-macos serve fm1-image fm1-check fm1-info fm1-flash tsan ubsan ubsan-ui clean
+.PHONY: all check format test test-ui test-dsp wasm sim-macos serve fm1-image fm1-build fm1-check fm1-info fm1-flash tsan ubsan ubsan-ui clean
 
 all: $(TEST_DSP_BIN) $(TEST_UI_BIN) $(WASM_OUT) $(MACOS_SIM_BIN)
 
@@ -178,6 +178,9 @@ ubsan: $(TEST_DSP_UBSAN_BIN) $(TEST_UI_UBSAN_BIN)
 
 fm1-image:
 	docker build --platform linux/amd64 -t ruido-fm1-toolchain:latest tools/fm1-docker
+
+fm1-build: check
+	python3 platforms/fm1/build_fm1.py --skip-emu
 
 fm1-check: check
 	python3 platforms/fm1/build_fm1.py

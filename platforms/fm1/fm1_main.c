@@ -6,8 +6,10 @@
 #define APP_NAME "RUIDO"
 #define APP_VER "1.0"
 #define STORE_MAGIC 0x52554944u /* "RUID": distinct NVS magic from stock dinghy forks */
-#define CV_MAX (240u * 32u)     /* 15 KiB canvas for platform rescue/OTA FONT_S/FONT_L text boxes */
+#define CV_MAX (240u * 16u)     /* Unused gfx.c canvas shrunk (GC'd by --gc-sections) */
 #define LCD_BAUD 1u /* Fast ~30 MHz SPI1 ST7789 scanline DMA (vs default BAUD 4 = 12 MHz) */
+
+#include "fm1_ops_screen.h"
 
 /* Redirect dinghy's 1-byte-at-a-time libc.c memset/memcpy & wrap TIMER5 ISR cleanly */
 #define memset dinghy_byte_memset
@@ -15,8 +17,12 @@
 #define fm1_timer5_irq dinghy_timer5_irq
 
 static void app_idle(void);
+static void ruido_fm1_plat_ota_show(uint32_t step, int32_t code);
+static void ruido_fm1_plat_rescue_show(uint8_t is_flash_ok);
+static void ruido_fm1_plat_uboot_show(void);
+static void ruido_fm1_plat_fault_show(uint32_t vec, uint32_t pc, uint32_t rets);
 #define LCD_IDLE app_idle
-#include "platform.c"
+#include "platform_ruido.c"
 
 #undef fm1_timer5_irq
 #undef memset
@@ -95,6 +101,84 @@ void* memcpy(void* dst, const void* src, unsigned n) {
 static volatile uint8_t g_in_platform_poll = 0u;
 static uint32_t g_idle_assist_ok = 0u;
 static uint8_t g_in_app_idle = 0u;
+static uint8_t g_lcd_inited = 0u;
+static uint8_t g_last_ota_kind = 0xFFu;
+static uint16_t g_ops_strip_be[240u * 16u] __attribute__((section(".pool")));
+
+static void ruido_fm1_plat_blit_ops_screen(const RuidoOpsState* st, int use_ota_idle) {
+    uint16_t y = 0u;
+    g_idle_assist_ok = 0u;
+    for (y = 0u; y < 240u; y = (uint16_t)(y + 16u)) {
+        if (use_ota_idle) {
+            ota_idle();
+        } else {
+            fm1_wdt_feed();
+        }
+        lcd_sync();
+        ruido_ops_render_strip_be(st, y, 16u, g_ops_strip_be);
+        lcd_blit(0u, y, 240u, 16u, g_ops_strip_be);
+    }
+    lcd_sync();
+}
+
+static void ruido_fm1_plat_rescue_show(uint8_t is_flash_ok) {
+    RuidoOpsState st = {
+        (uint8_t)(is_flash_ok ? RUIDO_OPS_RESCUE_READY : RUIDO_OPS_RESCUE_BADFLASH),
+        0u,
+        0u,
+        0u,
+        0u,
+        0u,
+    };
+    g_lcd_inited = 1u;
+    g_last_ota_kind = 0xFFu;
+    ruido_fm1_plat_blit_ops_screen(&st, 0);
+}
+
+static void ruido_fm1_plat_ota_show(uint32_t step, int32_t code) {
+    RuidoOpsState st = {RUIDO_OPS_OTA_CHECK, 0u, 0u, 0u, 0u, 0u};
+    if (step <= 2u) {
+        st.kind = RUIDO_OPS_OTA_CHECK;
+    } else if (step <= 4u) {
+        st.kind = RUIDO_OPS_OTA_PREPARE;
+    } else if (step == 5u) {
+        st.kind = RUIDO_OPS_OTA_ENTER;
+    } else {
+        st.kind = (uint8_t)((code == 1) ? RUIDO_OPS_OTA_VERIFIED : RUIDO_OPS_OTA_CANCELLED);
+    }
+    if (step < 9u && st.kind == g_last_ota_kind) {
+        ota_idle();
+        return;
+    }
+    g_last_ota_kind = st.kind;
+    ruido_fm1_plat_blit_ops_screen(&st, 1);
+
+    if (step >= 9u) {
+        uint32_t t0 = fm1_ticks();
+        g_last_ota_kind = 0xFFu;
+        while ((uint32_t)(fm1_ticks() - t0) < (1800u * 1000u * FM1_TICKS_PER_US)) {
+            ota_idle();
+        }
+        if (recovery_active) {
+            ruido_fm1_plat_rescue_show(flash_ok);
+        }
+    }
+}
+
+static void ruido_fm1_plat_uboot_show(void) {
+    RuidoOpsState st = {RUIDO_OPS_UBOOT, 0u, 0u, 0u, 0u, 0u};
+    ruido_fm1_plat_blit_ops_screen(&st, 0);
+}
+
+static void ruido_fm1_plat_fault_show(uint32_t vec, uint32_t pc, uint32_t rets) {
+    RuidoOpsState st = {RUIDO_OPS_SYSTEM_FAULT, 0u, 0u, vec, pc, rets};
+    g_idle_assist_ok = 0u;
+    if (!g_lcd_inited) {
+        lcd_init();
+        g_lcd_inited = 1u;
+    }
+    ruido_fm1_plat_blit_ops_screen(&st, 0);
+}
 
 /* Fast bounded 10-bit SARADC single conversion for ISR carbon-pill sampling (`ch 0` PA7 / `ch 1`
  * PA8). Uses a tight 1,024-iteration timeout (~12 us ceiling) so ISR execution stays strictly
@@ -367,6 +451,7 @@ static void app_main(void) {
 
     /* 6. Prime 512-frame audio ring and arm ALNK0 consumer + live Core 1 worker */
     ruido_fm1_arm_audio(allow_core1);
+    g_lcd_inited = 1u;
     g_idle_assist_ok = 1u;
 
     last_lcd_ms = fm1_ms;
@@ -379,16 +464,26 @@ static void app_main(void) {
         poll_panel_inputs(now_ms);
 
         if (now_ms != last_poll_ms) {
+            const uint8_t was_ota_req = usb.ota_req;
             last_poll_ms = now_ms;
-            if (usb.ota_req || usb.uboot_req) {
-                /* Pause Core 1 into clean solo fallback, finish in-flight SPI1 LCD DMA, and silence
-                 * ALNK0 DMA halves before `ota_session()` erases 5 x 4 KiB staging sectors. */
+            if (was_ota_req || usb.uboot_req) {
+                /* Flush any pending Scene / Config NVS save, pause Core 1 into clean solo fallback,
+                 * finish in-flight SPI1 LCD DMA, and silence ALNK0 DMA halves before
+                 * `ota_session()` erases 5 x 4 KiB staging sectors. */
+                g_idle_assist_ok = 0u;
+                g_last_ota_kind = 0xFFu;
+                (void)ruido_fm1_nvs_poll_save(now_ms, 1u, blob_save, prepare_for_nvs_erase);
                 ruido_fm1_quiesce_for_ota();
                 prepare_for_nvs_erase();
             }
             g_in_platform_poll = 1u;
             platform_poll();
             g_in_platform_poll = 0u;
+            if (was_ota_req) {
+                g_idle_assist_ok = 1u;
+                last_lcd_ms = fm1_ms;
+                first_frame = 1u;
+            }
             sync_master_pot_target();
             if (ruido_fm1_nvs_poll_save(now_ms, 0u, blob_save, prepare_for_nvs_erase) > 0u) {
                 uint32_t rb_slot1[35];
