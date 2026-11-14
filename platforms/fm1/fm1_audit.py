@@ -79,14 +79,17 @@ def audit_firmware_image(
     if rt_calls:
         errors.append(f".ram_text contains call instructions: {rt_calls[:2]}")
 
+    sym_label_re = re.compile(r"^([A-Za-z_.$][A-Za-z0-9_.$]*):$")
     c1_xip_leaks: list[str] = []
     c1_bad_ops: list[str] = []
     boot_post_sp_ops: list[str] = []
     in_boot_post = False
     dsp_fdiv = 0
     for ln in c1_dis.splitlines():
-        if re.match(r"^[0-9a-f]+\s+<([^>]+)>:$", ln):
-            in_boot_post = "<ruido_fm1_c1_boot_post>:" in ln
+        if not ln.startswith(" "):
+            m_c1_lbl = sym_label_re.match(ln.strip())
+            if m_c1_lbl:
+                in_boot_post = m_c1_lbl.group(1) == "ruido_fm1_c1_boot_post"
             continue
         mm = DIS_LINE_RE.match(ln)
         if not mm:
@@ -187,12 +190,81 @@ def audit_firmware_image(
     ram_bytes = sym_addr("_bss_end") - 0x01C08000
     c1_bytes = sym_addr("_c1_end") - C1_SRAM_ORIGIN
     pool_bytes = sym_addr("_pool_end") - 0x01C20000
+    c0_ustack_bytes = sym_addr("_ustack_top") - sym_addr("_ustack_lo")
+    c0_sstack_bytes = sym_addr("_sstack_top") - sym_addr("_sstack_lo")
+    c1_ustack_bytes = sym_addr("_c1_ustack_top") - sym_addr("_c1_ustack_lo")
+    c1_sstack_bytes = sym_addr("_c1_sstack_top") - sym_addr("_c1_sstack_lo")
     if ram_bytes > RAM_MAX_BYTES:
         errors.append(f".data+.bss ({ram_bytes} B) > {RAM_MAX_BYTES} B")
     if c1_bytes == 0 or c1_bytes > C1_SRAM_MAX_BYTES:
         errors.append(f".c1_text ({c1_bytes} B) outside (0, {C1_SRAM_MAX_BYTES}] B")
     if pool_bytes > POOL_MAX_BYTES:
         errors.append(f".pool ({pool_bytes} B) > {POOL_MAX_BYTES} B")
+    if c0_ustack_bytes < 15 * 1024 or c0_sstack_bytes < 15 * 1024:
+        errors.append(
+            f"Core 0 stacks ({c0_ustack_bytes} B U / {c0_sstack_bytes} B S) < 15 KiB minimum"
+        )
+    if c1_ustack_bytes < 7 * 1024 or c1_sstack_bytes < 7 * 1024:
+        errors.append(
+            f"Core 1 stacks ({c1_ustack_bytes} B U / {c1_sstack_bytes} B S) < 7 KiB minimum"
+        )
+
+    dc_stubs_addr = sym_addr("fm1_dc_fatal_stubs")
+    dc_common_addr = sym_addr("fm1_dc_fatal_common")
+    if dc_stubs_addr == 0 or dc_common_addr == 0:
+        errors.append("missing fm1_dc_fatal_stubs / fm1_dc_fatal_common symbols")
+    else:
+        stub_push_addrs: set[int] = set()
+        for ln in extract_dis_section(dis, ".text").splitlines():
+            mm = DIS_LINE_RE.match(ln)
+            if mm and mm.group(3).strip() == "[--sp] = {rets}":
+                stub_push_addrs.add(int(mm.group(1), 16))
+        missing_stubs = [
+            i for i in range(128) if (dc_stubs_addr + 6 * i) not in stub_push_addrs
+        ]
+        if missing_stubs:
+            errors.append(
+                f"fm1_dc_fatal_stubs relaxation/stride mismatch at indices {missing_stubs[:4]}"
+            )
+
+    sym_label_re = re.compile(r"^([A-Za-z_.$][A-Za-z0-9_.$]*):$")
+    cur_fn: str | None = None
+    cur_sec = ""
+    cur_sp = 0
+    max_c0_sp = 0
+    max_c0_fn = "none"
+    max_c1_sp = 0
+    max_c1_fn = "none"
+    oversized_stacks: list[str] = []
+    for ln in dis.splitlines():
+        if ln.startswith("Disassembly of section "):
+            cur_sec = ln.split("Disassembly of section ", 1)[1].rstrip(":")
+            cur_fn = None
+            cur_sp = 0
+            continue
+        if not ln.startswith(" "):
+            m_fn = sym_label_re.match(ln.strip())
+            if m_fn:
+                cur_fn = m_fn.group(1)
+                cur_sp = 0
+            continue
+        if cur_fn in (None, "fm1_fatal_stubs", "fm1_dc_fatal_stubs"):
+            continue
+        for d_sp in re.findall(r"\bsp \+= (-\d+)", ln):
+            cur_sp += -int(d_sp)
+        if "[--sp]" in ln:
+            cur_sp += 16
+        if cur_sec == ".c1_text":
+            if cur_sp > max_c1_sp:
+                max_c1_sp, max_c1_fn = cur_sp, cur_fn
+        else:
+            if cur_sp > max_c0_sp:
+                max_c0_sp, max_c0_fn = cur_sp, cur_fn
+        if cur_sp > 3584 and not any(s.startswith(f"{cur_fn}(") for s in oversized_stacks):
+            oversized_stacks.append(f"{cur_fn}({cur_sp}B)")
+    if oversized_stacks:
+        errors.append(f"functions exceed 3.5 KiB stack frame ceiling: {oversized_stacks[:5]}")
+
     for chip_name, jedec_id, le_bytes in REQUIRED_JEDEC_IDS:
         if le_bytes not in img:
             errors.append(f"app image (`ruido.bin`) missing {chip_name} JEDEC ID {jedec_id:#08x}")
@@ -208,16 +280,20 @@ def audit_firmware_image(
     )
     print(
         f"  Package (.fwsc)   : {len(fwsc_bytes):,} B / {MAX_FWSC_BYTES:,} B "
-        f"({len(fwsc_bytes) / 1024.0:.1f} KiB)"
+        f"({len(fwsc_bytes) / 1024.0:.1f} KiB, {MAX_FWSC_BYTES - len(fwsc_bytes):,} B free)"
     )
     print(
         f"  SRAM .c1_text DSP : {c1_bytes:,} B / {C1_SRAM_MAX_BYTES:,} B "
-        f"({c1_bytes / 1024.0:.1f} KiB @ 0x01C0E000, 0 XIP refs; "
+        f"({c1_bytes / 1024.0:.1f} KiB @ 0x01C0E000, {C1_SRAM_MAX_BYTES - c1_bytes:,} B free, 0 XIP refs; "
         f"raw .text={dsp_text:,} B + .rodata={dsp_rodata:,} B)"
     )
     print(f"  XIP UI + Bridge   : {ui_text + ui_rodata:,} B (.text={ui_text:,} B + .rodata={ui_rodata:,} B)")
     print(f"  SRAM .data + .bss : {ram_bytes:,} B / {RAM_MAX_BYTES:,} B ({ram_bytes / 1024.0:.1f} KiB)")
     print(f"  SRAM .pool        : {pool_bytes:,} B / {POOL_MAX_BYTES:,} B ({pool_bytes / 1024.0:.1f} KiB)")
+    print(
+        f"  Guarded U/S Stacks: Core0 max={max_c0_sp:,} B / ({c0_ustack_bytes:,} U + {c0_sstack_bytes:,} S), "
+        f"Core1 max={max_c1_sp:,} B / ({c1_ustack_bytes:,} U + {c1_sstack_bytes:,} S), 128x6B stubs=OK"
+    )
     print(
         f"  Hardware r3 FPU   : fadd={fpu_add}, fsub={fpu_sub}, fmul={fpu_mul}, "
         f"fdiv={fpu_div} (.c1_text={dsp_fdiv}), fcmp={fpu_cmp}, fconv/minmax={fpu_conv}"

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/Config.h"
-#include "dsp/Ms20Filter.h"
+#include "dsp/SallenKeyFilter.h"
 
 #include <array>
 #include <atomic>
@@ -39,8 +39,12 @@ class alignas(64) VoiceFilterCoProcessor {
         reqSeq_.store(0u, std::memory_order_relaxed);
         lastSubmittedSeq_ = 0u;
         lastHandledSeq_ = 0u;
+        spanSubPtr_ = nullptr;
+        filtersPtr_ = nullptr;
+        coeffsPtr_ = nullptr;
         numFrames_ = 0u;
         numDelegated_ = 2u;
+        delegatedVoices_ = {2u, 3u, 0u};
     }
 
     // Called exclusively by Core 0 (helper thread).
@@ -86,12 +90,21 @@ class alignas(64) VoiceFilterCoProcessor {
                                            (coeffs[v].lpLinearBypass ? 1u : 4u));
         }
 
-        std::array<uint8_t, kNumOscillators> ord{0u, 1u, 2u, 3u};
-        const auto cmpSwap = [&](size_t a, size_t b) noexcept {
-            if (cost[ord[a]] < cost[ord[b]]) {
-                const uint8_t tmp = ord[a];
-                ord[a] = ord[b];
-                ord[b] = tmp;
+        // Keep the 4-element sorting network packed in a single 32-bit register (2 bits per voice)
+        // rather than a 4-byte stack array so an AC791N Core 1 bit-21 (`0x00200000`, byte-lane 2)
+        // SRAM misread can never corrupt `ord[2]` to `34` and index `spanSub` out of bounds.
+        uint32_t ord = 0u | (1u << 2u) | (2u << 4u) | (3u << 6u);
+        const auto ordAt = [&](uint32_t slot) noexcept -> uint8_t {
+            return static_cast<uint8_t>((ord >> (2u * slot)) & 3u);
+        };
+        const auto cmpSwap = [&](uint32_t a, uint32_t b) noexcept {
+            const uint8_t va = ordAt(a);
+            const uint8_t vb = ordAt(b);
+            if (cost[va] < cost[vb]) {
+                const uint32_t sa = 2u * a;
+                const uint32_t sb = 2u * b;
+                ord = (ord & ~((3u << sa) | (3u << sb))) | (static_cast<uint32_t>(vb) << sa) |
+                      (static_cast<uint32_t>(va) << sb);
             }
         };
         cmpSwap(0u, 1u);
@@ -100,35 +113,36 @@ class alignas(64) VoiceFilterCoProcessor {
         cmpSwap(1u, 3u);
         cmpSwap(1u, 2u);
 
+        const uint8_t o0 = ordAt(0u);
+        const uint8_t o1 = ordAt(1u);
+        const uint8_t o2 = ordAt(2u);
+        const uint8_t o3 = ordAt(3u);
+
         std::array<uint8_t, 2> c1Voices{0u, 1u};
         std::array<uint8_t, kMaxDelegatedVoices> c0Voices{2u, 3u, 0u};
         uint8_t c1Count = 2u;
         uint8_t c0Count = 2u;
 
-        if (cost[ord[0]] > 2u && cost[ord[1]] == 2u) {
-            c1Voices[0] = ord[0];
+        if (cost[o0] > 2u && cost[o1] == 2u) {
+            c1Voices[0] = o0;
             c1Count = 1u;
-            c0Voices[0] = ord[1];
-            c0Voices[1] = ord[2];
-            c0Voices[2] = ord[3];
+            c0Voices[0] = o1;
+            c0Voices[1] = o2;
+            c0Voices[2] = o3;
             c0Count = 3u;
-        } else if (cost[ord[0]] != cost[ord[3]]) {
-            c1Voices[0] = ord[0];
-            c1Voices[1] = ord[3];
-            c0Voices[0] = ord[1];
-            c0Voices[1] = ord[2];
+        } else if (cost[o0] != cost[o3]) {
+            c1Voices[0] = o0;
+            c1Voices[1] = o3;
+            c0Voices[0] = o1;
+            c0Voices[1] = o2;
         }
 
+        spanSubPtr_ = &spanSub;
+        filtersPtr_ = filters.data();
+        coeffsPtr_ = coeffs.data();
         numFrames_ = numFrames;
         numDelegated_ = c0Count;
-        for (uint8_t d = 0u; d < c0Count; ++d) {
-            const uint8_t v = c0Voices[d];
-            delegatedFilters_[d] = filters[v];
-            delegatedCoeffs_[d] = coeffs[v];
-            for (size_t k = 0u; k < numFrames; ++k) {
-                delegatedSamples_[d][k] = spanSub[v][k];
-            }
-        }
+        delegatedVoices_ = c0Voices;
 
         uint32_t seq = lastSubmittedSeq_ + 1u;
         if (seq == 0u) {
@@ -138,7 +152,7 @@ class alignas(64) VoiceFilterCoProcessor {
         reqSeq_.store(seq, std::memory_order_seq_cst);
 
         for (uint8_t i = 0u; i < c1Count; ++i) {
-            const uint8_t v = c1Voices[i];
+            const size_t v = static_cast<size_t>(c1Voices[i] & 3u);
             filters[v].processSpan4x(spanSub[v].data(), numFrames, coeffs[v]);
         }
 
@@ -173,11 +187,17 @@ class alignas(64) VoiceFilterCoProcessor {
         c0ClaimingSeq_.store(0u, std::memory_order_seq_cst);
         lastHandledSeq_ = req;
 
+        VoiceSpanBuffer* spanPtr = spanSubPtr_;
+        Ms20DualFilter* fltPtr = filtersPtr_;
+        const Ms20DualFilter::Coeffs* cfPtr = coeffsPtr_;
         const size_t n = (numFrames_ <= kMaxFilterSpanFrames) ? numFrames_ : kMaxFilterSpanFrames;
         const size_t count =
             (numDelegated_ <= kMaxDelegatedVoices) ? numDelegated_ : kMaxDelegatedVoices;
-        for (size_t d = 0u; d < count; ++d) {
-            delegatedFilters_[d].processSpan4x(delegatedSamples_[d].data(), n, delegatedCoeffs_[d]);
+        if (spanPtr != nullptr && fltPtr != nullptr && cfPtr != nullptr) {
+            for (size_t d = 0u; d < count; ++d) {
+                const size_t v = static_cast<size_t>(delegatedVoices_[d] & 3u);
+                fltPtr[v].processSpan4x((*spanPtr)[v].data(), n, cfPtr[v]);
+            }
         }
         assistedSpans_.store(assistedSpans_.load(std::memory_order_relaxed) + 1u,
                              std::memory_order_relaxed);
@@ -198,40 +218,41 @@ class alignas(64) VoiceFilterCoProcessor {
                        const std::array<uint8_t, kMaxDelegatedVoices>& c0Voices, uint8_t c0Count,
                        std::array<Ms20DualFilter, kNumOscillators>& filters,
                        const std::array<Ms20DualFilter::Coeffs, kNumOscillators>& coeffs) noexcept {
+        const size_t safeFrames =
+            (numFrames <= kMaxFilterSpanFrames) ? numFrames : kMaxFilterSpanFrames;
+        const uint8_t safeCount =
+            (c0Count <= kMaxDelegatedVoices) ? c0Count : static_cast<uint8_t>(kMaxDelegatedVoices);
         const uint32_t seq = lastSubmittedSeq_;
         if (doneSeq_.load(std::memory_order_acquire) != seq &&
             claimedSeq_.load(std::memory_order_acquire) != seq) {
             // Dekker Side 1: reclaim `seq` immediately so Core 1 never stalls behind busy Core 0.
             c1ReclaimedSeq_.store(seq, std::memory_order_seq_cst);
             uint32_t claimSpins = 0u;
-            while (c0ClaimingSeq_.load(std::memory_order_seq_cst) == seq && ++claimSpins < 65536u) {
+            while (c0ClaimingSeq_.load(std::memory_order_seq_cst) == seq && ++claimSpins < 4096u) {
             }
             if (claimedSeq_.load(std::memory_order_seq_cst) != seq) {
-                for (uint8_t d = 0u; d < c0Count; ++d) {
-                    const uint8_t v = c0Voices[d];
-                    filters[v].processSpan4x(spanSub[v].data(), numFrames, coeffs[v]);
+                for (uint8_t d = 0u; d < safeCount; ++d) {
+                    const size_t v = static_cast<size_t>(c0Voices[d] & 3u);
+                    filters[v].processSpan4x(spanSub[v].data(), safeFrames, coeffs[v]);
                 }
                 return;
             }
         }
 
+#if defined(__pi32v2__)
         uint32_t spins = 0u;
+#endif
         while (doneSeq_.load(std::memory_order_acquire) != seq) {
-            if (++spins > 500000u && helperArmed_.load(std::memory_order_acquire) == 0u &&
-                doneSeq_.load(std::memory_order_acquire) != seq) {
-                for (uint8_t d = 0u; d < c0Count; ++d) {
-                    const uint8_t v = c0Voices[d];
-                    filters[v].processSpan4x(spanSub[v].data(), numFrames, coeffs[v]);
+#if defined(__pi32v2__)
+            if (++spins > 262144u) {
+                helperArmed_.store(0u, std::memory_order_release);
+                for (uint8_t d = 0u; d < safeCount; ++d) {
+                    const size_t v = static_cast<size_t>(c0Voices[d] & 3u);
+                    filters[v].processSpan4x(spanSub[v].data(), safeFrames, coeffs[v]);
                 }
                 return;
             }
-        }
-        for (uint8_t d = 0u; d < c0Count; ++d) {
-            const uint8_t v = c0Voices[d];
-            filters[v] = delegatedFilters_[d];
-            for (size_t k = 0u; k < numFrames; ++k) {
-                spanSub[v][k] = delegatedSamples_[d][k];
-            }
+#endif
         }
     }
 
@@ -246,11 +267,12 @@ class alignas(64) VoiceFilterCoProcessor {
     std::atomic<uint32_t> reqSeq_{0u};
     uint32_t lastSubmittedSeq_ = 0u;
 
-    alignas(64) size_t numFrames_ = 0u;
+    alignas(64) VoiceSpanBuffer* spanSubPtr_ = nullptr;
+    Ms20DualFilter* filtersPtr_ = nullptr;
+    const Ms20DualFilter::Coeffs* coeffsPtr_ = nullptr;
+    size_t numFrames_ = 0u;
     uint8_t numDelegated_ = 2u;
-    std::array<Ms20DualFilter, kMaxDelegatedVoices> delegatedFilters_{};
-    std::array<Ms20DualFilter::Coeffs, kMaxDelegatedVoices> delegatedCoeffs_{};
-    std::array<std::array<Frame4x, kMaxFilterSpanFrames>, kMaxDelegatedVoices> delegatedSamples_{};
+    std::array<uint8_t, kMaxDelegatedVoices> delegatedVoices_{2u, 3u, 0u};
 };
 
 } // namespace ruido

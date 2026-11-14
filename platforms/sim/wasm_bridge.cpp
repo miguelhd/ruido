@@ -3,10 +3,10 @@
 // as a zero-dependency freestanding Wasm module instantiable in both AudioWorklet (Core 1)
 // and Main UI Thread (Core 0) without Emscripten glue or external runtime imports.
 
+#include "WasmAbiLayout.h"
+
 #include <cstddef>
 #include <cstdint>
-
-#include "WasmAbiLayout.h"
 
 // Placement new for zero-static-ctor deterministic initialization in freestanding Wasm
 inline void* operator new(size_t, void* p) noexcept {
@@ -58,7 +58,7 @@ size_t strlen(const char* s) {
 #include "core/SnapshotCodec.cpp"
 #include "dsp/DroneEngine.cpp"
 #include "dsp/HalfBandDecimator.cpp"
-#include "dsp/Ms20Filter.cpp"
+#include "dsp/SallenKeyFilter.cpp"
 #include "dsp/SchmittOscillatorBank.cpp"
 #include "dsp/VoiceLfoBank.cpp"
 #include "ui/BootIntroRender.cpp"
@@ -134,7 +134,8 @@ void refreshSummary() noexcept {
     }
     gSummaryOut[WasmSummaryIdx::kCircuitCoupling] = st.global.circuitCoupling;
     gSummaryOut[WasmSummaryIdx::kMasterTrim] = st.global.masterTrim;
-    gSummaryOut[WasmSummaryIdx::kKnobRate] = static_cast<float>(static_cast<int>(gCtrl->hud().knobRate));
+    gSummaryOut[WasmSummaryIdx::kKnobRate] =
+        static_cast<float>(static_cast<int>(gCtrl->hud().knobRate));
     gSummaryOut[WasmSummaryIdx::kMonoCollapse] = st.global.monoCollapse ? 1.0f : 0.0f;
     gSummaryOut[WasmSummaryIdx::kMasterRun] = st.global.masterRun ? 1.0f : 0.0f;
     gSummaryOut[WasmSummaryIdx::kPitchPressureMode] = st.global.pitchPressureMode ? 1.0f : 0.0f;
@@ -508,8 +509,7 @@ void wasm_ui_tick_and_render(float dtSec) {
 
         const size_t stripPixels =
             static_cast<size_t>(ruido::kDisplayWidth) * ruido::kScanlineStripHeight;
-        uint8_t* rgbaDst =
-            gScreenRgba + (static_cast<size_t>(y0) * ruido::kDisplayWidth) * 4u;
+        uint8_t* rgbaDst = gScreenRgba + (static_cast<size_t>(y0) * ruido::kDisplayWidth) * 4u;
 
         for (size_t i = 0u; i < stripPixels; ++i) {
             const uint16_t px = gScanlineStripRgb565[i];

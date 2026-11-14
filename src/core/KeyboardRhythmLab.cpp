@@ -15,66 +15,66 @@ void evaluateRhythmLabModel(const KeyboardInputView& in, EngineControlState& sta
     KeyboardModState mod{};
     PunchTracker punch{};
 
-    // 1. Shared Console SOLO 1-4 (OP1-OP4) & MUTE 1-4 (Keys 1-4) + 11th Tall Key TAP TEMPO
+    // 1. Shared Console SOLO 1-4 (PIT-POLY) & MUTE 1-4 (Keys 13-16) + 11th Tall Key TAP TEMPO
     evaluateConsoleSoloMute(in, mod, punch);
     if (in.blackHeld[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)]) {
         punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)],
                    KeyPunchKind::TapTempo, 0u, 1.0f);
     }
 
-    // 2. Top Raised Black Keys: Global Rhythm & Clock Modifiers
-    // OP5: PUMP -> 4-on-the-floor sidechain ducking swell (double-time above 72% pressure)
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op5)]) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op5)], 0.0f, 1.0f);
+    // 2. Top Raised Black Keys (OP1-OP6): Global Rhythm & Clock Modifiers
+    // OP1: PUMP -> 4-on-the-floor sidechain ducking swell (double-time above 72% pressure)
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op1)]) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op1)], 0.0f, 1.0f);
         mod.rhythmPump = p;
         mod.overloadSurge = 0.28f * p * p;
-        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Op5)], KeyPunchKind::RhythmPump,
+        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Op1)], KeyPunchKind::RhythmPump,
                    0u, p);
     }
 
-    // OP6: CHASE -> 1 -> 2 -> 3 -> 4 round-robin oscillator step loop
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op6)]) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op6)], 0.0f, 1.0f);
+    // OP2: CHASE -> 1 -> 2 -> 3 -> 4 round-robin oscillator step loop
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op2)]) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op2)], 0.0f, 1.0f);
         mod.rhythmChase = p;
-        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Op6)],
+        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Op2)],
                    KeyPunchKind::RhythmChase, 0u, p);
     }
 
-    // PIT: TEMPO -> 1.0x -> 4.0x master clock multiplier
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Pit)]) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Pit)], 0.0f, 1.0f);
+    // OP3: TEMPO -> 1.0x -> 4.0x master clock multiplier
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op3)]) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op3)], 0.0f, 1.0f);
         mod.rhythmTempo = p;
-        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Pit)],
+        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Op3)],
                    KeyPunchKind::RhythmTempo, 0u, p);
     }
 
-    // GLO: PLUCK -> Short percussive MS-20 low-pass filter plucks + live 4-voice filter graph
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Glo)]) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Glo)], 0.0f, 1.0f);
+    // OP4: PLUCK -> Short percussive MS-20 low-pass filter plucks + live 4-voice filter graph
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op4)]) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op4)], 0.0f, 1.0f);
         mod.rhythmPluck = p;
-        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Glo)],
+        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Op4)],
                    KeyPunchKind::RhythmPluck, 0u, p);
     }
 
-    // MONO: SHORT -> Pinpoint 50% -> 6% gate length + tight center stereo focus
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Mono)]) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Mono)], 0.0f, 1.0f);
+    // OP5: SHORT -> Pinpoint 50% -> 6% gate length + tight center stereo focus
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op5)]) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op5)], 0.0f, 1.0f);
         mod.rhythmShort = p;
         mod.spatialFocus = clampf(mod.spatialFocus - 0.72f * p, -1.0f, 1.0f);
-        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Mono)],
+        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Op5)],
                    KeyPunchKind::RhythmShort, 0u, p);
     }
 
-    // POLY: SWING -> 50% -> 72% MPC shuffle swing + wide stereo bounce
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Poly)]) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Poly)], 0.0f, 1.0f);
+    // OP6: SWING -> 50% -> 72% MPC shuffle swing + wide stereo bounce
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op6)]) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op6)], 0.0f, 1.0f);
         mod.rhythmSwing = p;
         mod.spatialFocus = clampf(mod.spatialFocus + 0.65f * p, -1.0f, 1.0f);
-        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Poly)],
+        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Op6)],
                    KeyPunchKind::RhythmSwing, 0u, p);
     }
 
-    // 3. Bottom White Keys: Per-Oscillator Rhythm Engines (STUTTER | DIVIDE | EUCLID)
+    // 3. Bottom White Keys: Per-Oscillator Rhythm Engines (STUTTER 1-4 | DIVIDE 5-8 | EUCLID 9-12)
     bool anyVoiceRhythm = false;
     std::array<float, kNumOscillators> voiceFormant{0.0f, 0.0f, 0.0f, 0.0f};
 
@@ -83,10 +83,10 @@ void evaluateRhythmLabModel(const KeyboardInputView& in, EngineControlState& sta
         VoiceRhythmMode winMode = VoiceRhythmMode::Off;
         float winPressure = 0.0f;
 
-        // Bank B (Keys 5-8): STUTTER -> Free-speed chopper (1.5 -> 24 Hz, ignores clock)
-        if (in.whiteHeld[4u + v]) {
-            const float p = clampf(in.whitePressure[4u + v], 0.0f, 1.0f);
-            const uint32_t seq = in.whitePressSeq[4u + v];
+        // Bank A (Keys 1-4): STUTTER -> Free-speed chopper (1.5 -> 24 Hz, ignores clock)
+        if (in.whiteHeld[kBankAWhiteKeyBase + v]) {
+            const float p = clampf(in.whitePressure[kBankAWhiteKeyBase + v], 0.0f, 1.0f);
+            const uint32_t seq = in.whitePressSeq[kBankAWhiteKeyBase + v];
             punch.note(seq, KeyPunchKind::VoiceStutter, v, p);
             if (seq >= winSeq) {
                 winSeq = seq;
@@ -95,10 +95,10 @@ void evaluateRhythmLabModel(const KeyboardInputView& in, EngineControlState& sta
             }
         }
 
-        // Bank C (Keys 9-12): DIVIDE -> Master-clock-locked musical dividers (/2 .. x8)
-        if (in.whiteHeld[8u + v]) {
-            const float p = clampf(in.whitePressure[8u + v], 0.0f, 1.0f);
-            const uint32_t seq = in.whitePressSeq[8u + v];
+        // Bank B (Keys 5-8): DIVIDE -> Master-clock-locked musical dividers (/2 .. x8)
+        if (in.whiteHeld[kBankBWhiteKeyBase + v]) {
+            const float p = clampf(in.whitePressure[kBankBWhiteKeyBase + v], 0.0f, 1.0f);
+            const uint32_t seq = in.whitePressSeq[kBankBWhiteKeyBase + v];
             punch.note(seq, KeyPunchKind::VoiceDivide, v, p);
             if (seq >= winSeq) {
                 winSeq = seq;
@@ -107,10 +107,10 @@ void evaluateRhythmLabModel(const KeyboardInputView& in, EngineControlState& sta
             }
         }
 
-        // Bank D (Keys 13-16): EUCLID -> 16-step Euclidean groove patterns (unless SAVE is armed)
-        if (in.whiteHeld[12u + v] && !hud.saveArmed) {
-            const float p = clampf(in.whitePressure[12u + v], 0.0f, 1.0f);
-            const uint32_t seq = in.whitePressSeq[12u + v];
+        // Bank C (Keys 9-12): EUCLID -> 16-step Euclidean groove patterns (unless SAVE is armed)
+        if (in.whiteHeld[kSceneWhiteKeyBase + v] && !hud.saveArmed) {
+            const float p = clampf(in.whitePressure[kSceneWhiteKeyBase + v], 0.0f, 1.0f);
+            const uint32_t seq = in.whitePressSeq[kSceneWhiteKeyBase + v];
             punch.note(seq, KeyPunchKind::VoiceEuclid, v, p);
             if (seq >= winSeq) {
                 winSeq = seq;
@@ -170,6 +170,7 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
                               const EngineControlState& state, const HudState& hud,
                               uint8_t stutMask, float rhythmPhase01, LedState& outLeds) noexcept {
     (void)animPhase;
+    (void)subBreathWave01;
     const float barPhase = wrapLfoPhase01(rhythmPhase01);
     const auto step16 = static_cast<size_t>(barPhase * 16.0f) & 15u;
     const float step16Frac = barPhase * 16.0f - static_cast<float>(step16);
@@ -178,19 +179,19 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
     const float stepSmooth = smoothstep01(clampf((effBpm - 320.0f) * (1.0f / 280.0f), 0.0f, 1.0f));
     const float beatSmooth = smoothstep01(clampf((effBpm - 480.0f) * (1.0f / 420.0f), 0.0f, 1.0f));
 
-    // LIFO top-row show selection across OP5..POLY (indices 4..9)
+    // LIFO top-row show selection across OP1..OP6 (indices 0..5)
     int topBlackShow = -1;
     uint32_t topBlackSeq = 0u;
-    for (size_t k = 4u; k <= 9u; ++k) {
+    for (size_t k = 0u; k < kNumTopMacroKeys; ++k) {
         if (in.blackHeld[k] && (topBlackShow < 0 || in.blackPressSeq[k] >= topBlackSeq)) {
             topBlackShow = static_cast<int>(k);
             topBlackSeq = in.blackPressSeq[k];
         }
     }
 
-    // 1. OP5 PUMP: 4-on-the-floor sidechain duck on the beat + red REC kick transient + swell
-    if (topBlackShow == static_cast<int>(BlackKeyId::Op5)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op5)], 0.0f, 1.0f);
+    // 1. OP1 PUMP: 4-on-the-floor sidechain duck on the beat + red REC kick transient + swell
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op1)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op1)], 0.0f, 1.0f);
         const float cycles = (p >= 0.72f) ? 8.0f : 4.0f;
         const float beatScaled = barPhase * cycles;
         const float beatFrac = beatScaled - static_cast<float>(static_cast<uint32_t>(beatScaled));
@@ -199,10 +200,10 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
         const float rawKick = fastExpNeg(beatFrac * 8.5f);
         const float kickFlash = rawKick + (0.38f - rawKick) * beatSmooth;
         const float whiteBreathe = (1.0f - 0.94f * p) + 0.94f * p * swell;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
             outLeds.whiteKeyLeds[i] = clampf(0.03f + 0.92f * whiteBreathe, 0.02f, 1.0f);
         }
-        for (size_t i = 4u; i < 10u; ++i) {
+        for (size_t i = 0u; i < kNumTopMacroKeys; ++i) {
             outLeds.blackKeyLeds[i] = clampf(0.05f + 0.75f * whiteBreathe, 0.02f, 1.0f);
         }
         scalePanelGrid(outLeds, 0.12f + 0.88f * whiteBreathe);
@@ -215,18 +216,18 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
         maxPanelBtnLed(outLeds, ButtonId::Rec, clampf(kickFlash * (0.45f + 0.55f * p), 0.0f, 1.0f));
     }
 
-    // 2. OP6 CHASE: 1 -> 2 -> 3 -> 4 round-robin column spotlight chaser synced to stutMask
-    if (topBlackShow == static_cast<int>(BlackKeyId::Op6)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op6)], 0.0f, 1.0f);
+    // 2. OP2 CHASE: 1 -> 2 -> 3 -> 4 round-robin column spotlight chaser synced to stutMask
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op2)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op2)], 0.0f, 1.0f);
         scalePanelGrid(outLeds, 0.14f);
-        for (size_t i = 4u; i < 10u; ++i) {
+        for (size_t i = 0u; i < kNumTopMacroKeys; ++i) {
             outLeds.blackKeyLeds[i] = 0.08f;
         }
         for (size_t v = 0u; v < kNumOscillators; ++v) {
             const bool activeCol = (((stutMask >> v) & 1u) != 0u);
             const float rawLvl = activeCol ? (0.55f + 0.45f * p) : 0.03f;
             const float lvl = rawLvl + ((0.28f + 0.22f * p) - rawLvl) * stepSmooth;
-            for (size_t b = 0u; b < 4u; ++b) {
+            for (size_t b = 0u; b < 3u; ++b) {
                 outLeds.whiteKeyLeds[b * 4u + v] = lvl;
             }
             if (activeCol || stepSmooth > 0.05f) {
@@ -238,14 +239,14 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
         }
     }
 
-    // 3. PIT TEMPO: Clock-locked 16-step speedometer comet + OCT+ speedup beacon
-    if (topBlackShow == static_cast<int>(BlackKeyId::Pit)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Pit)], 0.0f, 1.0f);
-        const float head = barPhase * 16.0f;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+    // 3. OP3 TEMPO: Clock-locked speedometer comet + OCT+ speedup beacon
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op3)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op3)], 0.0f, 1.0f);
+        const float head = barPhase * 12.0f;
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
             float dist = absf(static_cast<float>(i) - head);
-            if (dist > 8.0f) {
-                dist = 16.0f - dist;
+            if (dist > 6.0f) {
+                dist = 12.0f - dist;
             }
             const float comet = clampf(1.0f - dist * 0.48f, 0.0f, 1.0f);
             const float shaped = comet * comet + (0.52f - comet * comet) * stepSmooth;
@@ -267,14 +268,14 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
         }
     }
 
-    // 4. GLO PLUCK: Percussive MS-20 filter pluck curtain snapping & decaying on every trigger
-    if (topBlackShow == static_cast<int>(BlackKeyId::Glo)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Glo)], 0.0f, 1.0f);
+    // 4. OP4 PLUCK: Percussive MS-20 filter pluck curtain snapping & decaying on every trigger
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op4)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op4)], 0.0f, 1.0f);
         const float rawEnv =
             (stutMask != 0u) ? fastExpNeg(step16Frac * (2.6f + 4.8f * p)) : (0.12f * (1.0f - p));
         const float env = rawEnv + (0.48f - rawEnv) * stepSmooth;
-        const float reach = clampf(env * (4.0f + 12.0f * p), 0.0f, 15.5f);
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+        const float reach = clampf(env * (3.0f + 9.0f * p), 0.0f, 11.5f);
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
             const float fi = static_cast<float>(i);
             const float bar = clampf(reach - fi, 0.0f, 1.0f);
             outLeds.whiteKeyLeds[i] = 0.02f + 0.94f * bar;
@@ -290,13 +291,13 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
         }
     }
 
-    // 5. MONO SHORT: Pinpoint staccato needle flashes in center chassis
-    if (topBlackShow == static_cast<int>(BlackKeyId::Mono)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Mono)], 0.0f, 1.0f);
+    // 5. OP5 SHORT: Pinpoint staccato needle flashes in center chassis
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op5)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op5)], 0.0f, 1.0f);
         const bool open = (stutMask != 0u);
         const float gateVis = (open ? 1.0f : 0.0f) + (0.45f - (open ? 1.0f : 0.0f)) * stepSmooth;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-            const bool center = (i >= 6u && i <= 9u);
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
+            const bool center = (i >= 4u && i <= 7u);
             outLeds.whiteKeyLeds[i] = center ? (0.04f + (0.56f + 0.40f * p) * gateVis) : 0.02f;
         }
         scalePanelGrid(outLeds, 0.10f);
@@ -307,15 +308,15 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
         maxPanelBtnLed(outLeds, ButtonId::Seq, pin);
     }
 
-    // 6. POLY SWING: Left-to-right shuffle pendulum showing delayed off-beat swing groove
-    if (topBlackShow == static_cast<int>(BlackKeyId::Poly)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Poly)], 0.0f, 1.0f);
+    // 6. OP6 SWING: Left-to-right shuffle pendulum showing delayed off-beat swing groove
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op6)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op6)], 0.0f, 1.0f);
         const bool rightSwing = ((step16 & 1u) != 0u);
         const float pulse = fastExpNeg(step16Frac * 2.4f);
         const float activeLvl = clampf(0.38f + 0.62f * pulse * (0.45f + 0.55f * p), 0.0f, 1.0f);
         const float steadyLvl = 0.32f + 0.36f * p;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-            const bool isRight = (i >= 8u);
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
+            const bool isRight = (i >= 6u);
             const float raw = (isRight == rightSwing) ? activeLvl : 0.03f;
             outLeds.whiteKeyLeds[i] = raw + (steadyLvl - raw) * stepSmooth;
         }
@@ -336,12 +337,12 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
     }
 
     // 7. Bottom Rhythm Shows across all 42 LEDs (when no top-row show leads):
-    //    STUTTER (Keys 5-8) | DIVIDE (Keys 9-12) | EUCLID (Keys 13-16)
+    //    STUTTER (Keys 1-4) | DIVIDE (Keys 5-8) | EUCLID (Keys 9-12)
     int botKey = -1;
     uint32_t botSeq = 0u;
-    for (size_t k = 4u; k < kNumWhiteKeys; ++k) {
-        if (k >= 12u && hud.saveArmed) {
-            break;
+    for (size_t k = 0u; k < kMuteWhiteKeyBase; ++k) {
+        if (k >= kSceneWhiteKeyBase && k < kSceneWhiteKeyBase + kNumSnapshots && hud.saveArmed) {
+            continue;
         }
         if (in.whiteHeld[k] && (botKey < 0 || in.whitePressSeq[k] >= botSeq)) {
             botKey = static_cast<int>(k);
@@ -349,48 +350,49 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
         }
     }
 
-    if (topBlackShow < 0 && botKey >= 4) {
+    if (topBlackShow < 0 && botKey >= 0) {
         const auto wIdx = static_cast<size_t>(botKey);
         scalePanelGrid(outLeds, 0.16f);
 
-        if (wIdx < 8u) {
-            // 7a. STUTTER (5-8): Polyrhythmic radial strobe shockwaves synced 1:1 to stutMask
-            for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+        if (wIdx < kBankBWhiteKeyBase) {
+            // 7a. STUTTER (1-4): Polyrhythmic radial strobe shockwaves synced 1:1 to stutMask
+            for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
                 outLeds.whiteKeyLeds[i] = 0.03f;
             }
             for (size_t v = 0u; v < kNumOscillators; ++v) {
-                if (!in.whiteHeld[4u + v]) {
+                if (!in.whiteHeld[kBankAWhiteKeyBase + v]) {
                     continue;
                 }
-                const float p = clampf(in.whitePressure[4u + v], 0.0f, 1.0f);
+                const float p = clampf(in.whitePressure[kBankAWhiteKeyBase + v], 0.0f, 1.0f);
                 const bool open = (((stutMask >> v) & 1u) != 0u);
                 if (open) {
-                    for (size_t b = 0u; b < 4u; ++b) {
+                    for (size_t b = 0u; b < 3u; ++b) {
                         outLeds.whiteKeyLeds[b * 4u + v] = 0.58f + 0.42f * p;
                     }
                     maxPanelBtnLed(outLeds, kPanelGridTop[1u + v], 0.65f + 0.35f * p);
                     maxPanelBtnLed(outLeds, kPanelGridBot[1u + v], 0.55f + 0.40f * p);
                 } else {
-                    outLeds.whiteKeyLeds[4u + v] = 0.24f;
+                    outLeds.whiteKeyLeds[kBankAWhiteKeyBase + v] = 0.24f;
                 }
             }
-        } else if (wIdx < 12u) {
-            // 7b. DIVIDE (9-12): 16-step master clock playhead + 4-key zone bursts per divider
-            for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-                const float rawPlayhead = (i == step16) ? 0.44f : 0.03f;
+        } else if (wIdx < kSceneWhiteKeyBase) {
+            // 7b. DIVIDE (5-8): Master clock playhead + 4-key zone bursts per divider
+            const size_t playIdx = (step16 * 3u) >> 2u; // 0..11 across expressive keys 1-12
+            for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
+                const float rawPlayhead = (i == playIdx) ? 0.44f : 0.03f;
                 outLeds.whiteKeyLeds[i] = rawPlayhead + (0.10f - rawPlayhead) * stepSmooth;
             }
             for (size_t v = 0u; v < kNumOscillators; ++v) {
-                if (!in.whiteHeld[8u + v]) {
+                if (!in.whiteHeld[kBankBWhiteKeyBase + v]) {
                     continue;
                 }
-                const float p = clampf(in.whitePressure[8u + v], 0.0f, 1.0f);
+                const float p = clampf(in.whitePressure[kBankBWhiteKeyBase + v], 0.0f, 1.0f);
                 const bool open = (((stutMask >> v) & 1u) != 0u);
                 const float rawBurst = open ? (0.52f + 0.48f * p) : 0.0f;
                 const float burst = rawBurst + ((0.34f + 0.32f * p) - rawBurst) * stepSmooth;
                 if (burst > 0.05f) {
-                    for (size_t k = 0u; k < 4u; ++k) {
-                        const size_t idx = v * 4u + k;
+                    for (size_t b = 0u; b < 3u; ++b) {
+                        const size_t idx = b * 4u + v;
                         if (burst > outLeds.whiteKeyLeds[idx]) {
                             outLeds.whiteKeyLeds[idx] = burst;
                         }
@@ -404,12 +406,12 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
                 maxPanelBtnLed(outLeds, ButtonId::Seq, seqRaw + (0.45f - seqRaw) * beatSmooth);
             }
         } else {
-            // 7c. EUCLID (13-16): Live 16-step Euclidean pattern across Keys 1-16 + step cursor!
+            // 7c. EUCLID (9-12): Live Euclidean pattern across Keys 1-12 + step cursor!
             uint16_t unionMask = 0u;
             float maxP = 0.0f;
             for (uint8_t v = 0u; v < kNumOscillators; ++v) {
-                if (in.whiteHeld[12u + v]) {
-                    const float p = clampf(in.whitePressure[12u + v], 0.0f, 1.0f);
+                if (in.whiteHeld[kSceneWhiteKeyBase + v]) {
+                    const float p = clampf(in.whitePressure[kSceneWhiteKeyBase + v], 0.0f, 1.0f);
                     unionMask |= voiceEuclidMask16(v, selectEuclidTierIndex(p));
                     if (p > maxP) {
                         maxP = p;
@@ -417,12 +419,14 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
                 }
             }
             const bool hitNow = (((unionMask >> step16) & 1u) != 0u);
-            for (size_t s = 0u; s < kNumWhiteKeys; ++s) {
-                const bool isStepHit = (((unionMask >> s) & 1u) != 0u);
+            const size_t cursor12 = (step16 * 3u) >> 2u;
+            for (size_t s = 0u; s < kMuteWhiteKeyBase; ++s) {
+                const size_t stepMap = (s * 16u) / kMuteWhiteKeyBase;
+                const bool isStepHit = (((unionMask >> stepMap) & 1u) != 0u);
                 const float baseHit =
                     isStepHit ? (0.28f + 0.32f * stepSmooth + 0.18f * maxP) : 0.02f;
                 const float cursorBoost =
-                    (s == step16) ? ((isStepHit ? 0.72f : 0.60f) * (1.0f - stepSmooth)) : 0.0f;
+                    (s == cursor12) ? ((isStepHit ? 0.72f : 0.60f) * (1.0f - stepSmooth)) : 0.0f;
                 outLeds.whiteKeyLeds[s] = clampf(baseHit + cursorBoost, 0.02f, 1.0f);
             }
             const float seqRaw = hitNow ? 1.0f : 0.25f;
@@ -430,7 +434,7 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
             const float arpRaw = ((step16 & 3u) == 0u) ? 0.80f : 0.15f;
             maxPanelBtnLed(outLeds, ButtonId::Arp, arpRaw + (0.42f - arpRaw) * beatSmooth);
             for (size_t v = 0u; v < kNumOscillators; ++v) {
-                if (in.whiteHeld[12u + v]) {
+                if (in.whiteHeld[kSceneWhiteKeyBase + v]) {
                     const bool open = (((stutMask >> v) & 1u) != 0u);
                     if (open || stepSmooth > 0.10f) {
                         const float colRaw = open ? (0.72f + 0.28f * maxP) : 0.16f;
@@ -447,26 +451,26 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
         }
     }
 
-    // Keep every physically held top black key (OP5..POLY) unmistakably at 100%
-    for (size_t k = 4u; k <= 9u; ++k) {
+    // Keep every physically held top macro black key (OP1..OP6) unmistakably at 100%
+    for (size_t k = 0u; k < kNumTopMacroKeys; ++k) {
         if (in.blackHeld[k]) {
             outLeds.blackKeyLeds[k] = 1.0f;
         }
     }
-    // Keep SAVE + SNAP 13-16 clear when SAVE is armed
+    // Keep SAVE + SCENE 9-12 clear when SAVE is armed
     if (hud.saveArmed) {
         for (size_t s = 0u; s < kNumSnapshots; ++s) {
-            if (in.whiteHeld[12u + s]) {
-                outLeds.whiteKeyLeds[12u + s] = 1.0f;
+            if (in.whiteHeld[kSceneWhiteKeyBase + s]) {
+                outLeds.whiteKeyLeds[kSceneWhiteKeyBase + s] = 1.0f;
             }
         }
     }
 
-    // 8. 11th Key Tap Tempo flash + Authoritative Console SOLO (OP1-4) & MUTE (Keys 1-4)
+    // 8. 11th Key Tap Tempo flash + Authoritative binary Console SOLO (OP1-4) & MUTE (Keys 1-4)
     if (in.blackHeld[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)]) {
         outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)] = 1.0f;
     }
-    applyAuthoritativeConsoleLeds(state, stutMask, subBreathWave01, outLeds);
+    applyAuthoritativeConsoleLeds(state, outLeds);
 }
 
 } // namespace ruido

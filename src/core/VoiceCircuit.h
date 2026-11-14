@@ -84,29 +84,17 @@ inline float evaluateLiveOscAmplitude(const EngineControlState& state, size_t vo
     return clampf(rawAmp * clampf(vc.gateGainMul, 0.0f, 1.0f), 0.0f, 1.0f);
 }
 
-// Single source of truth for Console SOLO (OP 1-4) & MUTE (Keys 1-4) LEDs across both physical
-// PWM LEDs and the on-screen SEL keybed preview:
-//   - Muted / silent osc (patch 0%, MUTE key, peer SOLO duck, or STUTTER chop) -> MUTE=100%,
-//   SOLO=0%
-//   - Soloed & sounding osc                                                    -> SOLO=100%,
-//   MUTE=0%
-//   - Audible unsoloed osc                                                     -> 64% / sub-breath
-inline void evaluateVoiceConsoleLeds(const VoiceCircuitState& vc, float subBreathWave01,
-                                     float& outSoloLed, float& outMuteLed) noexcept {
-    if (vc.isMuted) {
-        outSoloLed = 0.0f;
-        outMuteLed = 1.0f;
-        return;
-    }
-    if (vc.isSoloed) {
-        outSoloLed = 1.0f;
-        outMuteLed = 0.0f;
-        return;
-    }
-    const float breath = 0.16f + 0.48f * clampf(subBreathWave01, 0.0f, 1.0f);
-    const float unmutedRest = 0.64f + (breath - 0.64f) * vc.subAudioBlend;
-    outSoloLed = 0.64f * (1.0f - vc.muteBlend);
-    outMuteLed = unmutedRest + (1.0f - unmutedRest) * vc.muteBlend;
+// Single source of truth for Console SOLO (PIT..POLY, Black 6-9) & MUTE (Keys 13-16, White 12-15)
+// LEDs across both physical PWM LEDs and the on-screen SEL keybed preview:
+//   - Strictly binary switch state (ON = 100%, OFF = 0% dark) — never modulated by voice level,
+//     sub-audio breathing, LFOs, peer solo ducking, or stutter gates.
+inline void evaluateVoiceConsoleLeds(const KeyboardModState& km, size_t voiceIdx, float& outSoloLed,
+                                     float& outMuteLed) noexcept {
+    const uint8_t bit = static_cast<uint8_t>(1u << (voiceIdx & 3u));
+    const bool muteOn = (km.muteMask & bit) != 0u;
+    const bool soloOn = !muteOn && ((km.soloMask & bit) != 0u);
+    outSoloLed = soloOn ? 1.0f : 0.0f;
+    outMuteLed = muteOn ? 1.0f : 0.0f;
 }
 
 } // namespace ruido

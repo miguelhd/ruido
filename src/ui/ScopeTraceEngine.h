@@ -29,6 +29,11 @@ class ScopeTraceEngine {
     void reset() noexcept;
 
     void advanceWatchdog(float dtClamped, bool scopeFrozen) noexcept {
+        if (pushedSinceWatchdog_) {
+            pushedSinceWatchdog_ = false;
+            timeSinceScopePushSec_ = 0.0f;
+            return;
+        }
         if (!scopeFrozen) {
             timeSinceScopePushSec_ += dtClamped;
             if (timeSinceScopePushSec_ > 10.0f) {
@@ -48,6 +53,14 @@ class ScopeTraceEngine {
                             uint8_t stutterGateMask = 0x0Fu,
                             ScopeTimebase timebase = ScopeTimebase::Auto) noexcept;
 
+    void refreshOverdriveHair(const EngineControlState& control, bool scopeFrozen) noexcept;
+
+    void notifyScopeHidden(bool scopeFrozen) noexcept {
+        if (!scopeFrozen) {
+            hiddenResumeSnap_ = true;
+        }
+    }
+
     // Rasterize <= 8-row strip chunk of 14 caustic strands + bilinear 60x60 bloom + tonemap.
     void renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t bgKeepQ8, uint16_t* linBuf,
                                uint8_t* lumBuf) const noexcept;
@@ -65,6 +78,8 @@ class ScopeTraceEngine {
     bool scopeValid_ = false;
     bool trigSigValid_ = false;
     bool phosphorPrimed_ = false;
+    bool hiddenResumeSnap_ = false;
+    bool pushedSinceWatchdog_ = false;
     float smoothStride_ = 2.0f;
     float timeSinceScopePushSec_ = 0.0f;
     float thermalPhase_ = 0.0f;
@@ -81,16 +96,38 @@ class ScopeTraceEngine {
     std::array<int16_t, kTracePoints> busTrailRQ12_{};
 
     // Prepared open edge-to-edge screen-space strands (Q8.6 Y coordinates) + 8-px tile Y-bounds
+    // + precomputed per-(strand, col) fixed-point segment geometry (eliminates 30x per-slice float
+    // fastRecipPos / fastInvSqrt recomputation in renderBackgroundChunk).
+    struct StrandColCache {
+        uint8_t segTop = 0u;    // Clamped [0..240] inclusive top row (segTop >= segBot = offscreen)
+        uint8_t segBot = 0u;    // Clamped [0..240] exclusive bottom row (0 = offscreen)
+        uint16_t dwellQ8 = 0u;  // Precomputed phosphor dwell weight in Q8
+        int16_t dyInvL2Q15 = 0; // Precomputed (dy / (1 + dy^2)) in Q1.15 (range [-16384..+16384])
+    };
+    static_assert(sizeof(StrandColCache) == 6u, "StrandColCache must stay compact at 6 B");
+
     std::array<std::array<int16_t, kTracePoints>, kNumStrands> strandYFixed_{};
     std::array<uint16_t, kNumStrands> strandWeightQ8_{};
     std::array<std::array<uint8_t, kNumTiles>, kNumStrands> strandTileMinY_{};
     std::array<std::array<uint8_t, kNumTiles>, kNumStrands> strandTileMaxY_{};
+    std::array<std::array<StrandColCache, kDisplayWidth>, kNumStrands> strandColCache_{};
 
     // Quarter-resolution (60x60) pre-blurred caustic bloom grid (scaled linear photon units)
     std::array<uint16_t, kBloomWidth * kBloomHeight> bloomGrid_{};
 
     // 48-point centered bipolar live transient window per voice for HudAmpGraph 3A overdrive cap
     OverdriveHairTable overdriveHair_{};
+
+    // Arena-resident scratch buffers (keeps Core 0 real-time stack frames < 1 KiB on embedded MCUs)
+    struct TraceScratch {
+        std::array<float, kTracePoints> liveL{};
+        std::array<float, kTracePoints> liveR{};
+        std::array<std::array<float, kTracePoints>, kNumOscillators> voiceCur{};
+        std::array<float, kTracePoints> trailBusL{};
+        std::array<float, kTracePoints> trailBusR{};
+        std::array<float, kTracePoints> scratchA{};
+        std::array<float, kTracePoints> scratchB{};
+    } scratch_{};
 };
 
 } // namespace ruido

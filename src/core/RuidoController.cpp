@@ -33,7 +33,7 @@ void RuidoController::reset() noexcept {
     savedSlotMask_ = 0u;
     latchedHudMode_ = HudMode::None;
     latchedButton_ = ButtonId::Count;
-    selectTickAccum_ = presetTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
+    selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
 
     keyboard_.evaluate(state_, hud_);
     EngineTelemetry zeroTel{};
@@ -232,68 +232,11 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         hud_.snapshotSavedToast = false;
         hud_.snapshotDeletedToast = false;
 
-        std::array<uint8_t, kNumSnapshots> occSlots{};
-        int32_t occCount = 0;
-        for (uint8_t s = 0u; s < kNumSnapshots; ++s) {
-            if (snapshots_.isSlotOccupied(s)) {
-                occSlots[static_cast<size_t>(occCount++)] = s;
-            }
-        }
-        if (occCount == 0) {
-            (void)stepClampedDetent(0, 0, ticks, rate, presetTickAccum_);
-            snapshots_.syncHud(hud_);
-            hud_.knobBank = KnobBankMode::Snapshot;
-            triggerHud(HudMode::SnapshotSlot, 0u, kNoFocusedKnob);
-            return;
-        }
-
-        const uint8_t curSlot = snapshots_.activeSlot() & 3u;
-        int32_t curOrd = -1;
-        for (int32_t i = 0; i < occCount; ++i) {
-            if (occSlots[static_cast<size_t>(i)] == curSlot) {
-                curOrd = i;
-                break;
-            }
-        }
-        uint8_t targetSlot = curSlot;
-        bool shouldRecall = false;
-        if (curOrd >= 0) {
-            const int32_t prevAccum = presetTickAccum_;
-            const int32_t nextOrd =
-                stepClampedDetent(curOrd, occCount - 1, ticks, rate, presetTickAccum_);
-            const bool steppedAtRail = snapshots_.isDirty() && (nextOrd == curOrd) &&
-                                       ((prevAccum + ticks >= 4) || (prevAccum + ticks <= -4));
-            targetSlot = occSlots[static_cast<size_t>(nextOrd)];
-            shouldRecall = (nextOrd != curOrd) || steppedAtRail;
-        } else {
-            presetTickAccum_ += ticks;
-            if (presetTickAccum_ >= 4) {
-                presetTickAccum_ %= 4;
-                targetSlot = occSlots[static_cast<size_t>(occCount - 1)];
-                for (int32_t i = 0; i < occCount; ++i) {
-                    if (occSlots[static_cast<size_t>(i)] > curSlot) {
-                        targetSlot = occSlots[static_cast<size_t>(i)];
-                        break;
-                    }
-                }
-                shouldRecall = true;
-            } else if (presetTickAccum_ <= -4) {
-                presetTickAccum_ %= 4;
-                targetSlot = occSlots[0];
-                for (int32_t i = occCount - 1; i >= 0; --i) {
-                    if (occSlots[static_cast<size_t>(i)] < curSlot) {
-                        targetSlot = occSlots[static_cast<size_t>(i)];
-                        break;
-                    }
-                }
-                shouldRecall = true;
-            }
-        }
-        if (shouldRecall) {
-            if (targetSlot != curSlot) {
+        const uint8_t prevSlot = snapshots_.activeSlot();
+        if (snapshots_.morphByEncoder(ticks, rate, state_)) {
+            if (snapshots_.activeSlot() != prevSlot) {
                 settingsDirty_ = true;
             }
-            snapshots_.recallSlotStepped(targetSlot, rate, state_);
             if (keyboard_.anyKeyHeld()) {
                 keyboard_.evaluate(state_, hud_);
             }
@@ -404,10 +347,10 @@ void RuidoController::onBlackKeyPressure(BlackKeyId key, float pressure) noexcep
 }
 
 bool RuidoController::tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active) noexcept {
-    if (whiteKeyIndex < 12u) {
+    if (whiteKeyIndex < kSceneWhiteKeyBase || whiteKeyIndex >= kSceneWhiteKeyBase + kNumSnapshots) {
         return false;
     }
-    const uint8_t slot = static_cast<uint8_t>(whiteKeyIndex - 12u);
+    const uint8_t slot = static_cast<uint8_t>(whiteKeyIndex - kSceneWhiteKeyBase);
     const uint8_t sBit = static_cast<uint8_t>(1u << slot);
     if ((saveSwallowedMask_ & sBit) != 0u) {
         if (!active) {

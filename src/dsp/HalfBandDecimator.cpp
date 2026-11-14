@@ -1,5 +1,7 @@
 #include "dsp/HalfBandDecimator.h"
 
+#include "core/DspMath.h"
+
 namespace ruido {
 
 namespace {
@@ -63,110 +65,137 @@ void StereoHalfBandDecimator4x::reset() noexcept {
     ow2_ = 0u;
 }
 
-StereoFrame StereoHalfBandDecimator4x::decimate2xStage1Stereo(StereoFrame s0,
-                                                              StereoFrame s1) noexcept {
-    constexpr size_t kEvenMask = kStage1Pairs - 1u;    // 7
-    constexpr size_t kOddMask = kStage1OddPeriod - 1u; // 15
+namespace {
 
-    const size_t ew = ew1_;
+RUIDO_ALWAYS_INLINE void decimateStage1Inline(float s0L, float s0R, float s1L, float s1R,
+                                              float* evenL, float* evenR, float* oddL, float* oddR,
+                                              size_t& ew1, size_t& ow1, float& outL,
+                                              float& outR) noexcept {
+    constexpr size_t kPairs = 8u;
+    constexpr size_t kOddPeriod = 16u;
+    constexpr size_t kEvenMask = kPairs - 1u;
+    constexpr size_t kOddMask = kOddPeriod - 1u;
+
+    const size_t ew = ew1;
     const size_t nextEw = (ew + 1u) & kEvenMask;
-    left_.even1[ew] = s0.left;
-    right_.even1[ew] = s0.right;
-    const float s0DelL = left_.even1[nextEw];
-    const float s0DelR = right_.even1[nextEw];
-    ew1_ = nextEw;
+    evenL[ew] = s0L;
+    evenR[ew] = s0R;
+    const float s0DelL = evenL[nextEw];
+    const float s0DelR = evenR[nextEw];
+    ew1 = nextEw;
 
-    const size_t ow = ow1_;
-    left_.odd1[ow] = s1.left;
-    left_.odd1[ow + kStage1OddPeriod] = s1.left;
-    right_.odd1[ow] = s1.right;
-    right_.odd1[ow + kStage1OddPeriod] = s1.right;
+    const size_t ow = ow1;
+    oddL[ow] = s1L;
+    oddL[ow + kOddPeriod] = s1L;
+    oddR[ow] = s1R;
+    oddR[ow + kOddPeriod] = s1R;
 
-    size_t base = (ow - (kStage1Pairs - 1u)) & kOddMask;
-    if (base < kStage1Pairs) {
-        base += kStage1OddPeriod;
+    size_t base = (ow - (kPairs - 1u)) & kOddMask;
+    if (base < kPairs) {
+        base += kOddPeriod;
     }
-    ow1_ = (ow + 1u) & kOddMask;
+    ow1 = (ow + 1u) & kOddMask;
 
-    const float* rL = &left_.odd1[base];
+    const float* rL = oddL + base;
     const float* lL = rL - 1;
-    const float* rR = &right_.odd1[base];
+    const float* rR = oddR + base;
     const float* lR = rR - 1;
-    const float* hp = kStage1Taps.data();
 
-    // Auto-increment / auto-decrement pointer walks emit native `[r++]`/`[r--]` DSP loads on pi32v2
+    // Fully unrolled 8-pair symmetric FIR: zero loop/branch overhead, exact even/odd FP sum order
     float accL0 = 0.5f * s0DelL;
     float accL1 = 0.0f;
     float accR0 = 0.5f * s0DelR;
     float accR1 = 0.0f;
-    for (size_t i = 0u; i < kStage1Pairs; i += 2u) {
-        const float h0 = *hp++;
-        const float h1 = *hp++;
-        const float sumL0 = *rL++ + *lL--;
-        const float sumL1 = *rL++ + *lL--;
-        const float sumR0 = *rR++ + *lR--;
-        const float sumR1 = *rR++ + *lR--;
-        accL0 += h0 * sumL0;
-        accL1 += h1 * sumL1;
-        accR0 += h0 * sumR0;
-        accR1 += h1 * sumR1;
-    }
-    return {accL0 + accL1, accR0 + accR1};
+
+    accL0 += kStage1Taps[0] * (rL[0] + lL[0]);
+    accL1 += kStage1Taps[1] * (rL[1] + lL[-1]);
+    accR0 += kStage1Taps[0] * (rR[0] + lR[0]);
+    accR1 += kStage1Taps[1] * (rR[1] + lR[-1]);
+
+    accL0 += kStage1Taps[2] * (rL[2] + lL[-2]);
+    accL1 += kStage1Taps[3] * (rL[3] + lL[-3]);
+    accR0 += kStage1Taps[2] * (rR[2] + lR[-2]);
+    accR1 += kStage1Taps[3] * (rR[3] + lR[-3]);
+
+    accL0 += kStage1Taps[4] * (rL[4] + lL[-4]);
+    accL1 += kStage1Taps[5] * (rL[5] + lL[-5]);
+    accR0 += kStage1Taps[4] * (rR[4] + lR[-4]);
+    accR1 += kStage1Taps[5] * (rR[5] + lR[-5]);
+
+    accL0 += kStage1Taps[6] * (rL[6] + lL[-6]);
+    accL1 += kStage1Taps[7] * (rL[7] + lL[-7]);
+    accR0 += kStage1Taps[6] * (rR[6] + lR[-6]);
+    accR1 += kStage1Taps[7] * (rR[7] + lR[-7]);
+
+    outL = accL0 + accL1;
+    outR = accR0 + accR1;
 }
 
-StereoFrame StereoHalfBandDecimator4x::decimate2xStage2Stereo(StereoFrame s0,
-                                                              StereoFrame s1) noexcept {
-    constexpr size_t kEvenMask = kStage2Pairs - 1u;    // 31
-    constexpr size_t kOddMask = kStage2OddPeriod - 1u; // 63
+RUIDO_ALWAYS_INLINE StereoFrame decimateStage2Inline(float s0L, float s0R, float s1L, float s1R,
+                                                     float* evenL, float* evenR, float* oddL,
+                                                     float* oddR, size_t& ew2,
+                                                     size_t& ow2) noexcept {
+    constexpr size_t kPairs = 32u;
+    constexpr size_t kOddPeriod = 64u;
+    constexpr size_t kEvenMask = kPairs - 1u;
+    constexpr size_t kOddMask = kOddPeriod - 1u;
 
-    const size_t ew = ew2_;
+    const size_t ew = ew2;
     const size_t nextEw = (ew + 1u) & kEvenMask;
-    left_.even2[ew] = s0.left;
-    right_.even2[ew] = s0.right;
-    const float s0DelL = left_.even2[nextEw];
-    const float s0DelR = right_.even2[nextEw];
-    ew2_ = nextEw;
+    evenL[ew] = s0L;
+    evenR[ew] = s0R;
+    const float s0DelL = evenL[nextEw];
+    const float s0DelR = evenR[nextEw];
+    ew2 = nextEw;
 
-    const size_t ow = ow2_;
-    left_.odd2[ow] = s1.left;
-    left_.odd2[ow + kStage2OddPeriod] = s1.left;
-    right_.odd2[ow] = s1.right;
-    right_.odd2[ow + kStage2OddPeriod] = s1.right;
+    const size_t ow = ow2;
+    oddL[ow] = s1L;
+    oddL[ow + kOddPeriod] = s1L;
+    oddR[ow] = s1R;
+    oddR[ow + kOddPeriod] = s1R;
 
-    size_t base = (ow - (kStage2Pairs - 1u)) & kOddMask;
-    if (base < kStage2Pairs) {
-        base += kStage2OddPeriod;
+    size_t base = (ow - (kPairs - 1u)) & kOddMask;
+    if (base < kPairs) {
+        base += kOddPeriod;
     }
-    ow2_ = (ow + 1u) & kOddMask;
+    ow2 = (ow + 1u) & kOddMask;
 
-    const float* rL = &left_.odd2[base];
+    const float* rL = oddL + base;
     const float* lL = rL - 1;
-    const float* rR = &right_.odd2[base];
+    const float* rR = oddR + base;
     const float* lR = rR - 1;
 
 #if !(defined(__SSE__) || defined(__ARM_NEON) || defined(__wasm__))
-    // 2 accumulators + `[r++]`/`[r--]` pointer walks fit inside pi32v2's 15 GPRs with zero spills
     const float* hp = kStage2Taps.data();
     float accL0 = 0.5f * s0DelL;
     float accL1 = 0.0f;
     float accR0 = 0.5f * s0DelR;
     float accR1 = 0.0f;
 
-    for (size_t i = 0u; i < kStage2Pairs; i += 2u) {
-        const float h0 = *hp++;
-        const float h1 = *hp++;
-        const float sumL0 = *rL++ + *lL--;
-        const float sumL1 = *rL++ + *lL--;
-        const float sumR0 = *rR++ + *lR--;
-        const float sumR1 = *rR++ + *lR--;
-        accL0 += h0 * sumL0;
-        accL1 += h1 * sumL1;
-        accR0 += h0 * sumR0;
-        accR1 += h1 * sumR1;
+    // 4x unrolled (8 iterations instead of 16) with immediate offsets to cut pointer/branch ops 4x
+    for (size_t i = 0u; i < kPairs; i += 4u) {
+        const float h0 = hp[0];
+        const float h1 = hp[1];
+        accL0 += h0 * (rL[0] + lL[0]);
+        accL1 += h1 * (rL[1] + lL[-1]);
+        accR0 += h0 * (rR[0] + lR[0]);
+        accR1 += h1 * (rR[1] + lR[-1]);
+
+        const float h2 = hp[2];
+        const float h3 = hp[3];
+        accL0 += h2 * (rL[2] + lL[-2]);
+        accL1 += h3 * (rL[3] + lL[-3]);
+        accR0 += h2 * (rR[2] + lR[-2]);
+        accR1 += h3 * (rR[3] + lR[-3]);
+
+        hp += 4;
+        rL += 4;
+        lL -= 4;
+        rR += 4;
+        lR -= 4;
     }
     return {accL0 + accL1, accR0 + accR1};
 #else
-    // 4 independent accumulators per channel break FPU fadd latency without -ffast-math
     float accL0 = 0.5f * s0DelL;
     float accL1 = 0.0f;
     float accL2 = 0.0f;
@@ -176,7 +205,7 @@ StereoFrame StereoHalfBandDecimator4x::decimate2xStage2Stereo(StereoFrame s0,
     float accR2 = 0.0f;
     float accR3 = 0.0f;
 
-    for (size_t i = 0u; i < kStage2Pairs; i += 4u) {
+    for (size_t i = 0u; i < kPairs; i += 4u) {
         const ptrdiff_t i0 = static_cast<ptrdiff_t>(i);
         const ptrdiff_t i1 = i0 + 1;
         const ptrdiff_t i2 = i0 + 2;
@@ -196,15 +225,68 @@ StereoFrame StereoHalfBandDecimator4x::decimate2xStage2Stereo(StereoFrame s0,
         accR2 += h2 * (rR[i2] + lR[-i2]);
         accR3 += h3 * (rR[i3] + lR[-i3]);
     }
-
     return {(accL0 + accL1) + (accL2 + accL3), (accR0 + accR1) + (accR2 + accR3)};
 #endif
 }
 
+} // namespace
+
+StereoFrame StereoHalfBandDecimator4x::decimate2xStage1Stereo(StereoFrame s0,
+                                                              StereoFrame s1) noexcept {
+    float outL = 0.0f;
+    float outR = 0.0f;
+    decimateStage1Inline(s0.left, s0.right, s1.left, s1.right, left_.even1.data(),
+                         right_.even1.data(), left_.odd1.data(), right_.odd1.data(), ew1_, ow1_,
+                         outL, outR);
+    return {outL, outR};
+}
+
+StereoFrame StereoHalfBandDecimator4x::decimate2xStage2Stereo(StereoFrame s0,
+                                                              StereoFrame s1) noexcept {
+    return decimateStage2Inline(s0.left, s0.right, s1.left, s1.right, left_.even2.data(),
+                                right_.even2.data(), left_.odd2.data(), right_.odd2.data(), ew2_,
+                                ow2_);
+}
+
+RUIDO_NOINLINE void StereoHalfBandDecimator4x::processSpan4x(const std::array<StereoFrame, 4>* in4x,
+                                                             StereoFrame* out,
+                                                             size_t count) noexcept {
+    size_t ew1 = ew1_;
+    size_t ow1 = ow1_;
+    size_t ew2 = ew2_;
+    size_t ow2 = ow2_;
+    float* ev1L = left_.even1.data();
+    float* ev1R = right_.even1.data();
+    float* od1L = left_.odd1.data();
+    float* od1R = right_.odd1.data();
+    float* ev2L = left_.even2.data();
+    float* ev2R = right_.even2.data();
+    float* od2L = left_.odd2.data();
+    float* od2R = right_.odd2.data();
+
+    for (size_t k = 0u; k < count; ++k) {
+        const auto& f = in4x[k];
+        float m0L = 0.0f;
+        float m0R = 0.0f;
+        float m1L = 0.0f;
+        float m1R = 0.0f;
+        decimateStage1Inline(f[0].left, f[0].right, f[1].left, f[1].right, ev1L, ev1R, od1L, od1R,
+                             ew1, ow1, m0L, m0R);
+        decimateStage1Inline(f[2].left, f[2].right, f[3].left, f[3].right, ev1L, ev1R, od1L, od1R,
+                             ew1, ow1, m1L, m1R);
+        out[k] = decimateStage2Inline(m0L, m0R, m1L, m1R, ev2L, ev2R, od2L, od2R, ew2, ow2);
+    }
+
+    ew1_ = ew1;
+    ow1_ = ow1;
+    ew2_ = ew2;
+    ow2_ = ow2;
+}
+
 StereoFrame StereoHalfBandDecimator4x::process4x(const std::array<StereoFrame, 4>& in4x) noexcept {
-    const StereoFrame mid0 = decimate2xStage1Stereo(in4x[0], in4x[1]);
-    const StereoFrame mid1 = decimate2xStage1Stereo(in4x[2], in4x[3]);
-    return decimate2xStage2Stereo(mid0, mid1);
+    StereoFrame out{};
+    processSpan4x(&in4x, &out, 1u);
+    return out;
 }
 
 } // namespace ruido

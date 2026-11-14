@@ -51,6 +51,10 @@ class BootIntroRenderer {
     bool fastDismiss_ = false;
     bool beamVisible_ = false;
     bool logoVisible_ = false;
+    std::array<uint8_t, kDisplayWidth> beamTightX_{};
+    std::array<uint8_t, kDisplayWidth> beamMedX_{};
+    std::array<uint8_t, kDisplayWidth> beamWideX_{};
+    std::array<uint8_t, kDisplayWidth> beamCoreHalfHQ4_{};
 };
 
 } // namespace ruido

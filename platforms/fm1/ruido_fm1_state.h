@@ -22,6 +22,10 @@ inline void hwMemoryBarrier() noexcept {
     __asm__ volatile("ssync\n\tcsync" ::: "memory");
 }
 
+inline void flushCacheLine(const volatile void* ptr) noexcept {
+    __asm__ volatile("flushinv [%0]\n\tssync\n\tcsync" ::"r"(ptr) : "memory");
+}
+
 /* Full 32-bit indirect call wrapper (`call rX`) across XIP (0x02000120) -> .c1_text (0x01C0E000),
  * avoiding pi32v2's +-4 MiB PC-relative `R_PI32V2_LONG_JUMP_23M2` direct-call limit. */
 template <typename Fn, typename... Args>
@@ -35,11 +39,17 @@ struct alignas(64) Fm1InterCoreControl {
     // and on every 64-frame block to catch AC791N bit-21 (`0x00200000`) RAM misreads immediately.
     volatile uint32_t sramCanaries[2]{0u, 0xFFFFFFFFu};
     std::atomic<uint32_t> c1SelfFault{0u};
-    std::atomic<uint32_t> engineReady{0u};
+    volatile uint32_t c1Booted{0u};
+    // Diagnostics: what tripped Core 1 (`fm1_cpu1.S` writes DBG_MSG / `0xC1xxxxxx` / `0xCA...`)
+    volatile uint32_t c1FaultCode{0u};
+    volatile uint32_t c1FaultAux{0u};
+    alignas(64) std::atomic<uint32_t> engineReady{0u};
     std::atomic<uint32_t> c1RunEnable{0u};
     std::atomic<uint32_t> c1FallbackActive{0u};
     std::atomic<uint32_t> c1BenchReq{0u};
     std::atomic<uint32_t> c1BenchTicks{0u};
+    std::atomic<uint32_t> c1FlashHold{0u};
+    std::atomic<uint32_t> c1FlashAck{0u};
     // IEEE-754 float32 bits of post-DSP quantizer trim (`1.0f = 0x3F800000u` unity; `MASTER` pot
     // routes through `RuidoController::onMasterPot` -> `DroneEngineCore::masterTrimSmoother_`)
     std::atomic<uint32_t> masterGainBits{0x3F800000u};
@@ -48,6 +58,10 @@ struct alignas(64) Fm1InterCoreControl {
 struct alignas(64) Fm1C1DspRuntime {
     OnePoleSmoother masterGainSmoother{};
     Fm1TpdfQuantizer quantizer{};
+    volatile uint8_t soloHalfRateActive = 0u;
+    volatile uint8_t inSoloDsp = 0u;
+    float soloHistL[3]{0.0f, 0.0f, 0.0f};
+    float soloHistR[3]{0.0f, 0.0f, 0.0f};
 };
 
 } // namespace ruido::fm1
@@ -92,8 +106,11 @@ void ruido_fm1_c1_snap_latest(void);
  * arming ALNK0 DMA so the very first callback drains click-free audio. */
 void ruido_fm1_c1_prime_blocks(uint32_t num_blocks, uint32_t reattach_coproc);
 
-/* Render one 64-frame TPDF-dithered block directly (used only if Core 1 silicon fallback trips). */
-void ruido_fm1_c1_render_one_block(ruido::Fm1AudioBlock* dst_block);
+/* Pump up to `max_blocks` into `Fm1AudioBlockRing` on Core 0 when `c1FallbackActive != 0`. */
+void ruido_fm1_c1_pump_solo_ring(uint32_t max_blocks);
+
+/* Switch `DroneEngineCore` into 22.05 kHz half-rate (88.2 kHz 4x ZDF) solo-core fallback mode. */
+void ruido_fm1_c1_enter_solo_fallback(void);
 
 /* Render one 64-frame float32 DSP block directly in `.c1_text` SRAM (fallback boot benchmark). */
 void ruido_fm1_c1_step_solo_bench64(void);

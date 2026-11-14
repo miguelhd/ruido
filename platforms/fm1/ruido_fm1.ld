@@ -87,21 +87,23 @@ SECTIONS
         *(.noinit*)
     } > NOINIT
 
-    /* Core 1 dedicated stacks (6 KiB user + 6 KiB supervisor + 4 KiB unmapped gap below Core 0) */
+    /* Balance User (`usp`) and Supervisor (`ssp`) stacks on both q32DSP cores so thread-mode
+     * and ISR execution always have >3x stack headroom regardless of `uboot.boot`'s `psr` mode,
+     * while preserving 256 B hardware WR_LIMIT(0/1) guard bands (`_guard0`, `_guard1`). */
     _c1_guard0 = 0x01C70000;
     _c1_ustack_lo = 0x01C70100;
-    _c1_ustack_top = 0x01C71800;
-    _c1_guard1 = 0x01C71800;
-    _c1_sstack_lo = 0x01C71900;
-    _c1_sstack_top = 0x01C73000;
-    _c1_sp_fence = 0x01C73800;
+    _c1_ustack_top = 0x01C71E00;
+    _c1_guard1 = 0x01C71E00;
+    _c1_sstack_lo = 0x01C71F00;
+    _c1_sstack_top = 0x01C73C00;
+    _c1_sp_fence = 0x01C73E00;
 
-    /* Core 0 stacks (exact addresses expected by crt0.S and fm1_guard_lock_top) */
+    /* Core 0 stacks: 15.75 KiB `_ustack` + 15.75 KiB `_sstack` (max call-graph depth <= 5.1 KiB) */
     _guard0 = 0x01C74000;
     _ustack_lo = 0x01C74100;
-    _ustack_top = 0x01C7A000;
-    _guard1 = 0x01C7A000;
-    _sstack_lo = 0x01C7A100;
+    _ustack_top = 0x01C78000;
+    _guard1 = 0x01C78000;
+    _sstack_lo = 0x01C78100;
     _sstack_top = 0x01C7C000;
 
     /DISCARD/ : {

@@ -287,7 +287,7 @@ void KeyboardEngine::stepAndComputeKeyLeds(float dtSec, float animPhase, float s
             smoothstep01(clampf((effBpm - 900.0f) * (1.0f / 600.0f), 0.0f, 1.0f));
         const float pulse = beatFlash * (1.0f - beatSmooth) + 0.35f * beatSmooth;
         outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)] =
-            0.08f + 0.22f * pulse;
+            0.68f + 0.32f * pulse;
     }
 
     if (anyKeyHeld()) {

@@ -49,19 +49,19 @@ void evaluateLiveMixerModel(const KeyboardInputView& in, EngineControlState& sta
     KeyboardModState mod{};
     PunchTracker punch{};
 
-    // 1. OP1..OP4 (SOLO 1-4) & White Keys 0..3 (MUTE 1-4): Momentary or Latching Console Switches
+    // 1. PIT..POLY (SOLO 1-4) & White Keys 12..15 (MUTE 1-4): Momentary or Latching Console
     evaluateConsoleSoloMute(in, mod, punch);
 
-    // 2. OP5: Drive -> progressive 4.5x MS-20 overdrive + starved-rail sync + Korg35 scream
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op5)]) {
-        const size_t idx = static_cast<size_t>(BlackKeyId::Op5);
+    // 2. OP1: Drive -> progressive 4.5x MS-20 overdrive + starved-rail sync + Korg35 scream
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op1)]) {
+        const size_t idx = static_cast<size_t>(BlackKeyId::Op1);
         mod.overloadSurge = in.blackPressure[idx];
         punch.note(in.blackPressSeq[idx], KeyPunchKind::OverloadSurge, 0u, mod.overloadSurge);
     }
 
-    // 3. OP6: Sub Octave (continuous 0.0 -> -2.0 Oct dive with -1.0 Oct inflection at 50%)
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op6)]) {
-        const size_t idx = static_cast<size_t>(BlackKeyId::Op6);
+    // 3. OP2: Sub Octave (continuous 0.0 -> -2.0 Oct dive with -1.0 Oct inflection at 50%)
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op2)]) {
+        const size_t idx = static_cast<size_t>(BlackKeyId::Op2);
         const float oct = evalSubDropOctaves(in.blackPressure[idx]);
         const float mul = fastExp2(oct);
         for (size_t v = 0u; v < kNumOscillators; ++v) {
@@ -70,9 +70,9 @@ void evaluateLiveMixerModel(const KeyboardInputView& in, EngineControlState& sta
         punch.note(in.blackPressSeq[idx], KeyPunchKind::SubDrop, 0u, oct);
     }
 
-    // 4. PIT: Just-Intonation Ratio Lock + progressive 1/f thermal drift damping
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Pit)]) {
-        const size_t idx = static_cast<size_t>(BlackKeyId::Pit);
+    // 4. OP3: Just-Intonation Ratio Lock + progressive 1/f thermal drift damping
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op3)]) {
+        const size_t idx = static_cast<size_t>(BlackKeyId::Op3);
         const float p = clampf(in.blackPressure[idx], 0.0f, 1.0f);
         const float lockAmt = p * (1.25f - 0.25f * p);
         mod.ratioLockAmount = lockAmt;
@@ -93,18 +93,18 @@ void evaluateLiveMixerModel(const KeyboardInputView& in, EngineControlState& sta
                    static_cast<uint8_t>(repRatioIdx), p);
     }
 
-    // 5. GLO key: Low Pass sweep (28 kHz -> 31 Hz with monotonically rising Korg35 resonance)
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Glo)]) {
-        const size_t idx = static_cast<size_t>(BlackKeyId::Glo);
+    // 5. OP4: Low Pass sweep (28 kHz -> 31 Hz with monotonically rising Korg35 resonance)
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op4)]) {
+        const size_t idx = static_cast<size_t>(BlackKeyId::Op4);
         const float p = in.blackPressure[idx];
         mod.dubLpfDrop = p;
         const float cutoffHz = 28000.0f * fastExp2(-9.8f * p);
         punch.note(in.blackPressSeq[idx], KeyPunchKind::DubLpfDrop, 0u, cutoffHz);
     }
 
-    // 6. MONO / POLY keys: 4-Oscillator Analog Unison Stack vs. Detuned + Schmitt PWM Swarm
-    const size_t monoIdx = static_cast<size_t>(BlackKeyId::Mono);
-    const size_t polyIdx = static_cast<size_t>(BlackKeyId::Poly);
+    // 6. OP5 / OP6 keys: 4-Oscillator Analog Unison Stack vs. Detuned + Schmitt PWM Swarm
+    const size_t monoIdx = static_cast<size_t>(BlackKeyId::Op5);
+    const size_t polyIdx = static_cast<size_t>(BlackKeyId::Op6);
     const bool monoOn = in.blackHeld[monoIdx];
     const bool polyOn = in.blackHeld[polyIdx];
     if (monoOn || polyOn) {
@@ -145,27 +145,27 @@ void evaluateLiveMixerModel(const KeyboardInputView& in, EngineControlState& sta
     // 7. 11th Tall Key: Freeze (8 LFOs + Drift + Scope)
     evaluateUniversalFreeze(in, mod, hud, punch);
 
-    // 8. Bottom Effect & Scene Groups (FILTER 5-8 | OCTAVE 9-12 | SCENE 13-16)
+    // 8. Bottom Effect & Scene Groups (FILTER 1-4 | OCTAVE 5-8 | SCENE 9-12)
     std::array<float, kNumOscillators> voiceFormant{0.0f, 0.0f, 0.0f, 0.0f};
     for (uint8_t v = 0u; v < kNumOscillators; ++v) {
-        if (in.whiteHeld[4u + v]) {
-            const float p = in.whitePressure[4u + v];
+        if (in.whiteHeld[kBankAWhiteKeyBase + v]) {
+            const float p = in.whitePressure[kBankAWhiteKeyBase + v];
             voiceFormant[v] = p;
-            punch.note(in.whitePressSeq[4u + v], KeyPunchKind::VoiceFormant, v, p);
+            punch.note(in.whitePressSeq[kBankAWhiteKeyBase + v], KeyPunchKind::VoiceFormant, v, p);
         }
-        if (in.whiteHeld[8u + v]) {
-            const float p = in.whitePressure[8u + v];
+        if (in.whiteHeld[kBankBWhiteKeyBase + v]) {
+            const float p = in.whitePressure[kBankBWhiteKeyBase + v];
             const float oct = evalOctaveRise(p);
             mod.voicePitchMul[v] *= fastExp2(oct);
             const float sirenBite = 0.72f * p * p;
             if (sirenBite > voiceFormant[v]) {
                 voiceFormant[v] = sirenBite;
             }
-            punch.note(in.whitePressSeq[8u + v], KeyPunchKind::VoiceSiren, v, oct);
+            punch.note(in.whitePressSeq[kBankBWhiteKeyBase + v], KeyPunchKind::VoiceSiren, v, oct);
         }
-        if (in.whiteHeld[12u + v] && !hud.saveArmed) {
-            punch.note(in.whitePressSeq[12u + v], KeyPunchKind::SnapshotRecall, v,
-                       in.whitePressure[12u + v]);
+        if (in.whiteHeld[kSceneWhiteKeyBase + v] && !hud.saveArmed) {
+            punch.note(in.whitePressSeq[kSceneWhiteKeyBase + v], KeyPunchKind::SnapshotRecall, v,
+                       in.whitePressure[kSceneWhiteKeyBase + v]);
         }
         state.voicePressure[v] = voiceFormant[v];
     }
@@ -177,11 +177,13 @@ void evaluateLiveMixerModel(const KeyboardInputView& in, EngineControlState& sta
 void choreographLiveMixerLeds(const KeyboardInputView& in, float animPhase, float subBreathWave01,
                               const EngineControlState& state, const HudState& hud,
                               uint8_t stutMask, float rhythmPhase01, LedState& outLeds) noexcept {
+    (void)subBreathWave01;
+    (void)stutMask;
     (void)rhythmPhase01;
-    // 1. OP5 Drive: Dual-edge plasma flood + top VU bar + physical RED REC clip beacon!
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op5)]) {
-        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Op5)];
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op5)] = 1.0f;
+    // 1. OP1 Drive: Dual-edge plasma flood + top VU bar + physical RED REC clip beacon!
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op1)]) {
+        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Op1)];
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op1)] = 1.0f;
         const float reach = p * 8.4f;
         const float shimmer =
             (p > 0.55f) ? (0.80f + 0.20f * evalAnalogSine(wrapLfoPhase01(animPhase * 13.0f)))
@@ -210,16 +212,17 @@ void choreographLiveMixerLeds(const KeyboardInputView& in, float animPhase, floa
         }
     }
 
-    // 2. OP6 Sub Octave: OCT- blazes 100%, top row dims, bottom switches & keys throb at 2 Hz
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op6)]) {
-        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Op6)];
+    // 2. OP2 Sub Octave: OCT- blazes 100%, top row dims, bottom switches & keys throb at 2 Hz
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op2)]) {
+        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Op2)];
         const float subThrob =
             0.55f + 0.45f * (0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(animPhase * 2.0f))));
-        for (size_t i = 4u; i < kNumBlackKeys; ++i) {
+        for (size_t i = 0u; i < kNumTopMacroKeys; ++i) {
             outLeds.blackKeyLeds[i] *= 0.25f;
         }
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op6)] = 1.0f;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+        outLeds.blackKeyLeds[10] *= 0.25f;
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op2)] = 1.0f;
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
             outLeds.whiteKeyLeds[i] = clampf(0.32f + 0.68f * p * subThrob, 0.0f, 1.0f);
         }
         setPanelBtnLed(outLeds, ButtonId::OctMinus, 0.55f + 0.45f * p);
@@ -232,13 +235,13 @@ void choreographLiveMixerLeds(const KeyboardInputView& in, float animPhase, floa
         }
     }
 
-    // 3. PIT Ratio Lock: Beating switch columns converge into steady harmonic lock as p -> 1
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Pit)]) {
-        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Pit)];
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Pit)] = 1.0f;
+    // 3. OP3 Ratio Lock: Beating switch columns converge into steady harmonic lock as p -> 1
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op3)]) {
+        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Op3)];
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op3)] = 1.0f;
         const float waveA = 0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(animPhase * 4.0f)));
         const float waveB = 1.0f - waveA;
-        for (size_t b = 1u; b < 4u; ++b) {
+        for (size_t b = 0u; b < 3u; ++b) {
             outLeds.whiteKeyLeds[b * 4u] = clampf(0.55f + 0.45f * p, 0.0f, 1.0f);
             for (size_t v = 1u; v < 4u; ++v) {
                 const float lockGlow = p * (0.45f + 0.45f * (1.0f - p) * waveA + 0.45f * p);
@@ -259,12 +262,12 @@ void choreographLiveMixerLeds(const KeyboardInputView& in, float animPhase, floa
         }
     }
 
-    // 4. GLO Low Pass: Right-to-left closing passband curtain across BOTH top switches & keys
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Glo)]) {
-        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Glo)];
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Glo)] = 1.0f;
-        const float crestIdx = (1.0f - p) * 15.0f;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+    // 4. OP4 Low Pass: Right-to-left closing passband curtain across BOTH top switches & keys
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op4)]) {
+        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Op4)];
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op4)] = 1.0f;
+        const float crestIdx = (1.0f - p) * 11.0f;
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
             const float fi = static_cast<float>(i);
             const float crest = clampf(1.0f - absf(fi - crestIdx) * 0.55f, 0.0f, 1.0f);
             const float pass = (fi <= crestIdx) ? 0.34f : 0.02f;
@@ -290,12 +293,12 @@ void choreographLiveMixerLeds(const KeyboardInputView& in, float animPhase, floa
         maxPanelBtnLed(outLeds, ButtonId::Fx, 0.45f + 0.55f * p);
     }
 
-    // 5. MONO Unison Stack vs. POLY Detune/PWM Swarm across BOTH rows!
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Mono)]) {
-        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Mono)];
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Mono)] = 1.0f;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-            const float tgt = (i >= 6u && i <= 9u) ? 0.95f : 0.03f;
+    // 5. OP5 Unison Stack vs. OP6 Detune/PWM Swarm across BOTH rows!
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op5)]) {
+        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Op5)];
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op5)] = 1.0f;
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
+            const float tgt = (i >= 4u && i <= 7u) ? 0.95f : 0.03f;
             outLeds.whiteKeyLeds[i] += (tgt - outLeds.whiteKeyLeds[i]) * p;
         }
         scalePanelGrid(outLeds, 1.0f - 0.92f * p);
@@ -304,11 +307,11 @@ void choreographLiveMixerLeds(const KeyboardInputView& in, float animPhase, floa
         maxPanelBtnLed(outLeds, ButtonId::Arp, 0.95f * p);
         maxPanelBtnLed(outLeds, ButtonId::Seq, 0.95f * p);
     }
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Poly)]) {
-        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Poly)];
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Poly)] = 1.0f;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-            const float tgt = (i <= 2u || i >= 13u) ? 0.95f : 0.04f;
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op6)]) {
+        const float p = in.blackPressure[static_cast<size_t>(BlackKeyId::Op6)];
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op6)] = 1.0f;
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
+            const float tgt = (i <= 2u || i >= 9u) ? 0.95f : 0.04f;
             outLeds.whiteKeyLeds[i] += (tgt - outLeds.whiteKeyLeds[i]) * p;
         }
         scalePanelGrid(outLeds, 1.0f - 0.88f * p);
@@ -320,32 +323,32 @@ void choreographLiveMixerLeds(const KeyboardInputView& in, float animPhase, floa
         maxPanelBtnLed(outLeds, ButtonId::GloRight, 0.98f * p);
     }
 
-    // 6. Bottom Effect & Snapshot Groups (FILTER 5-8 | OCTAVE 9-12 | SNAP 13-16)
+    // 6. Bottom Effect & Snapshot Groups (FILTER 1-4 | OCTAVE 5-8 | SCENE 9-12)
     float maxOctP = 0.0f;
     float maxSnapP = 0.0f;
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        if (in.whiteHeld[4u + v]) {
-            const float p = in.whitePressure[4u + v];
-            outLeds.whiteKeyLeds[4u + v] = 0.56f + 0.44f * p;
+        if (in.whiteHeld[kBankAWhiteKeyBase + v]) {
+            const float p = in.whitePressure[kBankAWhiteKeyBase + v];
+            outLeds.whiteKeyLeds[kBankAWhiteKeyBase + v] = 0.84f + 0.16f * p;
             maxPanelBtnLed(outLeds, ButtonId::Fx, 0.48f + 0.52f * p);
         }
-        if (in.whiteHeld[8u + v]) {
-            const float p = in.whitePressure[8u + v];
-            outLeds.whiteKeyLeds[8u + v] = 0.48f + 0.52f * p;
+        if (in.whiteHeld[kBankBWhiteKeyBase + v]) {
+            const float p = in.whitePressure[kBankBWhiteKeyBase + v];
+            outLeds.whiteKeyLeds[kBankBWhiteKeyBase + v] = 0.52f + 0.48f * p;
             if (p > maxOctP) {
                 maxOctP = p;
             }
         }
-        if (in.whiteHeld[12u + v]) {
+        if (in.whiteHeld[kSceneWhiteKeyBase + v]) {
             const bool occ = (hud.snapshotOccupiedMask & (1u << v)) != 0u;
             if (occ) {
-                const float p = in.whitePressure[12u + v];
-                outLeds.whiteKeyLeds[12u + v] = 1.0f;
+                const float p = in.whitePressure[kSceneWhiteKeyBase + v];
+                outLeds.whiteKeyLeds[kSceneWhiteKeyBase + v] = 1.0f;
                 if (p > maxSnapP) {
                     maxSnapP = p;
                 }
             } else {
-                outLeds.whiteKeyLeds[12u + v] = 0.15f;
+                outLeds.whiteKeyLeds[kSceneWhiteKeyBase + v] = 0.15f;
             }
         }
     }
@@ -375,8 +378,8 @@ void choreographLiveMixerLeds(const KeyboardInputView& in, float animPhase, floa
     // 7. 11th Key Stasis Freeze: Crystalline still-frame across ALL 42 device LEDs
     applyFreezeStillFrameLeds(in, outLeds);
 
-    // 8. Authoritative Console SOLO (OP 1-4) & MUTE (Keys 1-4) circuit state via VoiceCircuit.h
-    applyAuthoritativeConsoleLeds(state, stutMask, subBreathWave01, outLeds);
+    // 8. Authoritative binary Console SOLO (OP 1-4) & MUTE (Keys 1-4) switch state
+    applyAuthoritativeConsoleLeds(state, outLeds);
 }
 
 } // namespace ruido

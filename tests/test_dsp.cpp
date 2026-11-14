@@ -5,7 +5,7 @@
 #include "core/Parameters.h"
 #include "dsp/DroneEngine.h"
 #include "dsp/HalfBandDecimator.h"
-#include "dsp/Ms20Filter.h"
+#include "dsp/SallenKeyFilter.h"
 #include "dsp/SchmittOscillatorBank.h"
 #include "dsp/VoiceLfoBank.h"
 

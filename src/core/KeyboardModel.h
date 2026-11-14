@@ -86,24 +86,31 @@ struct PunchTracker {
     }
 };
 
-// Shared Momentary/Latching Console SOLO 1-4 (OP1-OP4) & MUTE 1-4 (Keys 1-4) switch logic.
+// Shared Momentary/Latching Console SOLO 1-4 (PIT..POLY, Black 6-9) & MUTE 1-4 (Keys 13-16,
+// White 12-15) switch logic on the right-hand non-pressure keys.
 inline void onConsoleSoloMuteKeyPress(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
                                       KeyboardLatchState& latch) noexcept {
-    if (keyIdx >= kNumOscillators) {
-        return;
-    }
-    const uint8_t bit = static_cast<uint8_t>(1u << keyIdx);
     if (isBlack) {
+        if (keyIdx < kSoloBlackKeyBase || keyIdx >= kSoloBlackKeyBase + kNumOscillators) {
+            return;
+        }
+        const uint8_t bit = static_cast<uint8_t>(1u << (keyIdx - kSoloBlackKeyBase));
         if (config.soloMode == KeySwitchMode::Latching) {
             latch.soloMask ^= bit;
             if ((latch.soloMask & bit) != 0u) {
                 latch.muteMask &= static_cast<uint8_t>(~bit);
             }
         }
-    } else if (config.muteMode == KeySwitchMode::Latching) {
-        latch.muteMask ^= bit;
-        if ((latch.muteMask & bit) != 0u) {
-            latch.soloMask &= static_cast<uint8_t>(~bit);
+    } else {
+        if (keyIdx < kMuteWhiteKeyBase || keyIdx >= kMuteWhiteKeyBase + kNumOscillators) {
+            return;
+        }
+        const uint8_t bit = static_cast<uint8_t>(1u << (keyIdx - kMuteWhiteKeyBase));
+        if (config.muteMode == KeySwitchMode::Latching) {
+            latch.muteMask ^= bit;
+            if ((latch.muteMask & bit) != 0u) {
+                latch.soloMask &= static_cast<uint8_t>(~bit);
+            }
         }
     }
 }
@@ -120,34 +127,40 @@ inline void evaluateConsoleSoloMute(const KeyboardInputView& in, KeyboardModStat
     bool latestSoloOn = true;
 
     for (uint8_t v = 0u; v < kNumOscillators; ++v) {
+        const size_t sIdx = kSoloBlackKeyBase + v;
+        const size_t mIdx = kMuteWhiteKeyBase + v;
         const uint8_t bit = static_cast<uint8_t>(1u << v);
-        if (!soloLatch && in.blackHeld[v]) {
+        if (!soloLatch && in.blackHeld[sIdx]) {
             soloMask |= bit;
         }
-        if (!muteLatch && in.whiteHeld[v]) {
+        if (!muteLatch && in.whiteHeld[mIdx]) {
             muteMask |= bit;
         }
-        if (!soloLatch && muteLatch && in.blackHeld[v]) {
+        if (!soloLatch && muteLatch && in.blackHeld[sIdx]) {
             muteMask &= static_cast<uint8_t>(~bit);
         }
-        if (!soloLatch && !muteLatch && in.blackHeld[v] && in.whiteHeld[v] &&
-            in.blackPressSeq[v] > in.whitePressSeq[v]) {
-            muteMask &= static_cast<uint8_t>(~bit);
+        if (!soloLatch && !muteLatch && in.blackHeld[sIdx] && in.whiteHeld[mIdx]) {
+            if (in.blackPressSeq[sIdx] > in.whitePressSeq[mIdx]) {
+                muteMask &= static_cast<uint8_t>(~bit);
+            } else {
+                soloMask &= static_cast<uint8_t>(~bit);
+            }
         }
-        if (in.blackHeld[v] && in.blackPressSeq[v] >= latestSoloSeq) {
-            latestSoloSeq = in.blackPressSeq[v];
+        if ((muteMask & bit) != 0u) {
+            soloMask &= static_cast<uint8_t>(~bit);
+        }
+        if (in.blackHeld[sIdx] && in.blackPressSeq[sIdx] >= latestSoloSeq) {
+            latestSoloSeq = in.blackPressSeq[sIdx];
             latestSoloVoice = v;
             latestSoloOn = ((soloMask & bit) != 0u);
         }
     }
 
     mod.soloMask = soloMask;
+    mod.muteMask = muteMask;
     if (soloMask != 0u) {
         for (uint8_t v = 0u; v < kNumOscillators; ++v) {
-            if (((soloMask >> v) & 1u) != 0u) {
-                const float p = in.blackHeld[v] ? in.blackPressure[v] : 0.0f;
-                mod.voiceGainMul[v] *= (1.0f + 0.24f * p * p);
-            } else {
+            if (((soloMask >> v) & 1u) == 0u) {
                 mod.voiceGainMul[v] = 0.0f;
             }
         }
@@ -158,13 +171,14 @@ inline void evaluateConsoleSoloMute(const KeyboardInputView& in, KeyboardModStat
     }
 
     for (uint8_t v = 0u; v < kNumOscillators; ++v) {
+        const size_t mIdx = kMuteWhiteKeyBase + v;
         const uint8_t bit = static_cast<uint8_t>(1u << v);
         const bool isChMuted = ((muteMask & bit) != 0u);
         if (isChMuted) {
             mod.voiceGainMul[v] = 0.0f;
         }
-        if (in.whiteHeld[v]) {
-            punch.note(in.whitePressSeq[v], KeyPunchKind::VoiceCut, v, isChMuted ? 1.0f : 0.0f);
+        if (in.whiteHeld[mIdx]) {
+            punch.note(in.whitePressSeq[mIdx], KeyPunchKind::VoiceCut, v, isChMuted ? 1.0f : 0.0f);
         }
     }
 }
@@ -201,14 +215,11 @@ inline void applyFreezeStillFrameLeds(const KeyboardInputView& in, LedState& out
     }
 }
 
-inline void applyAuthoritativeConsoleLeds(const EngineControlState& state, uint8_t stutMask,
-                                          float subBreathWave01, LedState& outLeds) noexcept {
+inline void applyAuthoritativeConsoleLeds(const EngineControlState& state,
+                                          LedState& outLeds) noexcept {
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        const VoiceCircuitState vc = evaluateVoiceCircuit(state, v, stutMask);
-        if (vc.isMuted || vc.isSoloed) {
-            evaluateVoiceConsoleLeds(vc, subBreathWave01, outLeds.blackKeyLeds[v],
-                                     outLeds.whiteKeyLeds[v]);
-        }
+        evaluateVoiceConsoleLeds(state.keyMod, v, outLeds.blackKeyLeds[kSoloBlackKeyBase + v],
+                                 outLeds.whiteKeyLeds[kMuteWhiteKeyBase + v]);
     }
 }
 

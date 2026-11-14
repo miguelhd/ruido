@@ -131,7 +131,6 @@ class RuidoController {
     uint8_t saveSwallowedMask_ = 0u;
     uint8_t savedSlotMask_ = 0u;
     int8_t selectTickAccum_ = 0;
-    int8_t presetTickAccum_ = 0;
     int8_t targetTickAccum_ = 0;
     int8_t configTickAccum_ = 0;
     HudMode latchedHudMode_ = HudMode::None;

@@ -123,7 +123,7 @@ def main(argv: list[str]) -> int:
         f"-I{fw / 'gen'}",
         f"-I{FM1_DIR}",
         f'-DFELUCCA_ID="{PRODUCT_DEV}"',
-        '-DAPP_VER="1.0"',
+        '-DAPP_VER="0.1.0"',
     ]
 
     common_cxxflags = [
@@ -260,7 +260,7 @@ def main(argv: list[str]) -> int:
             [
                 str(clang),
                 *common_cxxflags,
-                args.ui_opt,
+                "-Os",
                 "-c",
                 str(FM1_DIR / "fm1_ops_screen.cpp"),
                 "-o",
@@ -275,12 +275,15 @@ def main(argv: list[str]) -> int:
         raw_dsp_objs.append(out_o)
         specs.append(CompileSpec( OUT_DIR.parents[1] / s, out_o, [str(clang), *c1_dsp_cxxflags, "-c", s, "-o", str(out_o)]))
 
+    cold_ui_stems = {"BootIntroRender", "SnapshotCodec", "ControllerPageNav"}
     ui_objs: list[pathlib.Path] = []
     for s in ui_srcs:
-        out_o = RAW_OBJ_DIR / (pathlib.Path(s).stem + ".o")
+        stem = pathlib.Path(s).stem
+        out_o = RAW_OBJ_DIR / (stem + ".o")
         ui_objs.append(out_o)
+        opt_flag = "-Os" if stem in cold_ui_stems else args.ui_opt
         specs.append(
-            CompileSpec(OUT_DIR.parents[1] / s, out_o, [str(clang), *common_cxxflags, args.ui_opt, "-c", s, "-o", str(out_o)])
+            CompileSpec(OUT_DIR.parents[1] / s, out_o, [str(clang), *common_cxxflags, opt_flag, "-c", s, "-o", str(out_o)])
         )
 
     app_hits, app_built = compile_cached_jobs(specs, file_sha_cache, rebuild=args.rebuild)

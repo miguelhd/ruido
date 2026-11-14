@@ -199,25 +199,63 @@ int main(int argc, char** argv) {
             };
 
             switch (ch) {
-            case '1': toggleMod(ruido::BlackKeyId::Op1); break;
-            case '2': toggleMod(ruido::BlackKeyId::Op2); break;
-            case '3': toggleMod(ruido::BlackKeyId::Op3); break;
-            case '4': toggleMod(ruido::BlackKeyId::Op4); break;
-            case '5': toggleMod(ruido::BlackKeyId::Op5); break;
-            case '6': toggleMod(ruido::BlackKeyId::Op6); break;
-            case 'g': toggleMod(ruido::BlackKeyId::Glo); break;
-            case 'q': controller.onEncoderDelta(ruido::EncoderId::Knob1, 8); break;
-            case 'w': controller.onEncoderDelta(ruido::EncoderId::Knob2, 8); break;
-            case 'e': controller.onEncoderDelta(ruido::EncoderId::Knob3, 8); break;
-            case 'r': controller.onEncoderDelta(ruido::EncoderId::Knob4, 8); break;
-            case 'u': controller.onEncoderDelta(ruido::EncoderId::Knob1, -8); break;
-            case 'i': controller.onEncoderDelta(ruido::EncoderId::Knob2, -8); break;
-            case 'o': controller.onEncoderDelta(ruido::EncoderId::Knob3, -8); break;
-            case 'p': controller.onEncoderDelta(ruido::EncoderId::Knob4, -8); break;
-            case '[': controller.onEncoderDelta(ruido::EncoderId::Algorithm, -8); break;
-            case ']': controller.onEncoderDelta(ruido::EncoderId::Algorithm, 8); break;
-            case '-': toggleRateHold(ruido::ButtonId::OctMinus); break;
-            case '=': toggleRateHold(ruido::ButtonId::OctPlus); break;
+            case '1':
+                toggleMod(ruido::BlackKeyId::Op1);
+                break;
+            case '2':
+                toggleMod(ruido::BlackKeyId::Op2);
+                break;
+            case '3':
+                toggleMod(ruido::BlackKeyId::Op3);
+                break;
+            case '4':
+                toggleMod(ruido::BlackKeyId::Op4);
+                break;
+            case '5':
+                toggleMod(ruido::BlackKeyId::Op5);
+                break;
+            case '6':
+                toggleMod(ruido::BlackKeyId::Op6);
+                break;
+            case 'g':
+                toggleMod(ruido::BlackKeyId::Glo);
+                break;
+            case 'q':
+                controller.onEncoderDelta(ruido::EncoderId::Knob1, 8);
+                break;
+            case 'w':
+                controller.onEncoderDelta(ruido::EncoderId::Knob2, 8);
+                break;
+            case 'e':
+                controller.onEncoderDelta(ruido::EncoderId::Knob3, 8);
+                break;
+            case 'r':
+                controller.onEncoderDelta(ruido::EncoderId::Knob4, 8);
+                break;
+            case 'u':
+                controller.onEncoderDelta(ruido::EncoderId::Knob1, -8);
+                break;
+            case 'i':
+                controller.onEncoderDelta(ruido::EncoderId::Knob2, -8);
+                break;
+            case 'o':
+                controller.onEncoderDelta(ruido::EncoderId::Knob3, -8);
+                break;
+            case 'p':
+                controller.onEncoderDelta(ruido::EncoderId::Knob4, -8);
+                break;
+            case '[':
+                controller.onEncoderDelta(ruido::EncoderId::Algorithm, -8);
+                break;
+            case ']':
+                controller.onEncoderDelta(ruido::EncoderId::Algorithm, 8);
+                break;
+            case '-':
+                toggleRateHold(ruido::ButtonId::OctMinus);
+                break;
+            case '=':
+                toggleRateHold(ruido::ButtonId::OctPlus);
+                break;
             case 'j':
                 controller.onButtonEvent(ruido::ButtonId::Fx, true);
                 controller.onButtonEvent(ruido::ButtonId::Fx, false);
@@ -242,10 +280,18 @@ int main(int argc, char** argv) {
                 controller.onButtonEvent(ruido::ButtonId::Home, true);
                 controller.onButtonEvent(ruido::ButtonId::Home, false);
                 break;
-            case ',': controller.onEncoderDelta(ruido::EncoderId::Select, -4); break;
-            case '.': controller.onEncoderDelta(ruido::EncoderId::Select, 4); break;
-            case 'm': toggleMod(ruido::BlackKeyId::Mono); break;
-            case '0': toggleMod(ruido::BlackKeyId::ScopeFreezeKey); break;
+            case ',':
+                controller.onEncoderDelta(ruido::EncoderId::Select, -4);
+                break;
+            case '.':
+                controller.onEncoderDelta(ruido::EncoderId::Select, 4);
+                break;
+            case 'm':
+                toggleMod(ruido::BlackKeyId::Mono);
+                break;
+            case '0':
+                toggleMod(ruido::BlackKeyId::ScopeFreezeKey);
+                break;
             case ' ':
                 controller.onButtonEvent(ruido::ButtonId::PlayStop, true);
                 controller.onButtonEvent(ruido::ButtonId::PlayStop, false);

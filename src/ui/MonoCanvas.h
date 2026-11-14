@@ -101,6 +101,7 @@ inline int16_t slewQ8_6(int16_t cur, int16_t tgt, float alpha, bool snapImmediat
 // Pack 8-bit monochrome luminance [0..255] into strictly neutral RGB565 (R5==B5, G6==2*R5)
 // with 4x4 ordered Bayer dithering (~496 effective shades) so subtle 25% caustic bloom halos
 // and soft HUD vignettes melt into #000000 with zero 5-bit contour banding or tint.
+template <bool BigEndian = false>
 inline uint16_t packNeutralGrayRgb565(uint8_t lum, int x, int y) noexcept {
     if (lum <= 1u) {
         return 0x0000u;
@@ -112,12 +113,18 @@ inline uint16_t packNeutralGrayRgb565(uint8_t lum, int x, int y) noexcept {
         0u, 8u, 2u, 10u, 12u, 4u, 14u, 6u, 3u, 11u, 1u, 9u, 15u, 7u, 13u, 5u,
     };
     const uint32_t dither = kBayer4x4[((y & 3) << 2) | (x & 3)];
-    uint32_t g5 = (static_cast<uint32_t>(lum) * 31u + dither * 16u + 8u) / 255u;
+    const uint32_t num = static_cast<uint32_t>(lum) * 31u + dither * 16u + 8u;
+    uint32_t g5 = (num + 1u + (num >> 8u)) >> 8u;
     if (g5 > 31u) {
         g5 = 31u;
     }
     const uint32_t g6 = (g5 << 1u) | (g5 >> 4u);
-    return static_cast<uint16_t>((g5 << 11u) | (g6 << 5u) | g5);
+    const auto rgb = static_cast<uint16_t>((g5 << 11u) | (g6 << 5u) | g5);
+    if constexpr (BigEndian) {
+        return static_cast<uint16_t>((rgb >> 8u) | (rgb << 8u));
+    } else {
+        return rgb;
+    }
 }
 
 inline uint8_t blendLum8(uint8_t bg, uint8_t fg, uint8_t alpha8) noexcept {
@@ -129,7 +136,8 @@ inline uint8_t blendLum8(uint8_t bg, uint8_t fg, uint8_t alpha8) noexcept {
     }
     const uint32_t a = static_cast<uint32_t>(alpha8);
     const uint32_t inv = 255u - a;
-    return static_cast<uint8_t>((inv * bg + a * fg + 127u) / 255u);
+    const uint32_t mix = inv * bg + a * fg + 127u;
+    return static_cast<uint8_t>((mix + 1u + (mix >> 8u)) >> 8u);
 }
 
 struct MonoStripCanvas {
@@ -456,6 +464,18 @@ struct MonoStripCanvas {
         }
     }
 
+    void drawSansFlushLeft(const SansFont& font, int leftX, int ty, const char* str, uint8_t gray,
+                           int tracking = 0) const noexcept {
+        if (str == nullptr || str[0] == '\0') {
+            return;
+        }
+        size_t idx0 = 0u;
+        bool acute = false;
+        const unsigned char uc0 = decodeSansGlyphChar(str, idx0, acute);
+        const int xOff0 = static_cast<int>(font.metrics[static_cast<size_t>(uc0 - 32u)].xOffset);
+        drawSans(font, leftX - xOff0, ty, str, gray, tracking);
+    }
+
     void drawSansCentered(const SansFont& font, int centerX, int ty, const char* str, uint8_t gray,
                           int tracking = 0) const noexcept {
         const int w = measureSansText(font, str, tracking);
@@ -549,21 +569,21 @@ inline void splatPhotonSegment(int colX, float yA, float yB, float weight, float
         return;
     }
     const float dy = yB - yA;
-    const float invL2 = 1.0f / (1.0f + dy * dy);
+    const float dyInvL2 = dy * fastRecipPos(1.0f + dy * dy);
     const float dwell =
         (minDwell + (1.0f - minDwell) * fastInvSqrt(1.0f + 0.14f * dy * dy)) * weight;
+    const uint32_t dwellQ8 = static_cast<uint32_t>(dwell * 256.0f + 0.5f);
     const float yMid = 0.5f * (yA + yB);
     const int pyS = (segTop < y0) ? y0 : segTop;
     const int pyE = (segBot > y1) ? y1 : segBot;
-    for (int py = pyS; py < pyE; ++py) {
-        const float vy = static_cast<float>(py) - yMid;
-        const float segT = clampf(vy * dy * invL2, -0.5f, 0.5f);
+    float vy = static_cast<float>(pyS) - yMid;
+    for (int py = pyS; py < pyE; ++py, vy += 1.0f) {
+        const float segT = clampf(vy * dyInvL2, -0.5f, 0.5f);
         const float ey = vy - dy * segT;
         const float d2 = segT * segT + ey * ey;
         if (d2 < 3.95f) {
             const size_t lutIdx = static_cast<size_t>(d2 * 16.0f);
-            const uint32_t add =
-                static_cast<uint32_t>(static_cast<float>(kGaussLut[lutIdx]) * dwell);
+            const uint32_t add = (static_cast<uint32_t>(kGaussLut[lutIdx]) * dwellQ8) >> 8u;
             uint16_t& cell = linScratch[static_cast<size_t>(py - y0) * kDisplayWidth +
                                         static_cast<size_t>(colX)];
             const uint32_t next = static_cast<uint32_t>(cell) + add;

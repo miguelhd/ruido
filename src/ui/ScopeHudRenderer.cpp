@@ -48,6 +48,7 @@ void ScopeHudRenderer::reset() noexcept {
     prevHeaderBarMode_ = HudMode::None;
     prevKnobBank_ = KnobBankMode::Frequency;
     frameRhythmPhase_ = 0.0f;
+    frameBgKeepQ8_ = 256u;
     frameStutterGateMask_ = 0x0Fu;
     lastPhantomSeq_ = 0u;
     phantomPin_ = 0u;
@@ -63,9 +64,33 @@ void ScopeHudRenderer::pushScopeSamples(const ScopeFrame* frames, size_t count) 
     traceEngine_.pushScopeSamples(frames, count, frameHud_.scopeFrozen);
 }
 
+uint32_t ScopeHudRenderer::computeFrameBgKeepQ8() const noexcept {
+    const float scopeVis = bootIntro_.scopeVisibility01();
+    const float bgDim01 = smoothstep01(clampf(graphs_.backdropDim(), 0.0f, 1.0f));
+    const float hudAlpha01 = clampf(frameHud_.opacity, 0.0f, 1.0f);
+    float cfgBackdrop01 = 0.0f;
+    (void)resolveSubViewAlpha(globalViews_.configPhase(), hudAlpha01, cfgBackdrop01);
+    return static_cast<uint32_t>(
+        (1.0f - kFilterBgDimDepth * bgDim01) * (1.0f - cfgBackdrop01) * scopeVis * 256.0f + 0.5f);
+}
+
+void ScopeHudRenderer::updateTraceForFrame(float dtSec, const EngineControlState& control,
+                                           const HudState& hud) noexcept {
+    frameBgKeepQ8_ = computeFrameBgKeepQ8();
+    if (frameBgKeepQ8_ > 0u) {
+        traceEngine_.buildWaveformTrace(dtSec, control, hud.scopeFrozen, frameStutterGateMask_,
+                                        hud.scopeTimebase);
+    } else {
+        traceEngine_.notifyScopeHidden(hud.scopeFrozen);
+        if (HudAmpGraph::isLevelViewActive(hud)) {
+            traceEngine_.refreshOverdriveHair(control, hud.scopeFrozen);
+        }
+    }
+}
+
 void ScopeHudRenderer::updateHudGauges(float dtClamped, bool snapImmediate) noexcept {
     const float alphaGauge =
-        snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.045f)));
+        snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.022f)));
     const float alphaChop = snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.004f)));
     const HudGaugeTargets tgt =
         computeHudGaugeTargets(frameControl_, frameHud_, frameLfoOutput_, frameStutterGateMask_);
@@ -138,9 +163,6 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     smoothedPeakR_ =
         slewScalar(smoothedPeakR_, pR, (pR >= smoothedPeakR_) ? alphaPeakAtk : alphaPeakRel);
 
-    traceEngine_.buildWaveformTrace(dtSec, control, hud.scopeFrozen, frameStutterGateMask_,
-                                    hud.scopeTimebase);
-
     if (hud.phantomPinSeq != lastPhantomSeq_) {
         lastPhantomSeq_ = hud.phantomPinSeq;
         phantomPin_ = static_cast<uint8_t>(hud.phantomPinIndex & 3u);
@@ -184,6 +206,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
             globalViews_.clearImmediate();
             keybedView_.clearImmediate();
             hudGaugesPrimed_ = false;
+            updateTraceForFrame(dtSec, control, hud);
             return;
         }
 
@@ -206,6 +229,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
             frameHud_.opacity = 0.0f;
             hudGaugesPrimed_ = false;
         }
+        updateTraceForFrame(dtSec, control, hud);
         return;
     }
 
@@ -306,13 +330,14 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
 
     globalViews_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_,
                         frameStutterGateMask_);
-    ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoiceDrift_,
-                     traceEngine_.overdriveHair(), frameStutterGateMask_);
     keybedView_.update(dtClamped, control, effectiveHud, frameVoicePeak_, frameStutterGateMask_);
     const bool extraCenterView = globalViews_.anyActiveTarget(hud) || ampGraph_.isActive(hud) ||
                                  keybedView_.isActive(effectiveHud);
     graphs_.update(dtClamped, control, hud, effectiveHud, extraCenterView, frameLfoOutput_,
                    frameLfoDriftPacked_, frameRhythmPhase_, frameStutterGateMask_);
+    updateTraceForFrame(dtSec, control, hud);
+    ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoiceDrift_,
+                     traceEngine_.overdriveHair(), frameStutterGateMask_);
 }
 
 int ScopeHudRenderer::computeScanlineSyncShift(int py) const noexcept {
@@ -331,8 +356,8 @@ int ScopeHudRenderer::computeScanlineSyncShift(int py) const noexcept {
     return static_cast<int>(shiftF + ((shiftF >= 0.0f) ? 0.5f : -0.5f));
 }
 
-void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,
-                                   uint16_t* rgb565Out) const noexcept {
+void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight, uint16_t* rgb565Out,
+                                   bool bigEndianRgb565) const noexcept {
     if (rgb565Out == nullptr || yStart >= kDisplayHeight || stripHeight == 0u) {
         return;
     }
@@ -342,15 +367,12 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,
                                   : static_cast<uint16_t>(yStart + stripHeight);
 
     const float scopeVis = bootIntro_.scopeVisibility01();
-    const float bgDim01 = smoothstep01(clampf(graphs_.backdropDim(), 0.0f, 1.0f));
-    const uint32_t bgKeepQ8 =
-        static_cast<uint32_t>((1.0f - kFilterBgDimDepth * bgDim01) * scopeVis * 256.0f + 0.5f);
-    const uint8_t hudAlpha8 =
-        static_cast<uint8_t>(clampf(frameHud_.opacity, 0.0f, 1.0f) * 255.0f + 0.5f);
+    const float hudAlpha01 = clampf(frameHud_.opacity, 0.0f, 1.0f);
+    const uint32_t bgKeepQ8 = (scopeVis <= 0.001f) ? 0u : frameBgKeepQ8_;
+    const uint8_t hudAlpha8 = static_cast<uint8_t>(hudAlpha01 * 255.0f + 0.5f);
 
-    constexpr uint16_t kSubStripRows = 8u;
-    std::array<uint16_t, kDisplayWidth * kSubStripRows> linBuf;
-    std::array<uint8_t, kDisplayWidth * kSubStripRows> lumBuf;
+    auto& linBuf = stripLinScratch_;
+    auto& lumBuf = stripLumScratch_;
     uint16_t curY = yStart;
 
     while (curY < totalEnd) {
@@ -361,9 +383,6 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,
         const int y1 = y0 + static_cast<int>(chunkH);
 
         if (scopeVis <= 0.001f) {
-            if (hudAlpha8 > 0u) {
-                linBuf.fill(0u);
-            }
             bootIntro_.compositeStripChunk(y0, chunkH, lumBuf.data(), false);
         } else {
             traceEngine_.renderBackgroundChunk(y0, chunkH, bgKeepQ8, linBuf.data(), lumBuf.data());
@@ -395,7 +414,10 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,
             uint16_t* dstRow = dstBase + static_cast<size_t>(r) * kDisplayWidth;
             if (!recoiling) {
                 for (size_t x = 0u; x < kDisplayWidth; ++x) {
-                    dstRow[x] = packNeutralGrayRgb565(srcRow[x], static_cast<int>(x), py);
+                    const uint16_t px =
+                        packNeutralGrayRgb565<false>(srcRow[x], static_cast<int>(x), py);
+                    dstRow[x] =
+                        bigEndianRgb565 ? static_cast<uint16_t>((px << 8u) | (px >> 8u)) : px;
                 }
             } else {
                 const int shiftPx = computeScanlineSyncShift(py);
@@ -408,7 +430,10 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight,
                             (static_cast<uint32_t>(srcRow[static_cast<size_t>(sx)]) * surgeQ8) >>
                             8u;
                         const uint8_t lum = static_cast<uint8_t>((boosted > 255u) ? 255u : boosted);
-                        dstRow[x] = packNeutralGrayRgb565(lum, static_cast<int>(x), py);
+                        const uint16_t px =
+                            packNeutralGrayRgb565<false>(lum, static_cast<int>(x), py);
+                        dstRow[x] =
+                            bigEndianRgb565 ? static_cast<uint16_t>((px << 8u) | (px >> 8u)) : px;
                     }
                 }
             }
@@ -441,17 +466,20 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     const uint8_t cfgAlpha8 = resolveSubViewAlpha(globalViews_.configPhase(), hudAlpha01, dummy01);
     const uint8_t keybedAlpha8 = resolveSubViewAlpha(keybedView_.phase(), hudAlpha01, dummy01);
 
-    cv.applyVerticalScrim(0, 34, 0.80f, true);
-    if (frameHud_.knobBank != KnobBankMode::None) {
-        float graphEnvMax = (effFilterAlpha01 > effLfoAlpha01) ? effFilterAlpha01 : effLfoAlpha01;
-        if (effEditGraphAlpha01 > graphEnvMax) {
-            graphEnvMax = effEditGraphAlpha01;
+    if (frameBgKeepQ8_ > 0u || bootIntro_.isActive()) {
+        cv.applyVerticalScrim(0, 34, 0.80f, true);
+        if (frameHud_.knobBank != KnobBankMode::None) {
+            float graphEnvMax =
+                (effFilterAlpha01 > effLfoAlpha01) ? effFilterAlpha01 : effLfoAlpha01;
+            if (effEditGraphAlpha01 > graphEnvMax) {
+                graphEnvMax = effEditGraphAlpha01;
+            }
+            if (effPanAlpha01 > graphEnvMax) {
+                graphEnvMax = effPanAlpha01;
+            }
+            const int botScrimTop = 178 - static_cast<int>(8.0f * graphEnvMax + 0.5f);
+            cv.applyVerticalScrim(botScrimTop, 240, 0.90f, false);
         }
-        if (effPanAlpha01 > graphEnvMax) {
-            graphEnvMax = effPanAlpha01;
-        }
-        const int botScrimTop = 178 - static_cast<int>(8.0f * graphEnvMax + 0.5f);
-        cv.applyVerticalScrim(botScrimTop, 240, 0.90f, false);
     }
 
     if (lfoAlpha8 > 0u) {

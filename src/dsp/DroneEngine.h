@@ -5,8 +5,8 @@
 #include "core/Parameters.h"
 #include "dsp/CircuitPatchMatrix.h"
 #include "dsp/HalfBandDecimator.h"
-#include "dsp/Ms20Filter.h"
 #include "dsp/RhythmGateMatrix.h"
+#include "dsp/SallenKeyFilter.h"
 #include "dsp/SchmittOscillatorBank.h"
 #include "dsp/VoiceFilterCoProcessor.h"
 #include "dsp/VoiceLfoBank.h"
@@ -93,7 +93,8 @@ class DroneEngineCore {
     std::array<float, kNumOscillators> prevScopeScale_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> prevOscSamples_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> prevCapRamp_{0.0f, 0.0f, 0.0f, 0.0f};
-    float prevFinalScale_ = 1.0f;
+    float prevRunScale_ = 1.0f;
+    float prevMasterTrim_ = 0.85f;
     bool prevExactMono_ = false;
     bool prevStatesValid_ = false;
     CriticallyDampedSmoother couplingSmoother_{};

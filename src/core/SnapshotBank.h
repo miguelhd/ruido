@@ -103,6 +103,9 @@ class SnapshotBank {
     // Stepped recall via left PRESETS encoder (works across all 3 keyboard models).
     void recallSlotStepped(uint8_t slot, KnobRate rate, EngineControlState& state) noexcept;
 
+    // Continuous overlapping multi-scene morph via left PRESETS encoder (works across all models).
+    bool morphByEncoder(int32_t ticks, KnobRate rate, EngineControlState& state) noexcept;
+
     // Update LIVE MIXER Keys 13-16 gate/pressure state (Latching glide/blend or Momentary morph).
     bool onSnapKeysChanged(const std::array<bool, kNumSnapshots>& held,
                            const std::array<float, kNumSnapshots>& pressure, KeySwitchMode snapMode,
@@ -124,6 +127,7 @@ class SnapshotBank {
 
   private:
     PatchFrame blendSlots(const std::array<float, kNumSnapshots>& normWeights) const noexcept;
+    void syncKnobMorphAnchor() noexcept;
 
     std::array<PatchSnapshot, kNumSnapshots> slots_{};
     PatchFrame originFrame_{};
@@ -135,11 +139,13 @@ class SnapshotBank {
     float glideDurationSec_ = 0.50f;
     float momentaryBlend_ = 0.0f;
     float morphPos_ = 1.0f;
+    float knobMorphPos_ = 0.0f;
     uint8_t activeSlot_ = 0u;
     bool dirty_ = false;
     bool latchGliding_ = false;
     bool latchHybridHeld_ = false;
     bool momentaryActive_ = false;
+    bool knobMorphActive_ = false;
 };
 
 } // namespace ruido

@@ -24,6 +24,10 @@ class StereoHalfBandDecimator4x {
     // Consumes 4 consecutive oversampled stereo frames and returns 1 decimated 44.118 kHz frame.
     StereoFrame process4x(const std::array<StereoFrame, 4>& in4x) noexcept;
 
+    // Batch-decimates `count` consecutive 4x stereo frames with ring indices hoisted in registers.
+    void processSpan4x(const std::array<StereoFrame, 4>* in4x, StereoFrame* out,
+                       size_t count) noexcept;
+
   private:
     static constexpr size_t kStage1Pairs = 8u;
     static constexpr size_t kStage1OddPeriod = 2u * kStage1Pairs; // 16

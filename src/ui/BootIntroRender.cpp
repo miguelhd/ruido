@@ -11,45 +11,46 @@ namespace ruido {
 
 namespace {
 
-// User-tuned CRT Boot Intro Spec (3.34 s total):
-constexpr float kBeamPeakMs = 80.0f;
-constexpr float kBeamEndMs = 300.0f;
+// User-tuned Physical CRT Boot Intro Spec (1.00 s total):
+constexpr float kBeamPeakMs = 90.0f;
+constexpr float kBeamHandoffMs = 60.0f;
 constexpr float kUnfoldDelayMs = 100.0f;
-constexpr float kUnfoldDurMs = 240.0f;
-constexpr float kHoldDurMs = 2000.0f;
-constexpr float kHoldEndMs = kUnfoldDelayMs + kUnfoldDurMs + kHoldDurMs; // 2340 ms
-constexpr float kExitDurMs = 1000.0f;
-constexpr float kIntroTotalMs = kHoldEndMs + kExitDurMs; // 3340 ms
-constexpr float kFastDismissSpeed = 5.5f;                // ~180 ms smooth dissolve on user touch
+constexpr float kUnfoldDurMs = 200.0f;
+constexpr float kHoldDurMs = 520.0f;
+constexpr float kHoldEndMs = kUnfoldDelayMs + kUnfoldDurMs + kHoldDurMs; // 820 ms
+constexpr float kExitDurMs = 180.0f;
+constexpr float kIntroTotalMs = kHoldEndMs + kExitDurMs; // 1000 ms
+constexpr float kFastDismissSpeed = 2.0f;                // ~90 ms smooth collapse on user touch
 
 constexpr float kBzX1 = 0.12f;
-constexpr float kBzY1 = 1.00f;
+constexpr float kBzY1 = 1.03f;
 constexpr float kBzX2 = 0.24f;
 constexpr float kBzY2 = 1.00f;
 
-constexpr float kUnfoldStartSx = 1.03f;
-constexpr float kUnfoldStartSy = 0.26f;
+constexpr float kUnfoldStartSx = 1.04f;
+constexpr float kUnfoldStartSy = 0.018f;
 
 constexpr float kBeamRx = 112.0f;
-constexpr float kBeamRy = 1.9f;
-constexpr float kBeamFlareY = 5.0f;
-constexpr float kBeamPeakOp = 1.0f;
-constexpr float kHsyncJitterPx = 1.0f;
+constexpr float kBeamRy = 1.4f;
+constexpr float kSpotRadiusPx = 2.0f;
+constexpr float kAnodeSagPct = 4.0f;
+constexpr float kHsyncJitterPx = 2.0f;
 
 constexpr float kCorePeakLum = 255.0f;
 constexpr float kCoreSettledLum = 205.0f;
-constexpr float kBloomPeakOp = 1.30f;
-constexpr float kBloomSettledOp = 0.35f;
+constexpr float kBloomPeakOp = 1.00f;
+constexpr float kBloomSettledOp = 0.32f;
+constexpr float kPhosphorDecayMs = 140.0f;
 
-constexpr float kBlurTightX = 1.8f;
-constexpr float kBlurTightY = 1.8f * 0.66f;
-constexpr float kBlurMedX = 2.5f;
-constexpr float kBlurMedY = 2.5f * 0.64f;
-constexpr float kBlurWideX = 20.0f;
-constexpr float kBlurWideY = 20.0f * 0.125f;
+constexpr float kBlurTightX = 1.6f;
+constexpr float kBlurTightY = 1.6f * 0.62f;
+constexpr float kBlurMedX = 1.5f;
+constexpr float kBlurMedY = 1.5f * 0.58f;
+constexpr float kBlurWideX = 1.0f;
+constexpr float kBlurWideY = 0.80f;
 
-// Scanline mask depth = 0.74 -> even rows = 1.00 (256), odd rows = 0.26 (67 / 256)
-constexpr uint32_t kOddRowKeepQ8 = 67u;
+// Scanline mask depth = 0.00 -> even rows = 1.00 (256), odd rows = 1.00 (256 / 256)
+constexpr uint32_t kOddRowKeepQ8 = 256u;
 
 inline constexpr std::array<uint8_t, 32> kCrtQuant32 = {
     0u,   8u,   16u,  25u,  33u,  41u,  49u,  58u,  66u,  74u,  82u,  90u,  99u,  107u, 115u, 123u,
@@ -232,80 +233,166 @@ void BootIntroRenderer::step(float dtSec, bool hudActive) noexcept {
 }
 
 void BootIntroRenderer::evaluateAtMs(float tMs) noexcept {
-    // 1. H-Sync Damped Power-On Jitter
+    // 1. Damped H-Sync Lock Oscillation (`tMs > kBeamPeakMs * 0.5f`)
     float jitterX = 0.0f;
-    if (tMs > kUnfoldDelayMs) {
-        const float dtS = (tMs - kUnfoldDelayMs) * 0.001f;
-        const float env = fastExpNeg(dtS * 9.5f);
+    if (tMs > (kBeamPeakMs * 0.5f)) {
+        const float dtS = (tMs - (kBeamPeakMs * 0.5f)) * 0.001f;
+        const float env = fastExpNeg(dtS * 10.5f);
         if (env > 0.005f) {
-            const float ph = wrapLfoPhase01(dtS * (92.0f * (1.0f / (2.0f * kPi))));
+            const float ph = wrapLfoPhase01(dtS * (96.0f * (1.0f / (2.0f * kPi))));
             jitterX = kHsyncJitterPx * env * fastSinPhase01(ph);
         }
     }
 
-    // 2. Exit / Scope Handoff (`flash-out` phosphor flare dissolve)
+    // 2. Exit / Scope Handoff (`collapse-y` vertical collapse with 1/sy brightness surge)
     float exitFade = 1.0f;
+    float exitScaleY = 1.0f;
     float exitBloomBoost = 1.0f;
+    float collapseSurge = 0.0f;
     scopeAlpha_ = 0.0f;
     if (tMs > kHoldEndMs) {
         const float uExit = clampf((tMs - kHoldEndMs) * (1.0f / kExitDurMs), 0.0f, 1.0f);
-        const float sExit = smoothstep01(uExit);
-        scopeAlpha_ = sExit;
-        exitFade = 1.0f - sExit;
-        exitBloomBoost = 1.0f + 1.1f * fastSinPhase01(0.5f * uExit);
+        const float remExit = 1.0f - uExit;
+        // (1 - uExit)^1.7 approximated via remExit * (0.3f * remExit + 0.7f * sqrt(remExit))
+        const float sqrtRem = (remExit > 1.0e-5f) ? (remExit * fastInvSqrt(remExit)) : 0.0f;
+        exitScaleY = clampf(remExit * (0.30f * remExit + 0.70f * sqrtRem), 0.018f, 1.0f);
+        const float uExit2 = uExit * uExit;
+        exitFade = clampf(1.0f - uExit2 * (0.80f + 0.20f * uExit), 0.0f, 1.0f);
+        collapseSurge = fastSinPhase01(0.5f * uExit);
+        exitBloomBoost = 1.0f + 0.65f * collapseSurge;
+        scopeAlpha_ = smoothstep01(clampf((uExit - 0.18f) * (1.0f / 0.82f), 0.0f, 1.0f));
     }
 
-    // 3. Electron Beam Strike & Vertical Flare (`0 .. 300 ms`)
-    float beamSx = 0.01f;
-    float beamSy = 0.40f;
-    float beamOp = 0.0f;
-    if (tMs <= kBeamPeakMs) {
-        const float u = solveCubicBezier(tMs * (1.0f / kBeamPeakMs));
-        beamSx = 0.01f + 0.99f * u;
-        beamSy = 0.40f + 0.60f * u;
-        beamOp = kBeamPeakOp * clampf(tMs * (1.0f / (kBeamPeakMs * 0.35f)), 0.0f, 1.0f);
-    } else if (tMs <= kBeamEndMs) {
-        const float u = solveCubicBezier((tMs - kBeamPeakMs) * (1.0f / (kBeamEndMs - kBeamPeakMs)));
-        beamSx = 1.0f;
-        beamSy = 1.0f + (kBeamFlareY - 1.0f) * u;
-        beamOp = kBeamPeakOp * (1.0f - u);
+    // 3. Flat Horizontal Scanline + Center Cathode Strike Spot (NO vertical oval inflation!)
+    const float uH = smoothstep01(clampf(tMs * (1.0f / kBeamPeakMs), 0.0f, 1.0f));
+    const float sqrtUH = (uH > 1.0e-5f) ? (uH * fastInvSqrt(uH)) : 0.0f;
+    const float beamSx = 0.015f + 0.985f * (0.90f * sqrtUH + 0.10f * uH);
+
+    float beamLineOp = 0.0f;
+    if (tMs <= kUnfoldDelayMs) {
+        beamLineOp = clampf(tMs * (1.0f / (kBeamPeakMs * 0.25f)), 0.0f, 1.0f);
+    } else if (tMs < (kUnfoldDelayMs + kBeamHandoffMs)) {
+        const float uHand = clampf((tMs - kUnfoldDelayMs) * (1.0f / kBeamHandoffMs), 0.0f, 1.0f);
+        const float remHand = 1.0f - uHand;
+        beamLineOp = remHand * remHand;
     }
-    beamOp *= exitFade;
-    beamOp_ = clampf(beamOp, 0.0f, 1.0f);
+
+    float spotOp = 0.0f;
+    float spotRx = kSpotRadiusPx;
+    float spotRy = kSpotRadiusPx;
+    if (tMs < (kBeamPeakMs * 1.1f)) {
+        const float uSpot = clampf(tMs * (1.0f / (kBeamPeakMs * 0.85f)), 0.0f, 1.0f);
+        const float remSpot = 1.0f - uSpot;
+        spotOp = remSpot * (0.60f * remSpot + 0.40f);
+        spotRx = kSpotRadiusPx * (1.0f + 2.8f * uSpot);
+        spotRy = kSpotRadiusPx * clampf(1.0f - 0.55f * uSpot, 0.35f, 1.0f);
+    }
+
+    const float maxBeamOp = ((beamLineOp > spotOp) ? beamLineOp : spotOp) * exitFade;
+    beamOp_ = clampf(maxBeamOp, 0.0f, 1.0f);
     beamVisible_ = (beamOp_ > 0.003f);
 
     if (beamVisible_) {
-        beamRx_ = clampf(kBeamRx * beamSx, 0.5f, 120.0f);
-        beamRy_ = clampf(kBeamRy * beamSy, 0.4f, 32.0f);
+        beamRx_ = clampf(kBeamRx * beamSx, 1.5f, 120.0f);
+        beamRy_ = kBeamRy; // Stays flat (`1.4 px`) — never inflates vertically!
         beamCenterIdx_ = 119.5f + jitterX;
+        const float invRx = 1.0f / beamRx_;
+        const float flatHalfH = 0.5f * kBeamRy;
+        for (size_t x = 0u; x < kDisplayWidth; ++x) {
+            const float dx = absf(static_cast<float>(x) - beamCenterIdx_);
+            const float q = dx * invRx;
+            // Flat horizontal scanline gradient (`beam-h-grad`: 1.0 plateau across 84%, soft tips)
+            float hGrad = 0.0f;
+            if (q <= 0.68f) {
+                hGrad = 1.0f;
+            } else if (q <= 0.86f) {
+                hGrad = 1.0f - (q - 0.68f) * (0.35f / 0.18f);
+            } else if (q < 1.0f) {
+                hGrad = 0.65f * (1.0f - (q - 0.86f) * (1.0f / 0.14f));
+            }
+            const float lineEnv = hGrad * beamLineOp;
+
+            // Radial cathode strike spot at center (`0 .. 99 ms`)
+            float spotEnv = 0.0f;
+            float spotHalfH = 0.0f;
+            if (spotOp > 0.005f && dx < spotRx) {
+                const float sq = dx * (1.0f / spotRx);
+                const float rem2 = 1.0f - sq * sq;
+                spotEnv = spotOp * rem2;
+                spotHalfH = spotRy * rem2 * fastInvSqrt(rem2) * spotOp;
+            }
+
+            const float envX = clampf((lineEnv > spotEnv) ? lineEnv : spotEnv, 0.0f, 1.0f);
+            beamTightX_[x] = static_cast<uint8_t>(
+                boxConvolvedGauss1D(dx, beamRx_, 1.0f / kBlurTightX) * envX * 255.0f + 0.5f);
+            beamMedX_[x] = static_cast<uint8_t>(
+                boxConvolvedGauss1D(dx, beamRx_, 1.0f / kBlurMedX) * envX * 255.0f + 0.5f);
+            beamWideX_[x] = static_cast<uint8_t>(
+                boxConvolvedGauss1D(dx, beamRx_, 1.0f / kBlurWideX) * envX * 255.0f + 0.5f);
+
+            const float coreHalfH =
+                ((flatHalfH * lineEnv) > spotHalfH) ? (flatHalfH * lineEnv) : spotHalfH;
+            beamCoreHalfHQ4_[x] =
+                static_cast<uint8_t>(clampf(coreHalfH * 16.0f + 0.5f, 0.0f, 255.0f));
+        }
     }
 
-    // 4. RUIDO Logo Unfold + Phosphor Settle (`100 .. 3340 ms`)
+    // 4. Unified RUIDO Raster (pre-unfold slit + V-Yoke Unfold + Anode Sag + 1/sy Energy)
     logoVisible_ = false;
     logoAlphaQ8_ = 0u;
-    if (tMs > kUnfoldDelayMs && exitFade > 0.002f) {
-        const float uUnfold = clampf((tMs - kUnfoldDelayMs) * (1.0f / kUnfoldDurMs), 0.0f, 1.0f);
-        const float eUnfold = solveCubicBezier(uUnfold);
-        const float relSx = clampf(kUnfoldStartSx + (1.0f - kUnfoldStartSx) * eUnfold, 0.25f, 2.0f);
-        const float relSy = clampf(kUnfoldStartSy + (1.0f - kUnfoldStartSy) * eUnfold, 0.08f, 2.0f);
-        const float bloomSy = clampf(0.42f + 0.58f * eUnfold, 0.25f, 2.0f);
-
-        const float coreOp = smoothstep01(uUnfold * 1.35f);
-        constexpr float kSettleSpanMs = kUnfoldDurMs * 0.5f + kHoldDurMs * 0.75f; // 1620 ms
-        constexpr float kPeakTimeMs = kUnfoldDelayMs + kUnfoldDurMs * 0.65f;      // 256 ms
-
+    if (exitFade > 0.002f && tMs > (kBeamPeakMs * 0.35f)) {
+        float relSx = kUnfoldStartSx;
+        float relSy = kUnfoldStartSy;
+        float coreOp = 0.0f;
         float bloomOp = 0.0f;
         float coreLum = kCorePeakLum;
-        if (tMs <= kPeakTimeMs) {
-            const float ub =
-                smoothstep01((tMs - kUnfoldDelayMs) * (1.0f / (kPeakTimeMs - kUnfoldDelayMs)));
-            bloomOp = kBloomPeakOp * ub;
+        float uUnfold = 0.0f;
+
+        if (tMs <= kUnfoldDelayMs) {
+            const float preSweep = smoothstep01((tMs - kBeamPeakMs * 0.35f) *
+                                                (1.0f / (kUnfoldDelayMs - kBeamPeakMs * 0.35f)));
+            relSx = clampf(beamSx * kUnfoldStartSx, 0.20f, 2.0f);
+            relSy = kUnfoldStartSy;
+            coreOp = 0.85f * preSweep;
+            bloomOp = kBloomPeakOp * preSweep;
             coreLum = kCorePeakLum;
         } else {
-            const float us = smoothstep01((tMs - kPeakTimeMs) * (1.0f / kSettleSpanMs));
-            bloomOp = kBloomPeakOp + (kBloomSettledOp - kBloomPeakOp) * us;
-            coreLum = kCorePeakLum + (kCoreSettledLum - kCorePeakLum) * us;
+            const float dtUnfold = tMs - kUnfoldDelayMs;
+            uUnfold = clampf(dtUnfold * (1.0f / kUnfoldDurMs), 0.0f, 1.0f);
+            const float eUnfold = solveCubicBezier(uUnfold);
+
+            const float swellPhase =
+                0.5f * clampf(dtUnfold * (1.0f / (kUnfoldDurMs * 0.85f)), 0.0f, 1.0f);
+            const float anodeSwell = 1.0f + (kAnodeSagPct * 0.01f) * fastSinPhase01(swellPhase) *
+                                                fastExpNeg(dtUnfold * (1.0f / 240.0f));
+
+            const float sxLerp = clampf(uUnfold * 1.25f, 0.0f, 1.0f);
+            relSx = clampf((kUnfoldStartSx + (1.0f - kUnfoldStartSx) * sxLerp) * anodeSwell, 0.25f,
+                           2.0f);
+            relSy = clampf((kUnfoldStartSy + (1.0f - kUnfoldStartSy) * eUnfold) * anodeSwell,
+                           0.018f, 2.0f);
+            coreOp = 1.0f;
+
+            // Physical 1/sy energy density + exponential phosphor persistence tail
+            const float clampedSy = clampf(eUnfold, 0.02f, 1.0f);
+            const float remSy = 1.0f - clampedSy;
+            const float sqrtRemSy = (remSy > 1.0e-5f) ? (remSy * fastInvSqrt(remSy)) : 0.0f;
+            const float slitComp = remSy * sqrtRemSy; // (1 - sy)^1.5
+            const float phosphorTail = fastExpNeg(dtUnfold * (1.0f / kPhosphorDecayMs));
+            const float energyEnv =
+                clampf(((slitComp * 0.85f) > phosphorTail) ? (slitComp * 0.85f) : phosphorTail,
+                       0.0f, 1.0f);
+
+            bloomOp = kBloomSettledOp + (kBloomPeakOp - kBloomSettledOp) * energyEnv;
+            coreLum = kCoreSettledLum + (kCorePeakLum - kCoreSettledLum) * energyEnv;
         }
+
+        if (collapseSurge > 0.0f) {
+            coreLum = clampf(coreLum + (255.0f - coreLum) * collapseSurge, 0.0f, 255.0f);
+        }
+
+        const float totalSy = clampf(relSy * exitScaleY, 0.04f, 2.0f);
+        const float bloomSy = clampf(0.18f + 0.82f * totalSy, 0.18f, 2.0f);
 
         const float aCore = clampf(coreOp * exitFade, 0.0f, 1.0f);
         const float aBloom = clampf(bloomOp * exitBloomBoost * exitFade, 0.0f, 1.0f);
@@ -321,14 +408,15 @@ void BootIntroRenderer::evaluateAtMs(float tMs) noexcept {
                 logoAlphaQ8_ = 256u;
             }
 
-            if (uUnfold >= 0.999f && absf(jitterX) < 0.01f) {
+            if (uUnfold >= 0.999f && tMs <= kHoldEndMs && absf(jitterX) < 0.01f &&
+                absf(relSy - 1.0f) < 0.003f) {
                 invCoreSxQ16_ = 65536;
                 invCoreSyQ16_ = 65536;
                 invBloomSyQ16_ = 65536;
                 centerXQ16_ = (119 * 65536) + 32768;
             } else {
                 invCoreSxQ16_ = static_cast<int32_t>((1.0f / relSx) * 65536.0f + 0.5f);
-                invCoreSyQ16_ = static_cast<int32_t>((1.0f / relSy) * 65536.0f + 0.5f);
+                invCoreSyQ16_ = static_cast<int32_t>((1.0f / totalSy) * 65536.0f + 0.5f);
                 invBloomSyQ16_ = static_cast<int32_t>((1.0f / bloomSy) * 65536.0f + 0.5f);
                 centerXQ16_ = static_cast<int32_t>((119.5f + jitterX) * 65536.0f + 0.5f);
             }
@@ -351,12 +439,6 @@ void BootIntroRenderer::compositeStripChunk(int y0, uint16_t chunkH, uint8_t* lu
 
     constexpr int32_t kPivotQ16 = (119 * 65536) + 32768; // 119.5 in Q16
     using namespace intro_data;
-
-    std::array<uint8_t, kDisplayWidth> beamTightX{};
-    std::array<uint8_t, kDisplayWidth> beamMedX{};
-    std::array<uint8_t, kDisplayWidth> beamWideX{};
-    std::array<uint8_t, kDisplayWidth> beamCoreHalfHQ4{};
-    bool beamXPrepared = false;
 
     for (uint16_t r = 0u; r < chunkH; ++r) {
         const int py = y0 + static_cast<int>(r);
@@ -382,28 +464,6 @@ void BootIntroRenderer::compositeStripChunk(int y0, uint16_t chunkH, uint8_t* lu
                 beamYwQ8 = (static_cast<uint32_t>(yw * 256.0f + 0.5f) * beamOpQ8) >> 8u;
                 absDyQ4 = static_cast<uint32_t>(absDy * 16.0f + 0.5f);
                 rowHasBeam = (beamYtQ8 | beamYmQ8 | beamYwQ8) != 0u || (absDy <= beamRy_ + 1.5f);
-                if (rowHasBeam && !beamXPrepared) {
-                    const float invRx = 1.0f / beamRx_;
-                    for (size_t x = 0u; x < kDisplayWidth; ++x) {
-                        const float dx = absf(static_cast<float>(x) - beamCenterIdx_);
-                        beamTightX[x] = static_cast<uint8_t>(
-                            boxConvolvedGauss1D(dx, beamRx_, 1.0f / kBlurTightX) * 255.0f + 0.5f);
-                        beamMedX[x] = static_cast<uint8_t>(
-                            boxConvolvedGauss1D(dx, beamRx_, 1.0f / kBlurMedX) * 255.0f + 0.5f);
-                        beamWideX[x] = static_cast<uint8_t>(
-                            boxConvolvedGauss1D(dx, beamRx_, 1.0f / kBlurWideX) * 255.0f + 0.5f);
-                        const float q = dx * invRx;
-                        if (q < 1.0f) {
-                            const float rem2 = 1.0f - q * q;
-                            const float chord = beamRy_ * rem2 * fastInvSqrt(rem2);
-                            beamCoreHalfHQ4[x] =
-                                static_cast<uint8_t>(clampf(chord * 16.0f + 0.5f, 0.0f, 255.0f));
-                        } else {
-                            beamCoreHalfHQ4[x] = 0u;
-                        }
-                    }
-                    beamXPrepared = true;
-                }
             }
         }
 
@@ -455,15 +515,15 @@ void BootIntroRenderer::compositeStripChunk(int y0, uint16_t chunkH, uint8_t* lu
 
             if (rowHasBeam) {
                 uint32_t aCoreBeamQ8 = 0u;
-                const uint32_t halfHQ4 = beamCoreHalfHQ4[x];
+                const uint32_t halfHQ4 = beamCoreHalfHQ4_[x];
                 if (halfHQ4 > 0u && absDyQ4 < halfHQ4 + 16u) {
                     const uint32_t edgeCovQ4 =
                         (absDyQ4 + 16u <= halfHQ4) ? 16u : (halfHQ4 + 16u - absDyQ4);
                     aCoreBeamQ8 = (beamOpQ8 * edgeCovQ4) >> 4u;
                 }
-                const uint32_t abt = (beamYtQ8 * beamTightX[x]) >> 8u;
-                const uint32_t abm = (beamYmQ8 * beamMedX[x]) >> 8u;
-                const uint32_t abw = (beamYwQ8 * beamWideX[x]) >> 8u;
+                const uint32_t abt = (beamYtQ8 * beamTightX_[x]) >> 8u;
+                const uint32_t abm = (beamYmQ8 * beamMedX_[x]) >> 8u;
+                const uint32_t abw = (beamYwQ8 * beamWideX_[x]) >> 8u;
                 const uint32_t invB0 = ((256u - aCoreBeamQ8) * (256u - abt)) >> 8u;
                 const uint32_t invB1 = ((256u - abm) * (256u - abw)) >> 8u;
                 const uint32_t aBeamMergedQ8 = 256u - ((invB0 * invB1) >> 8u);

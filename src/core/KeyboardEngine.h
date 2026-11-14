@@ -35,10 +35,12 @@ class KeyboardEngine {
     const std::array<bool, kNumWhiteKeys>& whiteHeld() const noexcept { return whiteHeld_; }
 
     std::array<bool, kNumSnapshots> snapKeysHeld() const noexcept {
-        return {whiteHeld_[12], whiteHeld_[13], whiteHeld_[14], whiteHeld_[15]};
+        return {whiteHeld_[kSceneWhiteKeyBase + 0u], whiteHeld_[kSceneWhiteKeyBase + 1u],
+                whiteHeld_[kSceneWhiteKeyBase + 2u], whiteHeld_[kSceneWhiteKeyBase + 3u]};
     }
     std::array<float, kNumSnapshots> snapKeysPressure() const noexcept {
-        return {whitePressure_[12], whitePressure_[13], whitePressure_[14], whitePressure_[15]};
+        return {whitePressure_[kSceneWhiteKeyBase + 0u], whitePressure_[kSceneWhiteKeyBase + 1u],
+                whitePressure_[kSceneWhiteKeyBase + 2u], whitePressure_[kSceneWhiteKeyBase + 3u]};
     }
 
     // Evaluate non-destructive DSP overlay & HUD telemetry from current 27-key pressures.

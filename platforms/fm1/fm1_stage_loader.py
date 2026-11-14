@@ -32,7 +32,120 @@ def replace_once(src: str, old: str, new: str, label: str) -> str:
 
 
 def stage_platform_sources(fw: pathlib.Path) -> None:
-    """Stage `platform_ruido.c` and `recovery_ruido.c` into gitignored `build/fm1/gen/`."""
+    """Stage `fm1_input_ruido.h`, `usb_ruido.c`, `platform_ruido.c`, and `recovery_ruido.c`."""
+    inp_src = (fw / "hal" / "fm1_input.h").read_text(encoding="utf-8")
+    inp_src = replace_once(
+        inp_src,
+        "static void fm1__frame(void)\n"
+        "{\n"
+        "    uint32_t e;                                    /* (the keys: fm1__keys, as each column is read) */\n"
+        "    for (e = 0; e < FM1_NENC; e++) {               /* quadrature decoder + detents */\n"
+        "        const uint8_t *m = FM1_ENC[e];\n"
+        "        uint32_t cur = ((fm1_in.raw[m[0]] >> m[1]) & 1u) << 1 | ((fm1_in.raw[m[2]] >> m[3]) & 1u);\n"
+        "        uint32_t idx;\n"
+        "        volatile int8_t *sub = &fm1_in.enc_sub[e];\n"
+        "        if (cur != fm1_in.enc_last[e]) {\n"
+        "            fm1_in.enc_last[e] = (uint8_t)cur;\n"
+        "            fm1_in.enc_still[e] = 0;\n"
+        "            continue;\n"
+        "        }\n"
+        "        if (fm1_in.enc_prev[e] == 0xFF) {          /* first frame: the knob rests here */\n"
+        "            fm1_in.enc_prev[e] = (uint8_t)cur;\n"
+        "            fm1_in.enc_rest[e] = (uint8_t)cur;\n"
+        "        }\n"
+        "        if (fm1_in.enc_still[e] < 0xFFFFu && ++fm1_in.enc_still[e] == FM1_REST_FRAMES &&\n"
+        "            cur != fm1_in.enc_rest[e]) {\n"
+        "            fm1_in.enc_rest[e] = (uint8_t)cur;     /* parked ~1 s off the detent state (held at power-on): */\n"
+        "            *sub = 0;                              /* that is the detent. Never a second state (see top) */\n"
+        "        }\n"
+        "        if (cur == fm1_in.enc_prev[e])\n"
+        "            continue;\n"
+        "        idx = (uint32_t)fm1_in.enc_prev[e] << 2 | cur;\n"
+        "        if ((0x4182u >> idx) & 1u)\n"
+        "            (*sub)++;\n"
+        "        else if ((0x2814u >> idx) & 1u)\n"
+        "            (*sub)--;\n"
+        "        else if (*sub > 0)                         /* two states in one sample: a fast turn, */\n"
+        "            *sub = (int8_t)(*sub + 2);             /* the way it was going */\n"
+        "        else if (*sub < 0)\n"
+        "            *sub = (int8_t)(*sub - 2);\n"
+        "        fm1_in.enc_prev[e] = (uint8_t)cur;\n"
+        "        if (*sub > 100 || *sub < -100)\n"
+        "            *sub = 0;                              /* (never off the detent that long) */\n"
+        "        if (cur == fm1_in.enc_rest[e]) {           /* back on the detent: whole cycles, a lost transition */\n"
+        "            int32_t n = *sub < 0 ? -*sub : *sub;   /* or two forgiven (one click = 4 transitions) */\n"
+        "            n = n >= 2 ? (n + 2) / 4 : 0;\n"
+        "            fm1_in.enc_steps[e] = (int16_t)(fm1_in.enc_steps[e] + (*sub < 0 ? -n : n));\n"
+        "            *sub = 0;\n"
+        "        }\n"
+        "    }\n"
+        "    fm1_in.frames++;\n"
+        "}",
+        "static void fm1__frame(void)\n"
+        "{\n"
+        "    uint32_t e;\n"
+        "    for (e = 0; e < FM1_NENC; e++) {\n"
+        "        const uint8_t *m = FM1_ENC[e];\n"
+        "        uint32_t cur = ((fm1_in.raw[m[0]] >> m[1]) & 1u) << 1 | ((fm1_in.raw[m[2]] >> m[3]) & 1u);\n"
+        "        uint32_t idx;\n"
+        "        int32_t s;\n"
+        "        if (fm1_in.enc_prev[e] == 0xFF) {\n"
+        "            fm1_in.enc_prev[e] = (uint8_t)cur;\n"
+        "            fm1_in.enc_rest[e] = (uint8_t)cur;\n"
+        "            fm1_in.enc_last[e] = 0;\n"
+        "            fm1_in.enc_still[e] = 0;\n"
+        "            continue;\n"
+        "        }\n"
+        "        if (cur == fm1_in.enc_prev[e]) {\n"
+        "            if (fm1_in.enc_still[e] < 0xFFFFu)\n"
+        "                fm1_in.enc_still[e]++;\n"
+        "            if (fm1_in.enc_still[e] == 64u)\n"
+        "                fm1_in.enc_last[e] = 0;\n"
+        "            if (fm1_in.enc_still[e] == FM1_REST_FRAMES && cur != fm1_in.enc_rest[e]) {\n"
+        "                fm1_in.enc_rest[e] = (uint8_t)cur;\n"
+        "                fm1_in.enc_sub[e] = 0;\n"
+        "            }\n"
+        "            continue;\n"
+        "        }\n"
+        "        fm1_in.enc_still[e] = 0;\n"
+        "        idx = (uint32_t)fm1_in.enc_prev[e] << 2 | cur;\n"
+        "        fm1_in.enc_prev[e] = (uint8_t)cur;\n"
+        "        s = fm1_in.enc_sub[e];\n"
+        "        if ((0x4182u >> idx) & 1u) {\n"
+        "            s++;\n"
+        "            fm1_in.enc_last[e] = 1;\n"
+        "        } else if ((0x2814u >> idx) & 1u) {\n"
+        "            s--;\n"
+        "            fm1_in.enc_last[e] = 2;\n"
+        "        } else if (s > 0 || (s == 0 && fm1_in.enc_last[e] == 1)) {\n"
+        "            s += 2;\n"
+        "        } else if (s < 0 || (s == 0 && fm1_in.enc_last[e] == 2)) {\n"
+        "            s -= 2;\n"
+        "        }\n"
+        "        if (cur == fm1_in.enc_rest[e]) {\n"
+        "            int32_t mag = s < 0 ? -s : s;\n"
+        "            int32_t d = mag >= 2 ? (mag + 2) / 4 : 0;\n"
+        "            if (d != 0)\n"
+        "                fm1_in.enc_steps[e] = (int16_t)(fm1_in.enc_steps[e] + (s < 0 ? -d : d));\n"
+        "            s = 0;\n"
+        "        } else if (s >= 4) {\n"
+        "            fm1_in.enc_steps[e] = (int16_t)(fm1_in.enc_steps[e] + (s / 4));\n"
+        "            s %= 4;\n"
+        "        } else if (s <= -4) {\n"
+        "            fm1_in.enc_steps[e] = (int16_t)(fm1_in.enc_steps[e] - ((-s) / 4));\n"
+        "            s = -((-s) % 4);\n"
+        "        }\n"
+        "        fm1_in.enc_sub[e] = (int8_t)s;\n"
+        "    }\n"
+        "    fm1_in.frames++;\n"
+        "}",
+        "fm1_input.h fm1__frame encoder decoder",
+    )
+    write_text_if_changed(GEN_DIR / "fm1_input_ruido.h", inp_src)
+
+    usb_src = (fw / "src" / "usb.c").read_text(encoding="utf-8")
+    write_text_if_changed(GEN_DIR / "usb_ruido.c", usb_src)
+
     rec_src = (fw / "src" / "recovery.c").read_text(encoding="utf-8")
     rec_src = replace_once(
         rec_src,
@@ -77,6 +190,39 @@ def stage_platform_sources(fw: pathlib.Path) -> None:
     )
     plat_src = replace_once(
         plat_src,
+        "static void ota_commit(const uint8_t *parm)\n"
+        "{\n"
+        "    bootguard_clear(&bootguard);\n"
+        "    usb_detach();\n"
+        "    fm1_delay_ms(30);\n"
+        "    fm1_enter_update(parm);\n"
+        "}",
+        "static void ota_commit(const uint8_t *parm)\n"
+        "{\n"
+        "    bootguard_clear(&bootguard);\n"
+        "    fm1_crash.magic = 0u;\n"
+        "    fm1_crash.early = 0u;\n"
+        "    ruido_fm1_plat_fault_quiesce();\n"
+        "    usb_detach();\n"
+        "    fm1_delay_ms(30);\n"
+        "    fm1_enter_update(parm);\n"
+        "}",
+        "ota_commit quiesce block",
+    )
+    plat_src = replace_once(
+        plat_src,
+        '#include "fm1_input.h"',
+        '#include "fm1_input_ruido.h"',
+        "fm1_input.h include",
+    )
+    plat_src = replace_once(
+        plat_src,
+        '#include "usb.c"',
+        '#include "usb_ruido.c"',
+        "usb.c include",
+    )
+    plat_src = replace_once(
+        plat_src,
         '#include "recovery.c"',
         '#include "recovery_ruido.c"',
         "recovery.c include",
@@ -111,14 +257,49 @@ def stage_platform_sources(fw: pathlib.Path) -> None:
         "static void fm1_fault(const fm1_crash_t *c)\n"
         "{\n"
         "    uint32_t t0;\n"
+        "    ruido_fm1_plat_fault_quiesce();\n"
         "    fm1_audio_stop();\n"
         "    ruido_fm1_plat_fault_show(c->vec, c->pc, c->rets);\n"
+        "    fm1_input_init();\n"
         "    t0 = fm1_ticks();\n"
-        "    while ((uint32_t)(fm1_ticks() - t0) < 8000u * 1000u * FM1_TICKS_PER_US)\n"
+        "    while ((uint32_t)(fm1_ticks() - t0) < 8000u * 1000u * FM1_TICKS_PER_US) {\n"
         "        fm1_wdt_feed();\n"
+        "        fm1_input_scan();\n"
+        "        if ((uint32_t)(fm1_ticks() - t0) >= 400u * 1000u * FM1_TICKS_PER_US &&\n"
+        "            bootguard_manual(fm1_in.buttons)) {\n"
+        "            bootguard.magic = BOOTGUARD_MAGIC;\n"
+        "            bootguard.failed = 2u;\n"
+        "            bootguard.pending = 1u;\n"
+        "            break;\n"
+        "        }\n"
+        "    }\n"
         "    fm1_reboot();\n"
         "}",
         "fm1_fault screen block",
+    )
+    plat_src = replace_once(
+        plat_src,
+        "    if (in_audio) {\n"
+        "        if (usb_due)\n"
+        "            UAC_ONLY(uac_service());\n"
+        "        return;\n"
+        "    }",
+        "    if (in_audio) {\n"
+        "        if (usb_due) {\n"
+        "            UAC_ONLY(uac_service());\n"
+        "            usb_poll();\n"
+        "        }\n"
+        "        return;\n"
+        "    }",
+        "fm1_timer5_irq in_audio usb_poll",
+    )
+    plat_src = replace_once(
+        plat_src,
+        "    if (boot_mode == BOOT_ROM)\n"
+        "        fm1_enter_uboot();",
+        "    if (boot_mode == BOOT_ROM)\n"
+        "        boot_mode = BOOT_RECOVERY;",
+        "fm1_cstart boot_mode BOOT_ROM fallback",
     )
     if "draw_text_box(" in plat_src:
         raise SystemExit("[FM-1 FAIL] platform_ruido.c still calls draw_text_box")

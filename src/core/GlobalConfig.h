@@ -27,8 +27,24 @@ enum class MidiTransportMode : uint8_t {
     RunStop = 2,   // 0xFA/0xFB starts audio output (masterRun=true); 0xFC stops audio output
 };
 
+// Finger force needed to sweep the analog carbon-pill keys from feather touch to 100% pressure.
+// `Medium` is the hardware-calibrated default; lighter settings reach full pressure sooner.
+enum class PressureTouch : uint8_t {
+    VeryLight = 0,
+    Light = 1,
+    Medium = 2,
+    Firm = 3,
+    VeryFirm = 4,
+};
+
+inline constexpr uint8_t kNumPressureTouchLevels = 5u;
+
+inline constexpr std::array<const char*, kNumPressureTouchLevels> kPressureTouchLabels = {
+    "VERY HIGH", "HIGH", "MEDIUM", "LOW", "VERY LOW",
+};
+
 // Canonical Ruido firmware release version & FM-1 OTA package identity (`FM-1_96N`).
-inline constexpr char kRuidoVersionStr[] = "1.0";
+inline constexpr char kRuidoVersionStr[] = "0.1.0";
 inline constexpr char kRuidoPackageIdStr[] = "FM-1_960";
 
 // Active sub-screen inside the right-panel GLO `GLOBAL CONFIG` overlay.
@@ -48,9 +64,10 @@ enum class ConfigItemId : uint8_t {
     ClockSync = 4,
     MidiTransport = 5,
     MidiChannel = 6,
-    FactoryReset = 7,
-    Credits = 8,
-    Count = 9
+    PressureTouch = 7,
+    FactoryReset = 8,
+    Credits = 9,
+    Count = 10
 };
 
 inline constexpr size_t kNumGlobalConfigItems = static_cast<size_t>(ConfigItemId::Count);
@@ -71,6 +88,7 @@ struct GlobalConfigState {
     ClockSyncMode clockSync = ClockSyncMode::Auto;
     MidiTransportMode midiTransport = MidiTransportMode::Off;
     uint8_t midiChannel = 0u; // 0 = OMNI, 1..16 = MIDI Channel 1..16
+    PressureTouch pressureTouch = PressureTouch::Medium;
 };
 
 // Returns true when an incoming MIDI status byte matches `midiChannel` (0 = OMNI, 1..16 = CH 1..16;
@@ -88,23 +106,25 @@ constexpr bool acceptsMidiChannel(uint8_t configuredChannel, uint8_t statusByte)
 constexpr const char* globalConfigItemLabel(ConfigItemId id) noexcept {
     switch (id) {
     case ConfigItemId::OutputRouting:
-        return "OUTPUT ROUTING";
+        return "Output Routing";
     case ConfigItemId::MuteMode:
-        return "MUTE MODE";
+        return "Mute Mode";
     case ConfigItemId::SoloMode:
-        return "SOLO MODE";
+        return "Solo Mode";
     case ConfigItemId::SnapMode:
-        return "SCENE MODE";
+        return "Scene Mode";
     case ConfigItemId::ClockSync:
-        return "MIDI CLOCK IN";
+        return "MIDI Clock In";
     case ConfigItemId::MidiTransport:
-        return "MIDI TRANSPORT IN";
+        return "MIDI Transport In";
     case ConfigItemId::MidiChannel:
-        return "MIDI CHANNEL IN";
+        return "MIDI Channel In";
+    case ConfigItemId::PressureTouch:
+        return "Key Sensitivity";
     case ConfigItemId::FactoryReset:
-        return "FACTORY RESET";
+        return "Factory Reset";
     case ConfigItemId::Credits:
-        return "RUIDO";
+        return "Ruido";
     case ConfigItemId::Count:
         break;
     }
@@ -123,6 +143,8 @@ constexpr int32_t globalConfigMaxIndex(ConfigItemId id) noexcept {
         return 2;
     case ConfigItemId::MidiChannel:
         return 16;
+    case ConfigItemId::PressureTouch:
+        return static_cast<int32_t>(kNumPressureTouchLevels) - 1;
     case ConfigItemId::FactoryReset:
     case ConfigItemId::Credits:
     case ConfigItemId::Count:
@@ -150,6 +172,11 @@ constexpr int32_t globalConfigGetIndex(ConfigItemId id, const GlobalConfigState&
     }
     case ConfigItemId::MidiChannel:
         return (config.midiChannel <= 16u) ? static_cast<int32_t>(config.midiChannel) : 0;
+    case ConfigItemId::PressureTouch: {
+        const auto raw = static_cast<uint8_t>(config.pressureTouch);
+        return (raw < kNumPressureTouchLevels) ? static_cast<int32_t>(raw)
+                                               : static_cast<int32_t>(PressureTouch::Medium);
+    }
     case ConfigItemId::FactoryReset:
     case ConfigItemId::Credits:
     case ConfigItemId::Count:
@@ -204,6 +231,14 @@ inline bool globalConfigSetIndex(ConfigItemId id, int32_t idx, GlobalConfigState
         config.midiChannel = next;
         return changed;
     }
+    case ConfigItemId::PressureTouch: {
+        const int32_t maxIdx = static_cast<int32_t>(kNumPressureTouchLevels) - 1;
+        const auto next =
+            static_cast<PressureTouch>((idx <= 0) ? 0 : ((idx > maxIdx) ? maxIdx : idx));
+        const bool changed = (config.pressureTouch != next);
+        config.pressureTouch = next;
+        return changed;
+    }
     case ConfigItemId::FactoryReset:
     case ConfigItemId::Credits:
     case ConfigItemId::Count:
@@ -237,10 +272,16 @@ constexpr const char* globalConfigValueLabel(ConfigItemId id, const GlobalConfig
         return "OFF";
     case ConfigItemId::MidiChannel:
         return kMidiChannelLabels[(config.midiChannel <= 16u) ? config.midiChannel : 0u];
+    case ConfigItemId::PressureTouch: {
+        const auto raw = static_cast<uint8_t>(config.pressureTouch);
+        return kPressureTouchLabels[(raw < kNumPressureTouchLevels)
+                                        ? raw
+                                        : static_cast<uint8_t>(PressureTouch::Medium)];
+    }
     case ConfigItemId::FactoryReset:
         return "RESET >";
     case ConfigItemId::Credits:
-        return "v1.0 >";
+        return "v0.1.0 >";
     case ConfigItemId::Count:
         break;
     }
@@ -272,7 +313,8 @@ struct DeviceSettingsBlob {
     uint16_t masterTrimQ16 = 55705u;
     uint16_t internalBpmTenths = 1200u;
     uint8_t midiChannel = 0u;
-    std::array<uint8_t, 3> reserved{0u, 0u, 0u};
+    uint8_t pressureTouchPlus1 = 0u; // 0 = legacy blob (Medium), 1..5 = PressureTouch + 1
+    std::array<uint8_t, 2> reserved{0u, 0u};
 };
 static_assert(sizeof(DeviceSettingsBlob) == 16u, "DeviceSettingsBlob must be 16 bytes");
 static_assert(__is_trivially_copyable(DeviceSettingsBlob),
@@ -316,6 +358,11 @@ inline DeviceSettingsBlob encodeDeviceSettings(const GlobalConfigState& config,
     blob.internalBpmTenths = static_cast<uint16_t>(
         clampf(internalBpm, kMinInternalClockBpm, kMaxInternalClockBpm) * 10.0f + 0.5f);
     blob.midiChannel = (config.midiChannel <= 16u) ? config.midiChannel : 0u;
+    const auto rawTouch = static_cast<uint8_t>(config.pressureTouch);
+    blob.pressureTouchPlus1 = static_cast<uint8_t>(
+        ((rawTouch < kNumPressureTouchLevels) ? rawTouch
+                                              : static_cast<uint8_t>(PressureTouch::Medium)) +
+        1u);
     const auto* payload = reinterpret_cast<const uint8_t*>(&blob) + sizeof(uint32_t);
     blob.crc32 = computeCrc32Bytes(payload, sizeof(DeviceSettingsBlob) - sizeof(uint32_t));
     return blob;
@@ -354,6 +401,10 @@ inline bool decodeDeviceSettings(const DeviceSettingsBlob& blob, GlobalConfigSta
                               : (rawTransport == 1u) ? MidiTransportMode::PhaseOnly
                                                      : MidiTransportMode::Off;
     outConfig.midiChannel = (blob.midiChannel <= 16u) ? blob.midiChannel : 0u;
+    outConfig.pressureTouch =
+        (blob.pressureTouchPlus1 >= 1u && blob.pressureTouchPlus1 <= kNumPressureTouchLevels)
+            ? static_cast<PressureTouch>(blob.pressureTouchPlus1 - 1u)
+            : PressureTouch::Medium;
     if (outInternalBpm != nullptr) {
         *outInternalBpm = (blob.internalBpmTenths == 0u)
                               ? kDefaultClockBpm

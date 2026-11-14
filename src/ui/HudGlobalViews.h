@@ -22,6 +22,8 @@ class HudGlobalViews {
 
     float panPhase() const noexcept { return panPhase_; }
 
+    bool noPressureNotice() const noexcept { return noPressureHoldSec_ > 0.0f; }
+
     float configPhase() const noexcept { return configPhase_; }
 
     bool anyActiveTarget(const HudState& rawHud) const noexcept;
@@ -50,6 +52,14 @@ class HudGlobalViews {
     std::array<float, kNumOscillators> focusWeight_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> muteDim_{0.0f, 0.0f, 0.0f, 0.0f};
 
+    void updatePressureMeter(float dtClamped, const HudState& rawHud, bool cfgActive) noexcept;
+
+    // GLOBAL CONFIG > Key Pressure hairline meter (live analog key pressure + brief peak hold).
+    float pressLive01_ = 0.0f;
+    float pressPeak01_ = 0.0f;
+    float pressPeakHoldSec_ = 0.0f;
+    float pressMeterPhase_ = 0.0f;
+    float noPressureHoldSec_ = 0.0f; // > 0 while a non-pressure key was just touched on this row
     float hasFocusSmooth_ = 0.0f;
     float panPhase_ = 0.0f;
     float configPhase_ = 0.0f;

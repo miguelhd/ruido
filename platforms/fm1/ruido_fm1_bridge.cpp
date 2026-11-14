@@ -1,8 +1,10 @@
 #include "ruido_fm1_bridge.h"
 
 #include "core/RuidoController.h"
+#include "fm1_audio_io.h"
 #include "fm1_cpu1.h"
 #include "fm1_panel_io.h"
+#include "fm1_storage_io.h"
 #include "ruido_fm1_state.h"
 #include "ui/ScopeHudRenderer.h"
 
@@ -13,7 +15,6 @@
 inline void* operator new(size_t, void* p) noexcept {
     return p;
 }
-
 extern "C" RuidoFm1Status g_ruido_fm1_status{};
 
 /* Cache-line-isolated `.pool` arenas (shared IPC vs Core 1 DSP vs Core 0 UI/Panel/USB) */
@@ -36,13 +37,10 @@ constexpr size_t kStripPixels = ruido::kDisplayWidth * ruido::kScanlineStripHeig
 constexpr float kMaxPlatformMasterQ12 = 4088.0f; // (1023 * 1023) >> 8 in platform.c
 constexpr uint32_t kC1StallFallbackCallbacks = 3u;
 constexpr uint32_t kC1BenchSpinLimit = 40000u;
-constexpr uint32_t kTicksPer64Sec = 1536000000u; // 64 s * 24,000,000 Hz TIMER4 crystal
+constexpr uint32_t kC1FlashHoldTimeoutTicks = 10000u * 24u; // 10 ms @ 24 MHz TIMER4
+constexpr uint32_t kTicksPer64Sec = 1536000000u;            // 64 s * 24,000,000 Hz TIMER4 crystal
 constexpr float kInvTimer4Hz = 1.0f / 24000000.0f;
-constexpr uint32_t kNvsSettingsDebounceMs = 1500u;
-constexpr uint32_t kNvsSettingsBlobIdx = 4u; // 0xF8000 (blobs 0..3 = 0xF4000..0xF7FFF scenes)
-
 volatile uint32_t* const kTimer4CntReg = reinterpret_cast<volatile uint32_t*>(0x00010804u);
-
 alignas(64) uint8_t g_ctrl_arena[sizeof(ruido::RuidoController)] __attribute__((section(".pool")));
 alignas(64) uint8_t g_renderer_arena[sizeof(ruido::ScopeHudRenderer)]
     __attribute__((section(".pool")));
@@ -56,40 +54,32 @@ alignas(64) uint16_t g_strip_ping_pong[2][kStripPixels] __attribute__((section("
 
 uint32_t g_last_seen_c1_blocks = 0u;
 uint32_t g_c1_stall_callbacks = 0u;
+int32_t g_last_out_l = 0;
+int32_t g_last_out_r = 0;
 float g_latest_master_gain = 0.85f;
 uint8_t g_panel_constructed = 0u;
-
 uint8_t g_midi_t4_anchored = 0u;
 uint32_t g_midi_t4_prev = 0u;
 uint32_t g_midi_t4_mod64 = 0u;
 uint32_t g_midi_rt_events = 0u;
-
-uint32_t g_last_panel_touch_ms = 0u;
-uint8_t g_pending_slot_mask = 0u;
-uint8_t g_pending_settings_save = 0u;
-uint8_t g_nvs_boot_loaded_mask = 0u;
-uint8_t g_nvs_saves_ok = 0u;
+ruido::fm1::Fm1NvsRuntimeState g_nvs_state{};
+uint32_t g_solo_reason = 0u;
 
 inline ruido::RuidoController* controller() noexcept {
     return reinterpret_cast<ruido::RuidoController*>(g_ctrl_arena);
 }
-
 inline ruido::ScopeHudRenderer* renderer() noexcept {
     return reinterpret_cast<ruido::ScopeHudRenderer*>(g_renderer_arena);
 }
-
 inline ruido::Fm1UsbDriftResampler* usbResampler() noexcept {
     return reinterpret_cast<ruido::Fm1UsbDriftResampler*>(g_usb_resampler_arena);
 }
-
 inline ruido::fm1::Fm1PanelState* panel() noexcept {
     return reinterpret_cast<ruido::fm1::Fm1PanelState*>(g_panel_arena);
 }
-
 inline ruido::fm1::Fm1LedModulator* ledMod() noexcept {
     return reinterpret_cast<ruido::fm1::Fm1LedModulator*>(g_led_mod_arena);
 }
-
 inline uint32_t floatToBits(float f) noexcept {
     union {
         float f;
@@ -97,7 +87,6 @@ inline uint32_t floatToBits(float f) noexcept {
     } conv{f};
     return conv.u;
 }
-
 inline float masterQ12ToGain(uint32_t master_q12) noexcept {
     return ruido::clampf(static_cast<float>(master_q12) * (1.0f / kMaxPlatformMasterQ12), 0.0f,
                          1.0f);
@@ -107,53 +96,42 @@ inline void refreshGate43StatusWords() noexcept {
     const auto* ctrl = controller();
     const auto& hud = ctrl->hud();
     const auto& st = ctrl->state();
-
     const uint32_t modelBits = static_cast<uint32_t>(hud.keyboardModel) & 3u;
     const uint32_t slotBits = static_cast<uint32_t>(ctrl->snapshots().activeSlot()) & 3u;
     const uint32_t syncBit = hud.midiClockSynced ? 1u : 0u;
     const uint32_t runBit = st.global.masterRun ? 1u : 0u;
     const uint32_t hudBits = static_cast<uint32_t>(hud.mode) & 0x3Fu;
     const uint32_t evBits = static_cast<uint32_t>(panel()->inputEventCount());
-
     g_ruido_fm1_status.panel_state = modelBits | (slotBits << 2u) | (syncBit << 4u) |
                                      (runBit << 5u) | (hudBits << 8u) | (evBits << 16u);
-
     const float clampedBpm = ruido::clampf(hud.effectiveClockBpm, 0.0f, 6500.0f);
     const auto bpmX10 = static_cast<uint32_t>(clampedBpm * 10.0f + 0.5f) & 0xFFFFu;
     g_ruido_fm1_status.midi_clock_state = bpmX10 | ((g_midi_rt_events & 0xFFFFu) << 16u);
-
     g_ruido_fm1_status.led_state_summary = ledMod()->lastSummary();
-
     const float clampedHz = ruido::clampf(st.voices[0].frequencyHz, 0.0f, 6550.0f);
     const auto osc1HzX10 = static_cast<uint32_t>(clampedHz * 10.0f + 0.5f) & 0xFFFFu;
-    g_ruido_fm1_status.nvs_and_osc1_state = static_cast<uint32_t>(g_nvs_boot_loaded_mask) |
-                                            (static_cast<uint32_t>(g_nvs_saves_ok) << 8u) |
+    g_ruido_fm1_status.nvs_and_osc1_state = static_cast<uint32_t>(g_nvs_state.bootLoadedMask) |
+                                            (static_cast<uint32_t>(g_nvs_state.savesOk) << 8u) |
                                             (osc1HzX10 << 16u);
 }
 
-inline void copyStereoBlockToDma(const ruido::Fm1AudioBlock& src, int32_t* dst,
-                                 uint32_t frames) noexcept {
-    for (uint32_t i = 0u; i < frames; ++i) {
-        dst[2u * i] = static_cast<int32_t>(src.lr[2u * i]);
-        dst[2u * i + 1u] = static_cast<int32_t>(src.lr[2u * i + 1u]);
-    }
-}
-
-inline void engageCore1Fallback() noexcept {
+[[gnu::noinline]] void engageCore1Fallback(uint32_t reason) noexcept {
+    g_solo_reason = (g_solo_reason != 0u) ? g_solo_reason : reason;
     g_ruido_ic_ctrl.c1RunEnable.store(0u, std::memory_order_relaxed);
     g_ruido_ic_ctrl.c1BenchReq.store(0u, std::memory_order_relaxed);
+    g_ruido_ic_ctrl.c1FallbackActive.store(1u, std::memory_order_release);
+    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
     fm1_cpu1_pause();
     ruidoSharedBuses()->controlBus.abortFromFault();
     ruidoCoProc()->abortFromFault();
-    ruidoDspCore()->attachFilterCoProcessor(nullptr);
-    g_ruido_ic_ctrl.c1FallbackActive.store(1u, std::memory_order_release);
+    ruido::fm1::callC1Far(ruido_fm1_c1_enter_solo_fallback);
     g_ruido_fm1_status.c1_flags = g_ruido_fm1_status.c1_flags | 2u;
 }
 
 inline bool checkCore1SelfFault() noexcept {
     if (g_ruido_ic_ctrl.c1SelfFault.load(std::memory_order_acquire) != 0u) {
         if (g_ruido_ic_ctrl.c1FallbackActive.load(std::memory_order_relaxed) == 0u) {
-            engageCore1Fallback();
+            engageCore1Fallback(3u);
         }
         return true;
     }
@@ -185,11 +163,17 @@ void ruido_fm1_construct(uint32_t initial_master_q12) {
     g_ruido_ic_ctrl.sramCanaries[0] = 0u;
     g_ruido_ic_ctrl.sramCanaries[1] = 0xFFFFFFFFu;
     g_ruido_ic_ctrl.c1SelfFault.store(0u, std::memory_order_relaxed);
+    g_ruido_ic_ctrl.c1Booted = 0u;
+    g_ruido_ic_ctrl.c1FaultCode = 0u;
+    g_ruido_ic_ctrl.c1FaultAux = 0u;
+    __asm__ volatile("flushinv [%0]\n\tssync\n\tcsync" ::"r"(&g_ruido_ic_ctrl) : "memory");
     g_ruido_ic_ctrl.engineReady.store(0u, std::memory_order_relaxed);
     g_ruido_ic_ctrl.c1RunEnable.store(0u, std::memory_order_relaxed);
     g_ruido_ic_ctrl.c1FallbackActive.store(0u, std::memory_order_relaxed);
     g_ruido_ic_ctrl.c1BenchReq.store(0u, std::memory_order_relaxed);
     g_ruido_ic_ctrl.c1BenchTicks.store(0u, std::memory_order_relaxed);
+    g_ruido_ic_ctrl.c1FlashHold.store(0u, std::memory_order_relaxed);
+    g_ruido_ic_ctrl.c1FlashAck.store(0u, std::memory_order_relaxed);
 
     g_latest_master_gain = masterQ12ToGain(initial_master_q12);
     /* Core 1 quantizer runs at 1.0f unity; MASTER pot scales inside DroneEngineCore::masterTrim */
@@ -217,17 +201,26 @@ void ruido_fm1_construct(uint32_t initial_master_q12) {
 
     g_last_seen_c1_blocks = 0u;
     g_c1_stall_callbacks = 0u;
+    g_last_out_l = 0;
+    g_last_out_r = 0;
     g_midi_t4_anchored = 0u;
     g_midi_t4_prev = 0u;
     g_midi_t4_mod64 = 0u;
     g_midi_rt_events = 0u;
-    g_last_panel_touch_ms = 0u;
-    g_pending_slot_mask = 0u;
-    g_pending_settings_save = 0u;
-    g_nvs_boot_loaded_mask = 0u;
-    g_nvs_saves_ok = 0u;
-
+    g_nvs_state.reset();
     refreshGate43StatusWords();
+}
+
+void ruido_fm1_diag_sync_c1(void) {
+    const uint32_t code = g_ruido_ic_ctrl.c1FaultCode;
+    if (code != 0u) {
+        g_ruido_boot_diag.c1_code = code;
+        g_ruido_boot_diag.c1_aux = g_ruido_ic_ctrl.c1FaultAux;
+    }
+    const uint32_t selfBit =
+        (g_ruido_ic_ctrl.c1SelfFault.load(std::memory_order_relaxed) != 0u) ? 0x100u : 0u;
+    const uint32_t bootBit = (g_ruido_ic_ctrl.c1Booted != 0u) ? 0x200u : 0u;
+    g_ruido_boot_diag.c1_state = (g_solo_reason & 0xFFu) | selfBit | bootBit;
 }
 
 void ruido_fm1_set_coproc_enabled(uint32_t enabled) {
@@ -246,16 +239,19 @@ uint32_t ruido_fm1_measure_bench64_ticks(void) {
     if ((g_ruido_fm1_status.c1_flags & 1u) == 0u || checkCore1SelfFault()) {
         return measureSoloBench64Ticks();
     }
-
     uint32_t best = 0xFFFFFFFFu;
     for (uint32_t pass = 0u; pass < 3u; ++pass) {
         g_ruido_ic_ctrl.c1BenchTicks.store(0u, std::memory_order_relaxed);
         g_ruido_ic_ctrl.c1BenchReq.store(1u, std::memory_order_release);
-
+        ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
         uint32_t spins = 0u;
         while (g_ruido_ic_ctrl.c1BenchReq.load(std::memory_order_acquire) != 0u) {
+            if ((spins & 63u) == 0u) {
+                ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl);
+                ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+            }
             if (checkCore1SelfFault() || ++spins >= kC1BenchSpinLimit) {
-                engageCore1Fallback();
+                engageCore1Fallback(4u);
                 return measureSoloBench64Ticks();
             }
             if (ruidoCoProc()->hasPendingWork()) {
@@ -272,8 +268,10 @@ uint32_t ruido_fm1_measure_bench64_ticks(void) {
 
 void ruido_fm1_restore_default_patch(void) {
     auto* ctrl = controller();
+    auto* buses = ruidoSharedBuses();
+    /* Re-publish NVS-restored controller state and snap Core 1 smoothers after boot benchmarks */
+    buses->controlBus.publish(ctrl->state());
     ruido::fm1::callC1Far(ruido_fm1_set_bench_stress, 0u);
-    ctrl->reset();
     panel()->reset(g_latest_master_gain);
     panel()->syncMasterPot(*ctrl, g_latest_master_gain);
     (void)ctrl->consumeSavedSlotMask();
@@ -282,150 +280,131 @@ void ruido_fm1_restore_default_patch(void) {
     ledMod()->updateTargets(ctrl->leds());
     ruido::fm1::callC1Far(ruido_fm1_c1_snap_latest);
     renderer()->reset();
+    renderer()->armBootIntro();
+    g_last_out_l = 0;
+    g_last_out_r = 0;
     g_midi_t4_anchored = 0u;
     g_midi_rt_events = 0u;
-    g_pending_slot_mask = 0u;
-    g_pending_settings_save = 0u;
+    g_nvs_state.clearPendingAfterRestore();
     refreshGate43StatusWords();
 }
 
-uint32_t ruido_fm1_nvs_load_boot(RuidoFm1BlobLoadFn load_fn) {
+uint32_t ruido_fm1_nvs_load_boot(RuidoFm1BlobLoadFn load_fn,
+                                 RuidoFm1SettingsTailReadFn tail_read_fn,
+                                 RuidoFm1BlobSaveFn boot_compact_save_fn) {
     if (load_fn == nullptr || g_panel_constructed == 0u) {
         return 0u;
     }
-    auto* ctrl = controller();
-    uint32_t loadedMask = 0u;
-
-    /* 1. Load up to 4 CRC-verified 128-byte Scene slots (`0xF4000..0xF7FFF`) */
-    for (uint8_t s = 0u; s < ruido::kNumSnapshots; ++s) {
-        ruido::PatchSnapshot snap{};
-        if (load_fn(s, &snap, static_cast<uint32_t>(sizeof(snap))) == 0 &&
-            ctrl->loadSnapshotSlot(s, snap)) {
-            loadedMask |= (1u << s);
-        }
-    }
-
-    /* 2. Load CRC-verified 16-byte DeviceSettingsBlob (`0xF8000`) and activate saved Scene */
-    ruido::DeviceSettingsBlob settings{};
-    if (load_fn(kNvsSettingsBlobIdx, &settings, static_cast<uint32_t>(sizeof(settings))) == 0 &&
-        ctrl->loadSettings(settings)) {
-        loadedMask |= (1u << kNvsSettingsBlobIdx);
-    }
-
-    /* 3. Re-apply live physical MASTER pot position & clear boot dirty flags */
-    panel()->reset(g_latest_master_gain);
-    panel()->syncMasterPot(*ctrl, g_latest_master_gain);
-    (void)ctrl->consumeSavedSlotMask();
-    (void)ctrl->consumeSettingsDirty();
-
-    ledMod()->updateTargets(ctrl->leds());
+    const uint32_t loadedMask = ruido::fm1::loadBootNvsBlobs(
+        load_fn, *controller(), *panel(), *ledMod(), g_latest_master_gain, g_nvs_state,
+        tail_read_fn, boot_compact_save_fn);
     ruido::fm1::callC1Far(ruido_fm1_c1_snap_latest);
-
-    g_nvs_boot_loaded_mask = static_cast<uint8_t>(loadedMask & 0xFFu);
     refreshGate43StatusWords();
     return loadedMask;
 }
 
 uint32_t ruido_fm1_nvs_poll_save(uint32_t now_ms, uint32_t force_flush, RuidoFm1BlobSaveFn save_fn,
+                                 RuidoFm1SettingsTailWriteFn tail_write_fn,
                                  RuidoFm1PreEraseFn pre_erase_fn) {
     if (save_fn == nullptr || g_ruido_ic_ctrl.engineReady.load(std::memory_order_acquire) == 0u) {
         return 0u;
     }
-
-    auto* ctrl = controller();
-    g_pending_slot_mask = static_cast<uint8_t>(g_pending_slot_mask | ctrl->consumeSavedSlotMask());
-    if (ctrl->consumeSettingsDirty()) {
-        g_pending_settings_save = 1u;
+    const uint32_t writes = ruido::fm1::pollAndSaveNvsBlobs(
+        now_ms, force_flush, save_fn, pre_erase_fn, *controller(), g_nvs_state, tail_write_fn);
+    if (writes > 0u) {
+        refreshGate43StatusWords();
     }
-
-    const bool saveSlotsNow = (g_pending_slot_mask != 0u);
-    const auto& hud = ctrl->hud();
-    const bool keysIdle = (hud.heldBlackMask == 0u) && (hud.heldWhiteMask == 0u);
-    const bool saveSettingsNow =
-        (g_pending_settings_save != 0u) &&
-        (saveSlotsNow || force_flush != 0u ||
-         (keysIdle && (now_ms - g_last_panel_touch_ms) >= kNvsSettingsDebounceMs));
-
-    if (!saveSlotsNow && !saveSettingsNow) {
-        return 0u;
-    }
-
-    if (pre_erase_fn != nullptr) {
-        pre_erase_fn();
-    }
-
-    uint32_t writes = 0u;
-    if (saveSlotsNow) {
-        for (uint8_t s = 0u; s < ruido::kNumSnapshots; ++s) {
-            const uint8_t sBit = static_cast<uint8_t>(1u << s);
-            if ((g_pending_slot_mask & sBit) == 0u) {
-                continue;
-            }
-            const ruido::PatchSnapshot snap = ctrl->snapshots().slotBinary(s);
-            if (save_fn(s, &snap, static_cast<uint32_t>(sizeof(snap))) == 0) {
-                g_pending_slot_mask = static_cast<uint8_t>(g_pending_slot_mask & ~sBit);
-                if (g_nvs_saves_ok < 255u) {
-                    ++g_nvs_saves_ok;
-                }
-                ++writes;
-            }
-        }
-    }
-
-    if (saveSettingsNow) {
-        const ruido::DeviceSettingsBlob blob = ctrl->exportSettings();
-        if (save_fn(kNvsSettingsBlobIdx, &blob, static_cast<uint32_t>(sizeof(blob))) == 0) {
-            g_pending_settings_save = 0u;
-            if (g_nvs_saves_ok < 255u) {
-                ++g_nvs_saves_ok;
-            }
-            ++writes;
-        }
-    }
-
-    refreshGate43StatusWords();
     return writes;
+}
+
+uint32_t ruido_fm1_nvs_take_base_written(void) {
+    return g_nvs_state.takeBaseBlobWritten();
 }
 
 void ruido_fm1_arm_audio(uint32_t enable_core1) {
     const bool useCore1 = (enable_core1 != 0u) && !checkCore1SelfFault();
-
-    /* Pre-fill all 8 x 64-frame blocks (512 frames = two full 256-frame ALNK0 DMA halves) */
+    if (!useCore1) {
+        engageCore1Fallback(5u);
+    }
     ruido::fm1::callC1Far(ruido_fm1_c1_prime_blocks, ruido::Fm1AudioBlockRing::kNumBlocks,
                           useCore1 ? 1u : 0u);
-
     if (useCore1) {
         g_ruido_ic_ctrl.c1RunEnable.store(1u, std::memory_order_release);
-    } else {
-        engageCore1Fallback();
     }
-
-    ruido::fm1::hwMemoryBarrier();
     g_ruido_ic_ctrl.engineReady.store(1u, std::memory_order_release);
+    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
     g_ruido_fm1_status.magic = RUIDO_FM1_STATUS_MAGIC;
     refreshGate43StatusWords();
 }
 
-void ruido_fm1_on_c1_fault(void) {
-    engageCore1Fallback();
-    ruido::fm1::hwMemoryBarrier();
-    for (;;) {
-        __asm__ volatile("nop" ::: "memory");
+uint32_t ruido_fm1_start_core1(void) {
+    ruido_fm1_set_coproc_enabled(1u);
+    if (fm1_cpu1_start(fm1_cpu1_boot_xip, &g_ruido_ic_ctrl.c1Booted) != 0) {
+        g_ruido_fm1_status.c1_flags = g_ruido_fm1_status.c1_flags | 1u;
+        return 1u;
     }
+    ruido_fm1_set_coproc_enabled(0u);
+    engageCore1Fallback(1u);
+    return 0u;
+}
+
+void ruido_fm1_enter_solo_mode(void) {
+    ruido_fm1_set_coproc_enabled(0u);
+    engageCore1Fallback(2u);
 }
 
 void ruido_fm1_quiesce_for_ota(void) {
+    g_ruido_ic_ctrl.engineReady.store(0u, std::memory_order_release);
+    g_ruido_ic_ctrl.c1FlashHold.store(0u, std::memory_order_relaxed);
     if (g_panel_constructed != 0u) {
         ledMod()->updateTargets(ruido::LedState{});
     }
     if (g_ruido_ic_ctrl.c1FallbackActive.load(std::memory_order_acquire) == 0u) {
-        engageCore1Fallback();
+        engageCore1Fallback(6u);
     }
     ruido::fm1::hwMemoryBarrier();
 }
 
+void ruido_fm1_resume_after_ota(void) {
+    g_ruido_ic_ctrl.engineReady.store(1u, std::memory_order_release);
+    ruido::fm1::hwMemoryBarrier();
+}
+
+void ruido_fm1_flash_hold_begin(void) {
+    if ((g_ruido_fm1_status.c1_flags & 1u) == 0u || checkCore1SelfFault()) {
+        return;
+    }
+    g_ruido_ic_ctrl.c1FlashAck.store(0u, std::memory_order_relaxed);
+    g_ruido_ic_ctrl.c1FlashHold.store(1u, std::memory_order_release);
+    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+    const uint32_t t0 = *kTimer4CntReg;
+    uint32_t spins = 0u;
+    while (g_ruido_ic_ctrl.c1FlashAck.load(std::memory_order_acquire) == 0u) {
+        if ((spins & 63u) == 0u) {
+            ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+        }
+        if (checkCore1SelfFault() || (*kTimer4CntReg - t0) >= kC1FlashHoldTimeoutTicks ||
+            ++spins >= 500000u) {
+            break;
+        }
+        if (ruidoCoProc()->hasPendingWork()) {
+            ruido::fm1::callC1Far(ruido_fm1_c1_assist_dsp);
+        }
+    }
+    ruido::fm1::hwMemoryBarrier();
+}
+
+void ruido_fm1_flash_hold_end(void) {
+    g_c1_stall_callbacks = 0u;
+    g_ruido_ic_ctrl.c1FlashHold.store(0u, std::memory_order_release);
+    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+}
+
 void ruido_fm1_assist_dsp(void) {
     if (checkCore1SelfFault()) {
+        if (g_ruido_ic_ctrl.engineReady.load(std::memory_order_relaxed) != 0u) {
+            ruido::fm1::callC1Far(ruido_fm1_c1_pump_solo_ring, 2u);
+        }
         return;
     }
     if (ruidoCoProc()->hasPendingWork()) {
@@ -453,7 +432,7 @@ void ruido_fm1_poll_panel(uint32_t now_ms, uint32_t pressed_btns, uint32_t relea
         pnl->pollButtonsAndEncoders(*ctrl, pressed_btns, released_btns, cur_btns, enc_steps);
     const bool keyTouched = pnl->pollKeysAndPressure(*ctrl, cur_notes, note_press_edges);
     if (btnOrEnc || keyTouched) {
-        g_last_panel_touch_ms = now_ms;
+        g_nvs_state.lastPanelTouchMs = now_ms;
         renderer()->notifyUserInput();
     }
 }
@@ -494,8 +473,6 @@ void ruido_fm1_audio(int32_t* out_lr_q15, uint32_t num_frames) {
         out_lr_q15 == nullptr) {
         return;
     }
-
-    (void)checkCore1SelfFault();
     auto* ring = ruidoAudioRing();
     int32_t peak = g_ruido_fm1_status.peak_abs_q15;
     bool hadMiss = false;
@@ -505,39 +482,26 @@ void ruido_fm1_audio(int32_t* out_lr_q15, uint32_t num_frames) {
         const uint32_t chunk =
             ((num_frames - offset) > kAudioChunkFrames) ? kAudioChunkFrames : (num_frames - offset);
         int32_t* dst = out_lr_q15 + 2u * offset;
-
-        if (g_ruido_ic_ctrl.c1FallbackActive.load(std::memory_order_acquire) != 0u) {
-            ruido::Fm1AudioBlock fallbackBlk{};
-            ruido::fm1::callC1Far(ruido_fm1_c1_render_one_block, &fallbackBlk);
-            copyStereoBlockToDma(fallbackBlk, dst, chunk);
-            if (fallbackBlk.peakAbsQ15 > peak) {
-                peak = fallbackBlk.peakAbsQ15;
+        const ruido::Fm1AudioBlock* blk = ring->beginPop();
+        if (blk != nullptr) {
+            ruido::fm1::hwMemoryBarrier();
+            ruido::fm1::copyStereoBlockToDma(*blk, dst, chunk, g_last_out_l, g_last_out_r);
+            if (blk->peakAbsQ15 > peak) {
+                peak = blk->peakAbsQ15;
             }
+            ruido::fm1::hwMemoryBarrier();
+            ring->commitPop();
         } else {
-            const ruido::Fm1AudioBlock* blk = ring->beginPop();
-            if (blk != nullptr) {
-                ruido::fm1::hwMemoryBarrier();
-                copyStereoBlockToDma(*blk, dst, chunk);
-                if (blk->peakAbsQ15 > peak) {
-                    peak = blk->peakAbsQ15;
-                }
-                ruido::fm1::hwMemoryBarrier();
-                ring->commitPop();
-            } else if (checkCore1SelfFault()) {
-                ruido::Fm1AudioBlock fallbackBlk{};
-                ruido::fm1::callC1Far(ruido_fm1_c1_render_one_block, &fallbackBlk);
-                copyStereoBlockToDma(fallbackBlk, dst, chunk);
-                if (fallbackBlk.peakAbsQ15 > peak) {
-                    peak = fallbackBlk.peakAbsQ15;
-                }
-            } else {
-                hadMiss = true;
-            }
+            ruido::fm1::slewStereoBlockToZero(dst, chunk, g_last_out_l, g_last_out_r);
+            hadMiss = true;
         }
         offset += chunk;
     }
 
-    if (hadMiss && !checkCore1SelfFault()) {
+    const bool c1Faulted = (g_ruido_ic_ctrl.c1SelfFault.load(std::memory_order_acquire) != 0u) ||
+                           (g_ruido_ic_ctrl.c1FallbackActive.load(std::memory_order_acquire) != 0u);
+    if (hadMiss && !c1Faulted &&
+        g_ruido_ic_ctrl.c1FlashHold.load(std::memory_order_relaxed) == 0u) {
         const uint32_t curFlags = g_ruido_fm1_status.c1_flags;
         const uint32_t und = (curFlags >> 8u) & 0xFFu;
         if (und < 255u) {
@@ -548,8 +512,9 @@ void ruido_fm1_audio(int32_t* out_lr_q15, uint32_t num_frames) {
         if (curC1Blocks == g_last_seen_c1_blocks) {
             ++g_c1_stall_callbacks;
             if (g_c1_stall_callbacks >= kC1StallFallbackCallbacks) {
-                /* Automatic silicon-lottery survival: Core 1 halted -> switch to Core 0 fallback */
-                engageCore1Fallback();
+                fm1_cpu1_pause();
+                g_solo_reason = (g_solo_reason != 0u) ? g_solo_reason : 7u;
+                g_ruido_ic_ctrl.c1SelfFault.store(1u, std::memory_order_release);
             }
         } else {
             g_last_seen_c1_blocks = curC1Blocks;
@@ -608,7 +573,7 @@ void ruido_fm1_tick_and_prepare_ms(uint32_t elapsed_ms) {
         return;
     }
     const uint32_t clamped_ms =
-        (elapsed_ms == 0u) ? 16u : ((elapsed_ms > 100u) ? 100u : elapsed_ms);
+        (elapsed_ms == 0u) ? 16u : ((elapsed_ms > 250u) ? 250u : elapsed_ms);
     const float dt_sec = static_cast<float>(clamped_ms) * 0.001f;
     auto* buses = ruidoSharedBuses();
     auto* ctrl = controller();
@@ -635,29 +600,25 @@ const uint16_t* ruido_fm1_render_strip_be(uint16_t y_start, uint8_t slot) {
     if (g_ruido_ic_ctrl.engineReady.load(std::memory_order_acquire) == 0u) {
         return strip;
     }
-    if (g_ruido_ic_ctrl.c1FallbackActive.load(std::memory_order_relaxed) != 0u) {
-        renderer()->renderStrip(y_start, ruido::kScanlineStripHeight, strip);
-        auto* stripWords = reinterpret_cast<uint32_t*>(strip);
-        for (size_t w = 0u; w < (kStripPixels / 2u); ++w) {
-            const uint32_t pair = stripWords[w];
-            stripWords[w] = ((pair >> 8u) & 0x00FF00FFu) | ((pair & 0x00FF00FFu) << 8u);
-        }
-        return strip;
+    /* Drain Core 1's 44.1 kHz 2048-frame scope ring 4x per frame so zero samples are ever dropped
+     */
+    if ((y_start & 63u) == 0u && y_start != 0u) {
+        renderer()->ingestScopeRing(ruidoSharedBuses()->scopeBuffer);
     }
-    constexpr uint16_t kSliceRows = 2u;
-    constexpr size_t kSliceWords = (kSliceRows * ruido::kDisplayWidth) / 2u;
+    constexpr uint16_t kSliceRows = 8u;
+    static_assert(ruido::kScanlineStripHeight % kSliceRows == 0u, "kSliceRows must divide strip");
     for (uint16_t rowOff = 0u; rowOff < ruido::kScanlineStripHeight; rowOff += kSliceRows) {
         ruido_fm1_assist_dsp();
         uint16_t* sliceDst = strip + static_cast<size_t>(rowOff) * ruido::kDisplayWidth;
-        renderer()->renderStrip(static_cast<uint16_t>(y_start + rowOff), kSliceRows, sliceDst);
-        auto* sliceWords = reinterpret_cast<uint32_t*>(sliceDst);
-        for (size_t w = 0u; w < kSliceWords; ++w) {
-            const uint32_t pair = sliceWords[w];
-            sliceWords[w] = ((pair >> 8u) & 0x00FF00FFu) | ((pair & 0x00FF00FFu) << 8u);
-        }
+        renderer()->renderStrip(static_cast<uint16_t>(y_start + rowOff), kSliceRows, sliceDst,
+                                true);
     }
     ruido_fm1_assist_dsp();
     return strip;
+}
+
+uint16_t* ruido_fm1_acquire_ops_strip(void) {
+    return g_strip_ping_pong[0];
 }
 
 } // extern "C"

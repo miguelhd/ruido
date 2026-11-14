@@ -257,23 +257,15 @@ inline void updateOverdriveHair(const std::array<CompactScopeSample, HistorySize
         float maxAbsRaw = 0.0f;
 
         if (canReadHistory) {
-            const float spanCap = (maxSpan < 3600.0f) ? maxSpan : 3600.0f;
-            const float span = clampf(period * 9.7f, 160.0f, spanCap);
-            const size_t needAhead = static_cast<size_t>(span) + 48u;
-            size_t startIdx = (historyWrite + HistorySize - 1u - needAhead) & kMask;
-            const size_t maxSearch =
-                (historyCount > needAhead + 16u) ? (historyCount - needAhead - 16u) : 0u;
-            const size_t searchLim = (maxSearch < 1400u) ? maxSearch : 1400u;
-            for (size_t back = 0u; back < searchLim; ++back) {
-                const size_t cand = (startIdx + HistorySize - back) & kMask;
-                if (unpackVoiceEdgeFlag(history[cand].voiceEdgeQ12[v])) {
-                    startIdx = cand;
-                    break;
-                }
-            }
+            const float spanCap = (maxSpan < 1800.0f) ? maxSpan : 1800.0f;
+            const float span = clampf(period * 3.4f, 64.0f, spanCap);
+            const size_t needAhead = static_cast<size_t>(span) + 24u;
+            // Read directly from the live streaming ring head (no rising-edge lock) so the
+            // 3A overdrive cone continuously dances with live pitch, PWM, resonance, and beating.
+            const size_t startIdx = (historyWrite + HistorySize - 1u - needAhead) & kMask;
 
-            const size_t dStep = static_cast<size_t>(clampf(period * 0.045f + 0.5f, 2.0f, 40.0f));
-            const size_t qStep = static_cast<size_t>(clampf(period * 0.23f + 0.5f, 4.0f, 180.0f));
+            const size_t dStep = static_cast<size_t>(clampf(period * 0.045f + 0.5f, 2.0f, 32.0f));
+            const size_t qStep = static_cast<size_t>(clampf(period * 0.23f + 0.5f, 4.0f, 140.0f));
             for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
                 const size_t off = static_cast<size_t>(static_cast<float>(i) * kInvPts * span);
                 const size_t idx = (startIdx + off) & kMask;
@@ -288,24 +280,22 @@ inline void updateOverdriveHair(const std::array<CompactScopeSample, HistorySize
                 const float vd2 = vc - 2.0f * vm1 + vm2;
                 const float bc =
                     0.5f * (unpackQ3_12(history[idx].leftQ12) + unpackQ3_12(history[idx].rightQ12));
-                const float beatEnv = clampf(bc * vc * 1.45f + 0.45f * vc * vq, -0.35f, 1.45f);
-                const float val = vc * (0.14f + 0.86f * beatEnv) + 1.05f * vd2;
+                const float beatEnv = clampf(bc * vc * 1.45f + 0.50f * vc * vq, -0.45f, 1.55f);
+                const float val = vc * (0.38f + 0.62f * beatEnv) + 0.85f * vd2;
                 raw[i] = val;
                 const float av = absf(val);
                 if (av > maxAbsRaw) {
                     maxAbsRaw = av;
                 }
             }
-        }
-
-        if (maxAbsRaw < 0.008f) {
+        } else if (control.global.masterRun && !vp.muted) {
             const float duty = clampf(vp.pulseWidth, kPulseWidthMin, kPulseWidthMax);
             const float partnerHz =
                 clampf(control.voices[(v + 1u) & 3u].frequencyHz, 20.0f, kAudioFreqMaxHz);
             const float ratio = clampf(partnerHz / effHz, 0.35f, 3.2f);
             for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
                 const float u = static_cast<float>(i) * kInvPts;
-                const float cyc = u * 6.4f + 0.19f * static_cast<float>(v);
+                const float cyc = u * 3.4f + 0.19f * static_cast<float>(v);
                 const float ph = cyc - static_cast<float>(static_cast<int>(cyc));
                 const float dRise = absf(ph);
                 const float dFall = absf(ph - duty);
@@ -315,17 +305,19 @@ inline void updateOverdriveHair(const std::array<CompactScopeSample, HistorySize
                 const float beat = 0.65f + 0.35f * fastSinPhase01(u * 2.3f * ratio +
                                                                   0.27f * static_cast<float>(v));
                 raw[i] = vc * beat + spike;
+                maxAbsRaw = 1.0f;
             }
         }
 
+        const float liveEnv = smoothstep01(maxAbsRaw * (1.0f / 0.10f));
         float mean = 0.0f;
         for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
             mean += raw[i];
         }
         mean *= (1.0f / static_cast<float>(kOverdriveHairPoints));
 
-        float posPk = 0.20f;
-        float negPk = 0.20f;
+        float posPk = 0.08f;
+        float negPk = 0.08f;
         for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
             raw[i] -= mean;
             if (raw[i] > posPk) {
@@ -336,14 +328,14 @@ inline void updateOverdriveHair(const std::array<CompactScopeSample, HistorySize
             }
         }
 
-        const float invPos = 1.0f / posPk;
-        const float invNeg = 1.0f / negPk;
+        const float invPos = liveEnv * fastRecipPos(posPk);
+        const float invNeg = liveEnv * fastRecipPos(negPk);
         for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
             const float norm = (raw[i] >= 0.0f) ? (raw[i] * invPos) : (raw[i] * invNeg);
             const float clamped = clampf(norm, -1.0f, 1.0f);
             persistedHair[v][i] =
                 snapImmediate ? clamped
-                              : (persistedHair[v][i] + 0.36f * (clamped - persistedHair[v][i]));
+                              : (persistedHair[v][i] + 0.74f * (clamped - persistedHair[v][i]));
         }
     }
 }

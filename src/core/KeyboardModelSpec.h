@@ -27,22 +27,22 @@ inline constexpr std::array<KeyboardModelSpec, static_cast<size_t>(KeyboardModel
         {
             "LIVE MIXER",
             "MIX, FX & SCENES",
-            {"SOLO", "DRIVE", "SUB/LPF", "SPREAD"},
-            {"MUTE", "FILTER", "OCTAVE", "SCENE"},
+            {"DRIVE", "SUB/LPF", "SPREAD", "SOLO"},
+            {"FILTER", "OCTAVE", "SCENE", "MUTE"},
         },
         // 2/3: CIRCUIT LAB (CMOS Patch Bay)
         {
             "CIRCUIT LAB",
             "CMOS PATCH BAY",
-            {"SOLO", "STARVE", "RING/MOD", "SYNC"},
-            {"MUTE", "CROSS", "FOLD", "CRUSH"},
+            {"STARVE", "RING/MOD", "SYNC", "SOLO"},
+            {"CROSS", "FOLD", "CRUSH", "MUTE"},
         },
         // 3/3: RHYTHM LAB (Stutter, Clock Dividers & Euclidean Grooves)
         {
             "RHYTHM LAB",
             "CLOCK, DIVIDE & EUCLID",
-            {"SOLO", "PUMP", "CLOCK", "SWING"},
-            {"MUTE", "STUTTER", "DIVIDE", "EUCLID"},
+            {"PUMP", "CLOCK", "SWING", "SOLO"},
+            {"STUTTER", "DIVIDE", "EUCLID", "MUTE"},
         },
     }};
 
@@ -52,40 +52,44 @@ constexpr const KeyboardModelSpec& keyboardModelSpec(KeyboardModel model) noexce
 }
 
 // Single source of truth for the 27-key varibright zone gradient, Console SOLO/MUTE state,
-// and SNAP 1-4 status across all keyboard models (shared 1-to-1 by Core 0 PWM LEDs and SEL map).
+// and SCENE 1-4 status across all keyboard models (shared 1-to-1 by Core 0 PWM LEDs and SEL map).
 inline void computeKeyboardModelRestLeds(KeyboardModel model, const EngineControlState& state,
                                          const HudState& hud, uint8_t stutterGateMask,
                                          float subBreathWave01, float savePulse01,
                                          std::array<float, kNumBlackKeys>& outBlack,
                                          std::array<float, kNumWhiteKeys>& outWhite) noexcept {
-    // Shared left-to-right group brightness gradient across both physical rows:
-    //   Top 11 (5 groups, L->R):    64% -> 46% -> 30% -> 18% -> 8%
-    //   Bottom 16 (4 groups, L->R): 64% -> 42% -> 22% -> 8%
-    outBlack[static_cast<size_t>(BlackKeyId::Op5)] = 0.46f;
-    outBlack[static_cast<size_t>(BlackKeyId::Op6)] = 0.30f;
-    outBlack[static_cast<size_t>(BlackKeyId::Pit)] = 0.30f;
-    outBlack[static_cast<size_t>(BlackKeyId::Glo)] = 0.30f;
-    outBlack[static_cast<size_t>(BlackKeyId::Mono)] = 0.18f;
-    outBlack[static_cast<size_t>(BlackKeyId::Poly)] = 0.18f;
-    outBlack[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)] = 0.08f;
+    (void)stutterGateMask;
+    (void)subBreathWave01;
+    // High-contrast bright -> dark left-to-right group gradient across both physical rows
+    // (terminating at 0% dark on right-hand SOLO 1-4 and MUTE 1-4 when off, 100% when active):
+    //   Top 11 (L->R):    86% (OP1) -> 50% (OP2-4) -> 22% (OP5-6) -> 0% (SOLO) | 12% (11th)
+    //   Bottom 16 (L->R): 82% (1-4) -> 48% (5-8)   -> 16% (9-12)  -> 0% (MUTE 13-16)
+    outBlack[static_cast<size_t>(BlackKeyId::Op1)] = 0.86f;
+    outBlack[static_cast<size_t>(BlackKeyId::Op2)] = 0.50f;
+    outBlack[static_cast<size_t>(BlackKeyId::Op3)] = 0.50f;
+    outBlack[static_cast<size_t>(BlackKeyId::Op4)] = 0.50f;
+    outBlack[static_cast<size_t>(BlackKeyId::Op5)] = 0.22f;
+    outBlack[static_cast<size_t>(BlackKeyId::Op6)] = 0.22f;
+    outBlack[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)] = 0.12f;
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        outWhite[4u + v] = 0.42f;
-        outWhite[8u + v] = 0.22f;
+        outWhite[kBankAWhiteKeyBase + v] = 0.82f;
+        outWhite[kBankBWhiteKeyBase + v] = 0.48f;
         const bool occ = (hud.snapshotOccupiedMask & (1u << v)) != 0u;
-        outWhite[12u + v] = (model == KeyboardModel::LiveMixer && !occ) ? 0.0f : 0.08f;
+        outWhite[kSceneWhiteKeyBase + v] =
+            (model == KeyboardModel::LiveMixer) ? (occ ? 0.16f : 0.0f) : 0.16f;
     }
 
     if (hud.saveArmed) {
-        // Store mode pulses all 4 Scene keys; Delete mode pulses only occupied scenes (empty =
-        // dark)
+        // Store mode pulses all 4 Scene keys (9-12); Delete mode pulses only occupied scenes
         const float pulse = 0.25f + 0.70f * clampf(savePulse01, 0.0f, 1.0f);
         for (size_t s = 0u; s < kNumSnapshots; ++s) {
             const bool occ = (hud.snapshotOccupiedMask & (1u << s)) != 0u;
             if (hud.saveDeleteMode) {
-                outWhite[12u + s] = occ ? pulse : 0.0f;
+                outWhite[kSceneWhiteKeyBase + s] = occ ? pulse : 0.0f;
             } else {
-                outWhite[12u + s] = (occ && s == (hud.snapshotSlot & 3u)) ? 1.0f : pulse;
+                outWhite[kSceneWhiteKeyBase + s] =
+                    (occ && s == (hud.snapshotSlot & 3u)) ? 1.0f : pulse;
             }
         }
     } else if (model == KeyboardModel::LiveMixer) {
@@ -96,18 +100,17 @@ inline void computeKeyboardModelRestLeds(KeyboardModel model, const EngineContro
             for (size_t s = 0u; s < kNumSnapshots; ++s) {
                 const bool occ = (hud.snapshotOccupiedMask & (1u << s)) != 0u;
                 const float w = clampf(hud.snapshotWeights[s], 0.0f, 1.0f);
-                outWhite[12u + s] = occ ? (0.08f + 0.92f * w) : 0.0f;
+                outWhite[kSceneWhiteKeyBase + s] = occ ? (0.24f + 0.76f * w) : 0.0f;
             }
         } else if (hud.config.snapMode == KeySwitchMode::Latching && !hud.snapshotDirty &&
                    ((hud.snapshotOccupiedMask & (1u << (hud.snapshotSlot & 3u))) != 0u)) {
-            // Subtle active-slot landmark (< 22% of OCTAVE group so L->R gradient stays monotonic)
-            outWhite[12u + (hud.snapshotSlot & 3u)] = 0.16f;
+            outWhite[kSceneWhiteKeyBase + (hud.snapshotSlot & 3u)] = 1.0f;
         }
     }
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        const VoiceCircuitState vc = evaluateVoiceCircuit(state, v, stutterGateMask);
-        evaluateVoiceConsoleLeds(vc, subBreathWave01, outBlack[v], outWhite[v]);
+        evaluateVoiceConsoleLeds(state.keyMod, v, outBlack[kSoloBlackKeyBase + v],
+                                 outWhite[kMuteWhiteKeyBase + v]);
     }
 }
 

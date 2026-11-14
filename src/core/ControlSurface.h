@@ -66,6 +66,17 @@ enum class BlackKeyId : uint8_t {
     Count = 11
 };
 
+// Physical 27-key layout groups (all continuous-pressure macros & zones sit on PA8/PA7 SARADC;
+// binary non-pressure SOLO 1-4 and MUTE 1-4 switches sit on the right-hand keys):
+//   Top 11 Black Keys:    [0..5 = OP1..OP6 Macros] [6..9 = SOLO 1..4 (PIT..POLY)] [10 = FREEZE/TAP]
+//   Bottom 16 White Keys: [0..3 = Bank A] [4..7 = Bank B] [8..11 = Bank C / SCENE] [12..15 = MUTE]
+inline constexpr size_t kNumTopMacroKeys = 6u;   // Black 0..5 (OP1..OP6)
+inline constexpr size_t kSoloBlackKeyBase = 6u;  // Black 6..9 (PIT, GLO, MONO, POLY) -> SOLO 1..4
+inline constexpr size_t kBankAWhiteKeyBase = 0u; // White 0..3 (W01..W04): FILTER / CROSS / STUTTER
+inline constexpr size_t kBankBWhiteKeyBase = 4u; // White 4..7 (W05..W08): OCTAVE / FOLD / DIVIDE
+inline constexpr size_t kSceneWhiteKeyBase = 8u; // White 8..11 (W09..W12): SCENE / CRUSH / EUCLID
+inline constexpr size_t kMuteWhiteKeyBase = 12u; // White 12..15 (W13..W16): MUTE 1..4
+
 // 3 per-oscillator modes selected via discrete SELECT on the latching EDIT page
 // (signal-flow order: Osc Width -> Osc Drift -> Channel Level/Drive; default = Level)
 enum class EditTarget : uint8_t { Width = 0, Drift = 1, Level = 2, Count = 3 };

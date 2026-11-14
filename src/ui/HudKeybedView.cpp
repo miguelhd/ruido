@@ -190,12 +190,12 @@ struct TopZoneSpan {
     uint8_t keyCount;
 };
 
-// 4 model-specific top-row zones across OP1..POLY (leaving the universal 11th Freeze key open).
+// 4 model-specific top-row zones across OP1..POLY (leaving the universal 11th Freeze/Tap key open).
 constexpr std::array<TopZoneSpan, 4> kTopZoneSpans = {{
-    {kBlackCenterX[0] - 3.2f, kBlackCenterX[3] + 3.2f, 53, 0u, 4u},  // OP1-OP4
-    {kBlackCenterX[4] - 3.8f, kBlackCenterX[4] + 3.8f, 93, 4u, 1u},  // OP5
-    {kBlackCenterX[5] - 3.2f, kBlackCenterX[7] + 3.2f, 134, 5u, 3u}, // OP6, PIT, GLO
-    {kBlackCenterX[8] - 3.2f, kBlackCenterX[9] + 3.2f, 180, 8u, 2u}, // MONO, POLY
+    {kBlackCenterX[0] - 3.8f, kBlackCenterX[0] + 3.8f, 21, 0u, 1u},  // OP1
+    {kBlackCenterX[1] - 3.2f, kBlackCenterX[3] + 3.2f, 70, 1u, 3u},  // OP2, OP3, OP4
+    {kBlackCenterX[4] - 3.2f, kBlackCenterX[5] + 3.2f, 115, 4u, 2u}, // OP5, OP6
+    {kBlackCenterX[6] - 3.2f, kBlackCenterX[9] + 3.2f, 160, 6u, 4u}, // PIT..POLY (SOLO 1-4)
 }};
 
 inline void formatSignedOctave(char* dst, size_t cap, const char* signPrefix, float mag) noexcept {
@@ -390,31 +390,34 @@ void HudKeybedView::update(float dtClamped, const EngineControlState& control,
     computeKeyboardModelRestLeds(rawHud.keyboardModel, control, rawHud, stutterGateMask,
                                  subBreath01, savePulse01, tgtBlack, tgtWhite);
 
-    for (size_t i = kNumOscillators; i < kNumBlackKeys; ++i) {
+    for (size_t i = 0u; i < kNumBlackKeys; ++i) {
+        if (i >= kSoloBlackKeyBase && i < kSoloBlackKeyBase + kNumOscillators) {
+            continue;
+        }
         if (((rawHud.heldBlackMask >> i) & 1u) != 0u) {
             tgtBlack[i] = 1.0f;
         }
     }
-    for (size_t i = kNumOscillators; i < kNumWhiteKeys; ++i) {
+    for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
         if (((rawHud.heldWhiteMask >> i) & 1u) != 0u) {
-            const bool emptySnapKey = (i >= 12u) &&
-                                      (rawHud.keyboardModel == KeyboardModel::LiveMixer) &&
-                                      ((rawHud.snapshotOccupiedMask & (1u << (i - 12u))) == 0u);
+            const bool emptySnapKey =
+                (i >= kSceneWhiteKeyBase && i < kSceneWhiteKeyBase + kNumSnapshots) &&
+                (rawHud.keyboardModel == KeyboardModel::LiveMixer) &&
+                ((rawHud.snapshotOccupiedMask & (1u << (i - kSceneWhiteKeyBase))) == 0u);
             tgtWhite[i] = emptySnapKey ? 0.15f : 1.0f;
         }
     }
 
     const bool snap = !primed_ || (active && wasInvisible);
     primed_ = true;
-    const float alpha = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.040f)));
+    const float alpha = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.020f)));
     const float alphaChop = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.004f)));
     for (size_t i = 0u; i < kNumBlackKeys; ++i) {
-        const float a =
-            (i < kNumOscillators && control.keyMod.stutterDepth[i] > 1.0e-4f) ? alphaChop : alpha;
-        blackGlow_[i] = slewScalar(blackGlow_[i], tgtBlack[i], a, 0.002f);
+        blackGlow_[i] = slewScalar(blackGlow_[i], tgtBlack[i], alpha, 0.002f);
     }
     for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-        const bool isChopKey = (control.keyMod.stutterDepth[i & 3u] > 1.0e-4f);
+        const bool isChopKey =
+            (i < kMuteWhiteKeyBase) && (control.keyMod.stutterDepth[i & 3u] > 1.0e-4f);
         whiteGlow_[i] =
             slewScalar(whiteGlow_[i], tgtWhite[i], isChopKey ? alphaChop : alpha, 0.002f);
     }

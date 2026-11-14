@@ -164,6 +164,7 @@ struct KeyboardModState {
     float rhythmShort = 0.0f;     // [0, 1] 50% -> 6% pinpoint gate length
     float rhythmSwing = 0.0f;     // [0, 1] 50% -> 72% shuffle swing + stereo bounce
     uint8_t soloMask = 0u;        // 4-bit mask of soloed oscillators (bit v = OSC v+1 solo active)
+    uint8_t muteMask = 0u;        // 4-bit mask of muted oscillators (bit v = OSC v+1 mute active)
     bool stasisFreeze = false;    // 11th tall key: freezes 8 LFOs + thermal drift + clock + scope
 };
 
@@ -354,6 +355,11 @@ class ScopeRingBuffer {
         const size_t diff = w - r;
         return (diff <= kScopeRingCapacity) ? diff : 0u;
     }
+
+    size_t writePosRelaxed() const noexcept { return writePos_.load(std::memory_order_relaxed); }
+    size_t readPosRelaxed() const noexcept { return readPos_.load(std::memory_order_relaxed); }
+    const void* writePosAddr() const noexcept { return &writePos_; }
+    const void* readPosAddr() const noexcept { return &readPos_; }
 
   private:
     std::array<ScopeFrame, kScopeRingCapacity> buffer_{};

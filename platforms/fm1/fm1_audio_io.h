@@ -257,4 +257,35 @@ class Fm1UsbDriftResampler {
     Fm1TpdfQuantizer dither_{};
 };
 
+namespace fm1 {
+
+// ALNK0 DMA helpers: widen one 64-frame Q15 block, or slew the last output to silence on a miss.
+inline void copyStereoBlockToDma(const Fm1AudioBlock& src, int32_t* dst, uint32_t frames,
+                                 int32_t& lastL, int32_t& lastR) noexcept {
+    for (uint32_t i = 0u; i < frames; ++i) {
+        dst[2u * i] = static_cast<int32_t>(src.lr[2u * i]);
+        dst[2u * i + 1u] = static_cast<int32_t>(src.lr[2u * i + 1u]);
+    }
+    if (frames > 0u) {
+        lastL = dst[2u * (frames - 1u)];
+        lastR = dst[2u * (frames - 1u) + 1u];
+    }
+}
+
+inline void slewStereoBlockToZero(int32_t* dst, uint32_t frames, int32_t& lastL,
+                                  int32_t& lastR) noexcept {
+    int32_t l = lastL;
+    int32_t r = lastR;
+    for (uint32_t i = 0u; i < frames; ++i) {
+        l = ((l * 31) + ((l >> 31) & 31)) >> 5;
+        r = ((r * 31) + ((r >> 31) & 31)) >> 5;
+        dst[2u * i] = l;
+        dst[2u * i + 1u] = r;
+    }
+    lastL = l;
+    lastR = r;
+}
+
+} // namespace fm1
+
 } // namespace ruido

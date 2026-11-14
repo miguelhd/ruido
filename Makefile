@@ -37,7 +37,7 @@ BUILD_DIR := build
 DSP_SRCS := \
 	src/dsp/SchmittOscillatorBank.cpp \
 	src/dsp/VoiceLfoBank.cpp \
-	src/dsp/Ms20Filter.cpp \
+	src/dsp/SallenKeyFilter.cpp \
 	src/dsp/HalfBandDecimator.cpp \
 	src/dsp/DroneEngine.cpp
 
@@ -87,7 +87,7 @@ check:
 	python3 tools/check_hygiene.py
 
 format:
-	@"$(CLANG_FORMAT)" -i $(wildcard src/core/*.h src/core/*.cpp src/dsp/*.h src/dsp/*.cpp src/ui/*.h src/ui/*.cpp tests/*.h tests/*.cpp platforms/sim/WasmAbiLayout.h platforms/fm1/*.h platforms/fm1/*.c platforms/fm1/*.cpp)
+	@"$(CLANG_FORMAT)" -i $(wildcard src/core/*.h src/core/*.cpp src/dsp/*.h src/dsp/*.cpp src/ui/*.h src/ui/*.cpp tests/*.h tests/*.cpp platforms/sim/*.h platforms/sim/*.cpp platforms/fm1/*.h platforms/fm1/*.c platforms/fm1/*.cpp platforms/fm1/libc/*.h)
 
 $(BUILD_DIR)/%.o: src/%.cpp
 	@mkdir -p $(dir $@)

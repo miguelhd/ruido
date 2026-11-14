@@ -123,16 +123,16 @@ assert.equal(f32[summaryIdx + WASM_SUMMARY.FX_VOICE_FOCUS], 0.0); // OSC 1
 assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 0.0); // LiveMixer
 ex.wasm_ui_encoder(0, 4);                                         // SELECT -> OSC 2 on FX page
 assert.equal(f32[summaryIdx + WASM_SUMMARY.FX_VOICE_FOCUS], 1.0);
-for (let op = 0; op < 4; op++) {
-  assert.ok(Math.abs(f32[ledsIdx + op] - 0.64) < 1e-4); // OP1..OP4 Solo rest -> 64%
+assert.ok(Math.abs(f32[ledsIdx + 0] - 0.86) < 1e-4);      // OP1 Drive rest -> 86%
+assert.ok(Math.abs(f32[ledsIdx + 1] - 0.50) < 1e-4);      // OP2 Sub Octave rest -> 50%
+assert.ok(Math.abs(f32[ledsIdx + 2] - 0.50) < 1e-4);      // OP3 Ratio Lock rest -> 50%
+assert.ok(Math.abs(f32[ledsIdx + 3] - 0.50) < 1e-4);      // OP4 Low Pass rest -> 50%
+assert.ok(Math.abs(f32[ledsIdx + 4] - 0.22) < 1e-4);      // OP5 Unison rest -> 22%
+assert.ok(Math.abs(f32[ledsIdx + 5] - 0.22) < 1e-4);      // OP6 Spread rest -> 22%
+for (let s = 0; s < 4; s++) {
+  assert.ok(Math.abs(f32[ledsIdx + 6 + s] - 0.0) < 1e-4); // PIT..POLY Solo rest -> 0% (binary off)
 }
-assert.ok(Math.abs(f32[ledsIdx + 4] - 0.46) < 1e-4);    // OP5 Drive rest -> 46%
-assert.ok(Math.abs(f32[ledsIdx + 5] - 0.30) < 1e-4);    // OP6 Sub Octave rest -> 30%
-assert.ok(Math.abs(f32[ledsIdx + 6] - 0.30) < 1e-4);    // PIT Ratio Lock rest -> 30%
-assert.ok(Math.abs(f32[ledsIdx + 7] - 0.30) < 1e-4);    // GLO Low Pass rest -> 30%
-assert.ok(Math.abs(f32[ledsIdx + 8] - 0.18) < 1e-4);    // MONO rest -> 18%
-assert.ok(Math.abs(f32[ledsIdx + 9] - 0.18) < 1e-4);    // POLY rest -> 18%
-assert.ok(Math.abs(f32[ledsIdx + 10] - 0.08) < 1e-4);   // 11th Freeze rest -> 8%
+assert.ok(Math.abs(f32[ledsIdx + 10] - 0.12) < 1e-4);     // 11th Freeze rest -> 12%
 assert.ok(Math.abs(f32[ledsIdx + 27 + 2] - 1.0) < 1e-4);  // FX button -> 100% while open
 assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.15) < 1e-4); // SEL button -> 15% rest when closed
 assert.ok(Math.abs(f32[ledsIdx + 27 + 5] - 0.15) < 1e-4); // LFO button -> 15% rest when closed & depth==0
@@ -142,10 +142,10 @@ assert.ok(Math.abs(f32[ledsIdx + 27 + 12] - 0.0) < 1e-6); // PLAY Green LED -> 0
 assert.ok(Math.abs(f32[ledsIdx + 27 + 13] - 0.0) < 1e-6); // REC Red LED -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 41] - 1.0) < 1e-4);      // STOP Red LED -> 100% while sound ON
 for (let i = 0; i < 4; i++) {
-  assert.ok(Math.abs(f32[ledsIdx + 11 + i] - 0.64) < 1e-4);      // Keys 1-4 Mute -> 64% unmuted rest
-  assert.ok(Math.abs(f32[ledsIdx + 11 + 4 + i] - 0.42) < 1e-4);  // Keys 5-8 Filter -> 42% rest
-  assert.ok(Math.abs(f32[ledsIdx + 11 + 8 + i] - 0.22) < 1e-4);  // Keys 9-12 Octave -> 22% rest
-  assert.ok(Math.abs(f32[ledsIdx + 11 + 12 + i] - 0.08) < 1e-4); // Keys 13-16 Snap (edited) -> 8% rest
+  assert.ok(Math.abs(f32[ledsIdx + 11 + i] - 0.82) < 1e-4);       // Keys 1-4 Filter -> 82% rest
+  assert.ok(Math.abs(f32[ledsIdx + 11 + 4 + i] - 0.48) < 1e-4);   // Keys 5-8 Octave -> 48% rest
+  assert.ok(Math.abs(f32[ledsIdx + 11 + 8 + i] - 0.16) < 1e-4);   // Keys 9-12 Scene (edited) -> 16% rest
+  assert.ok(Math.abs(f32[ledsIdx + 11 + 12 + i] - 0.0) < 1e-4);   // Keys 13-16 Mute -> 0% unmuted rest
 }
 
 // Tapping SEL (button 3) opens persistent Keyboard Model Status & Guidance screen (closing FX page),
@@ -347,37 +347,40 @@ ex.wasm_ui_button(7, 0);
 ex.wasm_ui_tick_and_render(0.2);
 assert.equal(f32[summaryIdx + 45], 0.0);
 
-// Arm SAVE (button 9) + tap Key 14 (white 13 = SNAP 2) to store current patch, then PRESETS -> SNAP 3
+// Arm SAVE (button 9) + tap Key 10 (white 9 = SNAP 2) to store current patch, then PRESETS -> SNAP 3
 const osc1HzBeforeSave = f32[summaryIdx + 0];
 ex.wasm_ui_button(9, 1);
 ex.wasm_ui_button(9, 0);
 assert.equal(f32[summaryIdx + 38], 1.0); // saveArmed === true
-ex.wasm_ui_white_pressure(13, 0.90);     // Store into SNAP 2!
-ex.wasm_ui_white_gate(13, 0);
+ex.wasm_ui_white_pressure(9, 0.90);      // Store into SNAP 2!
+ex.wasm_ui_white_gate(9, 0);
 assert.equal(f32[summaryIdx + 38], 0.0); // saveArmed cleared!
 for (let i = 0; i < 12; i++) {
   ex.wasm_ui_tick_and_render(0.2);
 }
-// Clean active SNAP 2 rests at 16% (< 22% Octave), inactive SNAP slots rest at 8%
-assert.ok(Math.abs(f32[ledsIdx + 11 + 13] - 0.16) < 1e-4);
-assert.ok(Math.abs(f32[ledsIdx + 11 + 12] - 0.08) < 1e-4);
+// Clean active SNAP 2 rests at 100%, inactive occupied SNAP slots rest at 16%
+assert.ok(Math.abs(f32[ledsIdx + 11 + 9] - 1.0) < 1e-4);
+assert.ok(Math.abs(f32[ledsIdx + 11 + 8] - 0.16) < 1e-4);
 
-// Turn PRESETS encoder (1) CW -> SNAP 3 (27.5 Hz sub-tectonic) and verify tick_and_render sets dirty!
+// Turn PRESETS encoder (1) CW -> smooth continuous overlapping morph toward SNAP 3 (27.5 Hz)!
 ex.wasm_ui_consume_dirty();
-ex.wasm_ui_encoder(1, 4);
+ex.wasm_ui_encoder(1, 4); // 1 detent: gentle partial morph (not a discrete jump!)
 assert.equal(ex.wasm_ui_consume_dirty(), 1);
-for (let i = 0; i < 6; i++) {
-  ex.wasm_ui_tick_and_render(0.1);
-}
-assert.equal(ex.wasm_ui_consume_dirty(), 1); // Smooth glide inside tick_and_render dirties control!
-assert.ok(Math.abs(f32[summaryIdx + 0] - 27.5) < 0.1);
+ex.wasm_ui_tick_and_render(0.016);
+const partialMorphHz = f32[summaryIdx + 0];
+assert.ok(partialMorphHz < osc1HzBeforeSave && partialMorphHz > 40.0);
+ex.wasm_ui_encoder(1, 44); // +11 more detents -> centered on SNAP 3 with neighboring overlap
+ex.wasm_ui_tick_and_render(0.016);
+assert.ok(f32[summaryIdx + 0] < partialMorphHz && f32[summaryIdx + 0] < 42.0);
 
-// Tap Key 14 (white 13 = SNAP 2) -> glides smoothly back to saved patch!
-ex.wasm_ui_white_pressure(13, 1.0);
-ex.wasm_ui_white_gate(13, 0);
+// Tap Key 10 (white 9 = SNAP 2) -> glides smoothly back to saved patch & dirties control in tick!
+ex.wasm_ui_white_pressure(9, 1.0);
+ex.wasm_ui_white_gate(9, 0);
+ex.wasm_ui_consume_dirty();
 for (let i = 0; i < 6; i++) {
   ex.wasm_ui_tick_and_render(0.1);
 }
+assert.equal(ex.wasm_ui_consume_dirty(), 1);
 assert.ok(Math.abs(f32[summaryIdx + 0] - osc1HzBeforeSave) < 0.1);
 
 // Switch across 3-model SEL carousel (0..2 -> RhythmLab at end) then select 2/3 CIRCUIT LAB (1)
@@ -390,14 +393,14 @@ assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 1.0);
 ex.wasm_ui_button(3, 1);
 ex.wasm_ui_button(3, 0);
 
-// Exercise CROSS-PIN (white 4), FOLD (white 8), CRUSH (white 12), RING MOD (OP6), HARD SYNC (MONO), SCREAM (GLO)
-ex.wasm_ui_white_pressure(4, 0.85);
-ex.wasm_ui_white_pressure(8, 0.90);
-ex.wasm_ui_white_pressure(12, 0.95);
-ex.wasm_ui_black_pressure(5, 0.90);
-ex.wasm_ui_black_pressure(8, 1.00);
-ex.wasm_ui_black_pressure(7, 0.95);
-assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 7.0); // GLO SCREAM routes to KnobBankMode::GlobalFilter (7)
+// Exercise CROSS-PIN (white 0), FOLD (white 4), CRUSH (white 8), RING MOD (OP2), HARD SYNC (OP5), SCREAM (OP4)
+ex.wasm_ui_white_pressure(0, 0.85);
+ex.wasm_ui_white_pressure(4, 0.90);
+ex.wasm_ui_white_pressure(8, 0.95);
+ex.wasm_ui_black_pressure(1, 0.90);
+ex.wasm_ui_black_pressure(4, 1.00);
+ex.wasm_ui_black_pressure(3, 0.95);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 7.0); // OP4 SCREAM routes to KnobBankMode::GlobalFilter (7)
 u8.copyWithin(
   ex.wasm_dsp_get_control_ptr(),
   ex.wasm_ui_get_control_ptr(),
@@ -413,21 +416,21 @@ for (let i = 0; i < 128; i++) {
 }
 ex.wasm_ui_tick_and_render(0.2);
 assert.ok(f32[ledsIdx + 40] > 0.70); // Red REC warning LED flares during SCREAM
-ex.wasm_ui_black_key(5, 0);
-ex.wasm_ui_black_key(7, 0);
-ex.wasm_ui_black_key(8, 0);
+ex.wasm_ui_black_key(1, 0);
+ex.wasm_ui_black_key(3, 0);
+ex.wasm_ui_black_key(4, 0);
+ex.wasm_ui_white_gate(0, 0);
 ex.wasm_ui_white_gate(4, 0);
-ex.wasm_ui_white_gate(8, 0);
 
-// Isolate CRUSH 1 (white 12) + render HUD strips -> verify 42-LED binary bus & strict B&W RGBA neutrality
+// Isolate CRUSH 1 (white 8) + render HUD strips -> verify 42-LED binary bus & strict B&W RGBA neutrality
 ex.wasm_ui_tick_and_render(0.2);
-assert.ok(Math.abs(f32[ledsIdx + 11 + 12] - 1.0) < 1e-4);
+assert.ok(Math.abs(f32[ledsIdx + 11 + 8] - 1.0) < 1e-4);
 const playRgba = u8.subarray(rgbaStart, rgbaStart + 240 * 240 * 4);
 for (let i = 0; i < playRgba.length; i += 4) {
   assert.equal(playRgba[i], playRgba[i + 1]);
   assert.equal(playRgba[i + 1], playRgba[i + 2]);
 }
-ex.wasm_ui_white_gate(12, 0);
+ex.wasm_ui_white_gate(8, 0);
 ex.wasm_ui_tick_and_render(0.2);
 
 // Switch to 3/3 RHYTHM LAB (2), lock external 24-PPQN MIDI Clock @ 135 BPM via wasm_ui_midi_realtime,
@@ -472,9 +475,9 @@ for (let k = 0; k < 32; k++) {
 assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CLOCK_SYNCED], 1.0);
 assert.ok(Math.abs(f32[summaryIdx + WASM_SUMMARY.EFFECTIVE_CLOCK_BPM] - 135.0) < 0.5);
 
-ex.wasm_ui_white_pressure(12, 0.70); // EUCLID 1
-ex.wasm_ui_black_pressure(7, 0.85);  // GLO PLUCK
-ex.wasm_ui_black_pressure(9, 0.75);  // POLY SWING
+ex.wasm_ui_white_pressure(8, 0.70); // EUCLID 1
+ex.wasm_ui_black_pressure(3, 0.85); // OP4 PLUCK
+ex.wasm_ui_black_pressure(5, 0.75); // OP6 SWING
 u8.copyWithin(
   ex.wasm_dsp_get_control_ptr(),
   ex.wasm_ui_get_control_ptr(),
@@ -502,9 +505,9 @@ for (let i = 0; i < rhyRgba.length; i += 4) {
   assert.equal(rhyRgba[i], rhyRgba[i + 1]);
   assert.equal(rhyRgba[i + 1], rhyRgba[i + 2]);
 }
-ex.wasm_ui_white_gate(12, 0);
-ex.wasm_ui_black_key(7, 0);
-ex.wasm_ui_black_key(9, 0);
+ex.wasm_ui_white_gate(8, 0);
+ex.wasm_ui_black_key(3, 0);
+ex.wasm_ui_black_key(5, 0);
 // Default MIDI TRANSPORT IN == OFF ignores 0xFC Stop (external 135 BPM clock & audio stay untouched)
 ex.wasm_ui_midi_realtime(0xFC, 6.0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CLOCK_SYNCED], 1.0);
@@ -581,20 +584,18 @@ assert.ok(Math.abs(f32[ledsIdx + 27 + 4] - 0.075) < 0.005);
 ex.wasm_ui_tick_and_render(0.065);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 4]) < 1e-4);
 
-// Arm SAVE (button 9), turn SELECT (encoder 0) to DELETE SCENE, delete SCENE 2 (white key 13),
+// Arm SAVE (button 9), turn SELECT (encoder 0) to DELETE SCENE, delete SCENE 2 (white key 9),
 // and verify PRESETS (encoder 1) skips deleted SCENE 2 straight from SCENE 1 -> SCENE 3 (27.5 Hz):
 ex.wasm_ui_button(9, 1); // SAVE -> arm STORE SCENE
 ex.wasm_ui_button(9, 0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.SAVE_ARMED], 1.0);
 ex.wasm_ui_encoder(0, 4); // SELECT -> DELETE SCENE
-ex.wasm_ui_white_gate(13, 1); // Delete SCENE 2
-ex.wasm_ui_white_gate(13, 0);
+ex.wasm_ui_white_gate(9, 1); // Delete SCENE 2
+ex.wasm_ui_white_gate(9, 0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.SAVE_ARMED], 0.0);
-ex.wasm_ui_encoder(1, 4); // PRESETS +1 detent -> skips SCENE 2 -> lands on SCENE 3
-for (let i = 0; i < 12; i++) {
-  ex.wasm_ui_tick_and_render(0.06);
-}
-assert.ok(Math.abs(f32[summaryIdx + WASM_SUMMARY.VOICE_BASE] - 27.5) < 0.1);
+ex.wasm_ui_encoder(1, 48); // PRESETS +12 detents -> skips deleted SCENE 2 & centers on SCENE 3
+ex.wasm_ui_tick_and_render(0.06);
+assert.ok(f32[summaryIdx + WASM_SUMMARY.VOICE_BASE] < 45.0 && f32[summaryIdx + WASM_SUMMARY.VOICE_BASE] > 25.0);
 
 console.log(
   `[PASS] Wasm V8 verification (${(bytes.length / 1024).toFixed(1)} KB wasm, ${shades.size} neutral B&W shades).`

@@ -98,7 +98,7 @@ inline void shadeUnipolarGraphColumn(size_t colX, float yA, float yB, float zero
     const float hornBoost =
         1.0f + 0.42f * clampf((zeroRefY - yTopSeg) * (1.0f / 56.0f), 0.0f, 1.0f);
     const float glowAmp = baseGlowAmp * hornBoost;
-    const float invL2 = 1.0f / (1.0f + dy * dy);
+    const float invL2 = fastRecipPos(1.0f + dy * dy);
     const bool steepSeg = (absDy > 1.5f);
 
     for (int py = pyStart; py <= pyEnd; ++py) {

@@ -50,7 +50,6 @@ void HudGraphs::stepFadeOut(float dtClamped) noexcept {
 void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
                                   const std::array<ModulatedFilterParams, kNumOscillators>& mods,
                                   bool unified) noexcept {
-    std::array<std::array<int16_t, kFilterSweepPts>, kNumOscillators> tgtCurves{};
     float tgtHpX = filterHpBeadX_;
     float tgtHpY = filterHpBeadY_;
     float tgtHpInt = 0.0f;
@@ -60,6 +59,12 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
     float tgtLpInt = 0.0f;
     float tgtLpRad = filterLpBeadRad_;
 
+    const float alphaCurve =
+        snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.042f)));
+    const float alphaDiv = snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.055f)));
+    filterDivergenceSmooth_ =
+        slewScalar(filterDivergenceSmooth_, unified ? 0.0f : 1.0f, alphaDiv, 0.001f);
+
     if (unified) {
         const DualMs20Coeffs mainC = makeDualMs20Coeffs(mods[0].hpCutoffHz, mods[0].hpResonance,
                                                         mods[0].lpCutoffHz, mods[0].lpResonance);
@@ -67,10 +72,10 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
         for (size_t i = 0u; i < kFilterSweepPts; ++i) {
             const float freq = kFilterSweepFreqs[i];
             const int16_t yMain = dbToFilterYFixed(evalDualMs20Db(freq, mainC));
-            tgtCurves[0][i] = yMain;
-            tgtCurves[1][i] = yMain;
-            tgtCurves[2][i] = yMain;
-            tgtCurves[3][i] = yMain;
+            for (size_t v = 0u; v < kNumOscillators; ++v) {
+                filterCurvesFixed_[v][i] =
+                    slewQ8_6(filterCurvesFixed_[v][i], yMain, alphaCurve, snapImmediate);
+            }
         }
 
         if (mainC.hpAct > 0.02f) {
@@ -96,22 +101,10 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
             const DualMs20Coeffs c = makeDualMs20Coeffs(mods[v].hpCutoffHz, mods[v].hpResonance,
                                                         mods[v].lpCutoffHz, mods[v].lpResonance);
             for (size_t i = 0u; i < kFilterSweepPts; ++i) {
-                tgtCurves[v][i] = dbToFilterYFixed(evalDualMs20Db(kFilterSweepFreqs[i], c));
+                const int16_t yTgt = dbToFilterYFixed(evalDualMs20Db(kFilterSweepFreqs[i], c));
+                filterCurvesFixed_[v][i] =
+                    slewQ8_6(filterCurvesFixed_[v][i], yTgt, alphaCurve, snapImmediate);
             }
-        }
-    }
-
-    const float alphaCurve =
-        snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.042f)));
-    const float alphaDiv = snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.055f)));
-
-    filterDivergenceSmooth_ =
-        slewScalar(filterDivergenceSmooth_, unified ? 0.0f : 1.0f, alphaDiv, 0.001f);
-
-    for (size_t v = 0u; v < kNumOscillators; ++v) {
-        for (size_t i = 0u; i < kFilterSweepPts; ++i) {
-            filterCurvesFixed_[v][i] =
-                slewQ8_6(filterCurvesFixed_[v][i], tgtCurves[v][i], alphaCurve, snapImmediate);
         }
     }
 
@@ -140,10 +133,15 @@ void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate, bool showAll
                                const EngineControlState& control, const HudState& effectiveHud,
                                const LfoSignalArray& lfoOutput,
                                const LfoDriftArray& lfoDriftPacked) noexcept {
-    std::array<std::array<int16_t, kTracePoints>, kNumOscillators> tgtCurves{};
+    std::array<int16_t, kTracePoints> curve0{};
+    std::array<int16_t, kTracePoints> curveN{};
     std::array<float, kNumOscillators> tgtBeadInt{0.0f, 0.0f, 0.0f, 0.0f};
     float tgtSibWeight = 0.0f;
     bool unified = true;
+
+    const float alphaCurve =
+        snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.042f)));
+    const float alphaDiv = snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.055f)));
 
     constexpr float kInvPts = 1.0f / static_cast<float>(kTracePoints - 1u);
     static constexpr std::array<std::array<int8_t, 5>, kNumOscillators> kFallbackDriftKnots = {{
@@ -175,6 +173,12 @@ void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate, bool showAll
         }
         outLiveDepth = d;
     };
+    const auto slewVoiceCurve = [&](size_t v, const std::array<int16_t, kTracePoints>& tgt) {
+        for (size_t i = 0u; i < kTracePoints; ++i) {
+            lfoCurvesFixed_[v][i] =
+                slewQ8_6(lfoCurvesFixed_[v][i], tgt[i], alphaCurve, snapImmediate);
+        }
+    };
 
     if (!showAllVoices) {
         const uint8_t slot = effectiveHud.lfoVoiceFocus & 7u;
@@ -183,10 +187,12 @@ void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate, bool showAll
         const uint8_t sibSub = static_cast<uint8_t>(sub ^ 1u);
         float dMain = 0.0f;
         float dSib = 0.0f;
-        buildSlotCurve(v, sub, tgtCurves[0], dMain);
-        buildSlotCurve(v, sibSub, tgtCurves[1], dSib);
-        tgtCurves[2] = tgtCurves[0];
-        tgtCurves[3] = tgtCurves[0];
+        buildSlotCurve(v, sub, curve0, dMain);
+        buildSlotCurve(v, sibSub, curveN, dSib);
+        slewVoiceCurve(0u, curve0);
+        slewVoiceCurve(1u, curveN);
+        slewVoiceCurve(2u, curve0);
+        slewVoiceCurve(3u, curve0);
 
         lfoBeadBankIdx_[0] = static_cast<uint8_t>(lfoBankIndex(v, sub));
         lfoBeadBankIdx_[1] = static_cast<uint8_t>(lfoBankIndex(v, sibSub));
@@ -197,27 +203,21 @@ void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate, bool showAll
             const VoiceParams& vp = control.voices[v];
             const size_t sub = (vp.lfoBDepth > vp.lfoDepth && vp.lfoBDepth > 0.002f) ? 1u : 0u;
             float d = 0.0f;
-            buildSlotCurve(v, sub, tgtCurves[v], d);
+            auto& dst = (v == 0u) ? curve0 : curveN;
+            buildSlotCurve(v, sub, dst, d);
+            slewVoiceCurve(v, dst);
             lfoBeadBankIdx_[v] = static_cast<uint8_t>(lfoBankIndex(v, sub));
             tgtBeadInt[v] = 0.76f + 0.16f * smoothstep01(d * 3.0f);
-        }
-        for (size_t v = 1u; v < kNumOscillators; ++v) {
-            for (size_t i = 0u; i < kTracePoints; i += 8u) {
-                if (tgtCurves[v][i] - tgtCurves[0][i] > 16 ||
-                    tgtCurves[0][i] - tgtCurves[v][i] > 16) {
-                    unified = false;
-                    break;
+            if (v > 0u && unified) {
+                for (size_t i = 0u; i < kTracePoints; i += 8u) {
+                    if (curveN[i] - curve0[i] > 16 || curve0[i] - curveN[i] > 16) {
+                        unified = false;
+                        break;
+                    }
                 }
-            }
-            if (!unified) {
-                break;
             }
         }
     }
-
-    const float alphaCurve =
-        snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.042f)));
-    const float alphaDiv = snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.055f)));
 
     lfoDivergenceSmooth_ =
         slewScalar(lfoDivergenceSmooth_, unified ? 0.0f : 1.0f, alphaDiv, 0.001f);
@@ -226,10 +226,6 @@ void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate, bool showAll
                             : slewScalar(lfoSiblingWeight_, tgtSibWeight, alphaCurve, 0.002f);
 
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        for (size_t i = 0u; i < kTracePoints; ++i) {
-            lfoCurvesFixed_[v][i] =
-                slewQ8_6(lfoCurvesFixed_[v][i], tgtCurves[v][i], alphaCurve, snapImmediate);
-        }
         lfoBeadIntensity_[v] =
             snapImmediate ? tgtBeadInt[v]
                           : slewScalar(lfoBeadIntensity_[v], tgtBeadInt[v], alphaCurve, 0.002f);
@@ -388,7 +384,7 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
                     1.0f + 0.34f * clampf(maxSpan * (1.0f / kLfoMaxAmpPx), 0.0f, 1.0f);
                 const float colScale = fillScale * effLfoAlpha01;
                 const float glowAmp = 68.0f * crestBoost;
-                const float invL2 = 1.0f / (1.0f + dy * dy);
+                const float invL2 = fastRecipPos(1.0f + dy * dy);
                 const bool steepSeg = (absDy > 1.5f);
 
                 for (int py = pyStart; py <= pyEnd; ++py) {

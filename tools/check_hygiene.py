@@ -91,7 +91,14 @@ def main() -> int:
     )
     fm1_dir = ROOT / "platforms" / "fm1"
     fm1_c_files = sorted(
-        p for p in fm1_dir.glob("*") if p.suffix in {".h", ".c", ".cpp"} and p.is_file()
+        p
+        for p in [*fm1_dir.glob("*"), *(fm1_dir / "libc").glob("*.h")]
+        if p.suffix in {".h", ".c", ".cpp"} and p.is_file()
+    )
+    sim_c_files = sorted(
+        p
+        for p in (ROOT / "platforms" / "sim").glob("*")
+        if p.suffix in {".h", ".cpp"} and p.is_file()
     )
     fm1_py_files = sorted(
         p for p in fm1_dir.glob("*.py") if p.is_file()
@@ -100,7 +107,7 @@ def main() -> int:
         p for p in (ROOT / "tools").glob("*.py") if p.is_file()
     )
 
-    for path in [*fm1_c_files, *fm1_py_files, *tool_py_files]:
+    for path in [*fm1_c_files, *sim_c_files, *fm1_py_files, *tool_py_files]:
         rel = path.relative_to(ROOT)
         text = path.read_text(encoding="utf-8")
         line_count = text.count("\n") + (
@@ -245,7 +252,9 @@ def main() -> int:
     if not cf_bin:
         errors.append("[clang-format] clang-format binary not found")
     else:
-        cf_targets = [str(p) for p in (src_files + test_files + fm1_c_files)]
+        cf_targets = [
+            str(p) for p in (src_files + test_files + fm1_c_files + sim_c_files)
+        ]
         res = subprocess.run(
             [cf_bin, "--dry-run", "--Werror", *cf_targets],
             cwd=ROOT,

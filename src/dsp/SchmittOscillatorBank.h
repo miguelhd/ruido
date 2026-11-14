@@ -104,9 +104,13 @@ class SchmittOscillatorBank {
         float cachedMinSafeDuty = -1.0f;
         float cachedHalfInvHigh = 1.0f;
         float cachedHalfInvLow = 1.0f;
+        uint8_t blepPending = 0u;
     };
 
-    static void addCubicBsplineBlep(std::array<float, 4>& res, float d, float delta) noexcept;
+    static void addCubicBsplineBlep(VoiceState& v, float d, float delta) noexcept;
+    static void applyMasterHardSync(VoiceState& v, uint32_t incHighU32, uint32_t incLowU32,
+                                    float osc0WrapD) noexcept;
+    static void stepVoiceThermalDrift(VoiceState& v, float dAmt, bool enableDrift) noexcept;
     static float nextWhiteNoise(uint32_t& state) noexcept;
 
     std::array<VoiceState, kNumOscillators> voices_{};

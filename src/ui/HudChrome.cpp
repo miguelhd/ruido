@@ -106,9 +106,7 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
             const float pMul = computeVoicePitchRatio(control.voicePressure[k], pitchMode) *
                                control.keyMod.voicePitchMul[k];
             const float lfoHz = computeLiveVoicePitchHz(vp, lfoA, lfoB);
-            const float norm = clampf((fastLog2(lfoHz * pMul) - fastLog2(kAudioFreqMinHz)) /
-                                          (fastLog2(kAudioFreqMaxHz) - fastLog2(kAudioFreqMinHz)),
-                                      0.0f, 1.0f);
+            const float norm = normalizeOscFreqIndicator01(lfoHz * pMul);
             tgtSigned = 2.0f * norm - 1.0f;
             break;
         }

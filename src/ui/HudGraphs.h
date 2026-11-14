@@ -23,7 +23,7 @@ inline constexpr float kFilterYTop = kGraphTopY;
 inline constexpr float kFilterYZeroDb = 86.0f;
 inline constexpr float kFilterYBot = kGraphBaselineY;
 inline constexpr float kFilterDbToPx = 3.36f;
-inline constexpr float kFilterBgDimDepth = 0.72f; // 72% BG waveform dimming behind active graphs
+inline constexpr float kFilterBgDimDepth = 1.0f; // 100% BG waveform hide behind active menus
 
 inline constexpr float filterNormToScreenX(float u01) noexcept {
     return clampf(u01 * static_cast<float>(kDisplayWidth) - 0.5f, 0.0f,

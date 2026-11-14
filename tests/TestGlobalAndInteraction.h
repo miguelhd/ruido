@@ -369,7 +369,7 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
         }
     }
 
-    ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4); // Step SNAP 1 -> SNAP 2
+    ctrl.onEncoderDelta(ruido::EncoderId::Presets, 48); // Morph SNAP 1 -> SNAP 2 center
     ctrl.tick(0.200f, tel);
     RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::SnapshotSlot);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Snapshot);
@@ -559,11 +559,11 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -4);
     RTEST_CHECK(!ctrl.state().global.monoCollapse);
 
-    // Row 1 (MUTE MODE) & Row 2 (SOLO MODE): MOMENTARY (default) <-> LATCHING via SELECT/ALGORITHM
+    // Row 1 (Mute Mode) & Row 2 (Solo Mode): MOMENTARY (default) <-> LATCHING via SELECT/ALGORITHM
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 1u);
     RTEST_CHECK(
-        std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::MuteMode), "MUTE MODE") == 0);
+        std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::MuteMode), "Mute Mode") == 0);
     RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MuteMode,
                                                           ctrl.hud().config, ctrl.state().global),
                             "MOMENTARY") == 0);
@@ -578,7 +578,7 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 2u);
     RTEST_CHECK(
-        std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::SoloMode), "SOLO MODE") == 0);
+        std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::SoloMode), "Solo Mode") == 0);
     RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::SoloMode,
                                                           ctrl.hud().config, ctrl.state().global),
                             "MOMENTARY") == 0);
@@ -590,11 +590,11 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -4);
     RTEST_CHECK(ctrl.hud().config.soloMode == ruido::KeySwitchMode::Momentary);
 
-    // Row 3 (SCENE MODE): LATCHING (default) <-> MOMENTARY via SELECT/ALGORITHM
+    // Row 3 (Scene Mode): LATCHING (default) <-> MOMENTARY via SELECT/ALGORITHM
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 3u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::SnapMode),
-                            "SCENE MODE") == 0);
+                            "Scene Mode") == 0);
     RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::SnapMode,
                                                           ctrl.hud().config, ctrl.state().global),
                             "LATCHING") == 0);
@@ -606,11 +606,11 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     RTEST_CHECK(ctrl.hud().config.snapMode == ruido::KeySwitchMode::Latching);
 
-    // Row 4 (MIDI CLOCK IN): AUTO (default) <-> OFF via SELECT/ALGORITHM
+    // Row 4 (MIDI Clock In): AUTO (default) <-> OFF via SELECT/ALGORITHM
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 4u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::ClockSync),
-                            "MIDI CLOCK IN") == 0);
+                            "MIDI Clock In") == 0);
     RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::ClockSync,
                                                           ctrl.hud().config, ctrl.state().global),
                             "AUTO") == 0);
@@ -622,11 +622,11 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     RTEST_CHECK(ctrl.hud().config.clockSync == ruido::ClockSyncMode::Auto);
 
-    // Row 5 (MIDI TRANSPORT IN): OFF (default) -> PHASE -> RUN/STOP via SELECT/ALGORITHM
+    // Row 5 (MIDI Transport In): OFF (default) -> PHASE -> RUN/STOP via SELECT/ALGORITHM
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 5u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::MidiTransport),
-                            "MIDI TRANSPORT IN") == 0);
+                            "MIDI Transport In") == 0);
     RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::Off);
     RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MidiTransport,
                                                           ctrl.hud().config, ctrl.state().global),
@@ -644,11 +644,11 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -8);
     RTEST_CHECK(ctrl.hud().config.midiTransport == ruido::MidiTransportMode::Off);
 
-    // Row 6 (MIDI CHANNEL IN): OMNI (default) <-> CH 1..CH 16 + scrolled 6-row viewport check
+    // Row 6 (MIDI Channel In): OMNI (default) <-> CH 1..CH 16 + scrolled 6-row viewport check
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 6u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::MidiChannel),
-                            "MIDI CHANNEL IN") == 0);
+                            "MIDI Channel In") == 0);
     RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::MidiChannel,
                                                           ctrl.hud().config, ctrl.state().global),
                             "OMNI") == 0);
@@ -667,12 +667,111 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -80); // Clamped back to OMNI (0)
     RTEST_CHECK(ctrl.hud().config.midiChannel == 0u);
 
-    // Rows 7..8: Operational sub-screens (FACTORY RESET, RUIDO)
-    // 7a. FACTORY RESET requires 2 CW detents (8 ticks), cancels on CCW, and resets NVS + patch
+    // Row 7 (Key Sensitivity): MEDIUM (default) <-> VERY HIGH .. VERY LOW, label fits beside value
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 7u);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::PressureTouch),
+                            "Key Sensitivity") == 0);
+    RTEST_CHECK(ctrl.hud().config.pressureTouch == ruido::PressureTouch::Medium);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::PressureTouch,
+                                                          ctrl.hud().config, ctrl.state().global),
+                            "MEDIUM") == 0);
+    (void)ctrl.consumeSettingsDirty();
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -40); // Clamped at VERY HIGH
+    RTEST_CHECK(ctrl.hud().config.pressureTouch == ruido::PressureTouch::VeryLight);
+    RTEST_CHECK(ctrl.consumeSettingsDirty());
+    for (const char* lbl : ruido::kPressureTouchLabels) {
+        RTEST_CHECK(ruido::measureSansText(ruido::kFontSansMedium, "Key Sensitivity", 0) +
+                        ruido::measureSansText(ruido::kFontSansMedium, lbl, 0) + 12 <
+                    224 - 16);
+    }
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 40); // Clamped at VERY LOW
+    RTEST_CHECK(ctrl.hud().config.pressureTouch == ruido::PressureTouch::VeryFirm);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigValueLabel(ruido::ConfigItemId::PressureTouch,
+                                                          ctrl.hud().config, ctrl.state().global),
+                            "VERY LOW") == 0);
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+    verifyViewStripsAndCenter(false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -8); // Back to MEDIUM default
+    RTEST_CHECK(ctrl.hud().config.pressureTouch == ruido::PressureTouch::Medium);
+
+    // Key Pressure row doubles as a touch test: holding an analog key keeps the list on screen
+    // (no punch-in takeover) and draws a hairline meter along the selected row (y = 156 + 22).
+    {
+        const auto countMeterPx = [&]() {
+            size_t lit = 0u;
+            for (size_t y = 177u; y <= 179u; ++y) {
+                for (size_t x = 20u; x <= 220u; ++x) {
+                    if (((s16[y * 240u + x] >> 5u) & 0x3Fu) >= 40u) {
+                        ++lit;
+                    }
+                }
+            }
+            return lit;
+        };
+        renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+        renderer.renderFullScreenStrips(s16.data());
+        const size_t idleMeterPx = countMeterPx();
+        ctrl.onWhiteKeyGate(0u, true);
+        ctrl.onWhiteKeyPressure(0u, 1.0f);
+        ctrl.tick(0.016f, ruido::EngineTelemetry{});
+        RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::GlobalConfig);
+        for (int f = 0; f < 10; ++f) {
+            renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+        }
+        renderer.renderFullScreenStrips(s16.data());
+        const size_t fullMeterPx = countMeterPx();
+        RTEST_CHECK(fullMeterPx > idleMeterPx + 150u);
+        ctrl.onWhiteKeyGate(0u, false);
+        ctrl.tick(0.016f, ruido::EngineTelemetry{});
+        RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::GlobalConfig);
+        for (int f = 0; f < 80; ++f) { // 1.2 s peak hold + 150 ms fade
+            renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+        }
+        renderer.renderFullScreenStrips(s16.data());
+        RTEST_CHECK(countMeterPx() <= idleMeterPx);
+
+        // Touching an on/off key replaces the whole row with "Not pressure sensitive" (flush-left,
+        // 134 px), so the right-aligned value column (x = 184..224) goes dark while held.
+        RTEST_CHECK(ruido::measureSansText(ruido::kFontSansMedium, "Not pressure sensitive", 0) <
+                    184 - 16);
+        const auto valueAreaLit = [&]() {
+            size_t lit = 0u;
+            for (size_t y = 160u; y <= 175u; ++y) {
+                for (size_t x = 184u; x <= 224u; ++x) {
+                    if (((s16[y * 240u + x] >> 5u) & 0x3Fu) >= 30u) {
+                        ++lit;
+                    }
+                }
+            }
+            return lit;
+        };
+        renderer.renderFullScreenStrips(s16.data());
+        const size_t normalValuePx = valueAreaLit();
+        ctrl.onWhiteKeyGate(12u, true); // Key 13 = MUTE 1 (digital-only PA6)
+        ctrl.tick(0.016f, ruido::EngineTelemetry{});
+        RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::GlobalConfig);
+        for (int f = 0; f < 4; ++f) {
+            renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+        }
+        renderer.renderFullScreenStrips(s16.data());
+        RTEST_CHECK(normalValuePx > 20u);
+        RTEST_CHECK(valueAreaLit() + 20u < normalValuePx); // value replaced by the notice
+        ctrl.onWhiteKeyGate(12u, false);
+        ctrl.tick(0.016f, ruido::EngineTelemetry{});
+        for (int f = 0; f < 60; ++f) {
+            renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+        }
+        renderer.renderFullScreenStrips(s16.data());
+        RTEST_CHECK(valueAreaLit() + 4u >= normalValuePx); // "MEDIUM" value restored
+    }
+
+    // Rows 8..9: Operational sub-screens (Factory Reset, Ruido)
+    // 8a. FACTORY RESET requires 2 CW detents (8 ticks), cancels on CCW, and resets NVS + patch
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    RTEST_CHECK(ctrl.hud().configCursor == 8u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::FactoryReset),
-                            "FACTORY RESET") == 0);
+                            "Factory Reset") == 0);
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetConfirm);
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // 1 detent (50% progress) -> NOT reset yet
@@ -680,6 +779,21 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(ctrl.hud().configResetTicks == 4u);
     renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
     verifyViewStripsAndCenter(false);
+    {
+        uint32_t resetWhiteCols = 0u;
+        uint32_t resetTrackCols = 0u;
+        for (size_t x = 10u; x < 230u; ++x) {
+            const uint16_t px = s16[113u * 240u + x];
+            if (px == 0xFFFFu) {
+                ++resetWhiteCols;
+            } else if (px != 0u) {
+                ++resetTrackCols;
+            }
+        }
+        RTEST_CHECK(resetWhiteCols == 110u);
+        RTEST_CHECK(resetWhiteCols + resetTrackCols == 220u);
+        RTEST_CHECK(s16[120u * 240u + 4u] == 0u); // Zero background scope flatline bleed
+    }
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -8); // CCW cancels back to list safely
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::List);
 
@@ -687,20 +801,20 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // DELETE SCENE
-    ctrl.onWhiteKeyGate(12u, true);
-    ctrl.onWhiteKeyGate(12u, false);
+    ctrl.onWhiteKeyGate(8u, true);
+    ctrl.onWhiteKeyGate(8u, false);
     RTEST_CHECK(!ctrl.snapshots().isSlotOccupied(0u));
     (void)ctrl.consumeSavedSlotMask();
     (void)ctrl.consumeSettingsDirty();
 
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // Back to row 7 if needed (preserved at 7)
-    RTEST_CHECK(ctrl.hud().configCursor >= 7u);
-    if (ctrl.hud().configCursor != 7u) {
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // Back to row 8 if needed (preserved at 8)
+    RTEST_CHECK(ctrl.hud().configCursor >= 8u);
+    if (ctrl.hud().configCursor != 8u) {
         ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
     }
-    RTEST_CHECK(ctrl.hud().configCursor == 7u);
+    RTEST_CHECK(ctrl.hud().configCursor == 8u);
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // Enter confirm
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8); // 2 CW detents -> confirm reset!
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetDone);
@@ -712,18 +826,40 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::List);
 
-    // 7b. RUIDO about/credits (last row = 8): clamped at bottom, UTF-8 'á' acute width & monochrome
-    // render
-    ctrl.onEncoderDelta(ruido::EncoderId::Select, 16); // Clamped at last row (8)
-    RTEST_CHECK(ctrl.hud().configCursor == 8u);
-    RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::Credits), "RUIDO") ==
+    // 8b. RUIDO about/credits (last row = 9): clamped at bottom, UTF-8 'á' acute width,
+    //     flush-left x=10 alignment across header wordmark & body rows, and monochrome render
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 16); // Clamped at last row (9)
+    RTEST_CHECK(ctrl.hud().configCursor == 9u);
+    RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::Credits), "Ruido") ==
                 0);
+    RTEST_CHECK(std::strcmp(ruido::kRuidoVersionStr, "0.1.0") == 0);
     RTEST_CHECK(ruido::measureSansText(ruido::kFontSansMedium, "Hern\xC3\xA1ndez", 0) ==
                 ruido::measureSansText(ruido::kFontSansMedium, "Hernandez", 0));
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::Credits);
     renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
     verifyViewStripsAndCenter(false);
+    {
+        static std::array<uint16_t, 240u * 240u> creditsFrame{};
+        renderer.renderFullScreenStrips(creditsFrame.data());
+        const auto firstLitXInBand = [&](size_t yStart, size_t yEnd) -> int {
+            int minX = 240;
+            for (size_t y = yStart; y <= yEnd; ++y) {
+                for (int x = 0; x < 40; ++x) {
+                    if (creditsFrame[y * 240u + static_cast<size_t>(x)] != 0u && x < minX) {
+                        minX = x;
+                    }
+                }
+            }
+            return minX;
+        };
+        RTEST_CHECK(firstLitXInBand(5u, 22u) == 10);    // RUIDO header wordmark
+        RTEST_CHECK(firstLitXInBand(46u, 60u) == 10);   // 4-Oscillator Drone Synthesizer
+        RTEST_CHECK(firstLitXInBand(78u, 92u) == 10);   // By Miguel Hernández Domenech
+        RTEST_CHECK(firstLitXInBand(102u, 116u) == 10); // GPL-3.0  /  2026  /  Dinghy HAL
+        RTEST_CHECK(firstLitXInBand(126u, 140u) == 10); // github.com/miguelhd/ruido
+        RTEST_CHECK(creditsFrame[120u * 240u + 4u] == 0u);
+    }
 
     // Close GLOBAL CONFIG via 2nd GloRight tap -> 150 ms smooth fade-out
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
@@ -968,7 +1104,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     RTEST_CHECK(std::strcmp(ruido::lfoShapeLabel(0.88f), "SQR-RND") == 0);
     RTEST_CHECK(std::strcmp(ruido::lfoShapeLabel(1.00f), "RANDOM") == 0);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::OutputRouting),
-                            "OUTPUT ROUTING") == 0);
+                            "Output Routing") == 0);
 
     // Verify 240x8 == 240x16 == 240x24 strip equivalence & monochrome neutrality across all 3 EDIT
     // modes (DUTY · DRIFT · LEVEL) + EDIT Page 2 (PAN)
@@ -1108,7 +1244,7 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         ctrl.tick(0.016f, driveTel);
         renderer.prepareFrame(0.016f, quietSt, ctrl.hud(), driveTel);
     }
-    const float ledSubA = ctrl.leds().whiteKeyLeds[0];
+    const float ledSubA = ctrl.leds().whiteKeyLeds[12];
     renderer.renderFullScreenStrips(amp16.data());
     RTEST_CHECK(maxOscLabelG6(amp16, 0u) <= 22u);
     RTEST_CHECK(maxOscLabelG6(amp16, 2u) >= 35u);
@@ -1117,8 +1253,8 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         ctrl.tick(0.016f, driveTel);
         renderer.prepareFrame(0.016f, quietSt, ctrl.hud(), driveTel);
     }
-    const float ledSubB = ctrl.leds().whiteKeyLeds[0];
-    RTEST_CHECK(std::fabs(ledSubB - ledSubA) > 0.008f);
+    const float ledSubB = ctrl.leds().whiteKeyLeds[12];
+    RTEST_CHECK(nearF(ledSubA, 0.0f) && nearF(ledSubB, 0.0f));
     renderer.renderFullScreenStrips(clean16.data());
     bool lowerRailSteadySubAudio = true;
     for (size_t y = 190u; y < 240u; ++y) {
@@ -1755,23 +1891,23 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
             renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
         }
 
-        // Pressing MUTE 1 (white 0) or SOLO 1 (OP1) — even while HOME is latched open — hides the
+        // Pressing MUTE 1 (white 12) or SOLO 1 (PIT) — even while HOME is latched open — hides the
         // modulator dots on the MUTE/SOLO screen and restores them upon key release:
-        ctrl.onWhiteKeyPressure(0u, 0.80f); // MUTE 1
+        ctrl.onWhiteKeyPressure(12u, 0.80f); // MUTE 1
         ctrl.tick(0.02f, modTel);
         renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
         renderer.renderFullScreenStrips(clean16.data());
         RTEST_CHECK(g6At(clean16, 22, kModY) == 0u && g6At(clean16, 32, kModY) == 0u &&
                     g6At(clean16, 38, kModY) == 0u);
-        ctrl.onWhiteKeyGate(0u, false);
+        ctrl.onWhiteKeyGate(12u, false);
 
-        ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op1, 0.80f); // SOLO 1
+        ctrl.onBlackKeyPressure(ruido::BlackKeyId::Pit, 0.80f); // SOLO 1
         ctrl.tick(0.02f, modTel);
         renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
         renderer.renderFullScreenStrips(clean16.data());
         RTEST_CHECK(g6At(clean16, 22, kModY) == 0u && g6At(clean16, 32, kModY) == 0u &&
                     g6At(clean16, 38, kModY) == 0u);
-        ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
+        ctrl.onBlackKeyEvent(ruido::BlackKeyId::Pit, false);
         ctrl.tick(0.02f, modTel);
         renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
         renderer.renderFullScreenStrips(clean16.data());
@@ -1956,10 +2092,10 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     }
 
     // Pressing a key while SEL is open jumps live to native KeyboardPlay and returns on release!
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Glo, 0.70f);
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op4, 0.70f);
     RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::KeyboardPlay);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::GlobalFilter);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op4, false);
     RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::KeyboardModel);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::None);
 
@@ -2030,51 +2166,53 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         }
     };
 
-    // OP1..OP4 Immediate Console Solo -> OP_v = 100% (MUTE_v = 0%), peers MUTE = 100% (OP = 0%),
-    // with zero extraneous highlights on Keys 5-16 or FX/HOME!
+    // PIT..POLY (6..9) Immediate Console Solo -> SOLO_v = 100%, peer SOLO = 0%, all MUTE 1-4 = 0%
+    // (binary switch state only), with zero extraneous highlights on Keys 1-12 or FX/HOME!
     for (uint8_t v = 0u; v < 4u; ++v) {
-        const auto key = static_cast<ruido::BlackKeyId>(v);
+        const auto key = static_cast<ruido::BlackKeyId>(ruido::kSoloBlackKeyBase + v);
         const size_t peer = (v + 1u) & 3u;
         ctrl.onBlackKeyPressure(key, 0.20f);
         ctrl.tick(0.016f, tel);
         RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::SpotlightSolo);
         RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
-        RTEST_CHECK(ctrl.state().keyMod.voiceGainMul[v] >= 1.0f);
+        RTEST_CHECK(nearF(ctrl.state().keyMod.voiceGainMul[v], 1.0f));
         RTEST_CHECK(nearF(ctrl.state().keyMod.voiceGainMul[peer], 0.0f));
-        RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[v], 1.0f));
-        RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[peer], 0.0f));
-        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[v], 0.0f));
-        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[peer], 1.0f));
-        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[4u + v], 0.42f));
-        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8u + v], 0.22f));
-        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12u + v], 0.08f));
+        RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[ruido::kSoloBlackKeyBase + v], 1.0f));
+        RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[ruido::kSoloBlackKeyBase + peer], 0.0f));
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[ruido::kMuteWhiteKeyBase + v], 0.0f));
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[ruido::kMuteWhiteKeyBase + peer], 0.0f));
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[v], 0.82f));
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[4u + v], 0.48f));
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8u + v], 0.16f));
         RTEST_CHECK(nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)], 0.15f));
         ctrl.onBlackKeyEvent(key, false);
         ctrl.tick(0.016f, tel);
         verifyRestored();
     }
 
-    // OP5 Drive -> native Amplitude view + full-device VU bar + red REC clip beacon
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op5, 0.92f);
+    // OP1 Drive -> native Amplitude view + full-device VU bar + red REC clip beacon (MUTE 1-4 stay
+    // strictly binary 0%)
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op1, 0.92f);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::OverloadSurge);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Amplitude);
     RTEST_CHECK(nearF(ctrl.state().keyMod.overloadSurge, 0.92f));
-    RTEST_CHECK(ctrl.leds().whiteKeyLeds[0] > 0.70f && ctrl.leds().whiteKeyLeds[15] > 0.70f);
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12], 0.0f) && ctrl.leds().whiteKeyLeds[0] > 0.70f &&
+                ctrl.leds().whiteKeyLeds[11] > 0.70f);
     RTEST_CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Rec)] > 0.65f);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Rec)], 0.0f));
     verifyRestored();
 
-    // OP6 Sub Octave (continuous 0.0 -> -2.0 Oct dive across [0, 1] + OCT- beacon)
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op6, 0.25f);
+    // OP2 Sub Octave (continuous 0.0 -> -2.0 Oct dive across [0, 1] + OCT- beacon)
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op2, 0.25f);
     const float sub25 = ctrl.state().keyMod.voicePitchMul[0];
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op6, 0.50f);
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op2, 0.50f);
     const float sub50 = ctrl.state().keyMod.voicePitchMul[0];
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op6, 0.75f);
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op2, 0.75f);
     const float sub75 = ctrl.state().keyMod.voicePitchMul[0];
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op6, 1.00f);
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op2, 1.00f);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::SubDrop);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
@@ -2084,33 +2222,38 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(nearF(ctrl.state().keyMod.voicePitchMul[0], 0.25f, 1.0e-3f));
     RTEST_CHECK(
         nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)], 1.0f));
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op2, false);
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
-    // PIT Ratio Lock (pulls detuned Osc 2 = 82.41 Hz onto pure 3/2 = 82.50 Hz relative to 55 Hz)
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Pit, 1.0f);
+    // OP3 Ratio Lock (pulls detuned Osc 2 = 82.41 Hz onto pure 3/2 = 82.50 Hz relative to 55 Hz)
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op3, 1.0f);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::RatioMagnet);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
     const float lockedHz1 =
         ctrl.state().voices[1].frequencyHz * ctrl.state().keyMod.voicePitchMul[1];
     RTEST_CHECK(nearF(lockedHz1, 82.50f, 0.05f));
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Pit, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op3, false);
     verifyRestored();
 
-    // GLO Low Pass -> native 4-voice GlobalFilter MS-20 passband curve + right-to-left curtain LEDs
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Glo, 0.85f);
+    // OP4 Low Pass -> native 4-voice GlobalFilter MS-20 passband curve + right-to-left curtain LEDs
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op4, 0.65f);
+    ctrl.tick(0.016f, tel);
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12], 0.0f) &&
+                ctrl.leds().whiteKeyLeds[3] > ctrl.leds().whiteKeyLeds[11] + 0.60f);
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op4, 0.85f);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::DubLpfDrop);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::GlobalFilter);
     RTEST_CHECK(nearF(ctrl.state().keyMod.dubLpfDrop, 0.85f));
-    RTEST_CHECK(ctrl.leds().whiteKeyLeds[2] > ctrl.leds().whiteKeyLeds[14] + 0.40f);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
+    RTEST_CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctPlus)] >
+                ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::GloRight)] + 0.70f);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op4, false);
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
-    // MONO (UNISON: collapses Osc 2-4 pitches onto Osc 1 ~55 Hz + centers pan, undimmed scope!)
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Mono, 1.0f);
+    // OP5 (UNISON: collapses Osc 2-4 pitches onto Osc 1 ~55 Hz + centers pan, undimmed scope!)
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op5, 1.0f);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::MonoFocus);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
@@ -2130,13 +2273,14 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     }
     RTEST_CHECK(nearF(ctrl.state().keyMod.spatialFocus, -1.0f));
     RTEST_CHECK(ctrl.state().keyMod.ratioLockAmount > 0.70f);
-    RTEST_CHECK(ctrl.leds().whiteKeyLeds[7] > 0.90f && ctrl.leds().whiteKeyLeds[0] < 0.05f);
+    RTEST_CHECK(ctrl.leds().whiteKeyLeds[5] > 0.90f && ctrl.leds().whiteKeyLeds[1] < 0.05f &&
+                nearF(ctrl.leds().whiteKeyLeds[12], 0.0f));
     RTEST_CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Env)] > 0.90f);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
     verifyRestored();
 
-    // POLY (DETUNE SPREAD: detuned pitch swarm + Schmitt PWM duty shifts + wide pan)
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Poly, 1.0f);
+    // OP6 (DETUNE SPREAD: detuned pitch swarm + Schmitt PWM duty shifts + wide pan)
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op6, 1.0f);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::PolySpread);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
@@ -2159,9 +2303,10 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(ctrl.state().keyMod.voicePwDelta[0] < -0.15f);
     RTEST_CHECK(ctrl.state().keyMod.voicePwDelta[3] > 0.20f);
     RTEST_CHECK(nearF(ctrl.state().keyMod.spatialFocus, 1.0f));
-    RTEST_CHECK(ctrl.leds().whiteKeyLeds[0] > 0.90f && ctrl.leds().whiteKeyLeds[7] < 0.06f);
+    RTEST_CHECK(ctrl.leds().whiteKeyLeds[11] > 0.90f && ctrl.leds().whiteKeyLeds[5] < 0.06f &&
+                nearF(ctrl.leds().whiteKeyLeds[12], 0.0f));
     RTEST_CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)] > 0.90f);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
     verifyRestored();
 
     // 11th Key Stasis Freeze -> Scope
@@ -2172,38 +2317,39 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
-    // Bottom Keys on LIVE MIXER: Mute (0..3), Filter (4..7), Octave (8..11)
+    // Bottom Keys on LIVE MIXER: Filter (0..3), Octave (4..7), Mute (12..15)
     for (uint8_t v = 0u; v < 4u; ++v) {
-        // MUTE v: immediate full mute on touch -> MUTE_v = 100%, OP_v = 0%, zero FX/HOME side-glow
-        ctrl.onWhiteKeyPressure(v, 0.20f);
+        // MUTE v: immediate full mute on touch -> MUTE_v = 100%, SOLO_v = 0%, zero FX/HOME
+        // side-glow
+        ctrl.onWhiteKeyPressure(static_cast<uint8_t>(ruido::kMuteWhiteKeyBase + v), 0.20f);
         ctrl.tick(0.016f, tel);
         RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::VoiceCut);
         RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
         RTEST_CHECK(nearF(ctrl.state().keyMod.voiceGainMul[v], 0.0f));
-        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[v], 1.0f));
-        RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[v], 0.0f));
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[ruido::kMuteWhiteKeyBase + v], 1.0f));
+        RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[ruido::kSoloBlackKeyBase + v], 0.0f));
         RTEST_CHECK(nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)], 0.15f));
-        ctrl.onWhiteKeyGate(v, false);
+        ctrl.onWhiteKeyGate(static_cast<uint8_t>(ruido::kMuteWhiteKeyBase + v), false);
 
-        ctrl.onWhiteKeyPressure(static_cast<uint8_t>(4u + v), 0.80f);
+        ctrl.onWhiteKeyPressure(v, 0.80f);
         RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::VoiceFormant);
         RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::VoiceFilter);
         RTEST_CHECK(ctrl.hud().focusedVoice == v);
         RTEST_CHECK(nearF(ctrl.state().voicePressure[v], 0.80f));
-        ctrl.onWhiteKeyGate(static_cast<uint8_t>(4u + v), false);
+        ctrl.onWhiteKeyGate(v, false);
 
-        // OCTAVE v (Keys 8..11): continuous +0.0 -> +2.0 Oct siren climb (+1 Oct at 0.50, +2 at 1)
-        ctrl.onWhiteKeyPressure(static_cast<uint8_t>(8u + v), 0.50f);
+        // OCTAVE v (Keys 4..7): continuous +0.0 -> +2.0 Oct siren climb (+1 Oct at 0.50, +2 at 1)
+        ctrl.onWhiteKeyPressure(static_cast<uint8_t>(4u + v), 0.50f);
         RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::VoiceSiren);
         RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
         RTEST_CHECK(nearF(ctrl.state().keyMod.voicePitchMul[v], 2.0f, 1.0e-3f));
-        ctrl.onWhiteKeyPressure(static_cast<uint8_t>(8u + v), 1.00f);
+        ctrl.onWhiteKeyPressure(static_cast<uint8_t>(4u + v), 1.00f);
         ctrl.tick(0.016f, tel);
         RTEST_CHECK(nearF(ctrl.state().keyMod.voicePitchMul[v], 4.0f, 1.0e-3f));
         RTEST_CHECK(ctrl.state().voicePressure[v] > 0.65f);
         RTEST_CHECK(
             nearF(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctPlus)], 1.0f));
-        ctrl.onWhiteKeyGate(static_cast<uint8_t>(8u + v), false);
+        ctrl.onWhiteKeyGate(static_cast<uint8_t>(4u + v), false);
         ctrl.tick(0.016f, tel);
 
         verifyRestored();
@@ -2265,18 +2411,18 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         checkStripAndMono();
         if (m == 0) {
             // Rounded stadium corners: enclosure bbox corner (8, 92) is pure black (0), whereas
-            // top flat edge (30, 92) is lit border; OP1 corner (23, 98) is dark bed vs arc (28, 98)
+            // top flat edge (30, 92) is lit border; 11th tall key corner (208, 98) is dark bed vs
+            // lit arc (212, 98)
             RTEST_CHECK(g6Px(8u, 92u) == 0u);
             RTEST_CHECK(g6Px(30u, 92u) >= 8u);
-            RTEST_CHECK(g6Px(23u, 98u) <= 5u);
-            RTEST_CHECK(g6Px(28u, 98u) >= 9u);
-            // 4-tier bottom slits step brightest -> faintest left-to-right: MUTE > FILTER > OCTAVE
-            // > SNAP
-            const uint16_t gMute = g6Px(21u, 145u);
-            const uint16_t gFilt = g6Px(74u, 145u);
-            const uint16_t gOct = g6Px(127u, 145u);
-            const uint16_t gSnap = g6Px(179u, 145u);
-            RTEST_CHECK(gMute > gFilt && gFilt > gOct && gOct > gSnap);
+            RTEST_CHECK(g6Px(208u, 98u) <= 5u);
+            RTEST_CHECK(g6Px(212u, 98u) >= 9u);
+            // 4-tier bottom slits step bright -> dark left-to-right: FILTER > OCTAVE > SNAP > MUTE
+            const uint16_t gFilt = g6Px(21u, 145u);
+            const uint16_t gOct = g6Px(74u, 145u);
+            const uint16_t gSnap = g6Px(127u, 145u);
+            const uint16_t gMute = g6Px(179u, 145u);
+            RTEST_CHECK(gFilt > gOct && gOct > gSnap && gSnap > gMute);
         }
         if (m < 2) {
             ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
@@ -2306,7 +2452,7 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     const uint16_t instructInitG6 = maxInstructG6();
     const uint16_t slitInitG6 = g6Px(21u, 145u);
     RTEST_CHECK(instructInitG6 >= 30u);
-    RTEST_CHECK(slitInitG6 >= 45u);
+    RTEST_CHECK(slitInitG6 >= 42u);
 
     for (int f = 0; f < 73; ++f) {
         ctrl.tick(0.10f, tel);
@@ -2327,7 +2473,7 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     const uint16_t instructDimG6 = maxInstructG6();
     const uint16_t slitDimG6 = g6Px(21u, 145u);
     RTEST_CHECK(instructDimG6 >= 14u && instructDimG6 < instructMidG6 - 3u);
-    RTEST_CHECK(slitDimG6 >= 22u && slitDimG6 < slitMidG6 - 5u);
+    RTEST_CHECK(slitDimG6 >= 18u && slitDimG6 < slitMidG6 - 5u);
 
     // Turning SELECT (even clamped at 1/3 end stop) wakes whole view back to 100% brightness!
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
@@ -2343,10 +2489,10 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false); // Dismiss SEL
 
     // Chording multiple keys routes to most-recent press & peels back LIFO on release!
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op5, 0.80f);
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op1, 0.80f);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::OverloadSurge);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Amplitude);
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Glo, 0.65f);
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op4, 0.65f);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::DubLpfDrop);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::GlobalFilter);
     quietSt = ctrl.state();
@@ -2358,16 +2504,16 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     }
     checkStripAndMono();
 
-    ctrl.onWhiteKeyPressure(9u, 0.90f); // OCTAVE 2 on LIVE MIXER
+    ctrl.onWhiteKeyPressure(5u, 0.90f); // OCTAVE 2 on LIVE MIXER
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::VoiceSiren);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
-    ctrl.onWhiteKeyGate(9u, false);
+    ctrl.onWhiteKeyGate(5u, false);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::DubLpfDrop);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::GlobalFilter);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op4, false);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::OverloadSurge);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Amplitude);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
     verifyRestored();
 
     // 4. Unified VoiceCircuit mute consistency across main-screen HUD columns, SOLO+STUTTER (on
@@ -2424,19 +2570,19 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     }
     verifyRestored();
 
-    // Comprehensive 2/4 CIRCUIT LAB (CMOS PATCH BAY) 27-Key Bends, Headers & 42-LED Light Shows:
-    // (a) CROSS-PIN 1-4 (Keys 5-8, white 4..7): neighbor pre-mute FM/XOR into Voice v + 42-LED arc
+    // Comprehensive 2/3 CIRCUIT LAB (CMOS PATCH BAY) 27-Key Bends, Headers & 42-LED Light Shows:
+    // (a) CROSS-PIN 1-4 (Keys 1-4, white 0..3): neighbor pre-mute FM/XOR into Voice v + 42-LED arc
     for (uint8_t v = 0u; v < 4u; ++v) {
         const size_t nbr = (v + 1u) & 3u;
-        ctrl.onWhiteKeyPressure(static_cast<uint8_t>(4u + v), 0.85f);
+        ctrl.onWhiteKeyPressure(v, 0.85f);
         ctrl.tick(0.025f, tel);
         RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::VoiceXMod);
         RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
         RTEST_CHECK(nearF(ctrl.state().keyMod.xmodDepth[v], 0.85f));
         RTEST_CHECK(ctrl.state().voicePressure[v] > 0.60f); // Modulates Voice v itself!
-        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[4u + v], 1.0f));
-        RTEST_CHECK(ctrl.leds().whiteKeyLeds[8u + nbr] > 0.35f ||
-                    ctrl.leds().whiteKeyLeds[8u + v] > 0.35f);
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[v], 1.0f));
+        RTEST_CHECK(ctrl.leds().whiteKeyLeds[4u + nbr] > 0.35f ||
+                    ctrl.leds().whiteKeyLeds[4u + v] > 0.35f);
         RTEST_CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)] > 0.20f);
         {
             char lm[24]{}, ls[16]{}, rt[32]{};
@@ -2447,21 +2593,21 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
             RTEST_CHECK(std::strcmp(lm, "CROSS-PIN") == 0);
             RTEST_CHECK(sb && nearF(bn, 0.85f, 1.0e-3f));
         }
-        ctrl.onWhiteKeyGate(static_cast<uint8_t>(4u + v), false);
+        ctrl.onWhiteKeyGate(v, false);
         ctrl.tick(0.016f, tel);
         verifyRestored();
     }
 
-    // (b) FOLD 1-4 (Keys 9-12, white 8..11): 1.0x -> 6.2x West-Coast wavefolder + standing crests
-    ctrl.onWhiteKeyPressure(8u, 1.0f); // FOLD 1 full pressure -> 6.2x
+    // (b) FOLD 1-4 (Keys 5-8, white 4..7): 1.0x -> 6.2x West-Coast wavefolder + standing crests
+    ctrl.onWhiteKeyPressure(4u, 1.0f); // FOLD 1 full pressure -> 6.2x
     ctrl.tick(0.025f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::VoiceFold);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
     RTEST_CHECK(nearF(ctrl.state().keyMod.foldDepth[0], 1.0f));
     RTEST_CHECK(ctrl.state().voicePressure[0] > 0.40f);
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8u], 1.0f));
-    RTEST_CHECK(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op6)] > 0.10f ||
-                ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Pit)] > 0.10f);
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[4u], 1.0f));
+    RTEST_CHECK(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op2)] > 0.10f ||
+                ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op3)] > 0.10f);
     {
         char lm[24]{}, ls[16]{}, rt[32]{};
         bool sb = false;
@@ -2471,21 +2617,21 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         RTEST_CHECK(std::strcmp(lm, "FOLD") == 0 && std::strcmp(ls, " OSC 1") == 0);
         RTEST_CHECK(std::strcmp(rt, "6.2x") == 0 && sb && nearF(bn, 1.0f));
     }
-    ctrl.onWhiteKeyGate(8u, false);
+    ctrl.onWhiteKeyGate(4u, false);
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
-    // (c) CRUSH 1-4 (Keys 13-16, white 12..15): CD4040 sub-XOR + CD4013 S&H clock + 16-bit LED bus
-    ctrl.onWhiteKeyPressure(12u, 1.0f); // CRUSH 1 full pressure -> ~165 Hz S&H clock
+    // (c) CRUSH 1-4 (Keys 9-12, white 8..11): CD4040 sub-XOR + CD4013 S&H clock + 16-bit LED bus
+    ctrl.onWhiteKeyPressure(8u, 1.0f); // CRUSH 1 full pressure -> ~165 Hz S&H clock
     ctrl.tick(0.045f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::VoiceCrush);
     RTEST_CHECK(nearF(ctrl.state().keyMod.crushDepth[0], 1.0f));
     RTEST_CHECK(ctrl.state().voicePressure[0] > 0.65f);
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12u], 1.0f));
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8u], 1.0f));
     {
-        // Verify binary ripple divider lights crisp hi/lo contrast across OP5..POLY
+        // Verify binary ripple divider lights crisp hi/lo contrast across OP1..OP6
         bool anyHi = false;
-        for (size_t b = 4u; b < 10u; ++b) {
+        for (size_t b = 0u; b < ruido::kNumTopMacroKeys; ++b) {
             if (ctrl.leds().blackKeyLeds[b] > 0.80f) {
                 anyHi = true;
             }
@@ -2499,35 +2645,35 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         RTEST_CHECK(std::strcmp(lm, "CRUSH") == 0 && std::strcmp(ls, " OSC 1") == 0);
         RTEST_CHECK(std::strcmp(rt, "165 Hz") == 0 && sb && nearF(bn, 1.0f));
     }
-    ctrl.onWhiteKeyGate(12u, false);
+    ctrl.onWhiteKeyGate(8u, false);
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
-    // (c) OP5 STARVE: rail overload/coupling surge + pitch sag + PWM squeeze + brownout dim
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op5, 0.90f);
+    // (c) OP1 STARVE: rail overload/coupling surge + pitch sag + PWM squeeze + brownout dim
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op1, 0.90f);
     ctrl.tick(0.025f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::RailStarve);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
     RTEST_CHECK(nearF(ctrl.state().keyMod.overloadSurge, 0.90f));
     RTEST_CHECK(ctrl.state().keyMod.voicePitchMul[0] < 0.56f);
-    RTEST_CHECK(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op5)] > 0.85f);
-    RTEST_CHECK(ctrl.leds().whiteKeyLeds[15u] < 0.25f); // Brownout dims passive pads!
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
+    RTEST_CHECK(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op1)] > 0.85f);
+    RTEST_CHECK(ctrl.leds().whiteKeyLeds[11u] < 0.25f); // Brownout dims passive pads!
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
-    // (d) OP6 RING MOD: balanced 4-quadrant / CMOS XOR mix + checkerboard alternating keys
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op6, 1.0f);
+    // (d) OP2 RING MOD: balanced 4-quadrant / CMOS XOR mix + checkerboard alternating keys
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op2, 1.0f);
     ctrl.tick(0.020f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::RingXor);
     RTEST_CHECK(nearF(ctrl.state().keyMod.ringModMix, 1.0f));
-    RTEST_CHECK(std::fabs(ctrl.leds().whiteKeyLeds[4u] - ctrl.leds().whiteKeyLeds[5u]) > 0.50f);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
+    RTEST_CHECK(std::fabs(ctrl.leds().whiteKeyLeds[0u] - ctrl.leds().whiteKeyLeds[1u]) > 0.50f);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op2, false);
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
-    // (e) PIT TURBO LFO: 1x -> 32x LFO overclock ("32.0x") + LFO button strobe
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Pit, 1.0f);
+    // (e) OP3 TURBO LFO: 1x -> 32x LFO overclock ("32.0x") + LFO button strobe
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op3, 1.0f);
     ctrl.tick(0.020f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::LfoTurbo);
     RTEST_CHECK(nearF(ctrl.state().keyMod.lfoTurbo, 1.0f));
@@ -2540,20 +2686,20 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         RTEST_CHECK(std::strcmp(lm, "TURBO LFO") == 0);
         RTEST_CHECK(std::strcmp(rt, "32.0x") == 0 && sb && nearF(bn, 1.0f));
     }
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Pit, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op3, false);
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
-    // (f) GLO SCREAM: opens GlobalFilter MS-20 passband curve + twin Korg35 peaks + red REC flare!
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Glo, 1.0f);
+    // (f) OP4 SCREAM: opens GlobalFilter MS-20 passband curve + twin Korg35 peaks + red REC flare!
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op4, 1.0f);
     ctrl.tick(0.020f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::FilterScream);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::GlobalFilter);
     RTEST_CHECK(nearF(ctrl.state().keyMod.filterScream, 1.0f));
     RTEST_CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)] > 0.85f);
     RTEST_CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Rec)] > 0.80f);
-    RTEST_CHECK(ctrl.leds().whiteKeyLeds[6u] > 0.70f && ctrl.leds().whiteKeyLeds[9u] > 0.70f);
-    RTEST_CHECK(ctrl.leds().whiteKeyLeds[4u] < 0.25f);
+    RTEST_CHECK(ctrl.leds().whiteKeyLeds[5u] > 0.65f && ctrl.leds().whiteKeyLeds[6u] > 0.65f);
+    RTEST_CHECK(ctrl.leds().whiteKeyLeds[0u] < 0.25f);
     {
         const ruido::ModulatedFilterParams vf = ruido::computeLiveVoiceFilter(
             ctrl.state().voices[0], 0.0f, 0.0f, 0.0f, 0.0f,
@@ -2568,30 +2714,30 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         renderer.prepareFrame(0.020f, quietSt, ctrl.hud(), tel);
     }
     checkStripAndMono();
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op4, false);
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
-    // (g) MONO HARD SYNC: OSC 1 master reset + left-column console anchor (FX + OCT-)
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Mono, 1.0f);
+    // (g) OP5 HARD SYNC: OSC 1 master reset + left-column console anchor (FX + OCT-)
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op5, 1.0f);
     ctrl.tick(0.020f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::HardSync);
     RTEST_CHECK(nearF(ctrl.state().keyMod.hardSyncAmount, 1.0f));
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[4u], 1.0f));
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[0u], 1.0f));
     RTEST_CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)] > 0.90f);
     RTEST_CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)] > 0.90f);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
-    // (h) POLY SCATTER: S&H stepped chaos across pitch + PWM + stereo pan
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Poly, 1.0f);
+    // (h) OP6 SCATTER: S&H stepped chaos across pitch + PWM + stereo pan
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op6, 1.0f);
     ctrl.tick(0.020f, tel);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::PhaseScatter);
     RTEST_CHECK(nearF(ctrl.state().keyMod.spatialFocus, 1.0f));
     RTEST_CHECK(std::fabs(ctrl.state().keyMod.voicePitchMul[0] - 1.0f) > 0.01f ||
                 std::fabs(ctrl.state().keyMod.voicePitchMul[1] - 1.0f) > 0.01f);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
     ctrl.tick(0.016f, tel);
     verifyRestored();
 
@@ -2614,20 +2760,20 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         ctrl.tick(0.020f, tel);
     }
 
-    // Turning Osc 1 LEVEL down to 0% in EDIT lights MUTE 1 = 100% and turns SOLO 1 = 0% dark, and
-    // pressing SOLO 1 while Osc 1 is at 0% never lights SOLO 1!
+    // Turning Osc 1 LEVEL down to 0% in EDIT leaves MUTE 1 and SOLO 1 strictly binary (0% off,
+    // 100% on — never tracking voice sound level):
     ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
     ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -400);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(ctrl.state().voices[0].amplitude <= 1.0e-4f);
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[0], 1.0f));
-    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[0], 0.0f));
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op1, 0.80f);
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12], 0.0f));
+    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[6], 0.0f));
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Pit, 0.80f);
     ctrl.tick(0.016f, tel);
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[0], 1.0f));
-    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[0], 0.0f));
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12], 0.0f));
+    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[6], 1.0f));
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Pit, false);
 
     // 5. Latching MUTE MODE & SOLO MODE via GLOBAL CONFIG across LEDs, DSP & HUD:
     ctrl.reset();
@@ -2642,36 +2788,36 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         ctrl.tick(0.020f, tel);
     }
 
-    // Tap & release MUTE 1 (white key 0) -> Osc 1 latches muted after release!
-    ctrl.onWhiteKeyGate(0u, true);
+    // Tap & release MUTE 1 (white key 12) -> Osc 1 latches muted after release!
+    ctrl.onWhiteKeyGate(12u, true);
     RTEST_CHECK(nearF(ctrl.hud().activePunchValue, 1.0f)); // Header shows "MUTED"
-    ctrl.onWhiteKeyGate(0u, false);
+    ctrl.onWhiteKeyGate(12u, false);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(nearF(ctrl.state().keyMod.voiceGainMul[0], 0.0f));
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[0], 1.0f));
-    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[0], 0.0f));
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12], 1.0f));
+    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[6], 0.0f));
 
-    // Momentary SOLO 1 (OP1) temporarily overrides latched mute while held, then returns on
+    // Momentary SOLO 1 (PIT) temporarily overrides latched mute while held, then returns on
     // release!
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op1, 0.60f);
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Pit, 0.60f);
     ctrl.tick(0.016f, tel);
-    RTEST_CHECK(ctrl.state().keyMod.voiceGainMul[0] >= 1.0f);
-    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[0], 1.0f));
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[0], 0.0f));
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
+    RTEST_CHECK(nearF(ctrl.state().keyMod.voiceGainMul[0], 1.0f));
+    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[6], 1.0f));
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12], 0.0f));
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Pit, false);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(nearF(ctrl.state().keyMod.voiceGainMul[0], 0.0f));
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[0], 1.0f));
-    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[0], 0.0f));
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12], 1.0f));
+    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[6], 0.0f));
 
-    // Second tap on MUTE 1 toggles Osc 1 back ON ("UNMUTED" while held, 64% rest on release)
-    ctrl.onWhiteKeyGate(0u, true);
+    // Second tap on MUTE 1 toggles Osc 1 back ON ("UNMUTED" while held, 0% dark on release)
+    ctrl.onWhiteKeyGate(12u, true);
     RTEST_CHECK(nearF(ctrl.hud().activePunchValue, 0.0f)); // Header shows "UNMUTED"
     RTEST_CHECK(nearF(ctrl.state().keyMod.voiceGainMul[0], 1.0f));
-    ctrl.onWhiteKeyGate(0u, false);
+    ctrl.onWhiteKeyGate(12u, false);
     ctrl.tick(0.016f, tel);
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[0], 0.64f));
-    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[0], 0.64f));
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12], 0.0f));
+    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[6], 0.0f));
 
     // Enable SOLO MODE = LATCHING alongside MUTE MODE = LATCHING
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
@@ -2681,18 +2827,18 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
 
-    // Tap & release OP2 -> latches SOLO 2 on (OP2 = 100%, MUTE 2 = 0%, peers MUTE = 100%, OP = 0%)
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op2, true);
+    // Tap & release GLO (SOLO 2) -> latches SOLO 2 on (SOLO 2 = 100%, MUTE = 0%, peer SOLO = 0%)
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, true);
     RTEST_CHECK(nearF(ctrl.hud().activePunchValue, 1.0f)); // Header shows "SOLOED"
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op2, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(ctrl.state().keyMod.soloMask == (1u << 1u));
     RTEST_CHECK(nearF(ctrl.state().keyMod.voiceGainMul[1], 1.0f));
     RTEST_CHECK(nearF(ctrl.state().keyMod.voiceGainMul[0], 0.0f));
-    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[1], 1.0f));
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[1], 0.0f));
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[0], 1.0f));
-    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[0], 0.0f));
+    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[7], 1.0f));
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[13], 0.0f));
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[12], 0.0f));
+    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[6], 0.0f));
 
     // Open HOME (latched FREQUENCY HUD) -> main screen reflects latched SOLO 2 (OSC 2 bright, peers
     // dimmed) with zero keys held!
@@ -2709,19 +2855,19 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(maxHudColG6(1u) >= 45u);
     RTEST_CHECK(maxHudColG6(0u) <= 32u);
 
-    // Tap & release OP3 -> duet solo (OSC 2 + OSC 3); then tap MUTE 2 -> clears solo on OSC 2 &
-    // latches OSC 2 muted while OSC 3 stays soloed!
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op3, true);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op3, false);
+    // Tap & release MONO (SOLO 3) -> duet solo (OSC 2 + OSC 3); then tap MUTE 2 -> clears solo on
+    // OSC 2 & latches OSC 2 muted while OSC 3 stays soloed!
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, true);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(ctrl.state().keyMod.soloMask == ((1u << 1u) | (1u << 2u)));
-    ctrl.onWhiteKeyGate(1u, true);
-    ctrl.onWhiteKeyGate(1u, false);
+    ctrl.onWhiteKeyGate(13u, true);
+    ctrl.onWhiteKeyGate(13u, false);
     ctrl.tick(0.016f, tel);
     RTEST_CHECK(ctrl.state().keyMod.soloMask == (1u << 2u));
-    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[2], 1.0f));
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[1], 1.0f));
-    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[1], 0.0f));
+    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[8], 1.0f));
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[13], 1.0f));
+    RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[7], 0.0f));
 
     // Switching SOLO MODE & MUTE MODE back to MOMENTARY in GLOBAL CONFIG clears all latches cleanly
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
@@ -2732,8 +2878,8 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     ctrl.tick(0.016f, tel);
     for (size_t v = 0u; v < 4u; ++v) {
         RTEST_CHECK(nearF(ctrl.state().keyMod.voiceGainMul[v], 1.0f));
-        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[v], 0.64f));
-        RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[v], 0.64f));
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[ruido::kMuteWhiteKeyBase + v], 0.0f));
+        RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[ruido::kSoloBlackKeyBase + v], 0.0f));
     }
 
     // 6. 4-Slot 128-Byte SnapshotBank: CRC-32, SAVE + Keys 13-16, LATCHING/MOMENTARY & PRESETS:
@@ -2770,15 +2916,15 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
                                     bn);
         RTEST_CHECK(std::strcmp(lm, "STORE SCENE") == 0);
         RTEST_CHECK(std::strcmp(rt, "TAP SCENE 1-4") == 0);
-        RTEST_CHECK(std::strcmp(ruido::kKeyboardModelSpecs[0].bottomZones[3], "SCENE") == 0);
+        RTEST_CHECK(std::strcmp(ruido::kKeyboardModelSpecs[0].bottomZones[2], "SCENE") == 0);
     }
     ctrl.tick(0.050f, tel);
-    // Armed SAVE pulses SCENE 1-4 (white keys 12..15) unmistakably above 25%!
+    // Armed SAVE pulses SCENE 1-4 (white keys 8..11) unmistakably above 25%!
     for (size_t s = 0u; s < 4u; ++s) {
-        RTEST_CHECK(ctrl.leds().whiteKeyLeds[12u + s] >= 0.25f);
+        RTEST_CHECK(ctrl.leds().whiteKeyLeds[ruido::kSceneWhiteKeyBase + s] >= 0.25f);
     }
 
-    ctrl.onWhiteKeyPressure(13u, 0.85f); // Store into SCENE 2 (Key 14)
+    ctrl.onWhiteKeyPressure(9u, 0.85f); // Store into SCENE 2 (Key 10)
     RTEST_CHECK(!ctrl.hud().saveArmed);
     RTEST_CHECK(ctrl.hud().snapshotSlot == 1u);
     RTEST_CHECK(!ctrl.hud().snapshotDirty);
@@ -2798,8 +2944,8 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
                                         sizeof(rl), vs, sizeof(vs), gs);
         RTEST_CHECK(std::strcmp(rl, "SCENE 2") == 0);
     }
-    // Releasing Key 14 after saving is swallowed cleanly (never re-triggers recall!)
-    ctrl.onWhiteKeyGate(13u, false);
+    // Releasing Key 10 after saving is swallowed cleanly (never re-triggers recall!)
+    ctrl.onWhiteKeyGate(9u, false);
     RTEST_CHECK(!ctrl.hud().snapshotGliding);
     RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, customHz0, 0.05f));
 
@@ -2813,12 +2959,12 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     }
     checkStripAndMono();
 
-    // Tweak Knob 1 away -> marks EDITED; tapping Key 14 (SNAP 2, LATCHING default) glides back!
+    // Tweak Knob 1 away -> marks EDITED; tapping Key 10 (SNAP 2, LATCHING default) glides back!
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -60);
     RTEST_CHECK(ctrl.hud().snapshotDirty);
     RTEST_CHECK(ctrl.state().voices[0].frequencyHz < 70.0f);
-    ctrl.onWhiteKeyPressure(13u, 1.0f); // Firm press (~80ms fast glide)
-    ctrl.onWhiteKeyGate(13u, false);
+    ctrl.onWhiteKeyPressure(9u, 1.0f); // Firm press (~80ms fast glide)
+    ctrl.onWhiteKeyGate(9u, false);
     RTEST_CHECK(ctrl.hud().snapshotGliding);
     for (int f = 0; f < 10; ++f) {
         ctrl.tick(0.020f, tel);
@@ -2828,18 +2974,18 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, customHz0, 0.08f));
     RTEST_CHECK(nearF(ctrl.state().global.circuitCoupling, customCoupling, 1.0e-3f));
 
-    // (c) Multi-key LATCHING pressure crossfade: hold SNAP 1 (Key 13) + SNAP 3 (Key 15) -> parks at
+    // (c) Multi-key LATCHING pressure crossfade: hold SNAP 1 (Key 9) + SNAP 3 (Key 11) -> parks at
     //     sculpted hybrid patch on release!
-    ctrl.onWhiteKeyPressure(12u, 0.50f); // SNAP 1 (55 Hz)
-    ctrl.onWhiteKeyPressure(14u, 0.50f); // SNAP 3 (27.5 Hz)
+    ctrl.onWhiteKeyPressure(8u, 0.50f);  // SNAP 1 (55 Hz)
+    ctrl.onWhiteKeyPressure(10u, 0.50f); // SNAP 3 (27.5 Hz)
     for (int f = 0; f < 30; ++f) {
         ctrl.tick(0.025f, tel);
     }
     const float hybridHz = ctrl.state().voices[0].frequencyHz;
     // Equal log-octave midpoint between 55 Hz and 27.5 Hz is 55 / sqrt(2) ~= 38.89 Hz!
     RTEST_CHECK(std::fabs(hybridHz - 38.89f) < 0.50f);
-    ctrl.onWhiteKeyGate(12u, false);
-    ctrl.onWhiteKeyGate(14u, false);
+    ctrl.onWhiteKeyGate(8u, false);
+    ctrl.onWhiteKeyGate(10u, false);
     for (int f = 0; f < 10; ++f) {
         ctrl.tick(0.025f, tel);
     }
@@ -2855,12 +3001,12 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
     const ruido::EngineControlState momHome = ctrl.state();
 
-    ctrl.onWhiteKeyPressure(15u, 1.0f); // Hold SNAP 4 at 100% pressure
+    ctrl.onWhiteKeyPressure(11u, 1.0f); // Hold SNAP 4 at 100% pressure
     for (int f = 0; f < 16; ++f) {
         ctrl.tick(0.020f, tel);
     }
     RTEST_CHECK(std::fabs(ctrl.state().global.circuitCoupling - 0.68f) < 0.03f);
-    ctrl.onWhiteKeyGate(15u, false); // Release -> melts back to bit-exact momHome!
+    ctrl.onWhiteKeyGate(11u, false); // Release -> melts back to bit-exact momHome!
     for (int f = 0; f < 50; ++f) {
         ctrl.tick(0.025f, tel);
     }
@@ -2878,8 +3024,8 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::CircuitLab);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
-    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);  // Coarse = 0.10 s fast glide
-    ctrl.onEncoderDelta(ruido::EncoderId::Presets, -16); // Clamp -> SNAP 1 (slot 0)
+    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);  // Coarse = 4 detents/scene
+    ctrl.onEncoderDelta(ruido::EncoderId::Presets, -48); // Clamp -> pure SNAP 1 (slot 0)
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
     RTEST_CHECK(ctrl.hud().snapshotSlot == 0u);
     for (int f = 0; f < 8; ++f) {
@@ -2888,34 +3034,39 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(!ctrl.hud().snapshotGliding);
     RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, 55.0f, 0.05f));
 
-    // (f) Scrolling PRESETS rapidly across multiple detents (1 -> 2 -> 3 -> 4 at ~33 ms/detent)
-    //     never blips brushed-past intermediate scenes to "1%" or wobbles 0% <-> 1%:
+    // (f) Continuous overlapping PRESETS morphing: each detent advances smoothly without jumping
+    //     presets, overlapping 2-3 neighboring scenes across the interior while seating at 100%
+    //     pure Scene 1 / Scene 4 at the outer rails:
     ctrl.reset();
     {
-        ruido::LfoSignalArray zeroLfo{};
-        ruido::GlobalColumnSummary gs{};
-        char rl[12]{}, vs[16]{};
-        // Step 1 -> 2, advance 2 frames (33.3 ms), then step -> 3, 2 frames, then -> 4
-        ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4); // -> Scene 2
-        ctrl.tick(0.0166f, tel);
-        ctrl.tick(0.0166f, tel);
-        ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, 0x0Fu, 1u, rl,
-                                        sizeof(rl), vs, sizeof(vs), gs);
-        RTEST_CHECK(std::strcmp(vs, "0%") == 0);
-        ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4); // -> Scene 3
-        ctrl.tick(0.0166f, tel);
-        ctrl.tick(0.0166f, tel);
-        ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4); // -> Scene 4
-        for (int f = 0; f < 40; ++f) {
-            ctrl.tick(0.0166f, tel);
-            // Passed-through Scenes 2 & 3 stay rock-solid at "0%" for the entire glide!
-            ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, 0x0Fu, 1u, rl,
-                                            sizeof(rl), vs, sizeof(vs), gs);
-            RTEST_CHECK(std::strcmp(vs, "0%") == 0);
-            ruido::formatColumnRoleAndValue(ctrl.state(), ctrl.hud(), zeroLfo, 0x0Fu, 2u, rl,
-                                            sizeof(rl), vs, sizeof(vs), gs);
-            RTEST_CHECK(std::strcmp(vs, "0%") == 0);
+        // Single detent (+4 ticks) stays predominantly on SCENE 1 while gently blending SCENE 2
+        ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4);
+        RTEST_CHECK(ctrl.hud().snapshotSlot == 0u);
+        RTEST_CHECK(ctrl.hud().snapshotGliding);
+        RTEST_CHECK(ctrl.hud().snapshotWeights[0] > 0.85f && ctrl.hud().snapshotWeights[0] < 0.99f);
+        RTEST_CHECK(ctrl.hud().snapshotWeights[1] > 0.01f && ctrl.hud().snapshotWeights[1] < 0.15f);
+
+        // Advance to u = 1.0 (+44 more ticks = 48 total): centered on SCENE 2 with 3-way overlap
+        // across SCENE 1, SCENE 2, and SCENE 3!
+        float prevMorphPos = ctrl.hud().morphPosition;
+        for (int step = 0; step < 11; ++step) {
+            ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4);
+            RTEST_CHECK(ctrl.hud().morphPosition > prevMorphPos);
+            prevMorphPos = ctrl.hud().morphPosition;
         }
+        RTEST_CHECK(ctrl.hud().snapshotSlot == 1u);
+        RTEST_CHECK(ctrl.hud().snapshotWeights[0] > 0.08f);
+        RTEST_CHECK(ctrl.hud().snapshotWeights[1] > 0.55f);
+        RTEST_CHECK(ctrl.hud().snapshotWeights[2] > 0.08f);
+
+        // Sweep to right rail (+96 ticks -> 144 total = u = 3.0): pure 100% SCENE 4
+        ctrl.onEncoderDelta(ruido::EncoderId::Presets, 96);
+        RTEST_CHECK(ctrl.hud().snapshotSlot == 3u);
+        RTEST_CHECK(!ctrl.hud().snapshotGliding);
+        RTEST_CHECK(nearF(ctrl.hud().snapshotWeights[3], 1.0f, 1.0e-4f));
+        RTEST_CHECK(nearF(ctrl.hud().snapshotWeights[0], 0.0f, 1.0e-4f));
+        RTEST_CHECK(nearF(ctrl.hud().snapshotWeights[1], 0.0f, 1.0e-4f));
+        RTEST_CHECK(nearF(ctrl.hud().snapshotWeights[2], 0.0f, 1.0e-4f));
     }
 
     // (g) Scene Deletion (`SAVE` -> `SELECT` -> `"DELETE SCENE"` + Key 13-16), skipping `EMPTY`
@@ -2935,9 +3086,9 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         RTEST_CHECK(std::strcmp(lm, "DELETE SCENE") == 0);
         RTEST_CHECK(std::strcmp(rt, "TAP SCENE 1-4") == 0);
     }
-    // Delete SCENE 2 (white key 13) -> slot 1 becomes EMPTY with valid CRC-32
-    ctrl.onWhiteKeyGate(13u, true);
-    ctrl.onWhiteKeyGate(13u, false);
+    // Delete SCENE 2 (white key 9) -> slot 1 becomes EMPTY with valid CRC-32
+    ctrl.onWhiteKeyGate(9u, true);
+    ctrl.onWhiteKeyGate(9u, false);
     RTEST_CHECK(!ctrl.hud().saveArmed && !ctrl.hud().saveDeleteMode);
     RTEST_CHECK(ctrl.hud().snapshotDeletedToast);
     RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == 0x0Du); // Scenes 1, 3, 4 occupied
@@ -2967,18 +3118,21 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     }
     checkStripAndMono();
 
-    // Turning PRESETS +1 detent from SCENE 1 skips deleted SCENE 2 and lands directly on SCENE 3!
-    ctrl.onEncoderDelta(ruido::EncoderId::Presets, 4);
+    // Sweeping PRESETS +12 detents (+48 ticks) from SCENE 1 skips deleted SCENE 2 (`weight == 0`)
+    // and centers on SCENE 3!
+    ctrl.onEncoderDelta(ruido::EncoderId::Presets, 48);
     RTEST_CHECK(ctrl.hud().snapshotSlot == 2u);
-    for (int f = 0; f < 30; ++f) {
+    RTEST_CHECK(ctrl.hud().snapshotWeights[1] == 0.0f);
+    RTEST_CHECK(ctrl.hud().snapshotWeights[2] > 0.55f);
+    for (int f = 0; f < 6; ++f) {
         ctrl.tick(0.020f, tel);
     }
     const float scene3Hz = ctrl.state().voices[0].frequencyHz;
-    RTEST_CHECK(nearF(scene3Hz, 27.5f, 0.05f));
+    RTEST_CHECK(scene3Hz < 45.0f && scene3Hz > 25.0f);
 
-    // Tapping empty SCENE 2 key (white 13) on LIVE MIXER shows "SCENE 2 · EMPTY" without altering
+    // Tapping empty SCENE 2 key (white 9) on LIVE MIXER shows "SCENE 2 · EMPTY" without altering
     // live Scene 3 audio!
-    ctrl.onWhiteKeyPressure(13u, 0.90f);
+    ctrl.onWhiteKeyPressure(9u, 0.90f);
     ctrl.tick(0.016f, tel);
     {
         char lm[24]{}, ls[16]{}, rt[32]{};
@@ -2990,7 +3144,7 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
                     std::strcmp(rt, "EMPTY") == 0 && !sb);
     }
     RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, scene3Hz, 0.05f));
-    ctrl.onWhiteKeyGate(13u, false);
+    ctrl.onWhiteKeyGate(9u, false);
     ctrl.tick(0.016f, tel);
 
     // Deleting the currently active scene (SCENE 3) leaves live panel audio uninterrupted, and
@@ -2999,8 +3153,8 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         ctrl.onButtonEvent(ruido::ButtonId::Save, true);
         ctrl.onButtonEvent(ruido::ButtonId::Save, false);
         ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
-        ctrl.onWhiteKeyGate(static_cast<uint8_t>(12u + s), true);
-        ctrl.onWhiteKeyGate(static_cast<uint8_t>(12u + s), false);
+        ctrl.onWhiteKeyGate(static_cast<uint8_t>(ruido::kSceneWhiteKeyBase + s), true);
+        ctrl.onWhiteKeyGate(static_cast<uint8_t>(ruido::kSceneWhiteKeyBase + s), false);
     }
     RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == 0u);
     RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, scene3Hz, 0.05f));
@@ -3017,8 +3171,8 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     // Re-saving into SCENE 2 restores occupation, and NVS boot reload preserves deleted slots:
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
-    ctrl.onWhiteKeyGate(13u, true);
-    ctrl.onWhiteKeyGate(13u, false);
+    ctrl.onWhiteKeyGate(9u, true);
+    ctrl.onWhiteKeyGate(9u, false);
     RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == (1u << 1u));
     const std::array<ruido::PatchSnapshot, 4> nvsSlots = {
         ctrl.snapshots().slotBinary(0u), ctrl.snapshots().slotBinary(1u),
@@ -3090,9 +3244,9 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 8);
     RTEST_CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::RhythmLab);
     RTEST_CHECK(std::strcmp(ruido::kKeyboardModelSpecs[2].title, "RHYTHM LAB") == 0);
-    RTEST_CHECK(std::strcmp(ruido::kKeyboardModelSpecs[2].topZones[1], "PUMP") == 0);
-    RTEST_CHECK(std::strcmp(ruido::kKeyboardModelSpecs[2].bottomZones[2], "DIVIDE") == 0);
-    RTEST_CHECK(std::strcmp(ruido::kKeyboardModelSpecs[2].bottomZones[3], "EUCLID") == 0);
+    RTEST_CHECK(std::strcmp(ruido::kKeyboardModelSpecs[2].topZones[0], "PUMP") == 0);
+    RTEST_CHECK(std::strcmp(ruido::kKeyboardModelSpecs[2].bottomZones[1], "DIVIDE") == 0);
+    RTEST_CHECK(std::strcmp(ruido::kKeyboardModelSpecs[2].bottomZones[2], "EUCLID") == 0);
     for (int f = 0; f < 6; ++f) {
         ctrl.tick(0.020f, tel);
         renderer.prepareFrame(0.020f, ctrl.state(), ctrl.hud(), tel);
@@ -3134,12 +3288,12 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 200); // Clamp at 3,000.0 BPM!
     RTEST_CHECK(nearF(ctrl.hud().effectiveClockBpm, 3000.0f));
     // Verify high-speed 3,000 BPM LED anti-strobe choreography stays strictly in [0, 1]
-    ctrl.onWhiteKeyPressure(12u, 0.70f); // EUCLID @ 3,000 BPM
+    ctrl.onWhiteKeyPressure(8u, 0.70f); // EUCLID @ 3,000 BPM
     ctrl.tick(0.016f, tel);
     for (float l : ctrl.leds().whiteKeyLeds) {
         RTEST_CHECK(l >= 0.0f && l <= 1.0f);
     }
-    ctrl.onWhiteKeyGate(12u, false);
+    ctrl.onWhiteKeyGate(8u, false);
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -300); // Clamp at 20.0 BPM!
     RTEST_CHECK(nearF(ctrl.hud().effectiveClockBpm, 20.0f));
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 16); // +1.0 oct -> 40.0 BPM
@@ -3187,13 +3341,13 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     RTEST_CHECK(nearF(ctrl.hud().effectiveClockBpm, 120.0f));
 
     // 2. Exercise STUTTER, DIVIDE, EUCLID, PUMP, CHASE, TEMPO, PLUCK, SHORT, SWING + HUD headers
-    ctrl.onWhiteKeyPressure(4u, 0.50f); // Key 5: STUTTER OSC 1
+    ctrl.onWhiteKeyPressure(0u, 0.50f); // Key 1: STUTTER OSC 1
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::VoiceStutter);
     RTEST_CHECK(ctrl.state().keyMod.rhythmMode[0] ==
                 static_cast<uint8_t>(ruido::VoiceRhythmMode::Stutter));
-    ctrl.onWhiteKeyGate(4u, false);
+    ctrl.onWhiteKeyGate(0u, false);
 
-    ctrl.onWhiteKeyPressure(11u, 1.0f); // Key 12: DIVIDE OSC 4 @ full pressure -> X8 (index 5)
+    ctrl.onWhiteKeyPressure(7u, 1.0f); // Key 8: DIVIDE OSC 4 @ full pressure -> X8 (index 5)
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::VoiceDivide);
     RTEST_CHECK(ctrl.state().keyMod.rhythmParam[3] == 5u);
     {
@@ -3205,9 +3359,9 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
         RTEST_CHECK(std::strcmp(lm, "DIVIDE") == 0 && std::strcmp(ls, " OSC 4") == 0 &&
                     std::strcmp(rt, "X8") == 0 && sb);
     }
-    ctrl.onWhiteKeyGate(11u, false);
+    ctrl.onWhiteKeyGate(7u, false);
 
-    ctrl.onWhiteKeyPressure(12u, 0.45f); // Key 13: EUCLID OSC 1 -> 5/16
+    ctrl.onWhiteKeyPressure(8u, 0.45f); // Key 9: EUCLID OSC 1 -> 5/16
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::VoiceEuclid);
     RTEST_CHECK(ctrl.state().keyMod.rhythmMode[0] ==
                 static_cast<uint8_t>(ruido::VoiceRhythmMode::Euclid));
@@ -3215,20 +3369,20 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     for (float l : ctrl.leds().whiteKeyLeds) {
         RTEST_CHECK(l >= 0.0f && l <= 1.0f);
     }
-    ctrl.onWhiteKeyGate(12u, false);
+    ctrl.onWhiteKeyGate(8u, false);
 
-    // SAVE + Key 14 (white 13) stores SCENE 2 cleanly even inside RHYTHM LAB without firing EUCLID!
+    // SAVE + Key 10 (white 9) stores SCENE 2 cleanly even inside RHYTHM LAB without firing EUCLID!
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
     RTEST_CHECK(ctrl.hud().saveArmed);
-    ctrl.onWhiteKeyPressure(13u, 0.90f);
+    ctrl.onWhiteKeyPressure(9u, 0.90f);
     RTEST_CHECK(!ctrl.hud().saveArmed);
     RTEST_CHECK(ctrl.hud().snapshotSlot == 1u);
     RTEST_CHECK(ctrl.state().keyMod.rhythmMode[1] == 0u);
-    ctrl.onWhiteKeyGate(13u, false);
+    ctrl.onWhiteKeyGate(9u, false);
 
-    // GLO PLUCK opens live MS-20 Filter Pluck graph & maps knobs to GlobalFilter
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Glo, 0.85f);
+    // OP4 PLUCK opens live MS-20 Filter Pluck graph & maps knobs to GlobalFilter
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op4, 0.85f);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::RhythmPluck);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::GlobalFilter);
     RTEST_CHECK(nearF(ctrl.state().keyMod.rhythmPluck, 0.85f));
@@ -3237,22 +3391,22 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
         renderer.prepareFrame(0.020f, ctrl.state(), ctrl.hud(), tel);
     }
     checkStripAndMono();
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op4, false);
 
-    // OP5 PUMP, OP6 CHASE, MONO SHORT, POLY SWING
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op5, 0.80f);
+    // OP1 PUMP, OP2 CHASE, OP5 SHORT, OP6 SWING
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op1, 0.80f);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::RhythmPump);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op1, false);
+
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op2, 0.70f);
+    RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::RhythmChase);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op2, false);
+
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op5, 0.90f);
+    RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::RhythmShort);
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
 
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op6, 0.70f);
-    RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::RhythmChase);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
-
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Mono, 0.90f);
-    RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::RhythmShort);
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
-
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Poly, 1.0f);
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op6, 1.0f);
     RTEST_CHECK(ctrl.hud().activePunch == ruido::KeyPunchKind::RhythmSwing);
     {
         char lm[24]{}, ls[16]{}, rt[32]{};
@@ -3262,7 +3416,7 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
                                      bn);
         RTEST_CHECK(std::strcmp(lm, "SWING") == 0 && std::strcmp(rt, "72%") == 0);
     }
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Poly, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
 
     // 3. Port-agnostic 24-PPQN MIDI Clock In (TRS / USB / BLE-MIDI burst jitter immunity)
     RTEST_CHECK(!ctrl.hud().midiClockSynced);
@@ -3296,8 +3450,8 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     RTEST_CHECK(std::fabs(ctrl.hud().effectiveClockBpm - 140.0f) < 0.4f);
     RTEST_CHECK(std::fabs(ctrl.state().global.clockBpm - 140.0f) < 0.4f);
 
-    // Hold PIT TEMPO at minimal pressure -> header shows "140 BPM EXT"!
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Pit, 0.002f);
+    // Hold OP3 TEMPO at minimal pressure -> header shows "140 BPM EXT"!
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op3, 0.002f);
     {
         char lm[24]{}, ls[16]{}, rt[32]{};
         bool sb = false;
@@ -3306,7 +3460,7 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
                                      bn);
         RTEST_CHECK(std::strcmp(lm, "TEMPO") == 0 && std::strcmp(rt, "140 BPM EXT") == 0);
     }
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Pit, false);
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op3, false);
 
     // Turning ALGORITHM OR tapping 11th key while externally MIDI-synced shows "140 BPM EXT"
     // without mutating internal fallback BPM or breaking external lock (tap aligns Beat 1)!
@@ -3426,8 +3580,8 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 24);
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
-    ctrl.onWhiteKeyGate(14u, true); // Save into slot 2 (Key 15)
-    ctrl.onWhiteKeyGate(14u, false);
+    ctrl.onWhiteKeyGate(10u, true); // Save into slot 2 (Key 11)
+    ctrl.onWhiteKeyGate(10u, false);
     RTEST_CHECK(ctrl.consumeSavedSlotMask() == (1u << 2u));
     RTEST_CHECK(ctrl.consumeSavedSlotMask() == 0u);
     RTEST_CHECK(ctrl.consumeSettingsDirty());
@@ -3457,6 +3611,8 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8);  // OFF -> RunStop (+2 detents)
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);     // Row 6: MidiChannel
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 28); // -> CH 7
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);     // Row 7: Key Pressure
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -4); // MEDIUM -> LIGHT
     RTEST_CHECK(ctrl.consumeSettingsDirty());
     const ruido::DeviceSettingsBlob savedSettings = ctrl.exportSettings();
 
@@ -3476,6 +3632,17 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     RTEST_CHECK(bootCtrl.hud().config.muteMode == ruido::KeySwitchMode::Latching);
     RTEST_CHECK(bootCtrl.hud().config.midiTransport == ruido::MidiTransportMode::RunStop);
     RTEST_CHECK(bootCtrl.hud().config.midiChannel == 7u);
+    RTEST_CHECK(bootCtrl.hud().config.pressureTouch == ruido::PressureTouch::Light);
+    {
+        // Legacy v1 blobs (byte 13 == 0, written before Key Pressure existed) decode as MEDIUM.
+        ruido::DeviceSettingsBlob legacy = savedSettings;
+        legacy.pressureTouchPlus1 = 0u;
+        const auto* payload = reinterpret_cast<const uint8_t*>(&legacy) + sizeof(uint32_t);
+        legacy.crc32 = ruido::computeCrc32Bytes(payload, sizeof(legacy) - sizeof(uint32_t));
+        ruido::RuidoController legacyCtrl{};
+        RTEST_CHECK(legacyCtrl.loadSettings(legacy));
+        RTEST_CHECK(legacyCtrl.hud().config.pressureTouch == ruido::PressureTouch::Medium);
+    }
     RTEST_CHECK(std::fabs(bootCtrl.hud().effectiveClockBpm - dialedHighBpm) < 0.1f);
     RTEST_CHECK(bootCtrl.snapshots().activeSlot() == 2u);
     RTEST_CHECK(std::fabs(bootCtrl.state().voices[0].frequencyHz - savedOsc1Hz) < 0.25f);

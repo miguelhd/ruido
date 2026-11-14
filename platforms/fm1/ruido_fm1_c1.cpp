@@ -6,6 +6,19 @@
  * `ruido_c1_memcpy`/`ruido_c1_memset` below so Core 1 executes 0 instructions and loads 0 bytes
  * from XIP SPI NOR Flash (`0x02000000+`). */
 
+static_assert(__builtin_offsetof(ruido::fm1::Fm1InterCoreControl, sramCanaries) == 0u,
+              "fm1_cpu1.S expects sramCanaries at offset 0");
+static_assert(__builtin_offsetof(ruido::fm1::Fm1InterCoreControl, c1SelfFault) == 8u,
+              "fm1_cpu1.S expects c1SelfFault at offset 8");
+static_assert(__builtin_offsetof(ruido::fm1::Fm1InterCoreControl, c1Booted) == 12u,
+              "fm1_cpu1.S expects c1Booted at offset 12");
+static_assert(__builtin_offsetof(ruido::fm1::Fm1InterCoreControl, c1FaultCode) == 16u,
+              "fm1_cpu1.S expects c1FaultCode at offset 16");
+static_assert(__builtin_offsetof(ruido::fm1::Fm1InterCoreControl, c1FaultAux) == 20u,
+              "fm1_cpu1.S expects c1FaultAux at offset 20");
+static_assert(__builtin_offsetof(ruido::fm1::Fm1InterCoreControl, engineReady) == 64u,
+              "Core 0 control atomics isolated on cache line 1");
+
 inline void* operator new(size_t, void* p) noexcept {
     return p;
 }
@@ -34,10 +47,41 @@ RUIDO_ALWAYS_INLINE bool pollSramCanaryFault(uint32_t pairs) noexcept {
 }
 
 [[noreturn]] RUIDO_ALWAYS_INLINE void parkOnCore1SelfFault() noexcept {
+    g_ruido_ic_ctrl.c1FaultCode = 0xCA000000u;
+    g_ruido_boot_diag.c1_code = 0xCA000000u;
+    __asm__ volatile("flushinv [%0]\n\tssync" ::"r"(&g_ruido_boot_diag) : "memory");
     g_ruido_ic_ctrl.c1SelfFault.store(1u, std::memory_order_release);
+    __asm__ volatile("flushinv [%0]\n\tssync\n\tcsync" ::"r"(&g_ruido_ic_ctrl) : "memory");
     for (;;) {
         __asm__ volatile("nop" ::: "memory");
     }
+}
+
+inline float activeBaseSampleRate(const ruido::fm1::Fm1C1DspRuntime* rt) noexcept {
+    return (rt->soloHalfRateActive != 0u) ? (kSampleRateHz * 0.5f) : kSampleRateHz;
+}
+
+inline void upsampleCatmullRom32To64(const float halfIn[ruido::kBlockFrames / 2u], float hist[3],
+                                     float out64[ruido::kBlockFrames]) noexcept {
+    constexpr size_t kHalfFrames = ruido::kBlockFrames / 2u;
+    float ext[kHalfFrames + 3u];
+    ext[0] = hist[0];
+    ext[1] = hist[1];
+    ext[2] = hist[2];
+    for (size_t i = 0u; i < kHalfFrames; ++i) {
+        ext[i + 3u] = halfIn[i];
+    }
+    for (size_t i = 0u; i < kHalfFrames; ++i) {
+        const float a = ext[i];
+        const float b = ext[i + 1u];
+        const float c = ext[i + 2u];
+        const float d = ext[i + 3u];
+        out64[2u * i] = b;
+        out64[2u * i + 1u] = ruido::clampf(0.5625f * (b + c) - 0.0625f * (a + d), -1.0f, 1.0f);
+    }
+    hist[0] = halfIn[kHalfFrames - 3u];
+    hist[1] = halfIn[kHalfFrames - 2u];
+    hist[2] = halfIn[kHalfFrames - 1u];
 }
 
 inline void renderQuantizedBlock64(ruido::Fm1AudioBlock& outBlk) noexcept {
@@ -51,7 +95,16 @@ inline void renderQuantizedBlock64(ruido::Fm1AudioBlock& outBlk) noexcept {
 
     float left[ruido::kBlockFrames];
     float right[ruido::kBlockFrames];
-    core->processBlock(*buses, left, right, ruido::kBlockFrames);
+    if (rt->soloHalfRateActive != 0u) {
+        constexpr size_t kHalfFrames = ruido::kBlockFrames / 2u;
+        float halfL[kHalfFrames];
+        float halfR[kHalfFrames];
+        core->processBlock(*buses, halfL, halfR, kHalfFrames);
+        upsampleCatmullRom32To64(halfL, rt->soloHistL, left);
+        upsampleCatmullRom32To64(halfR, rt->soloHistR, right);
+    } else {
+        core->processBlock(*buses, left, right, ruido::kBlockFrames);
+    }
 
     int32_t blockPeak = 0;
     const bool gainSettled = (rt->masterGainSmoother.current() == rt->masterGainSmoother.target());
@@ -136,6 +189,16 @@ void* ruido_c1_memcpy(void* dst, const void* src, unsigned n) {
         }
         auto* wd = reinterpret_cast<uint32_t*>(d);
         const auto* ws = reinterpret_cast<const uint32_t*>(s);
+        while (n >= 16u) {
+            wd[0] = ws[0];
+            wd[1] = ws[1];
+            wd[2] = ws[2];
+            wd[3] = ws[3];
+            wd += 4;
+            ws += 4;
+            n -= 16u;
+            __asm__ volatile("" : "+r"(wd), "+r"(ws));
+        }
         while (n >= 4u) {
             *wd++ = *ws++;
             n -= 4u;
@@ -193,17 +256,52 @@ void ruido_fm1_c1_prime_blocks(uint32_t num_blocks, uint32_t reattach_coproc) {
     ruido::fm1::hwMemoryBarrier();
 }
 
-void ruido_fm1_c1_render_one_block(ruido::Fm1AudioBlock* dst_block) {
-    if (dst_block == nullptr) {
+void ruido_fm1_c1_enter_solo_fallback(void) {
+    auto* rt = ruidoC1Runtime();
+    auto* core = ruidoDspCore();
+    auto* buses = ruidoSharedBuses();
+    core->attachFilterCoProcessor(nullptr);
+    if (rt->soloHalfRateActive == 0u) {
+        rt->soloHalfRateActive = 1u;
+        for (size_t k = 0u; k < 3u; ++k) {
+            rt->soloHistL[k] = 0.0f;
+            rt->soloHistR[k] = 0.0f;
+        }
+        if (rt->inSoloDsp == 0u) {
+            core->init(*buses, kSampleRateHz * 0.5f);
+            core->snapParametersToLatest(*buses);
+        }
+    }
+}
+
+void ruido_fm1_c1_pump_solo_ring(uint32_t max_blocks) {
+    auto* rt = ruidoC1Runtime();
+    if (rt->inSoloDsp != 0u) {
         return;
     }
-    renderQuantizedBlock64(*dst_block);
+    rt->inSoloDsp = 1u;
+    auto* ring = ruidoAudioRing();
+    for (uint32_t b = 0u; b < max_blocks; ++b) {
+        ruido::Fm1AudioBlock* slot = ring->beginPush();
+        if (slot == nullptr) {
+            break;
+        }
+        renderQuantizedBlock64(*slot);
+        ruido::fm1::hwMemoryBarrier();
+        ring->commitPush();
+    }
+    rt->inSoloDsp = 0u;
 }
 
 void ruido_fm1_set_bench_stress(uint32_t stress_mode) {
     auto* buses = ruidoSharedBuses();
     auto* core = ruidoDspCore();
-    if (stress_mode != 0u) {
+    const float sr = activeBaseSampleRate(ruidoC1Runtime());
+    if (stress_mode == 2u) {
+        buses->controlBus.publish(ruido::EngineControlState::makeDefault());
+        core->init(*buses, sr);
+        core->snapParametersToLatest(*buses);
+    } else if (stress_mode != 0u) {
         ruido::EngineControlState st{};
         for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
             auto& v = st.voices[i];
@@ -228,15 +326,25 @@ void ruido_fm1_set_bench_stress(uint32_t stress_mode) {
         buses->controlBus.publish(st);
         core->snapParametersToLatest(*buses);
     } else {
-        core->init(*buses, kSampleRateHz);
+        core->init(*buses, sr);
         core->snapParametersToLatest(*buses);
     }
 }
 
 void ruido_fm1_c1_step_solo_bench64(void) {
+    auto* rt = ruidoC1Runtime();
     float left[ruido::kBlockFrames];
     float right[ruido::kBlockFrames];
-    ruidoDspCore()->processBlock(*ruidoSharedBuses(), left, right, ruido::kBlockFrames);
+    if (rt->soloHalfRateActive != 0u) {
+        constexpr size_t kHalfFrames = ruido::kBlockFrames / 2u;
+        float halfL[kHalfFrames];
+        float halfR[kHalfFrames];
+        ruidoDspCore()->processBlock(*ruidoSharedBuses(), halfL, halfR, kHalfFrames);
+        upsampleCatmullRom32To64(halfL, rt->soloHistL, left);
+        upsampleCatmullRom32To64(halfR, rt->soloHistR, right);
+    } else {
+        ruidoDspCore()->processBlock(*ruidoSharedBuses(), left, right, ruido::kBlockFrames);
+    }
 }
 
 void ruido_fm1_c1_assist_dsp(void) {
@@ -245,15 +353,6 @@ void ruido_fm1_c1_assist_dsp(void) {
 
 void ruido_fm1_c1_set_helper_armed(uint32_t armed) {
     ruidoCoProc()->setHelperArmed(armed != 0u);
-}
-
-/* Pure register-only leaf POST (`r0..r3` caller-saved only -> `0` stack loads / `[sp++]` pops):
- * executes 512 SRAM canary reads (`0x00000000` & `0xFFFFFFFF`) before Core 1 builds any C++ call
- * stack, catching AC791N bit-21 (`0x00200000`) misreads cleanly on affected silicon. */
-void ruido_fm1_c1_boot_post(void) {
-    if (pollSramCanaryFault(256u)) {
-        parkOnCore1SelfFault();
-    }
 }
 
 void ruido_fm1_cpu1_loop(void) {
@@ -270,6 +369,18 @@ void ruido_fm1_cpu1_loop(void) {
             continue;
         }
 
+        if (g_ruido_ic_ctrl.c1FlashHold.load(std::memory_order_acquire) != 0u) {
+            g_ruido_ic_ctrl.c1FlashAck.store(1u, std::memory_order_release);
+            ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+            while (g_ruido_ic_ctrl.c1FlashHold.load(std::memory_order_acquire) != 0u) {
+                __asm__ volatile("nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop" ::
+                                     : "memory");
+            }
+            g_ruido_ic_ctrl.c1FlashAck.store(0u, std::memory_order_release);
+            ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+            continue;
+        }
+
         if (g_ruido_ic_ctrl.c1BenchReq.load(std::memory_order_acquire) != 0u) {
             float left[ruido::kBlockFrames];
             float right[ruido::kBlockFrames];
@@ -281,11 +392,12 @@ void ruido_fm1_cpu1_loop(void) {
             }
             g_ruido_ic_ctrl.c1BenchTicks.store(dt, std::memory_order_relaxed);
             g_ruido_ic_ctrl.c1BenchReq.store(0u, std::memory_order_release);
+            ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
             continue;
         }
 
         if (g_ruido_ic_ctrl.c1RunEnable.load(std::memory_order_acquire) == 0u) {
-            __asm__ volatile("nop" ::: "memory");
+            __asm__ volatile("nop\n\tnop\n\tnop\n\tnop" ::: "memory");
             continue;
         }
 

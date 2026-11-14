@@ -64,6 +64,27 @@ inline float normalizeClockBpmLog01(float bpm) noexcept {
     return clampf((fastLog2(clamped) - kLogMin) * kInvLogSpan, 0.0f, 1.0f);
 }
 
+// Piecewise logarithmic oscillator horizontal gauge calibration:
+// Compresses the 8.64-octave subsonic band [0.05 Hz .. 20 Hz] into the leftmost 16% of the track
+// (well under a quarter of the bar) while devoting the upper 84% [0.16 .. 1.00] to the audible
+// [20 Hz .. 20 kHz] range (~330 Hz at center 50%).
+inline float normalizeOscFreqIndicator01(float hz) noexcept {
+    constexpr float kSubKneeHz = 20.0f;
+    constexpr float kSubKneeNorm = 0.16f;
+    constexpr float kLogMin = cxLog2Pos(kAudioFreqMinHz); // -4.32192809f
+    constexpr float kLogKnee = cxLog2Pos(kSubKneeHz);     // +4.32192809f
+    constexpr float kLogMax = cxLog2Pos(kAudioFreqMaxHz); // +14.2877124f
+    const float clamped = clampf(hz, kAudioFreqMinHz, kAudioFreqMaxHz);
+    const float logHz = fastLog2(clamped);
+    if (clamped <= kSubKneeHz) {
+        return clampf((logHz - kLogMin) * (kSubKneeNorm / (kLogKnee - kLogMin)), 0.0f,
+                      kSubKneeNorm);
+    }
+    return clampf(kSubKneeNorm +
+                      (logHz - kLogKnee) * ((1.0f - kSubKneeNorm) / (kLogMax - kLogKnee)),
+                  kSubKneeNorm, 1.0f);
+}
+
 // Discrete notched encoder stepper: always 1 item per physical detent (4 X4 quadrature ticks)
 // across Fine, Standard, and Coarse gears, with zero-windup clamping at [0, maxVal].
 // Performs arithmetic in `int32_t` before storing the [-3, +3] sub-detent remainder so `int8_t`

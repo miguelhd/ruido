@@ -2,6 +2,7 @@
 
 #include "../platforms/fm1/fm1_ops_screen.h"
 #include "../platforms/fm1/fm1_panel_io.h"
+#include "../platforms/fm1/fm1_storage_io.h"
 #include "core/RuidoController.h"
 
 #include <array>
@@ -80,7 +81,8 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
     RUIDO_FM1_CHECK(ctrl.hud().mode == HudMode::MasterLevel);
 
     const float baseOsc1Hz = ctrl.state().voices[0].frequencyHz;
-    int32_t encSteps[kFm1NumEncoders]{0, 0, 3, 0, 0, 0, 1}; // KNOB1 +3 detents, PRESETS +1 detent
+    int32_t encSteps[kFm1NumEncoders]{0, 0, 3, 0,
+                                      0, 0, 12}; // KNOB1 +3 detents, PRESETS +12 detents
     RUIDO_FM1_CHECK(panel.pollButtonsAndEncoders(ctrl, 0u, 0u, 0u, encSteps));
     RUIDO_FM1_CHECK(ctrl.snapshots().activeSlot() == 1u);
 
@@ -97,16 +99,51 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
     RUIDO_FM1_CHECK(panel.pollButtonsAndEncoders(ctrl, playBit, playBit, 0u, zeroEnc));
     RUIDO_FM1_CHECK(!ctrl.state().global.masterRun);
 
-    // 3. Verify PA7/PA8 carbon-pill SARADC curve, digital fallback (`-1`), & round-robin scheduling
+    // 3. Verify PA7/PA8 DRIVE-2 (`R_s = 132 ohm`) wide `[528..815]` carbon-pill curve & diagnostics
+    RUIDO_FM1_CHECK(adcToCarbonPressure01(-2) < 0.0f);
     RUIDO_FM1_CHECK(adcToCarbonPressure01(0) < 0.0f);
     RUIDO_FM1_CHECK(adcToCarbonPressure01(119) < 0.0f);
-    RUIDO_FM1_CHECK(adcToCarbonPressure01(921) < 0.0f);
     RUIDO_FM1_CHECK(adcToCarbonPressure01(1023) < 0.0f);
-    RUIDO_FM1_CHECK(std::fabs(adcToCarbonPressure01(800) - 0.18f) < 1.0e-4f);
-    RUIDO_FM1_CHECK(std::fabs(adcToCarbonPressure01(240) - 1.0f) < 1.0e-4f);
+    // High closed-key readings (`815..1022`) must stay at 4% feather touch, NEVER `-1 -> 100%`!
+    RUIDO_FM1_CHECK(std::fabs(adcToCarbonPressure01(1015) - 0.04f) < 1.0e-4f);
+    RUIDO_FM1_CHECK(std::fabs(adcToCarbonPressure01(815) - 0.04f) < 1.0e-4f);
+    RUIDO_FM1_CHECK(adcToCarbonPressure01(670) > 0.18f && adcToCarbonPressure01(670) < 0.28f);
+    RUIDO_FM1_CHECK(adcToCarbonPressure01(555) > 0.74f && adcToCarbonPressure01(555) < 0.84f);
+    RUIDO_FM1_CHECK(std::fabs(adcToCarbonPressure01(528) - 1.0f) < 1.0e-4f);
+    RUIDO_FM1_CHECK(std::fabs(adcToCarbonPressure01(400) - 1.0f) < 1.0e-4f);
 
-    float prevP = 0.18f;
-    for (int32_t adc = 770; adc >= 250; adc -= 20) {
+    // Key Pressure presets: explicit MEDIUM == default; lighter presets read strictly higher at the
+    // same mid squeeze, firmer presets strictly lower; VERY LIGHT maxes out by ADC 600 while VERY
+    // FIRM still reaches 100% above the ~490 PCB series-resistance floor.
+    RUIDO_FM1_CHECK(std::fabs(adcToCarbonPressure01(670, PressureTouch::Medium) -
+                              adcToCarbonPressure01(670)) < 1.0e-6f);
+    for (uint8_t lvl = 1u; lvl < kNumPressureTouchLevels; ++lvl) {
+        const auto lighter = static_cast<PressureTouch>(lvl - 1u);
+        const auto firmer = static_cast<PressureTouch>(lvl);
+        RUIDO_FM1_CHECK(adcToCarbonPressure01(640, lighter) > adcToCarbonPressure01(640, firmer));
+        RUIDO_FM1_CHECK(std::fabs(adcToCarbonPressure01(815, firmer) - 0.04f) < 1.0e-4f);
+    }
+    RUIDO_FM1_CHECK(std::fabs(adcToCarbonPressure01(690, PressureTouch::VeryLight) - 1.0f) <
+                    1.0e-4f);
+    RUIDO_FM1_CHECK(adcToCarbonPressure01(600, PressureTouch::VeryFirm) < 0.35f);
+    RUIDO_FM1_CHECK(std::fabs(adcToCarbonPressure01(515, PressureTouch::VeryFirm) - 1.0f) <
+                    1.0e-4f);
+    // Presets must be clearly distinct at a light-medium squeeze (ADC 640): >= 8 points apart.
+    for (uint8_t lvl = 1u; lvl < kNumPressureTouchLevels; ++lvl) {
+        RUIDO_FM1_CHECK(adcToCarbonPressure01(640, static_cast<PressureTouch>(lvl - 1u)) >=
+                        adcToCarbonPressure01(640, static_cast<PressureTouch>(lvl)) + 0.08f);
+    }
+    for (uint8_t lvl = 0u; lvl < kNumPressureTouchLevels; ++lvl) {
+        float prev = 0.04f;
+        for (int32_t adc = 815; adc >= 480; adc -= 5) {
+            const float p = adcToCarbonPressure01(adc, static_cast<PressureTouch>(lvl));
+            RUIDO_FM1_CHECK(p >= prev && p <= 1.0f);
+            prev = p;
+        }
+    }
+
+    float prevP = 0.04f;
+    for (int32_t adc = 815; adc >= 480; adc -= 20) {
         const float p = adcToCarbonPressure01(adc);
         RUIDO_FM1_CHECK(p >= prevP);
         prevP = p;
@@ -116,37 +153,37 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
     panel.reset(0.85f);
     panel.syncMasterPot(ctrl, 0.85f);
 
-    // Digital fallback (`rawAdc == -1` as in `fm1-emu`): holding n7 (White Key 5 = OSC 1 filter
-    // pad) immediately applies 100% pressure, and schedules PA8 (`ch 1`, `col 9`) for SARADC check.
-    const uint32_t n7Mask = 1u << 7u;
+    // Digital fallback (`rawAdc == -1`): holding n0 (White Key 1 = OSC 1 filter pad) immediately
+    // applies 100% pressure and schedules PA8 (`ch 1`, `col 3`).
+    const uint32_t n0Mask = 1u << 0u;
     const uint32_t n9Mask = 1u << 9u;
-    RUIDO_FM1_CHECK(panel.pollKeysAndPressure(ctrl, n7Mask, n7Mask));
+    RUIDO_FM1_CHECK(panel.pollKeysAndPressure(ctrl, n0Mask, n0Mask));
     RUIDO_FM1_CHECK(ctrl.state().voicePressure[0] > 0.99f);
     const auto req1 = panel.currentAdcRequest();
-    RUIDO_FM1_CHECK(req1.active == 1u && req1.noteBit == 7u && req1.col == 9u &&
+    RUIDO_FM1_CHECK(req1.active == 1u && req1.noteBit == 0u && req1.col == 3u &&
                     req1.saradcCh == 1u);
 
-    // Hold both n7 (PA8 ch1 col 9) and n9 (PA7 ch0 col 0): round-robin alternates 7 <-> 9
-    (void)panel.pollKeysAndPressure(ctrl, n7Mask | n9Mask, n9Mask);
+    // Hold both n0 (PA8 ch1 col 3) and n9 (PA7 ch0 col 0): round-robin alternates 0 <-> 9
+    (void)panel.pollKeysAndPressure(ctrl, n0Mask | n9Mask, n9Mask);
     const auto req2 = panel.currentAdcRequest();
     RUIDO_FM1_CHECK(req2.active == 1u && req2.noteBit == 9u && req2.col == 0u &&
                     req2.saradcCh == 0u);
-    (void)panel.pollKeysAndPressure(ctrl, n7Mask | n9Mask, 0u);
+    (void)panel.pollKeysAndPressure(ctrl, n0Mask | n9Mask, 0u);
     const auto req3 = panel.currentAdcRequest();
-    RUIDO_FM1_CHECK(req3.active == 1u && req3.noteBit == 7u);
+    RUIDO_FM1_CHECK(req3.active == 1u && req3.noteBit == 0u);
 
-    // Feed real physical carbon-pill readings on n7: soft touch (760) -> firm press (260)
+    // Feed physical `DRIVE 2` (`R_s = 132 ohm`) readings on n0: soft (670) -> firm (520)
     (void)panel.pollKeysAndPressure(ctrl, 0u, 0u);
-    panel.recordAdcSample(7u, 760);
-    (void)panel.pollKeysAndPressure(ctrl, n7Mask, n7Mask);
+    panel.recordAdcSample(0u, 670);
+    (void)panel.pollKeysAndPressure(ctrl, n0Mask, n0Mask);
     const float softPress = ctrl.state().voicePressure[0];
-    RUIDO_FM1_CHECK(softPress >= 0.18f && softPress < 0.30f);
+    RUIDO_FM1_CHECK(softPress >= 0.18f && softPress < 0.28f);
 
-    panel.recordAdcSample(7u, 260);
+    panel.recordAdcSample(0u, 520);
     for (int step = 0; step < 12; ++step) {
-        (void)panel.pollKeysAndPressure(ctrl, n7Mask, 0u);
+        (void)panel.pollKeysAndPressure(ctrl, n0Mask, 0u);
     }
-    RUIDO_FM1_CHECK(ctrl.state().voicePressure[0] > 0.95f);
+    RUIDO_FM1_CHECK(ctrl.state().voicePressure[0] > 0.99f);
 
     // 4. Verify 42-channel multi-tier 909.1 Hz Delta-Sigma LED modulator (`PLAY` green vs `STOP`
     // red)
@@ -170,9 +207,15 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
     RUIDO_FM1_CHECK((bg[kPlayGreenCol] & (1u << kPlayGreenRow)) == 0u);
     // Rest panel buttons (e.g. FX at col 6, row 1 = 15% perceptual) sit cleanly on `fm1_led_bg`
     RUIDO_FM1_CHECK((bg[6u] & (1u << 1u)) != 0u);
-    // White Keys 5-8 filter landmarks (e.g. n7 at col 9, row 4 = 24% perceptual) sit on
-    // `fm1_led_dim`
-    RUIDO_FM1_CHECK((dim[9u] & (1u << 4u)) != 0u);
+    // Left-bright -> right-dark gradient: FILTER 1 (n0 at col 3, row 4 = 82% -> `dim|lit`),
+    // OCTAVE 1 (n7 at col 9, row 4 = 48% -> `dim|lit`), active SCENE 1 (n14 at col 5, row 3 = 100%
+    // -> `lit`), occupied SCENE 2 (n16 at col 7, row 3 = 16% -> `bg|dim`), and unmuted MUTE 1 (n21
+    // at col 1, row 2 = 0% dark):
+    RUIDO_FM1_CHECK(((dim[3u] | lit[3u]) & (1u << 4u)) != 0u);
+    RUIDO_FM1_CHECK(((dim[9u] | lit[9u]) & (1u << 4u)) != 0u);
+    RUIDO_FM1_CHECK((lit[5u] & (1u << 3u)) != 0u);
+    RUIDO_FM1_CHECK(((bg[7u] | dim[7u]) & (1u << 3u)) != 0u);
+    RUIDO_FM1_CHECK(((lit[1u] | dim[1u] | bg[1u]) & (1u << 2u)) == 0u);
 
     // Stop audio via PLAY/STOP: PLAY green (col 8, row 1) lights, STOP red (col 10, row 2) goes
     // dark
@@ -270,8 +313,15 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
 
     // Verify 1 px progress bar accuracy at y = 112..115 across 0%, 50% (110 px), and 100% (220 px)
     for (uint16_t fill : {uint16_t{0u}, uint16_t{110u}, uint16_t{220u}}) {
-        RuidoOpsState wrSt{
-            RUIDO_OPS_LDR_WRITING, static_cast<uint8_t>((fill * 100u) / 220u), fill, 0u, 0u, 0u};
+        RuidoOpsState wrSt{RUIDO_OPS_LDR_WRITING,
+                           static_cast<uint8_t>((fill * 100u) / 220u),
+                           fill,
+                           0u,
+                           0u,
+                           0u,
+                           0u,
+                           0u,
+                           0u};
         renderOpsScreenStripImpl(wrSt, 112u, 16u, opsStripBe.data(), false);
         uint32_t whiteCols = 0u;
         uint32_t trackCols = 0u;
@@ -294,7 +344,7 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
          {static_cast<uint8_t>(RUIDO_OPS_LDR_WAITING), static_cast<uint8_t>(RUIDO_OPS_LDR_WRITING),
           static_cast<uint8_t>(RUIDO_OPS_LDR_FAILED)}) {
         for (uint8_t pct : {uint8_t{0u}, uint8_t{64u}, uint8_t{100u}}) {
-            RuidoOpsState ldrSt{ldrKind, pct, 110u, 0u, 0u, 0u};
+            RuidoOpsState ldrSt{ldrKind, pct, 110u, 0u, 0u, 0u, 0u, 0u, 0u};
             renderOpsScreenStripFullImpl(ldrSt, 0u, 240u, opsFullLe.data(), false);
             renderOpsScreenStripLdrImpl(ldrSt, 0u, 240u, opsStrips16Le.data(), false);
             int maxChanDiff = 0;
@@ -314,6 +364,167 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
             }
             RUIDO_FM1_CHECK(maxChanDiff <= 4);
         }
+    }
+
+    // 7. Verify erase-free `0xF8020..0xF8FF0` DeviceSettingsBlob journal + deduplication
+    {
+        struct MockNvsFlash {
+            std::array<PatchSnapshot, kNumSnapshots> slots{};
+            std::array<bool, kNumSnapshots> slotValid{};
+            DeviceSettingsBlob baseSettings{};
+            bool baseSettingsValid = false;
+            std::array<uint8_t, 0x1000u> sectorF8{};
+            uint32_t eraseCount = 0u;
+            uint32_t baseSaveCount = 0u;
+            uint32_t journalWriteCount = 0u;
+
+            void initBlank() noexcept {
+                slotValid.fill(false);
+                baseSettingsValid = false;
+                sectorF8.fill(0xFFu);
+                eraseCount = 0u;
+                baseSaveCount = 0u;
+                journalWriteCount = 0u;
+            }
+        };
+        static MockNvsFlash gMockNvs{};
+        gMockNvs.initBlank();
+
+        const RuidoFm1BlobLoadFn loadFn = [](uint32_t idx, void* dst, uint32_t len) -> int {
+            if (idx < kNumSnapshots) {
+                if (!gMockNvs.slotValid[idx] || len != sizeof(PatchSnapshot)) {
+                    return -1;
+                }
+                std::memcpy(dst, &gMockNvs.slots[idx], len);
+                return 0;
+            }
+            if (idx == kNvsSettingsBlobIdx) {
+                if (!gMockNvs.baseSettingsValid || len != sizeof(DeviceSettingsBlob)) {
+                    return -1;
+                }
+                std::memcpy(dst, &gMockNvs.baseSettings, len);
+                return 0;
+            }
+            return -1;
+        };
+        const RuidoFm1BlobSaveFn saveFn = [](uint32_t idx, const void* src, uint32_t len) -> int {
+            if (idx < kNumSnapshots && len == sizeof(PatchSnapshot)) {
+                std::memcpy(&gMockNvs.slots[idx], src, len);
+                gMockNvs.slotValid[idx] = true;
+                ++gMockNvs.baseSaveCount;
+                return 0;
+            }
+            if (idx == kNvsSettingsBlobIdx && len == sizeof(DeviceSettingsBlob)) {
+                std::memcpy(&gMockNvs.baseSettings, src, len);
+                gMockNvs.baseSettingsValid = true;
+                gMockNvs.sectorF8.fill(0xFFu);
+                std::memcpy(gMockNvs.sectorF8.data() + 12u, src, len);
+                ++gMockNvs.baseSaveCount;
+                return 0;
+            }
+            return -1;
+        };
+        const RuidoFm1PreEraseFn preEraseFn = []() { ++gMockNvs.eraseCount; };
+        const RuidoFm1SettingsTailReadFn tailReadFn = [](uint32_t off, void* dst,
+                                                         uint32_t len) -> int {
+            if (off < kSettingsJournalBaseOff || off + len > gMockNvs.sectorF8.size()) {
+                return -1;
+            }
+            std::memcpy(dst, gMockNvs.sectorF8.data() + off, len);
+            return 0;
+        };
+        const RuidoFm1SettingsTailWriteFn tailWriteFn = [](uint32_t off, const void* src,
+                                                           uint32_t len) -> int {
+            if (off < kSettingsJournalBaseOff || len != kSettingsJournalEntryBytes ||
+                (off & 0x0Fu) != 0u || off + len > gMockNvs.sectorF8.size()) {
+                return -1;
+            }
+            const auto* inBytes = static_cast<const uint8_t*>(src);
+            for (uint32_t i = 0u; i < len; ++i) {
+                // Enforce real SPI NOR flash physics: Page Program can only clear bits (1 -> 0)!
+                if ((gMockNvs.sectorF8[off + i] & inBytes[i]) != inBytes[i]) {
+                    return -4;
+                }
+                gMockNvs.sectorF8[off + i] =
+                    static_cast<uint8_t>(gMockNvs.sectorF8[off + i] & inBytes[i]);
+            }
+            ++gMockNvs.journalWriteCount;
+            return 0;
+        };
+
+        RuidoController nvsCtrl{};
+        Fm1PanelState nvsPanel{};
+        Fm1LedModulator nvsLeds{};
+        Fm1NvsRuntimeState nvsRt{};
+        RUIDO_FM1_CHECK(loadBootNvsBlobs(loadFn, nvsCtrl, nvsPanel, nvsLeds, 0.6f, nvsRt,
+                                         tailReadFn, saveFn) == 0u);
+        RUIDO_FM1_CHECK(nvsRt.nextJournalSlot == 0u);
+
+        // Live Mixer pressure-key bounce `Scene 1 -> Scene 2 -> Scene 1` before 1.5 s deduplicates
+        // to ZERO flash operations (neither erase nor journal write)!
+        nvsCtrl.onWhiteKeyGate(9u, true); // Scene 2
+        nvsCtrl.onWhiteKeyGate(9u, false);
+        nvsCtrl.onWhiteKeyGate(8u, true); // Back to Scene 1
+        nvsCtrl.onWhiteKeyGate(8u, false);
+        nvsRt.lastPanelTouchMs = 100u;
+        RUIDO_FM1_CHECK(
+            pollAndSaveNvsBlobs(1700u, 0u, saveFn, preEraseFn, nvsCtrl, nvsRt, tailWriteFn) == 0u);
+        RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u && gMockNvs.journalWriteCount == 0u);
+
+        // Live Mixer pressure-key recall `Scene 1 -> Scene 3` appends 16 B at `0x020` after 1.5 s
+        // with ZERO `preEraseFn` / sector-erase calls (eliminating the ~50 ms audio+LED glitch)!
+        nvsCtrl.onWhiteKeyGate(10u, true); // Scene 3 (slot 2)
+        nvsRt.lastPanelTouchMs = 200u;
+        // Held key keeps save deferred even past 1.5 s
+        RUIDO_FM1_CHECK(
+            pollAndSaveNvsBlobs(2000u, 0u, saveFn, preEraseFn, nvsCtrl, nvsRt, tailWriteFn) == 0u);
+        nvsCtrl.onWhiteKeyGate(10u, false);
+        nvsRt.lastPanelTouchMs = 2100u;
+        RUIDO_FM1_CHECK(
+            pollAndSaveNvsBlobs(3600u, 0u, saveFn, preEraseFn, nvsCtrl, nvsRt, tailWriteFn) == 1u);
+        RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u);
+        RUIDO_FM1_CHECK(gMockNvs.baseSaveCount == 0u);
+        RUIDO_FM1_CHECK(gMockNvs.journalWriteCount == 1u);
+        RUIDO_FM1_CHECK(nvsRt.nextJournalSlot == 1u);
+        RUIDO_FM1_CHECK(nvsRt.takeBaseBlobWritten() == 0u);
+
+        // Simulate a torn/corrupt slot 1 at `0x030`: cold boot must recover Scene 3 from slot 0 and
+        // advance `nextJournalSlot` past the dirty slot (`2`) so NOR `1 -> 0` writes stay clean!
+        gMockNvs.sectorF8[kSettingsJournalBaseOff + 16u + 4u] = 0x01u;
+        gMockNvs.sectorF8[kSettingsJournalBaseOff + 16u + 0u] = 0xAAu;
+
+        RuidoController bootCtrl2{};
+        Fm1PanelState bootPanel2{};
+        Fm1LedModulator bootLeds2{};
+        Fm1NvsRuntimeState bootRt2{};
+        RUIDO_FM1_CHECK(loadBootNvsBlobs(loadFn, bootCtrl2, bootPanel2, bootLeds2, 0.6f, bootRt2,
+                                         tailReadFn, saveFn) == (1u << kNvsSettingsBlobIdx));
+        RUIDO_FM1_CHECK(bootCtrl2.snapshots().activeSlot() == 2u);
+        RUIDO_FM1_CHECK(bootRt2.nextJournalSlot == 2u);
+
+        // Fill journal past `kSettingsJournalBootCompactThreshold` (64 slots) with zero live
+        // erases, then verify cold-boot silent compaction resets `nextJournalSlot` back to `0`!
+        for (uint32_t i = 0u; i < kSettingsJournalBootCompactThreshold; ++i) {
+            const uint8_t targetKey = static_cast<uint8_t>(8u + (i & 3u));
+            bootCtrl2.onWhiteKeyGate(targetKey, true);
+            bootCtrl2.onWhiteKeyGate(targetKey, false);
+            bootRt2.lastPanelTouchMs = 5000u + i * 2000u;
+            (void)pollAndSaveNvsBlobs(6600u + i * 2000u, 0u, saveFn, preEraseFn, bootCtrl2, bootRt2,
+                                      tailWriteFn);
+        }
+        RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u);
+        RUIDO_FM1_CHECK(bootRt2.nextJournalSlot >= kSettingsJournalBootCompactThreshold);
+        const uint8_t expectedFinalSlot = bootCtrl2.snapshots().activeSlot();
+
+        RuidoController bootCtrl3{};
+        Fm1PanelState bootPanel3{};
+        Fm1LedModulator bootLeds3{};
+        Fm1NvsRuntimeState bootRt3{};
+        RUIDO_FM1_CHECK(loadBootNvsBlobs(loadFn, bootCtrl3, bootPanel3, bootLeds3, 0.6f, bootRt3,
+                                         tailReadFn, saveFn) == (1u << kNvsSettingsBlobIdx));
+        RUIDO_FM1_CHECK(bootCtrl3.snapshots().activeSlot() == expectedFinalSlot);
+        RUIDO_FM1_CHECK(gMockNvs.baseSaveCount == 1u);
+        RUIDO_FM1_CHECK(bootRt3.nextJournalSlot == 0u);
     }
 
 #undef RUIDO_FM1_CHECK

@@ -42,7 +42,9 @@ class ScopeHudRenderer {
                       const EngineTelemetry& telemetry) noexcept;
 
     // Render `stripHeight` scanlines starting at `yStart` into `rgb565Out` (`240 * stripHeight`).
-    void renderStrip(uint16_t yStart, uint16_t stripHeight, uint16_t* rgb565Out) const noexcept;
+    // Pass `bigEndianRgb565 = true` on big-endian SPI displays (e.g., ST7789) for single-pass pack.
+    void renderStrip(uint16_t yStart, uint16_t stripHeight, uint16_t* rgb565Out,
+                     bool bigEndianRgb565 = false) const noexcept;
 
     // Convenience helper to render all 15 strips (`15 x 16 = 240`) into a 240x240 RGB565 surface.
     void renderFullScreenStrips(uint16_t* fullRgb565Out) const noexcept {
@@ -54,10 +56,15 @@ class ScopeHudRenderer {
     }
 
   private:
+    uint32_t computeFrameBgKeepQ8() const noexcept;
+    void updateTraceForFrame(float dtSec, const EngineControlState& control,
+                             const HudState& hud) noexcept;
     int computeScanlineSyncShift(int py) const noexcept;
     void updateHudGauges(float dtClamped, bool snapImmediate) noexcept;
     void compositeHudStrip(uint16_t yStart, uint16_t stripHeight, uint8_t* lumBuf,
                            uint16_t* linScratch, uint8_t hudAlpha8) const noexcept;
+
+    static constexpr uint16_t kSubStripRows = 8u;
 
     BootIntroRenderer bootIntro_{};
     ScopeTraceEngine traceEngine_{};
@@ -65,6 +72,9 @@ class ScopeHudRenderer {
     HudAmpGraph ampGraph_{};
     HudGlobalViews globalViews_{};
     HudKeybedView keybedView_{};
+
+    mutable std::array<uint16_t, kDisplayWidth * kSubStripRows> stripLinScratch_{};
+    mutable std::array<uint8_t, kDisplayWidth * kSubStripRows> stripLumScratch_{};
 
     EngineControlState frameControl_{};
     HudState frameHud_{};
@@ -90,6 +100,7 @@ class ScopeHudRenderer {
     float syncRecoilPhase_ = 0.0f;
     HudMode prevHeaderBarMode_ = HudMode::None;
     KnobBankMode prevKnobBank_ = KnobBankMode::Frequency;
+    uint32_t frameBgKeepQ8_ = 256u;
     uint8_t frameStutterGateMask_ = 0x0Fu;
     uint8_t lastPhantomSeq_ = 0u;
     uint8_t phantomPin_ = 0u;

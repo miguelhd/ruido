@@ -201,6 +201,15 @@ void RuidoController::restoreOrDissolveHud() noexcept {
     if (keyboard_.anyKeyHeld()) {
         dismissedByHome_ = false;
         hud_.focusedKnob = kNoFocusedKnob;
+        // GLOBAL CONFIG > Key Pressure doubles as a touch test: keys still play, but the list stays
+        // on screen so the row's live pressure meter remains visible while squeezing.
+        if (hud_.configPageOpen && hud_.configSubView == ConfigSubView::List &&
+            hud_.configCursor == static_cast<uint8_t>(ConfigItemId::PressureTouch)) {
+            hud_.knobBank = KnobBankMode::None;
+            hud_.mode = HudMode::GlobalConfig;
+            env_.latchPage();
+            return;
+        }
         if (hud_.activePunch == KeyPunchKind::None && hud_.selPageOpen) {
             hud_.knobBank = KnobBankMode::None;
             hud_.mode = HudMode::KeyboardModel;

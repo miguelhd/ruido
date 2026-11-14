@@ -46,6 +46,14 @@ inline void shadePanoramaCurveSkirt(int y0, int y1, uint8_t* lumBuf, float cx, f
     }
 }
 
+// Analog carbon-pill keys only (`OP1..OP6`, `Keys 1-12`); binary SOLO/MUTE/FREEZE keys excluded.
+constexpr uint16_t kAnalogBlackMask = 0x003Fu;
+constexpr uint16_t kAnalogWhiteMask = 0x0FFFu;
+constexpr float kNoPressureNoticeSec = 0.9f;
+constexpr float kPressMeterX0 = 16.0f;
+constexpr float kPressMeterX1 = 224.0f;
+constexpr float kPressPeakHoldSec = 1.2f;
+
 } // namespace
 
 void HudGlobalViews::reset() noexcept {
@@ -67,7 +75,51 @@ void HudGlobalViews::reset() noexcept {
 void HudGlobalViews::clearImmediate() noexcept {
     panPhase_ = 0.0f;
     configPhase_ = 0.0f;
+    pressLive01_ = pressPeak01_ = pressPeakHoldSec_ = pressMeterPhase_ = 0.0f;
+    noPressureHoldSec_ = 0.0f;
     primed_ = false;
+}
+
+void HudGlobalViews::updatePressureMeter(float dtClamped, const HudState& rawHud,
+                                         bool cfgActive) noexcept {
+    const bool onRow = cfgActive && rawHud.configSubView == ConfigSubView::List &&
+                       rawHud.configCursor == static_cast<uint8_t>(ConfigItemId::PressureTouch);
+    uint8_t liveQ8 = 0u;
+    bool analogHeld = false;
+    for (size_t i = 0u; i < kNumBlackKeys; ++i) {
+        if (((kAnalogBlackMask & rawHud.heldBlackMask) >> i) & 1u) {
+            analogHeld = true;
+            liveQ8 = (rawHud.blackPressureQ8[i] > liveQ8) ? rawHud.blackPressureQ8[i] : liveQ8;
+        }
+    }
+    for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+        if (((kAnalogWhiteMask & rawHud.heldWhiteMask) >> i) & 1u) {
+            analogHeld = true;
+            liveQ8 = (rawHud.whitePressureQ8[i] > liveQ8) ? rawHud.whitePressureQ8[i] : liveQ8;
+        }
+    }
+    const bool nonAnalogHeld = ((rawHud.heldBlackMask & ~kAnalogBlackMask) != 0u) ||
+                               ((rawHud.heldWhiteMask & ~kAnalogWhiteMask) != 0u);
+    if (onRow && nonAnalogHeld) {
+        noPressureHoldSec_ = kNoPressureNoticeSec;
+    } else if (noPressureHoldSec_ > 0.0f) {
+        noPressureHoldSec_ =
+            (onRow && noPressureHoldSec_ > dtClamped) ? (noPressureHoldSec_ - dtClamped) : 0.0f;
+    }
+    analogHeld = analogHeld && onRow;
+    pressLive01_ = analogHeld ? static_cast<float>(liveQ8) * (1.0f / 255.0f) : 0.0f;
+    if (analogHeld) {
+        pressPeak01_ = (pressLive01_ > pressPeak01_) ? pressLive01_ : pressPeak01_;
+        pressPeakHoldSec_ = kPressPeakHoldSec;
+    } else if (pressPeakHoldSec_ > 0.0f) {
+        pressPeakHoldSec_ -= dtClamped;
+    }
+    pressMeterPhase_ = stepHudFadeLinear(
+        pressMeterPhase_, onRow && (analogHeld || pressPeakHoldSec_ > 0.0f), dtClamped);
+    if (pressMeterPhase_ <= 0.002f) {
+        pressPeak01_ = 0.0f;
+        pressPeakHoldSec_ = 0.0f;
+    }
 }
 
 bool HudGlobalViews::anyActiveTarget(const HudState& rawHud) const noexcept {
@@ -78,7 +130,8 @@ bool HudGlobalViews::anyActiveTarget(const HudState& rawHud) const noexcept {
 }
 
 bool HudGlobalViews::hasResidualPhase() const noexcept {
-    return panPhase_ > 0.002f || configPhase_ > 0.002f;
+    return panPhase_ > 0.002f || configPhase_ > 0.002f || pressMeterPhase_ > 0.002f ||
+           noPressureHoldSec_ > 0.0f;
 }
 
 void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
@@ -94,6 +147,7 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
 
     panPhase_ = stepHudFadeLinear(panPhase_, panActive, dtClamped);
     configPhase_ = stepHudFadeLinear(configPhase_, cfgActive, dtClamped);
+    updatePressureMeter(dtClamped, rawHud, cfgActive);
 
     if (!panActive) {
         if (panPhase_ <= 0.002f) {
@@ -280,39 +334,50 @@ namespace {
 void compositeConfigSubViewStrip(const MonoStripCanvas& cv, const HudState& hud) noexcept {
     constexpr int kBodyX = 10;
     constexpr uint8_t kPrimaryLum = 255u;
+    constexpr uint8_t kSubtitleLum = 220u;
     constexpr uint8_t kBodyLum = 174u;
 
-    const int scrimTop = (cv.y0 < 24) ? 24 : cv.y0;
-    if (scrimTop < cv.y1) {
-        const uint32_t keepQ8 =
-            256u - ((208u * static_cast<uint32_t>(cv.masterAlpha8) + 127u) / 255u);
-        for (int py = scrimTop; py < cv.y1; ++py) {
-            uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
-            for (size_t x = 0u; x < kDisplayWidth; ++x) {
-                row[x] = static_cast<uint8_t>((static_cast<uint32_t>(row[x]) * keepQ8) >> 8u);
+    if (hud.configSubView == ConfigSubView::FactoryResetConfirm) {
+        cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 46, "Turn ALGORITHM CW to reset",
+                             kPrimaryLum);
+        cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 70, "Resets Scenes 1-4 and Config", kBodyLum);
+
+        constexpr int kBarY = 112;
+        constexpr int kBarH = 4;
+        constexpr int kBarW = 220;
+        const int barTop = (cv.y0 > kBarY) ? cv.y0 : kBarY;
+        const int barBot = (cv.y1 < kBarY + kBarH) ? cv.y1 : (kBarY + kBarH);
+        if (barTop < barBot) {
+            const auto trackLum =
+                static_cast<uint8_t>((48u * static_cast<uint32_t>(cv.masterAlpha8) + 127u) / 255u);
+            const uint8_t fillLum = cv.masterAlpha8;
+            const uint32_t ticks = (hud.configResetTicks > 8u) ? 8u : hud.configResetTicks;
+            const int fillW = static_cast<int>((ticks * static_cast<uint32_t>(kBarW) + 4u) / 8u);
+            for (int py = barTop; py < barBot; ++py) {
+                uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
+                for (int x = 0; x < kBarW; ++x) {
+                    row[kBodyX + x] = (x < fillW) ? fillLum : trackLum;
+                }
             }
         }
-    }
 
-    if (hud.configSubView == ConfigSubView::FactoryResetConfirm) {
-        cv.drawSans(kFontSansMedium, kBodyX, 46, "Turn ALGORITHM CW to reset", kPrimaryLum, 0);
-        cv.drawSans(kFontSansMedium, kBodyX, 69, "Resets Scenes 1-4 and Config", kBodyLum, 0);
+        cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 158, "SELECT or CCW to cancel", kBodyLum);
         return;
     }
 
     if (hud.configSubView == ConfigSubView::FactoryResetDone) {
-        cv.drawSans(kFontSansMedium, kBodyX, 46, "Factory defaults restored", kPrimaryLum, 0);
-        cv.drawSans(kFontSansMedium, kBodyX, 69, "Scenes 1-4 and Config reset", kBodyLum, 0);
+        cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 46, "Factory defaults restored", kPrimaryLum);
+        cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 70, "Scenes 1-4 and Config reset", kBodyLum);
         return;
     }
 
     // ConfigSubView::Credits ("RUIDO")
-    cv.drawSans(kFontSansMedium, kBodyX, 46, "4-Oscillator Drone Synthesizer", kBodyLum, 0);
-    cv.drawSans(kFontSansMedium, kBodyX, 69, "Miguel Hern\xC3\xA1ndez Domenech", kBodyLum, 0);
-    cv.drawSans(kFontSansMedium, kBodyX, 92, "(c) 2026  GPL-3.0-only", kBodyLum, 0);
-    cv.drawSans(kFontSansMedium, kBodyX, 124, "Felucca, SLOOP, Dinghy", kBodyLum, 0);
-    cv.drawSans(kFontSansMedium, kBodyX, 147, "JieLi AC79, Terminus OFL", kBodyLum, 0);
-    cv.drawSans(kFontSansMedium, kBodyX, 170, "github.com/miguelhd/ruido", kBodyLum, 0);
+    cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 46, "4-Oscillator Drone Synthesizer",
+                         kSubtitleLum);
+    cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 78, "By Miguel Hern\xC3\xA1ndez Domenech",
+                         kBodyLum);
+    cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 102, "GPL-3.0  /  2026  /  Dinghy HAL", kBodyLum);
+    cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 126, "github.com/miguelhd/ruido", kBodyLum);
 }
 
 } // namespace
@@ -373,12 +438,31 @@ void HudGlobalViews::compositeGlobalConfigStrip(int y0, int y1, uint8_t* lumBuf,
 
         const char* itemLbl = globalConfigItemLabel(itemId);
         const char* valLbl = globalConfigValueLabel(itemId, hud.config, control.global);
-        if (selected) {
-            cv.drawSans(kFontSansMedium, 16, ry + 5, itemLbl, 255u, 0);
-            cv.drawSansRight(kFontSansMedium, 224, ry + 5, valLbl, 255u, 0);
+        const uint8_t rowLum = selected ? 255u : 174u;
+        if (selected && itemId == ConfigItemId::PressureTouch && noPressureHoldSec_ > 0.0f) {
+            // An on/off key (SOLO/MUTE/FREEZE) was touched: say so plainly across the whole row.
+            cv.drawSansFlushLeft(kFontSansMedium, 16, ry + 5, "Not pressure sensitive", rowLum, 0);
         } else {
-            cv.drawSans(kFontSansSmall, 16, ry + 6, itemLbl, 138u, 1);
-            cv.drawSansRight(kFontSansMedium, 224, ry + 5, valLbl, 174u, 0);
+            cv.drawSansFlushLeft(kFontSansMedium, 16, ry + 5, itemLbl, rowLum, 0);
+            cv.drawSansRight(kFontSansMedium, 224, ry + 5, valLbl, rowLum, 0);
+        }
+
+        if (selected && itemId == ConfigItemId::PressureTouch && pressMeterPhase_ > 0.002f) {
+            const auto meterA8 =
+                static_cast<uint8_t>(pressMeterPhase_ * static_cast<float>(alpha8) + 0.5f);
+            const MonoStripCanvas mcv{lumBuf, y0, y1, meterA8};
+            const float yLine = static_cast<float>(ry) + 22.0f;
+            const float span = kPressMeterX1 - kPressMeterX0;
+            mcv.drawHorizontalFilament(kPressMeterX0, kPressMeterX1, yLine, 34.0f, 0.5f, false);
+            if (pressLive01_ > 0.004f) {
+                const float lum = (pressLive01_ >= 0.995f) ? 255.0f : 176.0f;
+                mcv.drawHorizontalFilament(kPressMeterX0, kPressMeterX0 + span * pressLive01_,
+                                           yLine, lum, 0.5f, false);
+            }
+            if (pressPeak01_ > 0.01f) {
+                mcv.drawVerticalSlit(kPressMeterX0 + span * pressPeak01_, yLine - 3.0f,
+                                     yLine + 1.0f, 230.0f);
+            }
         }
     }
 }

@@ -142,7 +142,8 @@ RUIDO_ALWAYS_INLINE float stepHpNonlinearPrecomputed(float x, float& s1, float& 
     const float fHp0 = y1_0 - xPlusS1 - g * ota1_0.value;
     const float d1_0 = g * ota1_0.deriv;
     const float d2_0 = g * ota2_0.deriv;
-    const float dy2_0 = fHp0 / ((1.0f + d1_0) * (1.0f + d2_0) - d1_0 * (k * fb_0.deriv));
+    const float dy2_0 =
+        fHp0 * fastRecipPos((1.0f + d1_0) * (1.0f + d2_0) - d1_0 * (k * fb_0.deriv));
     y2 -= dy2_0;
     float finalOta2 = ota2_0.value + ota2_0.deriv * dy2_0;
 
@@ -155,7 +156,8 @@ RUIDO_ALWAYS_INLINE float stepHpNonlinearPrecomputed(float x, float& s1, float& 
         const float fHp1 = y1_1 - xPlusS1 - g * ota1_1.value;
         const float d1_1 = g * ota1_1.deriv;
         const float d2_1 = g * ota2_1.deriv;
-        const float dy2_1 = fHp1 / ((1.0f + d1_1) * (1.0f + d2_1) - d1_1 * (k * fb_1.deriv));
+        const float dy2_1 =
+            fHp1 * fastRecipPos((1.0f + d1_1) * (1.0f + d2_1) - d1_1 * (k * fb_1.deriv));
         y2 -= dy2_1;
         finalOta2 = ota2_1.value + ota2_1.deriv * dy2_1;
     }
@@ -193,7 +195,7 @@ RUIDO_ALWAYS_INLINE float stepLpNonlinear(float x, float& s1, float& s2, float& 
     const float fLp0 = y1_0 - s1 - g * (ota1_0.value + fb_0.value);
     const float d1_0 = g * ota1_0.deriv;
     const float d2_0 = g * ota2_0.deriv;
-    const float dw0 = fLp0 / ((1.0f + d1_0) * (1.0f + d2_0) - g * (k * fb_0.deriv));
+    const float dw0 = fLp0 * fastRecipPos((1.0f + d1_0) * (1.0f + d2_0) - g * (k * fb_0.deriv));
     w -= dw0;
     float finalOta2 = ota2_0.value - ota2_0.deriv * dw0;
 
@@ -207,7 +209,7 @@ RUIDO_ALWAYS_INLINE float stepLpNonlinear(float x, float& s1, float& s2, float& 
         const float fLp1 = y1_1 - s1 - g * (ota1_1.value + fb_1.value);
         const float d1_1 = g * ota1_1.deriv;
         const float d2_1 = g * ota2_1.deriv;
-        const float dw1 = fLp1 / ((1.0f + d1_1) * (1.0f + d2_1) - g * (k * fb_1.deriv));
+        const float dw1 = fLp1 * fastRecipPos((1.0f + d1_1) * (1.0f + d2_1) - g * (k * fb_1.deriv));
         w -= dw1;
         finalOta2 = ota2_1.value - ota2_1.deriv * dw1;
     }

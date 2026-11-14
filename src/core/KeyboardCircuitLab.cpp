@@ -31,12 +31,12 @@ void evaluateCircuitLabModel(const KeyboardInputView& in, EngineControlState& st
     std::array<float, kNumOscillators> voiceFormant{0.0f, 0.0f, 0.0f, 0.0f};
     PunchTracker punch{};
 
-    // 1. OP1..OP4 (SOLO 1-4) & White Keys 0..3 (MUTE 1-4): Shared Momentary/Latching Console
+    // 1. PIT..POLY (SOLO 1-4) & White Keys 12..15 (MUTE 1-4): Shared Momentary/Latching Console
     evaluateConsoleSoloMute(in, mod, punch);
 
-    // 2. OP5: STARVE -> Dying-9V CMOS rail collapse, asymmetric duty thinning & voltage pitch sag
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op5)]) {
-        constexpr size_t kIdx = static_cast<size_t>(BlackKeyId::Op5);
+    // 2. OP1: STARVE -> Dying-9V CMOS rail collapse, asymmetric duty thinning & voltage pitch sag
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op1)]) {
+        constexpr size_t kIdx = static_cast<size_t>(BlackKeyId::Op1);
         const float p = clampf(in.blackPressure[kIdx], 0.0f, 1.0f);
         mod.overloadSurge = p;
         const float sagMul = fastExp2(-1.15f * p * p);
@@ -48,34 +48,34 @@ void evaluateCircuitLabModel(const KeyboardInputView& in, EngineControlState& st
         punch.note(in.blackPressSeq[kIdx], KeyPunchKind::RailStarve, 0u, p);
     }
 
-    // 3. OP6: RING MOD -> 4x oversampled paired Ring / XOR sideband matrix (1x2, 2x3, 3x4, 4x1)
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op6)]) {
-        constexpr size_t kIdx = static_cast<size_t>(BlackKeyId::Op6);
+    // 3. OP2: RING MOD -> 4x oversampled paired Ring / XOR sideband matrix (1x2, 2x3, 3x4, 4x1)
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op2)]) {
+        constexpr size_t kIdx = static_cast<size_t>(BlackKeyId::Op2);
         const float p = clampf(in.blackPressure[kIdx], 0.0f, 1.0f);
         mod.ringModMix = p;
         punch.note(in.blackPressSeq[kIdx], KeyPunchKind::RingXor, 0u, p);
     }
 
-    // 4. PIT: TURBO LFO -> 1x..32x LFO overclock + momentary dry-patch depth floor
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Pit)]) {
-        constexpr size_t kIdx = static_cast<size_t>(BlackKeyId::Pit);
+    // 4. OP3: TURBO LFO -> 1x..32x LFO overclock + momentary dry-patch depth floor
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op3)]) {
+        constexpr size_t kIdx = static_cast<size_t>(BlackKeyId::Op3);
         const float p = clampf(in.blackPressure[kIdx], 0.0f, 1.0f);
         mod.lfoTurbo = p;
         punch.note(in.blackPressSeq[kIdx], KeyPunchKind::LfoTurbo, 0u, p);
     }
 
-    // 5. GLO: SCREAM -> Twin Korg35 HPF + LPF self-oscillation sweep (opens GlobalFilter graph)
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Glo)]) {
-        constexpr size_t kIdx = static_cast<size_t>(BlackKeyId::Glo);
+    // 5. OP4: SCREAM -> Twin Korg35 HPF + LPF self-oscillation sweep (opens GlobalFilter graph)
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op4)]) {
+        constexpr size_t kIdx = static_cast<size_t>(BlackKeyId::Op4);
         const float p = clampf(in.blackPressure[kIdx], 0.0f, 1.0f);
         mod.filterScream = p;
         punch.note(in.blackPressSeq[kIdx], KeyPunchKind::FilterScream, 0u, p);
     }
 
-    // 6. MONO (HARD SYNC: OSC 1 -> OSC 2..4 PolyBLEP sync + slave harmonic sweep) &
-    //    POLY (SCATTER: opposite Schmitt PWM, pitch, filter & wide pan scramble)
-    constexpr size_t kMonoIdx = static_cast<size_t>(BlackKeyId::Mono);
-    constexpr size_t kPolyIdx = static_cast<size_t>(BlackKeyId::Poly);
+    // 6. OP5 (HARD SYNC: OSC 1 -> OSC 2..4 PolyBLEP sync + slave harmonic sweep) &
+    //    OP6 (SCATTER: opposite Schmitt PWM, pitch, filter & wide pan scramble)
+    constexpr size_t kMonoIdx = static_cast<size_t>(BlackKeyId::Op5);
+    constexpr size_t kPolyIdx = static_cast<size_t>(BlackKeyId::Op6);
     const bool monoOn = in.blackHeld[kMonoIdx];
     const bool polyOn = in.blackHeld[kPolyIdx];
     if (monoOn) {
@@ -116,39 +116,39 @@ void evaluateCircuitLabModel(const KeyboardInputView& in, EngineControlState& st
     // 7. 11th Tall Key: Universal Freeze (8 LFOs + Drift + Scope)
     evaluateUniversalFreeze(in, mod, hud, punch);
 
-    // 8. Bottom 4x4 Strip (MUTE 1-4 | CROSS-PIN 5-8 | FOLD 9-12 | CRUSH 13-16)
+    // 8. Bottom 4x4 Strip (CROSS-PIN 1-4 | FOLD 5-8 | CRUSH 9-12 | MUTE 13-16)
     for (uint8_t v = 0u; v < kNumOscillators; ++v) {
-        // Bank B (White 4..7): CROSS-PIN -> shorts neighbor pre-mute capacitor ramp & XOR into OSC
+        // Bank A (White 0..3): CROSS-PIN -> shorts neighbor pre-mute capacitor ramp & XOR into OSC
         // v
-        if (in.whiteHeld[4u + v]) {
-            const float p = clampf(in.whitePressure[4u + v], 0.0f, 1.0f);
+        if (in.whiteHeld[kBankAWhiteKeyBase + v]) {
+            const float p = clampf(in.whitePressure[kBankAWhiteKeyBase + v], 0.0f, 1.0f);
             mod.xmodDepth[v] = p;
             mod.voicePwDelta[v] += (((v & 1u) == 0u) ? -0.28f : 0.28f) * p;
             const float bite = 0.78f * p;
             if (bite > voiceFormant[v]) {
                 voiceFormant[v] = bite;
             }
-            punch.note(in.whitePressSeq[4u + v], KeyPunchKind::VoiceXMod, v, p);
+            punch.note(in.whitePressSeq[kBankAWhiteKeyBase + v], KeyPunchKind::VoiceXMod, v, p);
         }
-        // Bank C (White 8..11): FOLD -> 1x..6.2x West-Coast Serge wavefolder on CD40106 cap ramp
-        if (in.whiteHeld[8u + v]) {
-            const float p = clampf(in.whitePressure[8u + v], 0.0f, 1.0f);
+        // Bank B (White 4..7): FOLD -> 1x..6.2x West-Coast Serge wavefolder on CD40106 cap ramp
+        if (in.whiteHeld[kBankBWhiteKeyBase + v]) {
+            const float p = clampf(in.whitePressure[kBankBWhiteKeyBase + v], 0.0f, 1.0f);
             mod.foldDepth[v] = p;
             const float sheen = 0.44f * p;
             if (sheen > voiceFormant[v]) {
                 voiceFormant[v] = sheen;
             }
-            punch.note(in.whitePressSeq[8u + v], KeyPunchKind::VoiceFold, v, p);
+            punch.note(in.whitePressSeq[kBankBWhiteKeyBase + v], KeyPunchKind::VoiceFold, v, p);
         }
-        // Bank D (White 12..15): CRUSH -> CD4040 binary sub-divider XOR + CD4013 S&H clock crush
-        if (in.whiteHeld[12u + v] && !hud.saveArmed) {
-            const float p = clampf(in.whitePressure[12u + v], 0.0f, 1.0f);
+        // Bank C (White 8..11): CRUSH -> CD4040 binary sub-divider XOR + CD4013 S&H clock crush
+        if (in.whiteHeld[kSceneWhiteKeyBase + v] && !hud.saveArmed) {
+            const float p = clampf(in.whitePressure[kSceneWhiteKeyBase + v], 0.0f, 1.0f);
             mod.crushDepth[v] = p;
             const float ring = 0.72f * p;
             if (ring > voiceFormant[v]) {
                 voiceFormant[v] = ring;
             }
-            punch.note(in.whitePressSeq[12u + v], KeyPunchKind::VoiceCrush, v, p);
+            punch.note(in.whitePressSeq[kSceneWhiteKeyBase + v], KeyPunchKind::VoiceCrush, v, p);
         }
         state.voicePressure[v] = voiceFormant[v];
     }
@@ -160,31 +160,33 @@ void evaluateCircuitLabModel(const KeyboardInputView& in, EngineControlState& st
 void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, float subBreathWave01,
                                const EngineControlState& state, const HudState& hud,
                                uint8_t stutMask, float rhythmPhase01, LedState& outLeds) noexcept {
+    (void)subBreathWave01;
+    (void)stutMask;
     (void)rhythmPhase01;
-    // LIFO black-key show selection across OP5..POLY (indices 4..9): matches HUD header 1-to-1
+    // LIFO black-key show selection across OP1..OP6 (indices 0..5): matches HUD header 1-to-1
     // when chording multiple global bends, while keeping every physically held black key at 100%.
     int topBlackShow = -1;
     uint32_t topBlackSeq = 0u;
-    for (size_t k = 4u; k <= 9u; ++k) {
+    for (size_t k = 0u; k < kNumTopMacroKeys; ++k) {
         if (in.blackHeld[k] && (topBlackShow < 0 || in.blackPressSeq[k] >= topBlackSeq)) {
             topBlackShow = static_cast<int>(k);
             topBlackSeq = in.blackPressSeq[k];
         }
     }
 
-    // 1. OP5 STARVE: Dying-9V brownout dim & organic voltage sputter across all 42 LEDs
-    if (topBlackShow == static_cast<int>(BlackKeyId::Op5)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op5)], 0.0f, 1.0f);
+    // 1. OP1 STARVE: Dying-9V brownout dim & organic voltage sputter across all 42 LEDs
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op1)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op1)], 0.0f, 1.0f);
         const auto tick = static_cast<uint32_t>(animPhase * 18.0f);
         const float flutter =
             0.5f + 0.5f * evalAnalogSine(wrapLfoPhase01(animPhase * (5.5f + 6.0f * p)));
         const float keep = 1.0f - 0.80f * p;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
             const float rnd = clHashFloat01(tick * 31u + static_cast<uint32_t>(i));
             const float sputter = (rnd > 0.76f) ? ((rnd - 0.76f) * 3.6f * p * flutter) : 0.0f;
             outLeds.whiteKeyLeds[i] = clampf(outLeds.whiteKeyLeds[i] * keep + sputter, 0.02f, 1.0f);
         }
-        for (size_t i = 4u; i < kNumBlackKeys; ++i) {
+        for (size_t i = 0u; i < kNumTopMacroKeys; ++i) {
             const float rnd = clHashFloat01(tick * 17u + static_cast<uint32_t>(i) + 99u);
             const float sputter = (rnd > 0.78f) ? ((rnd - 0.78f) * 3.2f * p) : 0.0f;
             outLeds.blackKeyLeds[i] = clampf(outLeds.blackKeyLeds[i] * keep + sputter, 0.02f, 1.0f);
@@ -196,22 +198,22 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
                 maxPanelBtnLed(outLeds, kPanelGridTop[c], (rnd - 0.75f) * 3.0f * p * flutter);
             }
         }
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op5)] = 1.0f;
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op1)] = 1.0f;
     }
 
-    // 2. OP6 RING MOD: Alternating binary XOR logic checkerboard that flips parity with clock/press
-    if (topBlackShow == static_cast<int>(BlackKeyId::Op6)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op6)], 0.0f, 1.0f);
+    // 2. OP2 RING MOD: Alternating binary XOR logic checkerboard that flips parity with clock/press
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op2)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op2)], 0.0f, 1.0f);
         const bool clkFlip = evalAnalogSine(wrapLfoPhase01(animPhase * (2.5f + 9.5f * p))) < 0.0f;
         const bool pressParity = (p >= 0.55f);
         const bool flip = (clkFlip != pressParity);
         const float hi = 0.30f + 0.70f * p;
         const float lo = 0.03f;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
             const bool lit = (((i & 1u) == 0u) != flip);
             outLeds.whiteKeyLeds[i] = lit ? hi : lo;
         }
-        for (size_t i = 4u; i < kNumBlackKeys; ++i) {
+        for (size_t i = 0u; i < kNumTopMacroKeys; ++i) {
             const bool lit = (((i & 1u) != 0u) != flip);
             outLeds.blackKeyLeds[i] = lit ? hi : lo;
         }
@@ -224,18 +226,18 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
                 setPanelBtnLed(outLeds, kPanelGridBot[c], topLit ? lo : hi);
             }
         }
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op6)] = 1.0f;
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op2)] = 1.0f;
     }
 
-    // 3. PIT TURBO LFO: Accelerating cyclotron wave racing across keys & 2x6 button perimeter
-    if (topBlackShow == static_cast<int>(BlackKeyId::Pit)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Pit)], 0.0f, 1.0f);
+    // 3. OP3 TURBO LFO: Accelerating cyclotron wave racing across keys & 2x6 button perimeter
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op3)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op3)], 0.0f, 1.0f);
         const float cycPhase = wrapLfoPhase01(animPhase * (2.5f + 19.5f * p * p));
-        const float keyHead = cycPhase * 16.0f;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+        const float keyHead = cycPhase * 12.0f;
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
             float dist = absf(static_cast<float>(i) - keyHead);
-            if (dist > 8.0f) {
-                dist = 16.0f - dist;
+            if (dist > 6.0f) {
+                dist = 12.0f - dist;
             }
             const float comet = clampf(1.0f - dist * 0.42f, 0.0f, 1.0f);
             const float glow = 0.05f + (0.45f + 0.50f * p) * comet * comet;
@@ -258,18 +260,18 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
             maxPanelBtnLed(outLeds, kButtonLoop[b], beam * (0.50f + 0.50f * p));
         }
         maxPanelBtnLed(outLeds, ButtonId::Lfo, 0.65f + 0.35f * p);
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Pit)] = 1.0f;
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op3)] = 1.0f;
     }
 
-    // 4. GLO SCREAM: Twin Korg35 resonance peaks sweeping inward + FX & red REC clip flare
-    if (topBlackShow == static_cast<int>(BlackKeyId::Glo)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Glo)], 0.0f, 1.0f);
+    // 4. OP4 SCREAM: Twin Korg35 resonance peaks sweeping inward + FX & red REC clip flare
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op4)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op4)], 0.0f, 1.0f);
         const float shimmer =
             (p > 0.45f) ? (0.92f + 0.08f * evalAnalogSine(wrapLfoPhase01(animPhase * 16.0f)))
                         : 1.0f;
-        const float hpPeak = p * 6.0f;
-        const float lpPeak = 15.0f - p * 6.0f;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+        const float hpPeak = p * 4.5f;
+        const float lpPeak = 11.0f - p * 4.5f;
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
             const float fi = static_cast<float>(i);
             const float dHp = clampf(1.0f - absf(fi - hpPeak) * 0.62f, 0.0f, 1.0f);
             const float dLp = clampf(1.0f - absf(fi - lpPeak) * 0.62f, 0.0f, 1.0f);
@@ -295,14 +297,14 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
             maxPanelBtnLed(outLeds, ButtonId::Rec,
                            clampf((p - 0.40f) * (1.0f / 0.60f), 0.0f, 1.0f) * shimmer);
         }
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Glo)] = 1.0f;
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op4)] = 1.0f;
     }
 
-    // 5. MONO HARD SYNC: Master clock pulse anchored on OSC 1 column radiating L->R across slaves
-    if (topBlackShow == static_cast<int>(BlackKeyId::Mono)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Mono)], 0.0f, 1.0f);
+    // 5. OP5 HARD SYNC: Master clock pulse anchored on OSC 1 column radiating L->R across slaves
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op5)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op5)], 0.0f, 1.0f);
         const float pulsePos = wrapLfoPhase01(animPhase * (3.5f + 8.5f * p)) * 4.0f;
-        for (size_t b = 0u; b < 4u; ++b) {
+        for (size_t b = 0u; b < 3u; ++b) {
             outLeds.whiteKeyLeds[b * 4u] = clampf(0.75f + 0.25f * p, 0.0f, 1.0f);
             for (size_t v = 1u; v < 4u; ++v) {
                 const float wave =
@@ -320,20 +322,20 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
                 maxPanelBtnLed(outLeds, kPanelGridBot[c], (c == 0u) ? 0.85f : (0.80f * p * wave));
             }
         }
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Mono)] = 1.0f;
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op5)] = 1.0f;
     }
 
-    // 6. POLY SCATTER: Geiger-counter static sparks crackling randomly across all 42 LEDs
-    if (topBlackShow == static_cast<int>(BlackKeyId::Poly)) {
-        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Poly)], 0.0f, 1.0f);
+    // 6. OP6 SCATTER: Geiger-counter static sparks crackling randomly across all 42 LEDs
+    if (topBlackShow == static_cast<int>(BlackKeyId::Op6)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op6)], 0.0f, 1.0f);
         const auto tick = static_cast<uint32_t>(animPhase * 28.0f);
         const float thresh = 0.86f - 0.42f * p;
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
             const float r = clHashFloat01(tick * 47u + static_cast<uint32_t>(i) * 13u);
             outLeds.whiteKeyLeds[i] = (r > thresh) ? clampf(0.45f + 0.55f * p, 0.0f, 1.0f)
                                                    : (outLeds.whiteKeyLeds[i] * 0.15f);
         }
-        for (size_t i = 4u; i < kNumBlackKeys; ++i) {
+        for (size_t i = 0u; i < kNumTopMacroKeys; ++i) {
             const float r = clHashFloat01(tick * 53u + static_cast<uint32_t>(i) * 19u + 7u);
             if (r > thresh) {
                 outLeds.blackKeyLeds[i] = 0.50f + 0.50f * p;
@@ -352,16 +354,16 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
                 maxPanelBtnLed(outLeds, kPanelGridBot[c], 0.50f + 0.50f * p);
             }
         }
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Poly)] = 1.0f;
+        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::Op6)] = 1.0f;
     }
 
     // 7. Bottom Circuit-Bend Shows across all 42 LEDs (LIFO-selected when no top-row show leads):
-    //    CROSS-PIN (White 4..7) | FOLD (White 8..11) | CRUSH (White 12..15)
+    //    CROSS-PIN (White 0..3) | FOLD (White 4..7) | CRUSH (White 8..11)
     int botKey = -1;
     uint32_t botSeq = 0u;
-    for (size_t k = 4u; k < kNumWhiteKeys; ++k) {
-        if (k >= 12u && hud.saveArmed) {
-            break;
+    for (size_t k = 0u; k < kMuteWhiteKeyBase; ++k) {
+        if (k >= kSceneWhiteKeyBase && k < kSceneWhiteKeyBase + kNumSnapshots && hud.saveArmed) {
+            continue;
         }
         if (in.whiteHeld[k] && (botKey < 0 || in.whitePressSeq[k] >= botSeq)) {
             botKey = static_cast<int>(k);
@@ -369,19 +371,19 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
         }
     }
 
-    if (topBlackShow < 0 && botKey >= 4) {
+    if (topBlackShow < 0 && botKey >= 0) {
         const auto wIdx = static_cast<size_t>(botKey);
         const size_t v = wIdx & 3u;
         const float p = clampf(in.whitePressure[wIdx], 0.0f, 1.0f);
 
-        if (wIdx < 8u) {
-            // 7a. CROSS-PIN (5-8): High-voltage arc lightning jumping between shorted columns
+        if (wIdx < kBankBWhiteKeyBase) {
+            // 7a. CROSS-PIN (1-4): High-voltage arc lightning jumping between shorted columns
             const size_t nbr = (v + 1u) & 3u;
             const float boltPing =
                 0.5f + 0.5f * evalAnalogSine(wrapLfoPhase01(animPhase * (4.5f + 13.5f * p)));
-            const float arcPos = boltPing * 15.0f;
+            const float arcPos = boltPing * 11.0f;
             const auto sparkTick = static_cast<uint32_t>(animPhase * (18.0f + 22.0f * p));
-            for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+            for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
                 const size_t col = i & 3u;
                 const bool isPole = (col == v || col == nbr);
                 const float poleGlow =
@@ -397,7 +399,7 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
                 const float hi = (poleGlow > bolt) ? poleGlow : bolt;
                 outLeds.whiteKeyLeds[i] = clampf((hi > crackle) ? hi : crackle, 0.02f, 1.0f);
             }
-            for (size_t k = 4u; k < 10u; ++k) {
+            for (size_t k = 0u; k < kNumTopMacroKeys; ++k) {
                 const bool even = ((k & 1u) == 0u);
                 outLeds.blackKeyLeds[k] =
                     0.05f + (0.40f + 0.55f * p) * (even ? boltPing : (1.0f - boltPing));
@@ -419,20 +421,20 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
             if (p > 0.55f) {
                 maxPanelBtnLed(outLeds, ButtonId::Rec, (p - 0.55f) * (1.0f / 0.45f) * boltPing);
             }
-        } else if (wIdx < 12u) {
-            // 7b. FOLD (9-12): Symmetrical standing-wave crests (1 -> 6 folds) mirroring across
+        } else if (wIdx < kSceneWhiteKeyBase) {
+            // 7b. FOLD (5-8): Symmetrical standing-wave crests (1 -> 6 folds) mirroring across
             // chassis
             const float foldFreq = 0.08f + 0.34f * p;
             const float breath = animPhase * (1.6f + 4.4f * p);
-            for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+            for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
                 const float dist = absf(static_cast<float>(i) - static_cast<float>(wIdx));
                 const float wave =
                     0.5f + 0.5f * evalAnalogSine(wrapLfoPhase01(0.25f + dist * foldFreq - breath));
                 const float crest = wave * wave;
                 outLeds.whiteKeyLeds[i] = 0.03f + (0.38f + 0.59f * p) * crest;
             }
-            for (size_t k = 4u; k < 10u; ++k) {
-                const float symDist = absf(static_cast<float>(k) - 6.5f);
+            for (size_t k = 0u; k < kNumTopMacroKeys; ++k) {
+                const float symDist = absf(static_cast<float>(k) - 2.5f);
                 const float wave = 0.5f + 0.5f * evalAnalogSine(wrapLfoPhase01(
                                                      0.25f + symDist * (foldFreq * 1.5f) - breath));
                 outLeds.blackKeyLeds[k] = 0.04f + (0.35f + 0.60f * p) * wave * wave;
@@ -454,22 +456,22 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
                 }
             }
         } else {
-            // 7c. CRUSH (13-16): Live CD4040 16-bit binary ripple counter & stepped S&H data bus
+            // 7c. CRUSH (9-12): Live CD4040 binary ripple counter & stepped S&H data bus
             const auto clk = static_cast<uint32_t>(animPhase * (4.0f + 24.0f * p)) + 1u;
             const uint32_t lfsrWord =
                 (clk * 0x2C9277B5u) ^ (clk >> 1u) ^ (static_cast<uint32_t>(v) * 0x5555u);
             const float hi = 0.38f + 0.62f * p;
             const float lo = 0.02f;
-            for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+            for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
                 const uint32_t divBit = (clk >> (i & 3u)) & 1u;
                 const uint32_t busBit = (lfsrWord >> i) & 1u;
                 const bool on = ((p < 0.45f) ? (divBit != 0u) : ((divBit ^ busBit) != 0u));
                 outLeds.whiteKeyLeds[i] = on ? hi : lo;
             }
-            // Top OP5..POLY display true 6-stage binary ripple division (/2, /4, /8, /16, /32, /64)
-            for (size_t b = 0u; b < 6u; ++b) {
+            // Top OP1..OP6 display true 6-stage binary ripple division (/2, /4, /8, /16, /32, /64)
+            for (size_t b = 0u; b < kNumTopMacroKeys; ++b) {
                 const bool bitOn = ((clk >> b) & 1u) != 0u;
-                outLeds.blackKeyLeds[4u + b] = bitOn ? hi : lo;
+                outLeds.blackKeyLeds[b] = bitOn ? hi : lo;
             }
             scalePanelGrid(outLeds, 0.12f);
             setPanelBtnLed(outLeds, ButtonId::OctMinus, ((clk & 1u) != 0u) ? hi : lo);
@@ -489,23 +491,23 @@ void choreographCircuitLabLeds(const KeyboardInputView& in, float animPhase, flo
     }
 
     // Pin every physically held circuit-bend key (top & bottom) to unmistakable 100% brightness
-    for (size_t k = 4u; k <= 9u; ++k) {
+    for (size_t k = 0u; k < kNumTopMacroKeys; ++k) {
         if (in.blackHeld[k]) {
             outLeds.blackKeyLeds[k] = 1.0f;
         }
     }
-    for (size_t k = 4u; k < kNumWhiteKeys; ++k) {
-        if (k >= 12u && hud.saveArmed) {
-            break;
+    for (size_t k = 0u; k < kMuteWhiteKeyBase; ++k) {
+        if (k >= kSceneWhiteKeyBase && k < kSceneWhiteKeyBase + kNumSnapshots && hud.saveArmed) {
+            continue;
         }
         if (in.whiteHeld[k]) {
             outLeds.whiteKeyLeds[k] = 1.0f;
         }
     }
 
-    // 8. Universal 11th Key Stasis Freeze + Authoritative Console SOLO/MUTE Truth
+    // 8. Universal 11th Key Stasis Freeze + Authoritative binary Console SOLO/MUTE state
     applyFreezeStillFrameLeds(in, outLeds);
-    applyAuthoritativeConsoleLeds(state, stutMask, subBreathWave01, outLeds);
+    applyAuthoritativeConsoleLeds(state, outLeds);
 }
 
 } // namespace ruido

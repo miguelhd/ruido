@@ -34,8 +34,27 @@ typedef struct {
 
 extern RuidoFm1Status g_ruido_fm1_status;
 
+/* Reset-surviving (`.noinit`) boot breadcrumb. Core 0 writes `stage`; Core 1's fault stubs in
+ * `fm1_cpu1.S` write `c1_code` / `c1_aux` directly so the record survives a Core 0 hang + WDT. */
+#define RUIDO_BOOT_DIAG_MAGIC 0x52424432u /* "RBD2" */
+typedef struct {
+    volatile uint32_t magic;    /* [0]  */
+    volatile uint32_t stage;    /* [4]  last boot stage reached by Core 0 */
+    volatile uint32_t c1_code;  /* [8]  DBG_MSG (PC-limit trap) | 0xC1xxxxxx (C1 vector) | 0xCA.. */
+    volatile uint32_t c1_aux;   /* [12] interrupted Core 0 PC (trap) or Core 1 RETI (C1 vector) */
+    volatile uint32_t c1_state; /* [16] [7:0]=solo reason, b8=c1SelfFault seen, b9=c1Booted */
+    volatile uint32_t uptime_ms;
+} RuidoBootDiag;
+
+extern RuidoBootDiag g_ruido_boot_diag;
+
+/* Snapshot live Core 1 fault words into `g_ruido_boot_diag` (cheap; call per frame / stage). */
+void ruido_fm1_diag_sync_c1(void);
+
 typedef int (*RuidoFm1BlobLoadFn)(uint32_t idx, void* dst, uint32_t len);
 typedef int (*RuidoFm1BlobSaveFn)(uint32_t idx, const void* src, uint32_t len);
+typedef int (*RuidoFm1SettingsTailReadFn)(uint32_t off_in_sector, void* dst, uint32_t len);
+typedef int (*RuidoFm1SettingsTailWriteFn)(uint32_t off_in_sector, const void* src, uint32_t len);
 typedef void (*RuidoFm1PreEraseFn)(void);
 
 /* Placement-new construct shared buses, Core 1 DSP state, Core 0 controller/HUD, panel/LED I/O,
@@ -59,25 +78,45 @@ uint32_t ruido_fm1_measure_bench64_ticks(void);
 void ruido_fm1_restore_default_patch(void);
 
 /* Load CRC-verified `PatchSnapshot`s (`blob 0..3` @ `0xF4000..0xF7FFF`) and `DeviceSettingsBlob`
- * (`blob 4` @ `0xF8000`) into RAM after `ruido_fm1_restore_default_patch()` and before arming
- * audio. Returns bitmask of valid loaded blobs (`bit 0..3 = scenes`, `bit 4 = settings`). */
-uint32_t ruido_fm1_nvs_load_boot(RuidoFm1BlobLoadFn load_fn);
+ * (`blob 4` @ `0xF8000` + append-only `0xF8020..0xF8FF0` journal, compacting silently at boot if
+ * >= 64 journal slots were used) before arming audio. Returns bitmask of valid loaded blobs. */
+uint32_t ruido_fm1_nvs_load_boot(RuidoFm1BlobLoadFn load_fn,
+                                 RuidoFm1SettingsTailReadFn tail_read_fn,
+                                 RuidoFm1BlobSaveFn boot_compact_save_fn);
 
-/* Persist newly saved Scene slots immediately (`SAVE + White Key 13-16`) and debounce Global
- * Config / scene-selection edits (`1,500 ms` idle with no keys held) into `0xF4000..0xF8FFF`. */
+/* Persist newly saved Scene slots immediately (`SAVE + White Key 9-12`) and debounce Global
+ * Config / scene-selection edits (`1,500 ms` idle with no keys held) via erase-free 16 B journal
+ * appends in `0xF8020..0xF8FF0` (~150 us page program, zero sector erase, zero audio/LED glitch).
+ */
 uint32_t ruido_fm1_nvs_poll_save(uint32_t now_ms, uint32_t force_flush, RuidoFm1BlobSaveFn save_fn,
+                                 RuidoFm1SettingsTailWriteFn tail_write_fn,
                                  RuidoFm1PreEraseFn pre_erase_fn);
+
+/* Return 1 (and clear flag) if the most recent `ruido_fm1_nvs_poll_save` rewrote a base sector
+ * (`0xF4000..0xF8000`) rather than appending to the `0xF8020..0xF8FF0` settings journal. */
+uint32_t ruido_fm1_nvs_take_base_written(void);
 
 /* Pre-prime `Fm1AudioBlockRing` with 8 blocks (512 frames) and enable audio + Core 1 worker. */
 void ruido_fm1_arm_audio(uint32_t enable_core1);
 
-/* Invoked from `fm1_dc_fatal_stubs` if Core 1 takes a silicon exception: detaches the co-processor
- * and switches `ruido_fm1_audio` seamlessly to Core 0 fallback rendering. */
-void ruido_fm1_on_c1_fault(void);
+/* Launch Core 1 safely across AC791N Mask ROM + `uboot.boot` (`0x01E00000`) -> `fm1_cpu1_boot_xip`
+ * -> `fm1_cpu1_entry`, returning 1 if Core 1 reached `.c1_text` SRAM or 0 if solo fallback engaged.
+ */
+uint32_t ruido_fm1_start_core1(void);
 
-/* Cleanly pause Core 1 and switch to Core 0 solo mode ahead of a live USB-MIDI OTA session or
- * UBOOT soft-key jump (leaves live audio/UI intact on Core 0 if an OTA check is cancelled). */
+/* Explicitly switch `DroneEngineCore` into 22.05 kHz half-rate solo fallback when `allow_core1 ==
+ * 0`. */
+void ruido_fm1_enter_solo_mode(void);
+
+/* Cleanly pause Core 1 and mute DSP block synthesis ahead of a live USB-MIDI OTA session or
+ * UBOOT soft-key jump; `ruido_fm1_resume_after_ota()` re-arms audio if an OTA dry-run cancels. */
 void ruido_fm1_quiesce_for_ota(void);
+void ruido_fm1_resume_after_ota(void);
+
+/* Park/unpark Core 1 cleanly inside a tight `.c1_text` internal SRAM spinloop around runtime SPI0
+ * NOR flash saves/reads without touching the one-way `0x01EEE004` (`C1_CON`) hardware latch. */
+void ruido_fm1_flash_hold_begin(void);
+void ruido_fm1_flash_hold_end(void);
 
 /* Opportunistically assist Core 1 by claiming a pending `Voices 2-3` 4x ZDF filter span in
  * `.c1_text` SRAM (`0` branch cost when no span is waiting). Safe from `app_idle` & main loop. */
@@ -117,9 +156,13 @@ void ruido_fm1_on_midi_rt(uint8_t status_byte);
 /* Advance controller state, ingest scope ring, update LED targets, and prepare 240x240 curves. */
 void ruido_fm1_tick_and_prepare_ms(uint32_t elapsed_ms);
 
-/* Render a 240x16 scanline strip at `y_start` into `.pool` ping-pong slot `slot & 1` and swap
- * RGB565 pixels to big-endian for ST7789 SPI1 DMA (`0 B` stack copy). */
+/* Render a 240x16 scanline strip at `y_start` into `.pool` ping-pong slot `slot & 1` in
+ * big-endian RGB565 for ST7789 SPI1 DMA (`0 B` stack copy). */
 const uint16_t* ruido_fm1_render_strip_be(uint16_t y_start, uint8_t slot);
+
+/* Return `.pool` strip buffer `g_strip_ping_pong[0]` (`240 x 16` uint16_t) for lifecycle
+ * operational screens (`OTA`, `USB RESCUE`, `SYSTEM FAULT`) when normal rendering is quiesced. */
+uint16_t* ruido_fm1_acquire_ops_strip(void);
 
 #ifdef __cplusplus
 }

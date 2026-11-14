@@ -290,12 +290,49 @@ def collect_c1_weak_symbols(obj_paths: list[pathlib.Path]) -> set[str]:
     return weak_names
 
 
+# Cold Core-0-only init/constructor/reset/bench `.text.*` sections in DSP/C1 TUs that are
+# never called from Core 1 or real-time DSP and should stay in XIP `.text` to save `.c1_text` SRAM.
+C1_COLD_XIP_TEXT_SECTIONS: frozenset[str] = frozenset(
+    {
+        ".text.ruido_fm1_c1_construct",
+        ".text.ruido_fm1_set_bench_stress",
+        ".text.ruido_fm1_c1_snap_latest",
+        ".text.ruido_fm1_c1_prime_blocks",
+        ".text.ruido_fm1_c1_enter_solo_fallback",
+        ".text.ruido_fm1_c1_step_solo_bench64",
+        ".text.ruido_fm1_c1_set_helper_armed",
+        ".text._ZN5ruido15DroneEngineCoreC2Ev",
+        ".text._ZN5ruido15DroneEngineCoreC1Ev",
+        ".text._ZN5ruido15DroneEngineCore4initERNS_17EngineSharedBusesEf",
+        ".text._ZN5ruido15DroneEngineCore22snapParametersToLatestERNS_17EngineSharedBusesE",
+        ".text._ZN5ruido12VoiceLfoBank5resetEf",
+        ".text._ZN5ruido12VoiceLfoBankC2Ev",
+        ".text._ZN5ruido12VoiceLfoBankC1Ev",
+        ".text._ZNK5ruido12VoiceLfoBank21writeInitialTelemetryERNS_15EngineTelemetryE",
+        ".text._ZN5ruido21SchmittOscillatorBank5resetEf",
+        ".text._ZN5ruido21SchmittOscillatorBankC2Ev",
+        ".text._ZN5ruido21SchmittOscillatorBankC1Ev",
+        ".text._ZN5ruido16RhythmClockState4initEff",
+        ".text._ZN5ruido17Fm1AudioBlockRing5resetEv",
+        ".text._ZN5ruido18LockFreeControlBusC2Ev",
+        ".text._ZN5ruido18LockFreeControlBusC1Ev",
+        ".text._ZN5ruido18EngineControlState11makeDefaultEv",
+        ".text._ZN5ruido15LogFreqSmoother4initEfff",
+        ".text._ZN5ruido15VactrolSmoother4initEffff",
+    }
+)
+
+C1_COLD_XIP_SYMBOLS: frozenset[str] = frozenset(
+    sec[len(".text.") :] for sec in C1_COLD_XIP_TEXT_SECTIONS if sec.startswith(".text.")
+)
+
+
 def relocate_obj_to_c1_sram(
     src_obj_path: pathlib.Path,
     dst_obj_path: pathlib.Path,
     c1_weak_names: set[str],
 ) -> None:
-    """Copy `src_obj_path` -> `dst_obj_path`, relocating `.text*`/`.rodata*` into `.c1_text` SRAM."""
+    """Copy `src_obj_path` -> `dst_obj_path`, relocating hot `.text*`/`.rodata*` into `.c1_text` SRAM."""
     out = bytearray(src_obj_path.read_bytes())
     if out[:5] != b"\x7fELF\x01" or out[5] != 1:
         raise SystemExit(f"[FM-1 FAIL] {src_obj_path} is not little-endian ELF32")
@@ -339,7 +376,9 @@ def relocate_obj_to_c1_sram(
             continue
         sec_name = read_cstr(shstr, sh[0])
         new_sec: str | None = None
-        if sec_name == ".text" or sec_name.startswith(".text."):
+        if (sec_name == ".text" or sec_name.startswith(".text.")) and (
+            sec_name not in C1_COLD_XIP_TEXT_SECTIONS
+        ):
             new_sec = ".c1_text" + sec_name[len(".text") :]
         elif sec_name == ".rodata" or sec_name.startswith(".rodata."):
             new_sec = ".c1_text.rodata" + sec_name[len(".rodata") :]
@@ -362,9 +401,13 @@ def relocate_obj_to_c1_sram(
                 struct.pack_into("<I", out, pos, len(sym_str))
                 sym_str += f"ruido_c1_{sname}".encode("ascii") + b"\x00"
             elif (
-                sname in c1_weak_names
-                or (st_shndx != 0 and ((st_info >> 4) == 2 or sym_idx in group_sig_syms))
-            ) and not sname.startswith("__c1w_"):
+                (
+                    sname in c1_weak_names
+                    or (st_shndx != 0 and ((st_info >> 4) == 2 or sym_idx in group_sig_syms))
+                )
+                and sname not in C1_COLD_XIP_SYMBOLS
+                and not sname.startswith("__c1w_")
+            ):
                 struct.pack_into("<I", out, pos, len(sym_str))
                 sym_str += f"__c1w_{sname}".encode("ascii") + b"\x00"
 

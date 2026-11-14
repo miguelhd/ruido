@@ -201,7 +201,7 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
 
             const float hZone = kKneeY - fy;
             if (dim < 0.92f && drv > 0.005f && hZone > 1.2f) {
-                const float peakW = 3.8f * fastExp2(0.78f * fastLog2(clampf(drv, 0.001f, 1.0f)));
+                const float peakW = 4.15f * fastExp2(0.75f * fastLog2(clampf(drv, 0.001f, 1.0f)));
                 const int kneeClipY = static_cast<int>(kKneeY) + 1;
                 const int driveYEnd = (pyEnd < kneeClipY) ? pyEnd : kneeClipY;
 
@@ -250,9 +250,9 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
                 OverdriveHairArray layer1{};
                 OverdriveHairArray layer2{};
                 smoothZeroPhase(overdriveHair_[v].data(), layer1.data(), kOverdriveHairPoints,
-                                0.42f, 1u);
+                                0.35f, 1u);
                 smoothZeroPhase(overdriveHair_[v].data(), layer2.data(), kOverdriveHairPoints,
-                                0.45f, 3u);
+                                0.38f, 2u);
                 const float* layers[3] = {overdriveHair_[v].data(), layer1.data(), layer2.data()};
                 constexpr float kLayerBaseE[3] = {350.0f, 205.0f, 130.0f};
 
