@@ -3,9 +3,11 @@
 #include "core/ControlSurface.h"
 #include "core/DspMath.h"
 #include "core/FilterModMath.h"
+#include "core/KeyPunchSpec.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
 #include "ui/HudFormat.h"
+#include "ui/HudGlobalViews.h"
 #include "ui/HudGraphs.h"
 
 #include <array>
@@ -123,25 +125,42 @@ inline void formatHeaderEnsembleDrive(const EngineControlState& control,
 
 inline void formatSnapshotHeader(const HudState& hud, char* leftMain, size_t leftMainCap,
                                  char* leftSuffix, size_t suffixCap, char* rightText,
-                                 size_t rightCap, bool& outShowBar, float& outBarNorm) noexcept {
+                                 size_t rightCap, bool& outShowBar, float& outBarNorm,
+                                 bool* outShowSceneDots = nullptr) noexcept {
     outShowBar = false;
     outBarNorm = 0.0f;
+    if (outShowSceneDots != nullptr) {
+        *outShowSceneDots = false;
+    }
+    if (leftMainCap > 0u) {
+        leftMain[0] = '\0';
+    }
+    if (suffixCap > 0u) {
+        leftSuffix[0] = '\0';
+    }
+    if (rightCap > 0u) {
+        rightText[0] = '\0';
+    }
+    appendStr(leftMain, 0u, leftMainCap, "SCENE");
     if (hud.mode == HudMode::SaveArmed) {
-        appendStr(leftMain, 0u, leftMainCap, hud.saveDeleteMode ? "DELETE SCENE" : "STORE SCENE");
-        const char* status = !hud.saveArmed ? "CANCELLED"
-                             : (hud.saveDeleteMode && hud.snapshotOccupiedMask == 0u)
-                                 ? "ALL EMPTY"
-                                 : "TAP SCENE 1-4";
-        appendStr(rightText, 0u, rightCap, status);
+        appendStr(leftSuffix, 0u, suffixCap, hud.saveDeleteMode ? " 2/2" : " 1/2");
         return;
     }
     const bool isKeyRecall =
-        (hud.mode == HudMode::KeyboardPlay && hud.activePunch == KeyPunchKind::SnapshotRecall);
+        ((hud.mode == HudMode::KeyboardPlay || hud.mode == HudMode::ShiftMap) &&
+         hud.activePunch == KeyPunchKind::SnapshotRecall);
     if (hud.snapshotOccupiedMask == 0u && !isKeyRecall && !hud.snapshotDeletedToast) {
-        appendStr(leftMain, 0u, leftMainCap, "SCENES");
         appendStr(rightText, 0u, rightCap, "ALL EMPTY");
         return;
     }
+
+    uint8_t activeWeights = 0u;
+    for (uint8_t s = 0u; s < kNumSnapshots; ++s) {
+        if (((hud.snapshotOccupiedMask & (1u << s)) != 0u) && hud.snapshotWeights[s] > 0.01f) {
+            ++activeWeights;
+        }
+    }
+
     const uint8_t activeSlot = hud.snapshotSlot & 3u;
     const bool activeOcc = (hud.snapshotOccupiedMask & (1u << activeSlot)) != 0u;
     const uint8_t dispSlot =
@@ -150,21 +169,28 @@ inline void formatSnapshotHeader(const HudState& hud, char* leftMain, size_t lef
                            ? (hud.snapshotToastSlot & 3u)
                            : activeSlot);
     const bool dispOcc = (hud.snapshotOccupiedMask & (1u << dispSlot)) != 0u;
-    appendStr(leftMain, 0u, leftMainCap, "SCENE");
-    size_t sp = appendStr(leftSuffix, 0u, suffixCap, " ");
-    appendUInt(leftSuffix, sp, suffixCap, static_cast<uint32_t>(dispSlot + 1u));
+
     if (hud.snapshotDeletedToast) {
+        size_t sp = appendStr(leftSuffix, 0u, suffixCap, " ");
+        appendUInt(leftSuffix, sp, suffixCap, static_cast<uint32_t>(dispSlot + 1u));
         appendStr(rightText, 0u, rightCap, "DELETED");
-    } else if (hud.snapshotSavedToast) {
+        return;
+    }
+    if (hud.snapshotSavedToast) {
+        size_t sp = appendStr(leftSuffix, 0u, suffixCap, " ");
+        appendUInt(leftSuffix, sp, suffixCap, static_cast<uint32_t>(dispSlot + 1u));
         appendStr(rightText, 0u, rightCap, "SAVED");
-    } else if (!dispOcc) {
+        return;
+    }
+    if (!dispOcc && (isKeyRecall || activeWeights == 0u)) {
+        size_t sp = appendStr(leftSuffix, 0u, suffixCap, " ");
+        appendUInt(leftSuffix, sp, suffixCap, static_cast<uint32_t>(dispSlot + 1u));
         appendStr(rightText, 0u, rightCap, "EMPTY");
-    } else if (hud.snapshotGliding) {
-        outBarNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
-        formatPercent(rightText, rightCap, outBarNorm);
-        outShowBar = true;
-    } else {
-        appendStr(rightText, 0u, rightCap, hud.snapshotDirty ? "EDITED" : "ACTIVE");
+        return;
+    }
+
+    if (outShowSceneDots != nullptr) {
+        *outShowSceneDots = true;
     }
 }
 
@@ -242,14 +268,10 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
     }
     case KnobBankMode::VoiceFilter: {
         const uint8_t refV = resolveFilterViewVoice(hud);
-        const FilterMacroContext fltMacros{
-            control.keyMod.dubLpfDrop,
-            control.keyMod.overloadSurge,
-            control.keyMod.filterScream,
-        };
         const ModulatedFilterParams mod = computeLiveVoiceFilter(
             control.voices[refV], control.voicePressure[refV], pitchMode,
-            lfoOutput[lfoBankIndex(refV, 0u)], lfoOutput[lfoBankIndex(refV, 1u)], fltMacros);
+            lfoOutput[lfoBankIndex(refV, 0u)], lfoOutput[lfoBankIndex(refV, 1u)],
+            FilterMacroContext::fromKeyMod(control.keyMod));
         if (k == 0u) {
             appendStr(roleLbl, 0u, roleCap, "HPF");
             formatCompactHz(valStr, valCap, mod.hpCutoffHz);
@@ -296,7 +318,14 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
         const float lfoBRaw = lfoOutput[lfoBankIndex(lv, 1u)];
         if (k == 0u) {
             appendStr(roleLbl, 0u, roleCap, "TARGET");
-            appendStr(valStr, 0u, valCap, lfoTargetName(lfoSlotTarget(vp, sub)));
+            const LfoTarget tgt = lfoSlotTarget(vp, sub);
+            if (tgt == LfoTarget::LfoARate || tgt == LfoTarget::LfoADepth) {
+                valStr[0] = 'A';
+                valStr[1] = static_cast<char>('1' + (lv & 3u));
+                appendStr(valStr, 2u, valCap, (tgt == LfoTarget::LfoARate) ? " RATE" : " DEPTH");
+            } else {
+                appendStr(valStr, 0u, valCap, lfoTargetName(tgt));
+            }
         } else if (k == 1u) {
             appendStr(roleLbl, 0u, roleCap, "SHAPE");
             appendStr(valStr, 0u, valCap, lfoShapeLabel(lfoSlotShape(vp, sub)));
@@ -308,17 +337,6 @@ inline void formatColumnRoleAndValue(const EngineControlState& control, const Hu
             appendStr(roleLbl, 0u, roleCap, "DEPTH");
             const float liveDepth = (sub == 0u) ? computeLiveLfoADepth(vp, lfoBRaw) : vp.lfoBDepth;
             formatPercent(valStr, valCap, liveDepth);
-        }
-        break;
-    }
-    case KnobBankMode::Snapshot: {
-        size_t p = appendStr(roleLbl, 0u, roleCap, "SCENE ");
-        appendUInt(roleLbl, p, roleCap, static_cast<uint32_t>(k + 1u));
-        if ((hud.snapshotOccupiedMask & (1u << k)) == 0u) {
-            outGlobal.disabled = true;
-            appendStr(valStr, 0u, valCap, "EMPTY");
-        } else {
-            formatPercent(valStr, valCap, clampf(hud.snapshotWeights[k], 0.0f, 1.0f));
         }
         break;
     }

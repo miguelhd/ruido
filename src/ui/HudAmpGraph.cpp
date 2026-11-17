@@ -17,7 +17,6 @@ void HudAmpGraph::reset() noexcept {
     driftAmt_.fill(kDefaultVoiceDrift);
     driftLive_.fill(0.0f);
     muteDim_.fill(0.0f);
-    overdriveHair_ = {};
     phase_ = 0.0f;
     widthPhase_ = 0.0f;
     driftPhase_ = 0.0f;
@@ -43,12 +42,16 @@ void HudAmpGraph::stepFadeOut(float dtClamped) noexcept {
 void HudAmpGraph::update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                          const LfoSignalArray& lfoOutput,
                          const std::array<float, kNumOscillators>& voiceDriftNorm,
-                         const OverdriveHairTable& overdriveHair,
                          uint8_t stutterGateMask) noexcept {
-    const bool editVisible = rawHud.opacity > 0.001f && rawHud.editPageOpen && !rawHud.modifierHeld;
+    const bool homeVisible = rawHud.opacity > 0.001f && rawHud.freqPageOpen && !rawHud.shiftHeld &&
+                             !HudGlobalViews::isRailCouplingActive(rawHud);
+    const bool cleanDutyPunch = rawHud.opacity > 0.001f && !hasPinnedPageOpen(rawHud) &&
+                                !rawHud.shiftHeld && rawHud.mode == HudMode::KeyboardPlay &&
+                                rawHud.knobBank == KnobBankMode::PulseWidth;
     const bool levelAct = isLevelViewActive(rawHud);
-    const bool widthAct = editVisible && (rawHud.knobBank == KnobBankMode::PulseWidth);
-    const bool driftAct = editVisible && (rawHud.knobBank == KnobBankMode::VoiceDrift);
+    const bool widthAct =
+        (homeVisible && (rawHud.knobBank == KnobBankMode::PulseWidth)) || cleanDutyPunch;
+    const bool driftAct = homeVisible && (rawHud.knobBank == KnobBankMode::VoiceDrift);
     const bool anyAct = levelAct || widthAct || driftAct;
     const bool wasInvisible = !hasResidualPhase();
 
@@ -62,7 +65,6 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
 
     const bool snap = !primed_ || (anyAct && wasInvisible);
     primed_ = true;
-    overdriveHair_ = overdriveHair;
 
     const float alphaFader = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.036f)));
     const float alphaChop = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.004f)));
@@ -99,8 +101,8 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
 }
 
 void HudAmpGraph::compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
-                                 uint16_t* linScratch, float hudAlpha01,
-                                 const HudState& hud) const noexcept {
+                                 uint16_t* linScratch, float hudAlpha01, const HudState& hud,
+                                 const OverdriveHairTable& overdriveHair) const noexcept {
     if (hudAlpha01 <= 0.002f || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
     }
@@ -123,14 +125,16 @@ void HudAmpGraph::compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* 
         float lAlpha01 = 0.0f;
         const uint8_t lAlpha8 = resolveSubViewAlpha(phase_, hudAlpha01, lAlpha01);
         if (lAlpha8 > 0u) {
-            compositeLevelStrip(y0, y1, stripHeight, lumBuf, linScratch, lAlpha01, lAlpha8, hud);
+            compositeLevelStrip(y0, y1, stripHeight, lumBuf, linScratch, lAlpha01, lAlpha8, hud,
+                                overdriveHair);
         }
     }
 }
 
 void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                       uint16_t* linScratch, float effAlpha01, uint8_t alpha8,
-                                      const HudState& hud) const noexcept {
+                                      const HudState& hud,
+                                      const OverdriveHairTable& overdriveHair) const noexcept {
     if (alpha8 == 0u || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
     }
@@ -249,11 +253,11 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
 
                 OverdriveHairArray layer1{};
                 OverdriveHairArray layer2{};
-                smoothZeroPhase(overdriveHair_[v].data(), layer1.data(), kOverdriveHairPoints,
-                                0.35f, 1u);
-                smoothZeroPhase(overdriveHair_[v].data(), layer2.data(), kOverdriveHairPoints,
-                                0.38f, 2u);
-                const float* layers[3] = {overdriveHair_[v].data(), layer1.data(), layer2.data()};
+                smoothZeroPhase(overdriveHair[v].data(), layer1.data(), kOverdriveHairPoints, 0.35f,
+                                1u);
+                smoothZeroPhase(overdriveHair[v].data(), layer2.data(), kOverdriveHairPoints, 0.38f,
+                                2u);
+                const float* layers[3] = {overdriveHair[v].data(), layer1.data(), layer2.data()};
                 constexpr float kLayerBaseE[3] = {350.0f, 205.0f, 130.0f};
 
                 int nPts = static_cast<int>(hZone * 1.45f + 0.5f);
@@ -421,20 +425,30 @@ void HudAmpGraph::compositeWidthStrip(int y0, int y1, uint16_t stripHeight, uint
                 const float vDecay = highHalf
                                          ? fastExpNeg((pyF - kYHigh) * (1.0f / 26.0f))
                                          : (0.48f * fastExpNeg((kYLow - pyF) * (1.0f / 22.0f)));
-
-                for (int px = pxLo; px <= pxHi; ++px) {
-                    const float pxF = static_cast<float>(px);
-                    const bool inside =
-                        highHalf ? (pxF >= x0 && pxF <= xEdge) : (pxF >= xEdge && pxF <= x1);
-                    if (!inside) {
-                        continue;
-                    }
-                    const float energy = 150.0f * vDecay * activeW * focBoost;
-                    if (energy >= 1.0f) {
-                        const uint32_t add = static_cast<uint32_t>(energy * masterE + 0.5f);
-                        const uint32_t next = static_cast<uint32_t>(linRow[px]) + add;
-                        linRow[px] = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
-                    }
+                const float energy = 150.0f * vDecay * activeW * focBoost;
+                if (energy < 1.0f) {
+                    continue;
+                }
+                const uint32_t add = static_cast<uint32_t>(energy * masterE + 0.5f);
+                if (add == 0u) {
+                    continue;
+                }
+                const float segX0 = highHalf ? x0 : xEdge;
+                const float segX1 = highHalf ? xEdge : x1;
+                int segLo = static_cast<int>(segX0);
+                if (static_cast<float>(segLo) < segX0) {
+                    ++segLo;
+                }
+                int segHi = static_cast<int>(segX1);
+                if (segLo < pxLo) {
+                    segLo = pxLo;
+                }
+                if (segHi > pxHi) {
+                    segHi = pxHi;
+                }
+                for (int px = segLo; px <= segHi; ++px) {
+                    const uint32_t next = static_cast<uint32_t>(linRow[px]) + add;
+                    linRow[px] = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
                 }
             }
         }
@@ -476,6 +490,14 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
         cv.drawVerticalSlit(cx, kYZero - kMaxSpanPx - 4.0f, kYZero + kMaxSpanPx + 4.0f, 24.0f);
     }
 
+    constexpr std::array<float, 12> kDriftEnvGauss = {
+        95.0000f, 87.2571f, 67.5906f, 44.2059f, 24.3802f, 11.3413f,
+        4.4488f,  1.4718f,  0.4106f,  0.0966f,  0.0192f,  0.0032f,
+    };
+    constexpr std::array<float, 5> kDriftStemGauss = {
+        250.0000f, 48.0125f, 0.3401f, 0.0001f, 0.0f,
+    };
+
     const int pyStart = (y0 > 46) ? y0 : 46;
     const int pyEnd = (y1 < 170) ? y1 : 170;
     if (pyStart < pyEnd) {
@@ -485,7 +507,6 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
 
         for (size_t v = 0u; v < kNumOscillators; ++v) {
             const int cxInt = hudColumnCenterX(v);
-            const float cx = static_cast<float>(cxInt);
             const float spanPx = clampf(driftAmt_[v], 0.0f, 1.0f) * kMaxSpanPx;
             const float beaconY = clampf(kYZero - driftLive_[v] * kMaxSpanPx, kYZero - kMaxSpanPx,
                                          kYZero + kMaxSpanPx);
@@ -493,7 +514,7 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
             const float stemHi = (beaconY > kYZero) ? beaconY : kYZero;
             const float activeW = 1.0f - 0.78f * muteDim_[v];
             const float effFoc = (hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - muteDim_[v]);
-            const float focBoost = 1.0f + 0.18f * effFoc;
+            const float stemScale = activeW * (1.0f + 0.18f * effFoc);
 
             for (int py = pyStart; py < pyEnd; ++py) {
                 const float pyF = static_cast<float>(py);
@@ -503,19 +524,19 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
                 if (!inEnv && !inStem) {
                     continue;
                 }
+                const float envScale =
+                    inEnv ? ((1.0f - 0.45f * (dyZero / (spanPx + 0.5f))) * activeW) : 0.0f;
+                const int reach = inEnv ? 11 : 4;
                 uint16_t* linRow = linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
-                for (int px = cxInt - 14; px <= cxInt + 14; ++px) {
-                    const float dx = absf(static_cast<float>(px) - cx);
-                    float energy = 0.0f;
-                    if (inEnv && dx <= 11.0f) {
-                        const float envFall = 1.0f - 0.45f * (dyZero / (spanPx + 0.5f));
-                        energy += 95.0f * fastExpNeg(dx * dx * 0.085f) * envFall * activeW;
-                    }
-                    if (inStem && dx < 4.5f) {
-                        energy += 250.0f * fastExpNeg(dx * dx * 1.65f) * activeW * focBoost;
+                for (int d = -reach; d <= reach; ++d) {
+                    const auto ad = static_cast<size_t>((d < 0) ? -d : d);
+                    float energy = inEnv ? (kDriftEnvGauss[ad] * envScale) : 0.0f;
+                    if (inStem && ad <= 4u) {
+                        energy += kDriftStemGauss[ad] * stemScale;
                     }
                     if (energy >= 1.0f) {
                         const uint32_t add = static_cast<uint32_t>(energy * masterE + 0.5f);
+                        const int px = cxInt + d;
                         const uint32_t next = static_cast<uint32_t>(linRow[px]) + add;
                         linRow[px] = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
                     }

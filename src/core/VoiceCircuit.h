@@ -22,6 +22,12 @@ struct VoiceCircuitState {
     bool isSoloed = false;      // True iff solo is active on this oscillator AND it is audible
 };
 
+constexpr bool hasAudibleVoiceDrive(const VoiceParams& vp) noexcept {
+    return (vp.amplitude > kSilentAmpThreshold) ||
+           (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > kSilentAmpThreshold) ||
+           (vp.lfoBTarget == LfoTarget::Amplitude && vp.lfoBDepth > kSilentAmpThreshold);
+}
+
 inline VoiceCircuitState evaluateVoiceCircuit(const EngineControlState& state, size_t voiceIdx,
                                               uint8_t stutterGateMask) noexcept {
     const size_t v = voiceIdx & 3u;
@@ -36,10 +42,7 @@ inline VoiceCircuitState evaluateVoiceCircuit(const EngineControlState& state, s
     const float subAudioBlend =
         1.0f - smoothstep01((fastLog2(effHz) - kSubAudioLoOct) * kInvSubAudioSpanOct);
 
-    const bool hasAudibleAmp =
-        (vp.amplitude > kSilentAmpThreshold) || (km.overloadSurge > kSilentAmpThreshold) ||
-        (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > kSilentAmpThreshold) ||
-        (vp.lfoBTarget == LfoTarget::Amplitude && vp.lfoBDepth > kSilentAmpThreshold);
+    const bool hasAudibleAmp = hasAudibleVoiceDrive(vp) || (km.overloadSurge > kSilentAmpThreshold);
 
     float muteBlend = 0.0f;
     if (!hasAudibleAmp) {
@@ -84,17 +87,28 @@ inline float evaluateLiveOscAmplitude(const EngineControlState& state, size_t vo
     return clampf(rawAmp * clampf(vc.gateGainMul, 0.0f, 1.0f), 0.0f, 1.0f);
 }
 
-// Single source of truth for Console SOLO (PIT..POLY, Black 6-9) & MUTE (Keys 13-16, White 12-15)
-// LEDs across both physical PWM LEDs and the on-screen SEL keybed preview:
-//   - Strictly binary switch state (ON = 100%, OFF = 0% dark) — never modulated by voice level,
-//     sub-audio breathing, LFOs, peer solo ducking, or stutter gates.
-inline void evaluateVoiceConsoleLeds(const KeyboardModState& km, size_t voiceIdx, float& outSoloLed,
-                                     float& outMuteLed) noexcept {
-    const uint8_t bit = static_cast<uint8_t>(1u << (voiceIdx & 3u));
-    const bool muteOn = (km.muteMask & bit) != 0u;
-    const bool soloOn = !muteOn && ((km.soloMask & bit) != 0u);
-    outSoloLed = soloOn ? 1.0f : 0.0f;
-    outMuteLed = muteOn ? 1.0f : 0.0f;
+// Steady-state per-oscillator sound status LED for Keys 13-16 (`MUTE 1-4` & `SHIFT + SOLO 1-4`):
+//   - `0.00f` (0% dark):    `PLAY/STOP` is OFF, `LEVEL == 0%`, muted (`MUTE`), or cut by `SOLO`.
+//   - `0.50f` (50% half):   unmuted & active, base `frequencyHz < 20.0f` (sub-audio).
+//   - `0.80f` (80% bright): unmuted & active, base `frequencyHz >= 20.0f` (capped at 80% so `SHIFT`
+//                           at 100% remains unmistakably the brightest key on the right bay).
+// Never dances with LFO waves, rhythm/stutter gates, or momentary pressure bends.
+inline float evaluateVoiceSoundLedSteady(const EngineControlState& state,
+                                         size_t voiceIdx) noexcept {
+    if (!state.global.masterRun) {
+        return 0.0f;
+    }
+    const size_t v = voiceIdx & 3u;
+    const VoiceParams& vp = state.voices[v];
+    const KeyboardModState& km = state.keyMod;
+    const uint8_t bit = static_cast<uint8_t>(1u << v);
+    if (vp.muted || !hasAudibleVoiceDrive(vp) || ((km.muteMask & bit) != 0u)) {
+        return 0.0f;
+    }
+    if (km.soloMask != 0u && ((km.soloMask & bit) == 0u)) {
+        return 0.0f;
+    }
+    return (vp.frequencyHz < 20.0f) ? 0.50f : 0.80f;
 }
 
 } // namespace ruido

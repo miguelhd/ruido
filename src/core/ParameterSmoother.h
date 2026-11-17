@@ -327,6 +327,10 @@ template <size_t N> class CriticallyDampedSmootherBank {
 
     void setTarget(size_t idx, float target) noexcept { target_[idx] = sanitizeState(target); }
 
+    bool isSettled(size_t idx) const noexcept {
+        return s2_[idx] == target_[idx] && s1_[idx] == target_[idx];
+    }
+
     RUIDO_ALWAYS_INLINE float next(size_t idx) noexcept {
         const float cur2 = s2_[idx];
         const float tgt = target_[idx];
@@ -435,6 +439,47 @@ class LogFreqSmoother {
     CriticallyDampedSmoother octSmoother_{};
     float targetHz_ = 440.0f;
     float currentHz_ = 440.0f;
+};
+
+// Multi-channel log2-frequency critically-damped smoother sharing a single `coeff_` across N
+// channels to eliminate duplicate coefficient storage inside Core 1 L1 SRAM.
+template <size_t N> class LogFreqSmootherBank {
+  public:
+    constexpr LogFreqSmootherBank() noexcept = default;
+
+    void setTimeConstant(float poleTimeConstantSec, float sampleRate) noexcept {
+        octSmoothers_.setTimeConstant(poleTimeConstantSec, sampleRate);
+    }
+
+    void snapChannel(size_t idx, float hz) noexcept {
+        const float cleanHz = clampf(sanitizeState(hz), 0.005f, 100000.0f);
+        targetHz_[idx] = cleanHz;
+        currentHz_[idx] = cleanHz;
+        octSmoothers_.snapChannel(idx, fastLog2(cleanHz));
+    }
+
+    void setTarget(size_t idx, float hz) noexcept {
+        const float cleanHz = clampf(sanitizeState(hz), 0.005f, 100000.0f);
+        if (cleanHz == targetHz_[idx]) {
+            return;
+        }
+        targetHz_[idx] = cleanHz;
+        octSmoothers_.setTarget(idx, fastLog2(cleanHz));
+    }
+
+    RUIDO_ALWAYS_INLINE float nextN(size_t idx, uint32_t steps) noexcept {
+        if (octSmoothers_.isSettled(idx) || steps == 0u) {
+            return currentHz_[idx];
+        }
+        const float oct = octSmoothers_.nextN(idx, steps);
+        currentHz_[idx] = octSmoothers_.isSettled(idx) ? targetHz_[idx] : fastExp2(oct);
+        return currentHz_[idx];
+    }
+
+  private:
+    CriticallyDampedSmootherBank<N> octSmoothers_{};
+    std::array<float, N> targetHz_{};
+    std::array<float, N> currentHz_{};
 };
 
 } // namespace ruido

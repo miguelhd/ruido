@@ -14,6 +14,7 @@ from fm1_common import (
     FORBIDDEN_INT64_DIV,
     FORBIDDEN_SOFT_DOUBLE,
     MAX_FWSC_BYTES,
+    OTA_MAX_BYTES,
     POOL_MAX_BYTES,
     PRODUCT_DEV,
     RAM_MAX_BYTES,
@@ -231,30 +232,46 @@ def audit_firmware_image(
     cur_fn: str | None = None
     cur_sec = ""
     cur_sp = 0
+    cur_fn_needs_addr = False
     max_c0_sp = 0
     max_c0_fn = "none"
     max_c1_sp = 0
     max_c1_fn = "none"
+    c1_addr_to_fn: dict[int, str] = {}
+    c1_fn_sp: dict[str, int] = {}
+    c1_fn_call_addrs: dict[str, set[int]] = {}
     oversized_stacks: list[str] = []
     for ln in dis.splitlines():
         if ln.startswith("Disassembly of section "):
             cur_sec = ln.split("Disassembly of section ", 1)[1].rstrip(":")
             cur_fn = None
             cur_sp = 0
+            cur_fn_needs_addr = False
             continue
         if not ln.startswith(" "):
             m_fn = sym_label_re.match(ln.strip())
             if m_fn:
                 cur_fn = m_fn.group(1)
                 cur_sp = 0
+                cur_fn_needs_addr = True
             continue
         if cur_fn in (None, "fm1_fatal_stubs", "fm1_dc_fatal_stubs"):
             continue
+        if cur_sec == ".c1_text":
+            mm_c1 = DIS_LINE_RE.match(ln)
+            if mm_c1:
+                if cur_fn_needs_addr:
+                    c1_addr_to_fn[int(mm_c1.group(1), 16)] = cur_fn
+                    cur_fn_needs_addr = False
+                for tgt_hex in re.findall(r"call -?\d+ <[^:>]*: ([0-9a-f]+) >", mm_c1.group(3)):
+                    c1_fn_call_addrs.setdefault(cur_fn, set()).add(int(tgt_hex, 16))
         for d_sp in re.findall(r"\bsp \+= (-\d+)", ln):
             cur_sp += -int(d_sp)
         if "[--sp]" in ln:
             cur_sp += 16
         if cur_sec == ".c1_text":
+            if cur_sp > c1_fn_sp.get(cur_fn, 0):
+                c1_fn_sp[cur_fn] = cur_sp
             if cur_sp > max_c1_sp:
                 max_c1_sp, max_c1_fn = cur_sp, cur_fn
         else:
@@ -265,10 +282,33 @@ def audit_firmware_image(
     if oversized_stacks:
         errors.append(f"functions exceed 3.5 KiB stack frame ceiling: {oversized_stacks[:5]}")
 
+    c1_tree_memo: dict[str, int] = {}
+
+    def compute_c1_tree_sp(fn_name: str, visiting: frozenset[str] = frozenset()) -> int:
+        if fn_name in c1_tree_memo:
+            return c1_tree_memo[fn_name]
+        if fn_name in visiting:
+            return c1_fn_sp.get(fn_name, 0)
+        next_visiting = visiting | {fn_name}
+        callees = [
+            c1_addr_to_fn[a]
+            for a in c1_fn_call_addrs.get(fn_name, ())
+            if a in c1_addr_to_fn
+        ]
+        child_max = max((compute_c1_tree_sp(c, next_visiting) for c in callees), default=0)
+        res = c1_fn_sp.get(fn_name, 0) + child_max
+        c1_tree_memo[fn_name] = res
+        return res
+
+    c1_tree_sp = max(compute_c1_tree_sp("ruido_fm1_cpu1_loop"), max_c1_sp)
+    if c1_tree_sp > 4096:
+        errors.append(f"Core 1 call-tree stack ({c1_tree_sp} B) exceeds 4096 B ceiling")
+
     for chip_name, jedec_id, le_bytes in REQUIRED_JEDEC_IDS:
         if le_bytes not in img:
             errors.append(f"app image (`ruido.bin`) missing {chip_name} JEDEC ID {jedec_id:#08x}")
 
+    ota_est_bytes = max(0, len(fwsc_bytes) - (1024 + 602112 + 20))
     print("=== Ruido FM-1 Gate 4.1 + 4.2 + 4.3 Dual-Core Firmware Audit ===")
     print(
         f"  Compiler          : pi32v2 clang ({cxx_std}, DSP={dsp_opt}, UI={ui_opt}, -mcpu=r3 -mfprev1; "
@@ -280,7 +320,7 @@ def audit_firmware_image(
     )
     print(
         f"  Package (.fwsc)   : {len(fwsc_bytes):,} B / {MAX_FWSC_BYTES:,} B "
-        f"({len(fwsc_bytes) / 1024.0:.1f} KiB, {MAX_FWSC_BYTES - len(fwsc_bytes):,} B free)"
+        f"(ota.bin={ota_est_bytes:,}/{OTA_MAX_BYTES:,} B, {MAX_FWSC_BYTES - len(fwsc_bytes):,} B free)"
     )
     print(
         f"  SRAM .c1_text DSP : {c1_bytes:,} B / {C1_SRAM_MAX_BYTES:,} B "
@@ -292,7 +332,7 @@ def audit_firmware_image(
     print(f"  SRAM .pool        : {pool_bytes:,} B / {POOL_MAX_BYTES:,} B ({pool_bytes / 1024.0:.1f} KiB)")
     print(
         f"  Guarded U/S Stacks: Core0 max={max_c0_sp:,} B / ({c0_ustack_bytes:,} U + {c0_sstack_bytes:,} S), "
-        f"Core1 max={max_c1_sp:,} B / ({c1_ustack_bytes:,} U + {c1_sstack_bytes:,} S), 128x6B stubs=OK"
+        f"Core1 tree={c1_tree_sp:,} B (max frame={max_c1_sp:,} B) / ({c1_ustack_bytes:,} U + {c1_sstack_bytes:,} S), 128x6B stubs=OK"
     )
     print(
         f"  Hardware r3 FPU   : fadd={fpu_add}, fsub={fpu_sub}, fmul={fpu_mul}, "

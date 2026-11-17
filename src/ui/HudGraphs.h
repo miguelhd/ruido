@@ -155,9 +155,8 @@ class HudGraphs {
     void updateFilterGraph(float dtClamped, bool snapImmediate,
                            const std::array<ModulatedFilterParams, kNumOscillators>& mods,
                            bool unified) noexcept;
-    void updateLfoGraph(float dtClamped, bool snapImmediate, bool showAllVoices,
-                        const EngineControlState& control, const HudState& effectiveHud,
-                        const LfoSignalArray& lfoOutput,
+    void updateLfoGraph(float dtClamped, bool snapImmediate, const EngineControlState& control,
+                        const HudState& effectiveHud, const LfoSignalArray& lfoOutput,
                         const LfoDriftArray& lfoDriftPacked) noexcept;
 
     std::array<std::array<int16_t, kFilterSweepPts>, kNumOscillators> filterCurvesFixed_{};
@@ -173,11 +172,11 @@ class HudGraphs {
     float filterGraphPhase_ = 0.0f;
     float filterBackdropDim_ = 0.0f;
 
-    std::array<std::array<int16_t, kTracePoints>, kNumOscillators> lfoCurvesFixed_{};
-    std::array<float, kNumOscillators> lfoBeadIntensity_{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<uint8_t, kNumOscillators> lfoBeadBankIdx_{0u, 1u, 2u, 3u};
+    // [0] = focused LFO slot curve, [1] = same-oscillator sibling companion curve
+    std::array<std::array<int16_t, kTracePoints>, 2> lfoCurvesFixed_{};
+    float lfoBeadIntensity_ = 0.0f;
+    std::array<uint8_t, 2> lfoBeadBankIdx_{0u, 4u};
     float lfoSiblingWeight_ = 0.0f;
-    float lfoDivergenceSmooth_ = 0.0f;
     float lfoGraphPhase_ = 0.0f;
 };
 

@@ -373,7 +373,7 @@ struct MonoStripCanvas {
         const float invSpan = 1.0f / static_cast<float>(yBot - yTop);
         const float masterF = static_cast<float>(masterAlpha8) * (1.0f / 255.0f);
         for (int py = ys; py < ye; ++py) {
-            const float u = (static_cast<float>(py - yTop) + 0.5f) * invSpan;
+            const float u = clampf((static_cast<float>(py - yTop) + 0.5f) * invSpan, 0.0f, 1.0f);
             const float profile = topDown ? (1.0f - smoothstep01(u)) : smoothstep01(u);
             const float keep = 1.0f - clampf(peakDim * profile * masterF, 0.0f, 0.94f);
             const uint32_t keepQ8 = static_cast<uint32_t>(keep * 256.0f + 0.5f);
@@ -488,11 +488,79 @@ struct MonoStripCanvas {
         drawSans(font, rightX - w, ty, str, gray, tracking);
     }
 
-    // Two-tier tertiary monochrome indicator slot (HOME / FREQUENCY per-osc FX + LFO A/B row):
-    //  - Inactive (!active): crisp 1x1 integer pixel dot at 16% (matching passive track, zero AA)
-    //  - Active (active): calm tertiary circle (r = 1.50) capped strictly at 21%-37% (well below
-    //    60% secondary column labels and 88%-100% primary readouts)
-    void drawModulatorSlot(int cx, int cy, bool active, float sync01,
+    // Sub-pixel horizontally foreshortened single ASCII glyph for rotary drum/dial scales
+    void drawSansCharScaledX(const SansFont& font, char ch, float centerX, int ty, float xScale,
+                             uint8_t gray) const noexcept {
+        if (masterAlpha8 == 0u || gray == 0u || xScale <= 0.08f ||
+            ty + static_cast<int>(font.lineHeight) <= y0 || ty >= y1) {
+            return;
+        }
+        const GlyphMetrics& gm =
+            font.metrics[static_cast<size_t>(static_cast<unsigned char>(ch) - 32u)];
+        const int gw = static_cast<int>(gm.width);
+        const int gh = static_cast<int>(gm.height);
+        const int gy0 = ty + static_cast<int>(gm.yOffset);
+        if (gw <= 0 || gh <= 0 || gy0 + gh <= y0 || gy0 >= y1) {
+            return;
+        }
+        const float halfSpan = 0.5f * static_cast<float>(gw) * xScale;
+        const float leftF = centerX - halfSpan;
+        int px0 = static_cast<int>(leftF);
+        int px1 = static_cast<int>(centerX + halfSpan) + 1;
+        if (px0 < 0) {
+            px0 = 0;
+        }
+        if (px1 >= static_cast<int>(kDisplayWidth)) {
+            px1 = static_cast<int>(kDisplayWidth) - 1;
+        }
+        if (px0 > px1) {
+            return;
+        }
+        const float invScale = 1.0f / xScale;
+        const int32_t stepQ8 = static_cast<int32_t>(256.0f * invScale + 0.5f);
+        const int32_t uStartQ8 = static_cast<int32_t>(
+            ((static_cast<float>(px0) + 0.5f - leftF) * invScale - 0.5f) * 256.0f);
+        const int ryStart = (gy0 < y0) ? (y0 - gy0) : 0;
+        const int ryEnd = (gy0 + gh > y1) ? (y1 - gy0) : gh;
+        for (int ry = ryStart; ry < ryEnd; ++ry) {
+            uint8_t* row = lum + static_cast<size_t>(gy0 + ry - y0) * kDisplayWidth;
+            const size_t rowBase = static_cast<size_t>(ry * gw);
+            int32_t uQ8 = uStartQ8;
+            for (int px = px0; px <= px1; ++px, uQ8 += stepQ8) {
+                const int ix0 = static_cast<int>(uQ8 >> 8);
+                if (ix0 < -1 || ix0 >= gw) {
+                    continue;
+                }
+                const uint32_t frac = static_cast<uint32_t>(uQ8 & 0xFF);
+                uint32_t n0 = 0u;
+                uint32_t n1 = 0u;
+                if (ix0 >= 0) {
+                    const size_t idx0 = rowBase + static_cast<size_t>(ix0);
+                    const uint8_t p0 = font.bitmaps[gm.dataOffset + (idx0 >> 1u)];
+                    n0 = ((idx0 & 1u) == 0u) ? (p0 >> 4u) : (p0 & 0x0Fu);
+                }
+                if (ix0 + 1 < gw) {
+                    const size_t idx1 = rowBase + static_cast<size_t>(ix0 + 1);
+                    const uint8_t p1 = font.bitmaps[gm.dataOffset + (idx1 >> 1u)];
+                    n1 = ((idx1 & 1u) == 0u) ? (p1 >> 4u) : (p1 & 0x0Fu);
+                }
+                const uint32_t interpQ8 = n0 * (256u - frac) + n1 * frac;
+                if (interpQ8 >= 16u) {
+                    const uint32_t cov8 = (interpQ8 * 17u + 128u) >> 8u;
+                    const auto a8 = static_cast<uint8_t>(
+                        (cov8 * static_cast<uint32_t>(masterAlpha8) + 127u) / 255u);
+                    row[px] = blendLum8(row[px], gray, a8);
+                }
+            }
+        }
+    }
+
+    // Per-oscillator monochrome modulator indicator slot (`FX + LFO A/B` shared across HOME,
+    // LEVEL, and PAN):
+    //  - Inactive (!active): crisp 1x1 integer pixel dot at 14% (clearly visible, zero AA blur)
+    //  - Active (active): clear circular bead (`r = 1.65`) driven across `34%..92%` by that
+    //    oscillator's own live filter engagement or real-time LFO waveform x depth.
+    void drawModulatorSlot(int cx, int cy, bool active, float level01,
                            float colDim01) const noexcept {
         if (masterAlpha8 == 0u || cx < 0 || cx >= static_cast<int>(kDisplayWidth)) {
             return;
@@ -503,7 +571,7 @@ struct MonoStripCanvas {
             if (cy < y0 || cy >= y1) {
                 return;
             }
-            const float phAlpha = 0.16f * (1.0f - 0.35f * dim) * masterF;
+            const float phAlpha = 0.14f * (1.0f - 0.35f * dim) * masterF;
             const auto a8 = static_cast<uint8_t>(phAlpha * 255.0f + 0.5f);
             if (a8 > 0u) {
                 uint8_t* row = lum + static_cast<size_t>(cy - y0) * kDisplayWidth;
@@ -523,15 +591,15 @@ struct MonoStripCanvas {
         const int pyStart = (cy - kReach < y0) ? y0 : (cy - kReach);
         const int pyEnd = (cy + kReach >= y1) ? (y1 - 1) : (cy + kReach);
 
-        const float s = clampf(sync01, 0.0f, 1.0f);
-        const float effSync = s * (1.0f - dim) + 0.35f * dim;
-        const float dimKeep = 1.0f - 0.45f * dim;
-        const float circleAlpha = (0.21f + 0.16f * effSync) * dimKeep;
-        const float haloPeak = effSync * 0.08f * dimKeep;
+        const float s = clampf(level01, 0.0f, 1.0f);
+        const float effLevel = s * (1.0f - dim) + 0.25f * dim;
+        const float dimKeep = 1.0f - 0.55f * dim;
+        const float circleAlpha = (0.34f + 0.58f * effLevel) * dimKeep;
+        const float haloPeak = effLevel * 0.22f * dimKeep;
 
-        constexpr float kCircleR = 1.50f;
-        constexpr float kHaloInnerR = 1.40f;
-        constexpr float kHaloOuterR = 2.70f;
+        constexpr float kCircleR = 1.65f;
+        constexpr float kHaloInnerR = 1.50f;
+        constexpr float kHaloOuterR = 3.00f;
         constexpr float kInvHaloSpan = 1.0f / (kHaloOuterR - kHaloInnerR);
 
         for (int py = pyStart; py <= pyEnd; ++py) {

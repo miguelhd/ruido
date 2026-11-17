@@ -2,6 +2,7 @@
 
 #include "core/DspMath.h"
 #include "core/HudEnvelope.h"
+#include "core/KeyboardModelSpec.h"
 #include "core/LfoMath.h"
 #include "ui/GraphStyle.h"
 #include "ui/HudChrome.h"
@@ -21,6 +22,7 @@ void ScopeHudRenderer::reset() noexcept {
     ampGraph_.reset();
     globalViews_.reset();
     keybedView_.reset();
+    sceneView_.reset();
 
     frameControl_ = EngineControlState::makeDefault();
     for (size_t v = 0u; v < kNumOscillators; ++v) {
@@ -29,6 +31,8 @@ void ScopeHudRenderer::reset() noexcept {
     frameHud_ = {};
     prevRawHud_ = {};
     releaseLatchHud_ = {};
+    preparedHeader_ = {};
+    preparedChrome_ = {};
     frameLfoOutput_ = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     frameLfoPhase_ = {0.0f, 0.25f, 0.50f, 0.75f, 0.50f, 0.75f, 0.125f, 0.375f};
     frameLfoDriftPacked_ = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
@@ -37,9 +41,11 @@ void ScopeHudRenderer::reset() noexcept {
     knobPosSignedSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
     knobDimSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
     knobFocusSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
+    sceneDotsSmooth_ = {0.0f, 0.0f, 0.0f, 0.0f};
     headerBarSmooth_ = 0.0f;
     fineOverlayPhase_ = 0.0f;
     coarseOverlayPhase_ = 0.0f;
+    sceneDialPhaseSmooth_ = 0.0f;
     renderedOpacityLevel_ = 0.0f;
     smoothedPeakL_ = 0.0f;
     smoothedPeakR_ = 0.0f;
@@ -52,6 +58,7 @@ void ScopeHudRenderer::reset() noexcept {
     frameStutterGateMask_ = 0x0Fu;
     lastPhantomSeq_ = 0u;
     phantomPin_ = 0u;
+    wasShowingSceneDots_ = false;
     releaseLatchActive_ = false;
     hudGaugesPrimed_ = false;
 }
@@ -69,20 +76,27 @@ uint32_t ScopeHudRenderer::computeFrameBgKeepQ8() const noexcept {
     const float bgDim01 = smoothstep01(clampf(graphs_.backdropDim(), 0.0f, 1.0f));
     const float hudAlpha01 = clampf(frameHud_.opacity, 0.0f, 1.0f);
     float cfgBackdrop01 = 0.0f;
+    float shiftBackdrop01 = 0.0f;
+    float homeDim01 = 0.0f;
     (void)resolveSubViewAlpha(globalViews_.configPhase(), hudAlpha01, cfgBackdrop01);
-    return static_cast<uint32_t>(
-        (1.0f - kFilterBgDimDepth * bgDim01) * (1.0f - cfgBackdrop01) * scopeVis * 256.0f + 0.5f);
+    (void)resolveSubViewAlpha(keybedView_.shiftPhase(), hudAlpha01, shiftBackdrop01);
+    (void)resolveSubViewAlpha(ampGraph_.translucentPhase(), hudAlpha01, homeDim01);
+    const float keep01 = (1.0f - kFilterBgDimDepth * bgDim01) * (1.0f - cfgBackdrop01) *
+                         (1.0f - shiftBackdrop01) * (1.0f - kHomeSubBgDimDepth * homeDim01) *
+                         scopeVis;
+    return static_cast<uint32_t>(keep01 * 256.0f + 0.5f);
 }
 
 void ScopeHudRenderer::updateTraceForFrame(float dtSec, const EngineControlState& control,
-                                           const HudState& hud) noexcept {
+                                           const HudState& hud,
+                                           void (*coProcYield)() noexcept) noexcept {
     frameBgKeepQ8_ = computeFrameBgKeepQ8();
     if (frameBgKeepQ8_ > 0u) {
         traceEngine_.buildWaveformTrace(dtSec, control, hud.scopeFrozen, frameStutterGateMask_,
-                                        hud.scopeTimebase);
+                                        hud.scopeTimebase, false, coProcYield);
     } else {
         traceEngine_.notifyScopeHidden(hud.scopeFrozen);
-        if (HudAmpGraph::isLevelViewActive(hud)) {
+        if (HudAmpGraph::isLevelViewActive(hud) || ampGraph_.levelPhase() > 0.002f) {
             traceEngine_.refreshOverdriveHair(control, hud.scopeFrozen);
         }
     }
@@ -126,8 +140,8 @@ void ScopeHudRenderer::updateHudGauges(float dtClamped, bool snapImmediate) noex
 }
 
 void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& control,
-                                    const HudState& hud,
-                                    const EngineTelemetry& telemetry) noexcept {
+                                    const HudState& hud, const EngineTelemetry& telemetry,
+                                    void (*coProcYield)() noexcept) noexcept {
     frameControl_ = control;
     frameHud_.scopeFrozen = hud.scopeFrozen;
 
@@ -174,10 +188,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
             syncRecoilEnv_ = 0.0f;
             syncRecoilPhase_ = 0.0f;
         } else {
-            syncRecoilPhase_ += dtClamped * 24.0f;
-            while (syncRecoilPhase_ >= 1.0f) {
-                syncRecoilPhase_ -= 1.0f;
-            }
+            syncRecoilPhase_ = wrapLfoPhase01(syncRecoilPhase_ + dtClamped * 24.0f);
         }
     }
 
@@ -196,17 +207,19 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         if (dtSec <= 0.0f || syntheticInstantHide ||
             (renderedOpacityLevel_ <= 0.002f && !graphs_.hasResidualPhase() &&
              !ampGraph_.hasResidualPhase() && !globalViews_.hasResidualPhase() &&
-             !keybedView_.hasResidualPhase())) {
+             !keybedView_.hasResidualPhase() && !sceneView_.hasResidualPhase())) {
             frameHud_ = hud;
             renderedOpacityLevel_ = 0.0f;
             fineOverlayPhase_ = 0.0f;
             coarseOverlayPhase_ = 0.0f;
+            wasShowingSceneDots_ = false;
             graphs_.clearImmediate();
             ampGraph_.clearImmediate();
             globalViews_.clearImmediate();
             keybedView_.clearImmediate();
+            sceneView_.clearImmediate();
             hudGaugesPrimed_ = false;
-            updateTraceForFrame(dtSec, control, hud);
+            updateTraceForFrame(dtSec, control, hud, coProcYield);
             return;
         }
 
@@ -214,36 +227,43 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         graphs_.stepFadeOut(dtClamped);
         ampGraph_.stepFadeOut(dtClamped);
         globalViews_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_,
-                            frameStutterGateMask_);
+                            frameVoiceDrift_, frameStutterGateMask_, traceEngine_);
         keybedView_.update(dtClamped, control, hud, frameVoicePeak_, frameStutterGateMask_);
-        frameHud_.fxLedSync01 = hud.fxLedSync01;
-        frameHud_.lfoLedSync01 = hud.lfoLedSync01;
+        sceneView_.update(dtClamped, hud);
         frameHud_.opacity = smoothstep01(renderedOpacityLevel_);
         if (renderedOpacityLevel_ <= 0.001f && !graphs_.hasResidualPhase() &&
             !ampGraph_.hasResidualPhase() && !globalViews_.hasResidualPhase() &&
-            !keybedView_.hasResidualPhase()) {
+            !keybedView_.hasResidualPhase() && !sceneView_.hasResidualPhase()) {
             renderedOpacityLevel_ = 0.0f;
             fineOverlayPhase_ = 0.0f;
             coarseOverlayPhase_ = 0.0f;
+            wasShowingSceneDots_ = false;
             frameHud_.mode = HudMode::None;
             frameHud_.opacity = 0.0f;
             hudGaugesPrimed_ = false;
+        } else if (frameHud_.opacity > 0.001f && frameHud_.mode != HudMode::None) {
+            prepareHudHeader(preparedHeader_, frameControl_, frameHud_, frameLfoOutput_,
+                             frameStutterGateMask_, fineOverlayPhase_, coarseOverlayPhase_);
+            preparedHeader_.sceneDotWeights = sceneDotsSmooth_;
+            preparedHeader_.sceneDialPhase = sceneDialPhaseSmooth_;
+            prepareHudChrome(preparedChrome_, frameControl_, frameHud_, frameLfoOutput_,
+                             frameStutterGateMask_);
         }
-        updateTraceForFrame(dtSec, control, hud);
+        updateTraceForFrame(dtSec, control, hud, coProcYield);
         return;
     }
 
     const bool nowKeyHeld = (hud.heldBlackMask != 0u) || (hud.heldWhiteMask != 0u);
     const bool prevKeyHeld = (prevRawHud_.heldBlackMask != 0u) || (prevRawHud_.heldWhiteMask != 0u);
     const bool nowPinnedOrOpen =
-        hud.modifierHeld || nowKeyHeld || hud.freqPageOpen || hud.fxPageOpen || hud.panPageOpen ||
-        hud.lfoPageOpen || hud.editPageOpen || hud.configPageOpen || hud.selPageOpen ||
-        hud.saveArmed || (hud.scopeFrozen && hud.mode == HudMode::ScopeFreeze);
+        hud.shiftHeld || hud.modifierHeld || nowKeyHeld || hud.freqPageOpen || hud.fxPageOpen ||
+        hud.panPageOpen || hud.lfoPageOpen || hud.editPageOpen || hud.configPageOpen ||
+        hud.selPageOpen || hud.saveArmed || (hud.scopeFrozen && hud.mode == HudMode::ScopeFreeze);
     const bool prevWasPinnedOrOpen =
-        prevRawHud_.modifierHeld || prevKeyHeld || prevRawHud_.freqPageOpen ||
-        prevRawHud_.fxPageOpen || prevRawHud_.panPageOpen || prevRawHud_.lfoPageOpen ||
-        prevRawHud_.editPageOpen || prevRawHud_.configPageOpen || prevRawHud_.selPageOpen ||
-        prevRawHud_.saveArmed ||
+        prevRawHud_.shiftHeld || prevRawHud_.modifierHeld || prevKeyHeld ||
+        prevRawHud_.freqPageOpen || prevRawHud_.fxPageOpen || prevRawHud_.panPageOpen ||
+        prevRawHud_.lfoPageOpen || prevRawHud_.editPageOpen || prevRawHud_.configPageOpen ||
+        prevRawHud_.selPageOpen || prevRawHud_.saveArmed ||
         (prevRawHud_.scopeFrozen && prevRawHud_.mode == HudMode::ScopeFreeze);
     const bool fadingSameMode = !nowPinnedOrOpen && !freqChanged && (hud.opacity > 0.001f) &&
                                 ((prevWasPinnedOrOpen && hud.mode == prevRawHud_.mode &&
@@ -262,48 +282,18 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
 
     HudState effectiveHud = hud;
     if (releaseLatchActive_) {
-        effectiveHud.mode = releaseLatchHud_.mode;
-        effectiveHud.knobBank = releaseLatchHud_.knobBank;
-        effectiveHud.focusedVoice = releaseLatchHud_.focusedVoice;
-        effectiveHud.focusedKnob = releaseLatchHud_.focusedKnob;
-        effectiveHud.fxVoiceFocus = releaseLatchHud_.fxVoiceFocus;
-        effectiveHud.lfoVoiceFocus = releaseLatchHud_.lfoVoiceFocus;
-        effectiveHud.freqPageOpen = releaseLatchHud_.freqPageOpen;
-        effectiveHud.fxPageOpen = releaseLatchHud_.fxPageOpen;
-        effectiveHud.panPageOpen = releaseLatchHud_.panPageOpen;
-        effectiveHud.editPageOpen = releaseLatchHud_.editPageOpen;
-        effectiveHud.editTarget = releaseLatchHud_.editTarget;
-        effectiveHud.configCursor = releaseLatchHud_.configCursor;
-        effectiveHud.configSubView = releaseLatchHud_.configSubView;
-        effectiveHud.configResetTicks = releaseLatchHud_.configResetTicks;
-        effectiveHud.config = releaseLatchHud_.config;
-        effectiveHud.selPageOpen = releaseLatchHud_.selPageOpen;
-        effectiveHud.selWakeSeq = releaseLatchHud_.selWakeSeq;
-        effectiveHud.scopeTimebase = releaseLatchHud_.scopeTimebase;
-        effectiveHud.snapshotSlot = releaseLatchHud_.snapshotSlot;
-        effectiveHud.snapshotToastSlot = releaseLatchHud_.snapshotToastSlot;
-        effectiveHud.snapshotOccupiedMask = releaseLatchHud_.snapshotOccupiedMask;
-        effectiveHud.snapshotWeights = releaseLatchHud_.snapshotWeights;
-        effectiveHud.morphPosition = releaseLatchHud_.morphPosition;
-        effectiveHud.saveArmed = releaseLatchHud_.saveArmed;
-        effectiveHud.saveDeleteMode = releaseLatchHud_.saveDeleteMode;
-        effectiveHud.snapshotDirty = releaseLatchHud_.snapshotDirty;
-        effectiveHud.snapshotSavedToast = releaseLatchHud_.snapshotSavedToast;
-        effectiveHud.snapshotDeletedToast = releaseLatchHud_.snapshotDeletedToast;
-        effectiveHud.snapshotGliding = releaseLatchHud_.snapshotGliding;
-        effectiveHud.keyboardModel = releaseLatchHud_.keyboardModel;
-        effectiveHud.activePunch = releaseLatchHud_.activePunch;
-        effectiveHud.activePunchVoice = releaseLatchHud_.activePunchVoice;
-        effectiveHud.activePunchValue = releaseLatchHud_.activePunchValue;
-        effectiveHud.effectiveClockBpm = releaseLatchHud_.effectiveClockBpm;
-        effectiveHud.midiClockSynced = releaseLatchHud_.midiClockSynced;
-        effectiveHud.heldBlackMask = releaseLatchHud_.heldBlackMask;
-        effectiveHud.heldWhiteMask = releaseLatchHud_.heldWhiteMask;
-        effectiveHud.blackPressureQ8 = releaseLatchHud_.blackPressureQ8;
-        effectiveHud.whitePressureQ8 = releaseLatchHud_.whitePressureQ8;
-        if (releaseLatchHud_.mode == HudMode::KnobRate) {
-            effectiveHud.rateHoldActive = releaseLatchHud_.rateHoldActive;
-            effectiveHud.knobRate = releaseLatchHud_.knobRate;
+        effectiveHud = releaseLatchHud_;
+        effectiveHud.opacity = hud.opacity;
+        effectiveHud.scopeFrozen = hud.scopeFrozen;
+        effectiveHud.savePulseQ8 = hud.savePulseQ8;
+        effectiveHud.shiftBlinkQ8 = hud.shiftBlinkQ8;
+        effectiveHud.modeWipeQ8 = hud.modeWipeQ8;
+        effectiveHud.phantomPinSeq = hud.phantomPinSeq;
+        effectiveHud.phantomPinIndex = hud.phantomPinIndex;
+        if (releaseLatchHud_.mode != HudMode::KnobRate) {
+            effectiveHud.rateHoldActive = hud.rateHoldActive;
+            effectiveHud.knobRate = hud.knobRate;
+            effectiveHud.modifierHeld = hud.modifierHeld;
         }
     }
 
@@ -327,17 +317,74 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     if (hudGaugesPrimed_) {
         updateHudGauges(dtClamped, snapGauges);
     }
+    if (frameHud_.opacity > 0.001f && frameHud_.mode != HudMode::None) {
+        prepareHudHeader(preparedHeader_, frameControl_, frameHud_, frameLfoOutput_,
+                         frameStutterGateMask_, fineOverlayPhase_, coarseOverlayPhase_);
+        if (preparedHeader_.showSceneDots) {
+            const bool snapScene = snapGauges || !wasShowingSceneDots_;
+            wasShowingSceneDots_ = true;
+            const bool liveMorph = isSceneLiveMorphActive(frameHud_);
+            const float dotAlpha =
+                snapScene ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.036f)));
+            const float tgtDial =
+                liveMorph
+                    ? wrapCircularPhase(frameHud_.snapshotLoopPhase, 4.0f)
+                    : static_cast<float>((frameHud_.activePunch == KeyPunchKind::SnapshotRecall)
+                                             ? (frameHud_.activePunchVoice & 3u)
+                                             : (frameHud_.snapshotSlot & 3u));
+            if (snapScene) {
+                sceneDialPhaseSmooth_ = tgtDial;
+            } else {
+                float diff = tgtDial - sceneDialPhaseSmooth_;
+                if (diff > 2.0f) {
+                    diff -= 4.0f;
+                } else if (diff < -2.0f) {
+                    diff += 4.0f;
+                }
+                sceneDialPhaseSmooth_ =
+                    (absf(diff) <= 0.001f)
+                        ? tgtDial
+                        : wrapCircularPhase(sceneDialPhaseSmooth_ + diff * dotAlpha, 4.0f);
+            }
+            for (size_t s = 0u; s < kNumSnapshots; ++s) {
+                const bool occ = (frameHud_.snapshotOccupiedMask & (1u << s)) != 0u;
+                const float tgtW =
+                    !occ ? 0.0f
+                         : (liveMorph ? clampf(frameHud_.snapshotWeights[s], 0.0f, 1.0f)
+                                      : (((frameHud_.snapshotSlot & 3u) == s) ? 1.0f : 0.0f));
+                sceneDotsSmooth_[s] = slewScalar(sceneDotsSmooth_[s], tgtW, dotAlpha, 0.001f);
+            }
+            preparedHeader_.sceneDotWeights = sceneDotsSmooth_;
+            preparedHeader_.sceneDialPhase = sceneDialPhaseSmooth_;
+        } else {
+            wasShowingSceneDots_ = false;
+        }
+        prepareHudChrome(preparedChrome_, frameControl_, frameHud_, frameLfoOutput_,
+                         frameStutterGateMask_);
+    }
 
-    globalViews_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_,
-                        frameStutterGateMask_);
-    keybedView_.update(dtClamped, control, effectiveHud, frameVoicePeak_, frameStutterGateMask_);
-    const bool extraCenterView = globalViews_.anyActiveTarget(hud) || ampGraph_.isActive(hud) ||
-                                 keybedView_.isActive(effectiveHud);
-    graphs_.update(dtClamped, control, hud, effectiveHud, extraCenterView, frameLfoOutput_,
-                   frameLfoDriftPacked_, frameRhythmPhase_, frameStutterGateMask_);
-    updateTraceForFrame(dtSec, control, hud);
+    globalViews_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_, frameVoiceDrift_,
+                        frameStutterGateMask_, traceEngine_);
+    keybedView_.update(dtClamped, control, hud, frameVoicePeak_, frameStutterGateMask_,
+                       frameRhythmPhase_);
+    sceneView_.update(dtClamped, hud);
     ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoiceDrift_,
-                     traceEngine_.overdriveHair(), frameStutterGateMask_);
+                     frameStutterGateMask_);
+    const bool extraCenterView = globalViews_.anyActiveTarget(hud) ||
+                                 HudAmpGraph::isLevelViewActive(hud) || keybedView_.isActive(hud) ||
+                                 keybedView_.isShiftActive(hud) || sceneView_.isSaveActive(hud) ||
+                                 sceneView_.isPresetSceneActive(hud);
+    HudState graphsRawHud = hud;
+    if (HudGlobalViews::isRailCouplingActive(hud)) {
+        graphsRawHud.knobBank = KnobBankMode::None;
+        graphsRawHud.lfoPageOpen = false;
+    }
+    graphs_.update(dtClamped, control, graphsRawHud, effectiveHud, extraCenterView, frameLfoOutput_,
+                   frameLfoDriftPacked_, frameRhythmPhase_, frameStutterGateMask_);
+    if (coProcYield != nullptr) {
+        coProcYield();
+    }
+    updateTraceForFrame(dtSec, control, hud, coProcYield);
 }
 
 int ScopeHudRenderer::computeScanlineSyncShift(int py) const noexcept {
@@ -357,7 +404,8 @@ int ScopeHudRenderer::computeScanlineSyncShift(int py) const noexcept {
 }
 
 void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight, uint16_t* rgb565Out,
-                                   bool bigEndianRgb565) const noexcept {
+                                   bool bigEndianRgb565,
+                                   void (*coProcYield)() noexcept) const noexcept {
     if (rgb565Out == nullptr || yStart >= kDisplayHeight || stripHeight == 0u) {
         return;
     }
@@ -400,8 +448,14 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight, uint16
             }
         }
 
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
         if (hudAlpha8 > 0u && frameHud_.mode != HudMode::None) {
             compositeHudStrip(curY, chunkH, lumBuf.data(), linBuf.data(), hudAlpha8);
+            if (coProcYield != nullptr) {
+                coProcYield();
+            }
         }
 
         uint16_t* dstBase = rgb565Out + static_cast<size_t>(curY - yStart) * kDisplayWidth;
@@ -455,6 +509,7 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     float effLfoAlpha01 = 0.0f;
     float effEditGraphAlpha01 = 0.0f;
     float effPanAlpha01 = 0.0f;
+    float effCouplingAlpha01 = 0.0f;
     float dummy01 = 0.0f;
     const uint8_t filterAlpha8 =
         resolveSubViewAlpha(graphs_.filterGraphPhase(), hudAlpha01, effFilterAlpha01);
@@ -463,12 +518,20 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     (void)resolveSubViewAlpha(ampGraph_.maxPhase(), hudAlpha01, effEditGraphAlpha01);
     const uint8_t panAlpha8 =
         resolveSubViewAlpha(globalViews_.panPhase(), hudAlpha01, effPanAlpha01);
+    const uint8_t couplingAlpha8 =
+        resolveSubViewAlpha(globalViews_.couplingPhase(), hudAlpha01, effCouplingAlpha01);
     const uint8_t cfgAlpha8 = resolveSubViewAlpha(globalViews_.configPhase(), hudAlpha01, dummy01);
     const uint8_t keybedAlpha8 = resolveSubViewAlpha(keybedView_.phase(), hudAlpha01, dummy01);
+    const uint8_t shiftAlpha8 = resolveSubViewAlpha(keybedView_.shiftPhase(), hudAlpha01, dummy01);
+    const uint8_t saveAlpha8 = resolveSubViewAlpha(sceneView_.savePhase(), hudAlpha01, dummy01);
+    const uint8_t presetSceneAlpha8 =
+        resolveSubViewAlpha(sceneView_.morphPhase(), hudAlpha01, dummy01);
+    const bool showBotStrip = (frameHud_.knobBank != KnobBankMode::None) ||
+                              HudGlobalViews::isRailCouplingActive(frameHud_);
 
     if (frameBgKeepQ8_ > 0u || bootIntro_.isActive()) {
         cv.applyVerticalScrim(0, 34, 0.80f, true);
-        if (frameHud_.knobBank != KnobBankMode::None) {
+        if (showBotStrip) {
             float graphEnvMax =
                 (effFilterAlpha01 > effLfoAlpha01) ? effFilterAlpha01 : effLfoAlpha01;
             if (effEditGraphAlpha01 > graphEnvMax) {
@@ -476,6 +539,9 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
             }
             if (effPanAlpha01 > graphEnvMax) {
                 graphEnvMax = effPanAlpha01;
+            }
+            if (effCouplingAlpha01 > graphEnvMax) {
+                graphEnvMax = effCouplingAlpha01;
             }
             const int botScrimTop = 178 - static_cast<int>(8.0f * graphEnvMax + 0.5f);
             cv.applyVerticalScrim(botScrimTop, 240, 0.90f, false);
@@ -491,11 +557,16 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
                                      filterAlpha8);
     }
     if (effEditGraphAlpha01 > 0.0f) {
-        ampGraph_.compositeStrip(y0, y1, stripHeight, lumBuf, linScratch, hudAlpha01, frameHud_);
+        ampGraph_.compositeStrip(y0, y1, stripHeight, lumBuf, linScratch, hudAlpha01, frameHud_,
+                                 traceEngine_.overdriveHair());
     }
     if (panAlpha8 > 0u) {
         globalViews_.compositePanStageStrip(y0, y1, stripHeight, lumBuf, linScratch, effPanAlpha01,
                                             panAlpha8, frameHud_);
+    }
+    if (couplingAlpha8 > 0u) {
+        globalViews_.compositeRailCouplingStrip(y0, y1, stripHeight, lumBuf, linScratch,
+                                                effCouplingAlpha01, couplingAlpha8);
     }
     if (cfgAlpha8 > 0u) {
         globalViews_.compositeGlobalConfigStrip(y0, y1, lumBuf, cfgAlpha8, frameControl_,
@@ -504,15 +575,31 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     if (keybedAlpha8 > 0u) {
         keybedView_.compositeStrip(y0, y1, lumBuf, keybedAlpha8, frameHud_);
     }
+    if (shiftAlpha8 > 0u) {
+        keybedView_.compositeShiftStrip(y0, y1, lumBuf, shiftAlpha8, frameControl_, frameHud_);
+    }
+    if (sceneView_.isSaveActive(frameHud_)) {
+        if (presetSceneAlpha8 > 0u) {
+            sceneView_.compositePresetSceneStrip(y0, y1, lumBuf, presetSceneAlpha8, frameHud_);
+        }
+        if (saveAlpha8 > 0u) {
+            sceneView_.compositeSaveStrip(y0, y1, lumBuf, saveAlpha8, frameHud_);
+        }
+    } else {
+        if (saveAlpha8 > 0u) {
+            sceneView_.compositeSaveStrip(y0, y1, lumBuf, saveAlpha8, frameHud_);
+        }
+        if (presetSceneAlpha8 > 0u) {
+            sceneView_.compositePresetSceneStrip(y0, y1, lumBuf, presetSceneAlpha8, frameHud_);
+        }
+    }
     if (y0 < 26) {
-        compositeTopHeaderStrip(cv, frameControl_, frameHud_, frameLfoOutput_,
-                                frameStutterGateMask_, headerBarSmooth_, fineOverlayPhase_,
+        compositeTopHeaderStrip(cv, preparedHeader_, frameHud_, headerBarSmooth_, fineOverlayPhase_,
                                 coarseOverlayPhase_);
     }
-    if (y1 > 188 && frameHud_.knobBank != KnobBankMode::None) {
-        compositeBottomKnobStrip(cv, frameControl_, frameHud_, frameLfoOutput_,
-                                 frameStutterGateMask_, knobPosSignedSmooth_, knobDimSmooth_,
-                                 knobFocusSmooth_);
+    if (y1 > 188 && showBotStrip) {
+        compositeBottomKnobStrip(cv, preparedChrome_, frameControl_, frameHud_,
+                                 knobPosSignedSmooth_, knobDimSmooth_, knobFocusSmooth_);
     }
 }
 

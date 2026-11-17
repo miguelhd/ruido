@@ -167,7 +167,7 @@ int main() {
         const BakedFont bold =
             bakeFont(@"HelveticaNeue-Bold", 13.0, 16, 3, "kFontSansBold");
 
-        std::printf("#pragma once\n\n");
+        std::printf("#pragma once\n\n// clang-format off\n\n");
         std::printf("#include <cstddef>\n#include <cstdint>\n\n");
         std::printf("namespace ruido {\n\n");
         std::printf("// 4-bit grayscale anti-aliased Helvetica Neue Medium ROM font tables.\n");
@@ -190,16 +190,61 @@ int main() {
         emitFontStruct(medium);
         emitFontStruct(bold);
 
-        std::printf("inline constexpr int measureSansText(const SansFont& font,\n");
-        std::printf("                                     const char* str,\n");
+        std::printf("// clang-format on\n\n");
+        std::printf("// Decode one UTF-8 character from `str[ioIndex]`, advancing `ioIndex` to the "
+                    "final byte of\n");
+        std::printf("// the sequence. Maps Latin-1 acute vowels (á, é, í, ó, ú, Á, É, Í, Ó, Ú) to "
+                    "their base ASCII\n");
+        std::printf("// glyph and sets `outAcute = true` so `MonoStripCanvas::drawSans` can "
+                    "composite a crisp acute\n");
+        std::printf("// accent mark above the vowel with 0 B extra font ROM.\n");
+        std::printf("inline constexpr unsigned char decodeSansGlyphChar(const char* str, size_t& "
+                    "ioIndex,\n");
+        std::printf("                                                   bool& outAcute) noexcept "
+                    "{\n");
+        std::printf("    outAcute = false;\n");
+        std::printf("    const auto uc = static_cast<unsigned char>(str[ioIndex]);\n");
+        std::printf("    if (uc == 0xC3u) {\n");
+        std::printf("        const auto next = static_cast<unsigned char>(str[ioIndex + 1u]);\n");
+        std::printf("        if (next != 0u) {\n");
+        std::printf("            ++ioIndex;\n");
+        std::printf("            switch (next) {\n");
+        std::printf("            case 0x81u:\n                outAcute = true;\n                "
+                    "return 'A';\n");
+        std::printf("            case 0x89u:\n                outAcute = true;\n                "
+                    "return 'E';\n");
+        std::printf("            case 0x8Du:\n                outAcute = true;\n                "
+                    "return 'I';\n");
+        std::printf("            case 0x93u:\n                outAcute = true;\n                "
+                    "return 'O';\n");
+        std::printf("            case 0x9Au:\n                outAcute = true;\n                "
+                    "return 'U';\n");
+        std::printf("            case 0xA1u:\n                outAcute = true;\n                "
+                    "return 'a';\n");
+        std::printf("            case 0xA9u:\n                outAcute = true;\n                "
+                    "return 'e';\n");
+        std::printf("            case 0xADu:\n                outAcute = true;\n                "
+                    "return 'i';\n");
+        std::printf("            case 0xB3u:\n                outAcute = true;\n                "
+                    "return 'o';\n");
+        std::printf("            case 0xBAu:\n                outAcute = true;\n                "
+                    "return 'u';\n");
+        std::printf("            default:\n                return ' ';\n");
+        std::printf("            }\n");
+        std::printf("        }\n");
+        std::printf("    }\n");
+        std::printf("    return (uc >= 32u && uc <= 126u) ? uc : ' ';\n");
+        std::printf("}\n\n");
+        std::printf("inline constexpr int measureSansText(const SansFont& font, const char* str,\n");
         std::printf("                                     int tracking = 0) noexcept {\n");
         std::printf("    if (str == nullptr || str[0] == '\\0') {\n");
         std::printf("        return 0;\n");
         std::printf("    }\n");
         std::printf("    int w = 0;\n");
         std::printf("    for (size_t i = 0u; str[i] != '\\0'; ++i) {\n");
-        std::printf("        const unsigned char uc = static_cast<unsigned char>(str[i]);\n");
-        std::printf("        const size_t idx = (uc >= 32u && uc <= 126u) ? (uc - 32u) : 0u;\n");
+        std::printf("        bool acute = false;\n");
+        std::printf("        const unsigned char baseUc = decodeSansGlyphChar(str, i, acute);\n");
+        std::printf("        const size_t idx = static_cast<size_t>(baseUc - 32u);\n");
         std::printf("        w += static_cast<int>(font.metrics[idx].advance);\n");
         std::printf("        if (str[i + 1u] != '\\0') {\n");
         std::printf("            w += tracking;\n");

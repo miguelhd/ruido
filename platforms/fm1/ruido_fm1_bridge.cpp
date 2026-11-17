@@ -34,7 +34,6 @@ namespace {
 
 constexpr size_t kAudioChunkFrames = ruido::kBlockFrames;
 constexpr size_t kStripPixels = ruido::kDisplayWidth * ruido::kScanlineStripHeight;
-constexpr float kMaxPlatformMasterQ12 = 4088.0f; // (1023 * 1023) >> 8 in platform.c
 constexpr uint32_t kC1StallFallbackCallbacks = 3u;
 constexpr uint32_t kC1BenchSpinLimit = 40000u;
 constexpr uint32_t kC1FlashHoldTimeoutTicks = 10000u * 24u; // 10 ms @ 24 MHz TIMER4
@@ -80,16 +79,8 @@ inline ruido::fm1::Fm1PanelState* panel() noexcept {
 inline ruido::fm1::Fm1LedModulator* ledMod() noexcept {
     return reinterpret_cast<ruido::fm1::Fm1LedModulator*>(g_led_mod_arena);
 }
-inline uint32_t floatToBits(float f) noexcept {
-    union {
-        float f;
-        uint32_t u;
-    } conv{f};
-    return conv.u;
-}
 inline float masterQ12ToGain(uint32_t master_q12) noexcept {
-    return ruido::clampf(static_cast<float>(master_q12) * (1.0f / kMaxPlatformMasterQ12), 0.0f,
-                         1.0f);
+    return ruido::fm1::masterQ12ToGain(master_q12);
 }
 
 inline void refreshGate43StatusWords() noexcept {
@@ -100,10 +91,12 @@ inline void refreshGate43StatusWords() noexcept {
     const uint32_t slotBits = static_cast<uint32_t>(ctrl->snapshots().activeSlot()) & 3u;
     const uint32_t syncBit = hud.midiClockSynced ? 1u : 0u;
     const uint32_t runBit = st.global.masterRun ? 1u : 0u;
+    const uint32_t dirtyBit = hud.snapshotDirty ? 1u : 0u;
     const uint32_t hudBits = static_cast<uint32_t>(hud.mode) & 0x3Fu;
     const uint32_t evBits = static_cast<uint32_t>(panel()->inputEventCount());
     g_ruido_fm1_status.panel_state = modelBits | (slotBits << 2u) | (syncBit << 4u) |
-                                     (runBit << 5u) | (hudBits << 8u) | (evBits << 16u);
+                                     (runBit << 5u) | (dirtyBit << 6u) | (hudBits << 8u) |
+                                     (evBits << 16u);
     const float clampedBpm = ruido::clampf(hud.effectiveClockBpm, 0.0f, 6500.0f);
     const auto bpmX10 = static_cast<uint32_t>(clampedBpm * 10.0f + 0.5f) & 0xFFFFu;
     g_ruido_fm1_status.midi_clock_state = bpmX10 | ((g_midi_rt_events & 0xFFFFu) << 16u);
@@ -176,9 +169,6 @@ void ruido_fm1_construct(uint32_t initial_master_q12) {
     g_ruido_ic_ctrl.c1FlashAck.store(0u, std::memory_order_relaxed);
 
     g_latest_master_gain = masterQ12ToGain(initial_master_q12);
-    /* Core 1 quantizer runs at 1.0f unity; MASTER pot scales inside DroneEngineCore::masterTrim */
-    g_ruido_ic_ctrl.masterGainBits.store(floatToBits(1.0f), std::memory_order_relaxed);
-
     ruido::fm1::callC1Far(ruido_fm1_c1_construct, 1.0f);
 
     auto* ctrl = new (g_ctrl_arena) ruido::RuidoController();
@@ -276,6 +266,7 @@ void ruido_fm1_restore_default_patch(void) {
     panel()->syncMasterPot(*ctrl, g_latest_master_gain);
     (void)ctrl->consumeSavedSlotMask();
     (void)ctrl->consumeSettingsDirty();
+    (void)ctrl->consumeLivePatchDirty();
     ledMod()->reset();
     ledMod()->updateTargets(ctrl->leds());
     ruido::fm1::callC1Far(ruido_fm1_c1_snap_latest);
@@ -289,8 +280,7 @@ void ruido_fm1_restore_default_patch(void) {
     refreshGate43StatusWords();
 }
 
-uint32_t ruido_fm1_nvs_load_boot(RuidoFm1BlobLoadFn load_fn,
-                                 RuidoFm1SettingsTailReadFn tail_read_fn,
+uint32_t ruido_fm1_nvs_load_boot(RuidoFm1BlobLoadFn load_fn, RuidoFm1TailReadFn tail_read_fn,
                                  RuidoFm1BlobSaveFn boot_compact_save_fn) {
     if (load_fn == nullptr || g_panel_constructed == 0u) {
         return 0u;
@@ -304,7 +294,7 @@ uint32_t ruido_fm1_nvs_load_boot(RuidoFm1BlobLoadFn load_fn,
 }
 
 uint32_t ruido_fm1_nvs_poll_save(uint32_t now_ms, uint32_t force_flush, RuidoFm1BlobSaveFn save_fn,
-                                 RuidoFm1SettingsTailWriteFn tail_write_fn,
+                                 RuidoFm1TailWriteFn tail_write_fn,
                                  RuidoFm1PreEraseFn pre_erase_fn) {
     if (save_fn == nullptr || g_ruido_ic_ctrl.engineReady.load(std::memory_order_acquire) == 0u) {
         return 0u;
@@ -315,10 +305,6 @@ uint32_t ruido_fm1_nvs_poll_save(uint32_t now_ms, uint32_t force_flush, RuidoFm1
         refreshGate43StatusWords();
     }
     return writes;
-}
-
-uint32_t ruido_fm1_nvs_take_base_written(void) {
-    return g_nvs_state.takeBaseBlobWritten();
 }
 
 void ruido_fm1_arm_audio(uint32_t enable_core1) {
@@ -381,10 +367,14 @@ void ruido_fm1_flash_hold_begin(void) {
     uint32_t spins = 0u;
     while (g_ruido_ic_ctrl.c1FlashAck.load(std::memory_order_acquire) == 0u) {
         if ((spins & 63u) == 0u) {
+            ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl);
             ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
         }
-        if (checkCore1SelfFault() || (*kTimer4CntReg - t0) >= kC1FlashHoldTimeoutTicks ||
-            ++spins >= 500000u) {
+        if (checkCore1SelfFault()) {
+            break;
+        }
+        if ((*kTimer4CntReg - t0) >= kC1FlashHoldTimeoutTicks || ++spins >= 500000u) {
+            engageCore1Fallback(7u);
             break;
         }
         if (ruidoCoProc()->hasPendingWork()) {
@@ -430,8 +420,12 @@ void ruido_fm1_poll_panel(uint32_t now_ms, uint32_t pressed_btns, uint32_t relea
     auto* pnl = panel();
     const bool btnOrEnc =
         pnl->pollButtonsAndEncoders(*ctrl, pressed_btns, released_btns, cur_btns, enc_steps);
+    if (btnOrEnc) {
+        ruido_fm1_assist_dsp();
+    }
     const bool keyTouched = pnl->pollKeysAndPressure(*ctrl, cur_notes, note_press_edges);
     if (btnOrEnc || keyTouched) {
+        ruido_fm1_assist_dsp();
         g_nvs_state.lastPanelTouchMs = now_ms;
         renderer()->notifyUserInput();
     }
@@ -585,7 +579,8 @@ void ruido_fm1_tick_and_prepare_ms(uint32_t elapsed_ms) {
     ruido_fm1_assist_dsp();
     ui->ingestScopeRing(buses->scopeBuffer);
     ruido_fm1_assist_dsp();
-    ui->prepareFrame(dt_sec, ctrl->state(), ctrl->hud(), buses->telemetry);
+    ui->prepareFrame(dt_sec, ctrl->state(), ctrl->hud(), buses->telemetry,
+                     []() noexcept { ruido_fm1_assist_dsp(); });
     ruido_fm1_assist_dsp();
 
     const uint32_t assisted = ruidoCoProc()->assistedSpans();
@@ -605,13 +600,13 @@ const uint16_t* ruido_fm1_render_strip_be(uint16_t y_start, uint8_t slot) {
     if ((y_start & 63u) == 0u && y_start != 0u) {
         renderer()->ingestScopeRing(ruidoSharedBuses()->scopeBuffer);
     }
-    constexpr uint16_t kSliceRows = 8u;
+    constexpr uint16_t kSliceRows = 2u;
     static_assert(ruido::kScanlineStripHeight % kSliceRows == 0u, "kSliceRows must divide strip");
     for (uint16_t rowOff = 0u; rowOff < ruido::kScanlineStripHeight; rowOff += kSliceRows) {
         ruido_fm1_assist_dsp();
         uint16_t* sliceDst = strip + static_cast<size_t>(rowOff) * ruido::kDisplayWidth;
-        renderer()->renderStrip(static_cast<uint16_t>(y_start + rowOff), kSliceRows, sliceDst,
-                                true);
+        renderer()->renderStrip(static_cast<uint16_t>(y_start + rowOff), kSliceRows, sliceDst, true,
+                                []() noexcept { ruido_fm1_assist_dsp(); });
     }
     ruido_fm1_assist_dsp();
     return strip;

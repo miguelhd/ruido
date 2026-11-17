@@ -180,6 +180,27 @@ RUIDO_ALWAYS_INLINE float fastLog2(float x) noexcept {
     return static_cast<float>(expInt) + frac;
 }
 
+// O(1) NaN/Inf/UBSan-safe circular phase wrapper into [0, period).
+RUIDO_ALWAYS_INLINE float wrapCircularPhase(float x, float period) noexcept {
+    if (!(period > 0.0f)) {
+        return 0.0f;
+    }
+    const float s = sanitizeState(x);
+    const float norm = s * (1.0f / period);
+    if (!(norm > -4194304.0f && norm < 4194304.0f)) {
+        return 0.0f;
+    }
+    float frac = norm - static_cast<float>(static_cast<int32_t>(norm));
+    if (frac < 0.0f) {
+        frac += 1.0f;
+    }
+    float res = frac * period;
+    if (res < 0.0f || res >= period) {
+        res = 0.0f;
+    }
+    return res;
+}
+
 // Compile-time base-2 logarithm for positive constants (< 1e-6 octave error, zero runtime calls).
 constexpr float cxLog2Pos(float x) noexcept {
     float m = (x > 1.0e-12f) ? x : 1.0e-12f;

@@ -27,8 +27,11 @@ TEST_CXXFLAGS := \
 	-Wall \
 	-Wextra \
 	-Werror \
+	-Wdouble-promotion \
 	-fno-exceptions \
 	-fno-rtti \
+	-fno-math-errno \
+	-ffp-contract=off \
 	-MMD -MP \
 	-Isrc
 
@@ -49,7 +52,9 @@ UI_SRCS := \
 	src/core/LedEngine.cpp \
 	src/core/SnapshotCodec.cpp \
 	src/core/SnapshotBank.cpp \
+	src/core/SnapshotMorph.cpp \
 	src/core/ControllerPageNav.cpp \
+	src/core/ControllerEncoder.cpp \
 	src/core/RuidoController.cpp \
 	src/ui/BootIntroRender.cpp \
 	src/ui/ScopeTraceEngine.cpp \
@@ -58,6 +63,7 @@ UI_SRCS := \
 	src/ui/HudGraphs.cpp \
 	src/ui/HudGlobalViews.cpp \
 	src/ui/HudKeybedView.cpp \
+	src/ui/HudSceneView.cpp \
 	src/ui/HudHeader.cpp \
 	src/ui/HudChrome.cpp \
 	src/ui/ScopeHudRenderer.cpp
@@ -133,7 +139,8 @@ sim-macos: $(MACOS_SIM_BIN)
 
 $(MACOS_SIM_BIN): $(DSP_OBJS) $(UI_OBJS) platforms/sim/macos_sim.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti \
+	$(CXX) -std=c++17 -O2 -Wall -Wextra -Werror -Wdouble-promotion \
+		-fno-exceptions -fno-rtti -fno-math-errno -ffp-contract=off \
 		-Isrc $(DSP_OBJS) $(UI_OBJS) platforms/sim/macos_sim.cpp \
 		-framework AudioToolbox -framework CoreFoundation -pthread -o $@
 

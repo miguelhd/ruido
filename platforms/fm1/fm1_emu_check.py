@@ -137,7 +137,7 @@ def _gate_timed_lcd(fwsc_path: pathlib.Path, status_addr: int) -> tuple[list[str
         errs.append(f"fm1-emu did not write valid audio WAV ({wav_bytes} B)")
     if lcd_frames == 0:
         errs.append("fm1-emu timed SPI1 boot rendered 0 LCD frames")
-    if boot_hud != 0 or boot_run != 1 or boot_bpm_x10 != 1200 or boot_osc1_x10 != 550:
+    if boot_hud != 0 or boot_run != 1 or boot_bpm_x10 != 1200 or boot_osc1_x10 != 654:
         errs.append(
             f"boot state mismatch (hud={boot_hud}, run={boot_run}, bpm_x10={boot_bpm_x10}, osc1_x10={boot_osc1_x10})"
         )
@@ -236,13 +236,13 @@ def _gate_usr_nvs(
             "--raw-flash",
             str(raw_flash_path),
             "--ms",
-            "1150",
+            "1250",
             "--quiet",
             "--keys",
-            "560:enc2:+12,620-650:SAVE,700-740:n16",
+            "520:enc2:+12,720-750:SAVE,800-840:n16",
             "--dump",
             f"{status_addr:#x}",
-            "58",
+            "84",
         ],
         env={**os.environ, "FM1_FLASH_TRACE": "1"},
         include_stderr=True,
@@ -258,22 +258,19 @@ def _gate_usr_nvs(
         fl_addr = int(m_fl.group(2), 16)
         fl_bytes = int(m_fl.group(3))
         if fl_cmd in (0x20, 0x52, 0xD8, 0xC7, 0x60, 0x01, 0x31):
-            if fl_cmd == 0x20 and fl_addr in (0x0F5000, 0x0F8000):
-                erase_ops.append(fl_addr)
-            else:
-                bad_flash_ops.append(f"cmd={fl_cmd:#04x}@addr={fl_addr:#08x}")
+            erase_ops.append(fl_addr)
         elif fl_cmd == 0x02:
-            if (0x0F5000 <= fl_addr < 0x0F5200) or (0x0F8000 <= fl_addr < 0x0F9000):
+            if fl_addr in (0x0F5100, 0x0F8020):
                 prog_ops.append((fl_addr, fl_bytes))
             else:
                 bad_flash_ops.append(f"prog@addr={fl_addr:#08x}(bytes={fl_bytes})")
 
-    slot1_raw = struct.pack("<35I", *nsw1[16:51]) if len(nsw1) >= 58 else b""
-    settings_raw = struct.pack("<7I", *nsw1[51:58]) if len(nsw1) >= 58 else b""
-    if len(slot1_raw) == 140 and len(settings_raw) == 28:
-        persisted_flash = bytearray(baseline_flash)
-        persisted_flash[0x0F5000 : 0x0F5000 + 140] = slot1_raw
-        persisted_flash[0x0F8000 : 0x0F8000 + 28] = settings_raw
+    persisted_flash = bytearray(baseline_flash)
+    slot1_raw = struct.pack("<32I", *nsw1[16:48]) if len(nsw1) >= 84 else b""
+    settings_raw = struct.pack("<4I", *nsw1[48:52]) if len(nsw1) >= 84 else b""
+    if len(slot1_raw) == 128 and len(settings_raw) == 16:
+        persisted_flash[0x0F5100 : 0x0F5100 + 128] = slot1_raw
+        persisted_flash[0x0F8020 : 0x0F8020 + 16] = settings_raw
         raw_flash_path.write_bytes(persisted_flash)
 
     xip_bin_path = OUT_DIR / "ruido_xip.bin"
@@ -288,13 +285,13 @@ def _gate_usr_nvs(
             "--raw-flash",
             str(raw_flash_path),
             "--ms",
-            "2350",
+            "2700",
             "--quiet",
             "--keys",
-            "560-590:SCL,620:enc0:+1,650-680:SCL",
+            "560-590:SCL,620-650:SCL,680-710:HOME,740:enc2:+16",
             "--dump",
             f"{status_addr:#x}",
-            "58",
+            "84",
         ],
         env={**os.environ, "FM1_FLASH_TRACE": "1"},
         include_stderr=True,
@@ -310,19 +307,22 @@ def _gate_usr_nvs(
         if fl_cmd in (0x20, 0x52, 0xD8, 0xC7, 0x60, 0x01, 0x31):
             b2_erase_ops.append(fl_addr)
         elif fl_cmd == 0x02:
-            if 0x0F8020 <= fl_addr < 0x0F9000:
+            if (fl_addr == 0x0F8030 and fl_bytes == 20) or (fl_addr == 0x0F9100 and fl_bytes == 132):
                 b2_prog_ops.append((fl_addr, fl_bytes))
             else:
                 b2_bad_ops.append(f"prog@addr={fl_addr:#08x}(bytes={fl_bytes})")
 
-    # Persist the 16-byte journal entry at 0x0F8020 while keeping 0x0F8000 base record untouched,
-    # and cold-boot a 3rd time to prove `loadBootNvsBlobs` replays `0x0F8020` on top of `0x0F8000`.
+    # Persist the 16 B Settings journal entry (0x0F8030) + 128 B LIVE scratchpad journal entry
+    # (0x0F9100), then cold-boot a 3rd time to prove Scene 2 + CircuitLab + dirty LIVE drone
+    # tweaks restore across power-off with ZERO sector erases!
     b3_model = -1
     b3_slot = -1
+    b3_dirty = 0
+    b3_mask = 0
     b3_osc1 = 0
-    if len(nsw2) >= 58 and len(slot1_raw) == 140 and len(settings_raw) == 28:
-        journal_entry_raw = struct.pack("<4I", *nsw2[54:58])
-        persisted_flash[0x0F8020 : 0x0F8020 + 16] = journal_entry_raw
+    if len(nsw2) >= 84:
+        persisted_flash[0x0F8030 : 0x0F8030 + 16] = struct.pack("<4I", *nsw2[48:52])
+        persisted_flash[0x0F9100 : 0x0F9100 + 128] = struct.pack("<32I", *nsw2[52:84])
         raw_flash_path.write_bytes(persisted_flash)
         nvs_boot3_out = run_cmd([
             "fm1-emu",
@@ -333,7 +333,7 @@ def _gate_usr_nvs(
             "--raw-flash",
             str(raw_flash_path),
             "--ms",
-            "700",
+            "750",
             "--quiet",
             "--dump",
             f"{status_addr:#x}",
@@ -343,61 +343,76 @@ def _gate_usr_nvs(
         if len(nsw3) >= 16:
             b3_model = nsw3[12] & 3
             b3_slot = (nsw3[12] >> 2) & 3
+            b3_dirty = (nsw3[12] >> 6) & 1
+            b3_mask = nsw3[15] & 0xFF
             b3_osc1 = (nsw3[15] >> 16) & 0xFFFF
 
-    b1_slot = ((nsw1[12] >> 2) & 3) if len(nsw1) >= 58 else -1
-    b1_saves = ((nsw1[15] >> 8) & 0xFF) if len(nsw1) >= 58 else 0
-    b1_osc1 = ((nsw1[15] >> 16) & 0xFFFF) if len(nsw1) >= 58 else 0
-    b1_s1_magic = nsw1[16] if len(nsw1) >= 58 else 0
-    b1_s1_len = nsw1[17] if len(nsw1) >= 58 else 0
-    b1_cfg_magic = nsw1[51] if len(nsw1) >= 58 else 0
-    b1_cfg_len = nsw1[52] if len(nsw1) >= 58 else 0
-    b2_model = (nsw2[12] & 3) if len(nsw2) >= 16 else -1
-    b2_slot = ((nsw2[12] >> 2) & 3) if len(nsw2) >= 16 else -1
-    b2_mask = (nsw2[15] & 0xFF) if len(nsw2) >= 16 else 0
-    b2_saves = ((nsw2[15] >> 8) & 0xFF) if len(nsw2) >= 16 else 0
-    b2_osc1 = ((nsw2[15] >> 16) & 0xFFFF) if len(nsw2) >= 16 else 0
-    b2_underruns = ((nsw2[11] >> 8) & 0xFF) if len(nsw2) >= 16 else 99
+    b1_slot = ((nsw1[12] >> 2) & 3) if len(nsw1) >= 84 else -1
+    b1_dirty = ((nsw1[12] >> 6) & 1) if len(nsw1) >= 84 else 1
+    b1_saves = ((nsw1[15] >> 8) & 0xFF) if len(nsw1) >= 84 else 0
+    b1_osc1 = ((nsw1[15] >> 16) & 0xFFFF) if len(nsw1) >= 84 else 0
+    b1_underruns = ((nsw1[11] >> 8) & 0xFF) if len(nsw1) >= 84 else 99
+    b2_model = (nsw2[12] & 3) if len(nsw2) >= 84 else -1
+    b2_slot = ((nsw2[12] >> 2) & 3) if len(nsw2) >= 84 else -1
+    b2_dirty = ((nsw2[12] >> 6) & 1) if len(nsw2) >= 84 else 0
+    b2_mask = (nsw2[15] & 0xFF) if len(nsw2) >= 84 else 0
+    b2_saves = ((nsw2[15] >> 8) & 0xFF) if len(nsw2) >= 84 else 0
+    b2_osc1 = ((nsw2[15] >> 16) & 0xFFFF) if len(nsw2) >= 84 else 0
+    b2_underruns = ((nsw2[11] >> 8) & 0xFF) if len(nsw2) >= 84 else 99
 
-    # Note: fm1-emu `FM1_FLASH_TRACE` reports total SPI frame bytes (4B cmd+addr + 16B payload = 20)
-    if bad_flash_ops or sorted(erase_ops) != [0x0F5000, 0x0F8000] or len(prog_ops) < 4:
+    # Note: fm1-emu `FM1_FLASH_TRACE` reports total SPI frame bytes (4B cmd+addr + payload)
+    if (
+        bad_flash_ops
+        or erase_ops
+        or sorted(prog_ops) != [(0x0F5100, 132), (0x0F8020, 20)]
+        or b1_underruns != 0
+    ):
         errs.append(
-            f"NVS SPI NOR write audit failed: bad={bad_flash_ops[:4]}, "
-            f"erases={[hex(x) for x in erase_ops]}, progs={len(prog_ops)}"
+            f"NVS Boot1 live Scene journal failed: bad={bad_flash_ops[:4]}, "
+            f"erases={[hex(x) for x in erase_ops]}, "
+            f"progs={[(hex(a), n) for a, n in prog_ops]}, underruns={b1_underruns}, "
+            f"len_nsw1={len(nsw1)}, nsw1={[hex(x) for x in nsw1[:16]]}"
         )
-    elif b2_bad_ops or b2_erase_ops or b2_prog_ops != [(0x0F8020, 20)] or b2_underruns != 0:
+    elif (
+        b2_bad_ops
+        or b2_erase_ops
+        or sorted(b2_prog_ops) != [(0x0F8030, 20), (0x0F9100, 132)]
+        or b2_underruns != 0
+    ):
         errs.append(
-            f"NVS live settings journal failed: bad={b2_bad_ops[:4]}, erases={[hex(x) for x in b2_erase_ops]}, "
-            f"progs={[(hex(a), n) for a, n in b2_prog_ops]}, underruns={b2_underruns}"
-        )
-    elif b1_s1_magic != 0x52554944 or b1_s1_len != 128 or b1_cfg_magic != 0x52554944 or b1_cfg_len != 16:
-        errs.append(
-            f"NVS SPI NOR sector readback mismatch: slot1=({b1_s1_magic:#x}, {b1_s1_len}B), "
-            f"settings=({b1_cfg_magic:#x}, {b1_cfg_len}B)"
+            f"NVS Boot2 live Settings+LIVE journal failed: bad={b2_bad_ops[:4]}, "
+            f"erases={[hex(x) for x in b2_erase_ops]}, "
+            f"progs={[(hex(a), n) for a, n in b2_prog_ops]}, underruns={b2_underruns}, "
+            f"nsw2={[hex(x) for x in nsw2[:16]]}"
         )
     elif (
         b1_slot != 1
-        or b1_saves < 2
+        or b1_dirty != 0
+        or b1_saves != 2
         or b1_osc1 <= 600
         or b2_model != 1
         or b2_slot != 1
+        or b2_dirty != 1
         or b2_mask != 0x12
-        or b2_saves != 1
-        or b2_osc1 != b1_osc1
+        or b2_saves != 2
+        or b2_osc1 <= b1_osc1 + 50
         or b3_model != 1
         or b3_slot != 1
-        or b3_osc1 != b1_osc1
+        or b3_dirty != 1
+        or b3_mask != 0x32
+        or abs(b3_osc1 - b2_osc1) > 2
     ):
         errs.append(
-            f"NVS 3-boot persistence mismatch: boot1(slot={b1_slot}, saves={b1_saves}, osc1={b1_osc1}) "
-            f"vs boot2(model={b2_model}, slot={b2_slot}, loaded_mask={b2_mask:#x}, "
-            f"saves={b2_saves}, osc1={b2_osc1}) vs boot3(model={b3_model}, slot={b3_slot}, osc1={b3_osc1})"
+            f"NVS 3-boot persistence mismatch: boot1(slot={b1_slot}, dirty={b1_dirty}, saves={b1_saves}, osc1={b1_osc1}) "
+            f"vs boot2(model={b2_model}, slot={b2_slot}, dirty={b2_dirty}, mask={b2_mask:#x}, "
+            f"saves={b2_saves}, osc1={b2_osc1}) vs boot3(model={b3_model}, slot={b3_slot}, "
+            f"dirty={b3_dirty}, mask={b3_mask:#x}, osc1={b3_osc1})"
         )
     else:
         logs.append(
-            f"  fm1-emu USR NVS   : PASS (boot1 erases={[hex(x) for x in erase_ops]}, "
-            f"boot2 journal=0xf8020 [16B, erases=0, underruns=0], "
-            f"boot3 restored model={b3_model}/Scene 2 osc1={b3_osc1 / 10.0:.1f} Hz)"
+            f"  fm1-emu USR NVS   : PASS (boot1 S2=0xf5100+cfg=0xf8020 [erases=0, underruns=0], "
+            f"boot2 cfg=0xf8030+live=0xf9100 [erases=0, underruns=0], "
+            f"boot3 restored model={b3_model}/S2+LIVE osc1={b3_osc1 / 10.0:.1f} Hz)"
         )
     return logs, errs
 

@@ -4,9 +4,12 @@
 #include "core/Parameters.h"
 #include "ui/BootIntroRender.h"
 #include "ui/HudAmpGraph.h"
+#include "ui/HudChrome.h"
 #include "ui/HudGlobalViews.h"
 #include "ui/HudGraphs.h"
+#include "ui/HudHeader.h"
 #include "ui/HudKeybedView.h"
+#include "ui/HudSceneView.h"
 #include "ui/ScopeTraceEngine.h"
 
 #include <array>
@@ -39,12 +42,14 @@ class ScopeHudRenderer {
 
     // Prepare coupled 4-voice caustic strands, 60x60 separable bloom & HUD curves (~50-60 FPS).
     void prepareFrame(float dtSec, const EngineControlState& control, const HudState& hud,
-                      const EngineTelemetry& telemetry) noexcept;
+                      const EngineTelemetry& telemetry,
+                      void (*coProcYield)() noexcept = nullptr) noexcept;
 
     // Render `stripHeight` scanlines starting at `yStart` into `rgb565Out` (`240 * stripHeight`).
     // Pass `bigEndianRgb565 = true` on big-endian SPI displays (e.g., ST7789) for single-pass pack.
     void renderStrip(uint16_t yStart, uint16_t stripHeight, uint16_t* rgb565Out,
-                     bool bigEndianRgb565 = false) const noexcept;
+                     bool bigEndianRgb565 = false,
+                     void (*coProcYield)() noexcept = nullptr) const noexcept;
 
     // Convenience helper to render all 15 strips (`15 x 16 = 240`) into a 240x240 RGB565 surface.
     void renderFullScreenStrips(uint16_t* fullRgb565Out) const noexcept {
@@ -57,8 +62,8 @@ class ScopeHudRenderer {
 
   private:
     uint32_t computeFrameBgKeepQ8() const noexcept;
-    void updateTraceForFrame(float dtSec, const EngineControlState& control,
-                             const HudState& hud) noexcept;
+    void updateTraceForFrame(float dtSec, const EngineControlState& control, const HudState& hud,
+                             void (*coProcYield)() noexcept = nullptr) noexcept;
     int computeScanlineSyncShift(int py) const noexcept;
     void updateHudGauges(float dtClamped, bool snapImmediate) noexcept;
     void compositeHudStrip(uint16_t yStart, uint16_t stripHeight, uint8_t* lumBuf,
@@ -72,6 +77,7 @@ class ScopeHudRenderer {
     HudAmpGraph ampGraph_{};
     HudGlobalViews globalViews_{};
     HudKeybedView keybedView_{};
+    HudSceneView sceneView_{};
 
     mutable std::array<uint16_t, kDisplayWidth * kSubStripRows> stripLinScratch_{};
     mutable std::array<uint8_t, kDisplayWidth * kSubStripRows> stripLumScratch_{};
@@ -80,6 +86,8 @@ class ScopeHudRenderer {
     HudState frameHud_{};
     HudState prevRawHud_{};
     HudState releaseLatchHud_{};
+    PreparedHudHeader preparedHeader_{};
+    PreparedHudChrome preparedChrome_{};
     LfoSignalArray frameLfoOutput_{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     LfoSignalArray frameLfoPhase_{0.0f, 0.25f, 0.50f, 0.75f, 0.50f, 0.75f, 0.125f, 0.375f};
     LfoDriftArray frameLfoDriftPacked_{0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
@@ -89,9 +97,11 @@ class ScopeHudRenderer {
     std::array<float, kNumOscillators> knobPosSignedSmooth_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> knobDimSmooth_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> knobFocusSmooth_{0.0f, 0.0f, 0.0f, 0.0f};
+    std::array<float, kNumSnapshots> sceneDotsSmooth_{0.0f, 0.0f, 0.0f, 0.0f};
     float headerBarSmooth_ = 0.0f;
     float fineOverlayPhase_ = 0.0f;
     float coarseOverlayPhase_ = 0.0f;
+    float sceneDialPhaseSmooth_ = 0.0f;
     float renderedOpacityLevel_ = 0.0f;
     float smoothedPeakL_ = 0.0f;
     float smoothedPeakR_ = 0.0f;
@@ -104,6 +114,7 @@ class ScopeHudRenderer {
     uint8_t frameStutterGateMask_ = 0x0Fu;
     uint8_t lastPhantomSeq_ = 0u;
     uint8_t phantomPin_ = 0u;
+    bool wasShowingSceneDots_ = false;
     bool releaseLatchActive_ = false;
     bool hudGaugesPrimed_ = false;
 };

@@ -189,7 +189,12 @@ def compute_compile_digest(
     h = hashlib.sha256()
     h.update("\x00".join(spec.cmd).encode("utf-8"))
     h.update(b"\x00")
-    all_files = sorted({spec.src.resolve(), *(d.resolve() for d in deps)})
+    extra_bins: list[pathlib.Path] = []
+    if spec.cmd:
+        compiler_fp = pathlib.Path(spec.cmd[0])
+        if compiler_fp.is_file():
+            extra_bins.append(compiler_fp.resolve())
+    all_files = sorted({spec.src.resolve(), *extra_bins, *(d.resolve() for d in deps)})
     for fp in all_files:
         digest = file_sha_cache.get(fp)
         if digest is None:
@@ -316,9 +321,6 @@ C1_COLD_XIP_TEXT_SECTIONS: frozenset[str] = frozenset(
         ".text._ZN5ruido17Fm1AudioBlockRing5resetEv",
         ".text._ZN5ruido18LockFreeControlBusC2Ev",
         ".text._ZN5ruido18LockFreeControlBusC1Ev",
-        ".text._ZN5ruido18EngineControlState11makeDefaultEv",
-        ".text._ZN5ruido15LogFreqSmoother4initEfff",
-        ".text._ZN5ruido15VactrolSmoother4initEffff",
     }
 )
 

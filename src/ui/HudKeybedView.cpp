@@ -5,182 +5,21 @@
 #include "core/KeyPunchSpec.h"
 #include "core/KeyboardModelSpec.h"
 #include "core/LfoMath.h"
-#include "core/RhythmMath.h"
 #include "ui/FontSansAA.h"
-#include "ui/GraphStyle.h"
-#include "ui/HudColumnText.h"
 #include "ui/HudFormat.h"
+#include "ui/HudKeybedInspector.h"
+#include "ui/HudShiftMap.h"
 #include "ui/MonoCanvas.h"
 
 namespace ruido {
 
 namespace {
 
-// Exact physical M-VAVE FM-1 keybed proportions centered on the 240x240 display:
-//  - 16 bottom keys on a 13.2 px pitch (x = 21.0 .. 219.0, center = 120.0)
-//  - 11 top raised keys centered strictly over piano half-step gaps (3 | 2 | 3 | 2 | 1)
-//  - 4 registration dots at natural E-F / B-C gaps (4 . 3 . 4 . 3 . 2)
-constexpr float kWhiteFirstCenterX = 21.0f;
-constexpr float kWhitePitchX = 13.2f;
-constexpr float kKeyHalfW = 4.5f;
+// Hardware-faithful rounded-capsule half-width shared identically across all 27 keys (`8.4 px`).
+constexpr float kKeyHalfW = 4.2f;
 
-constexpr std::array<float, kNumBlackKeys> kBlackCenterX = {
-    27.6f,  40.8f,  54.0f,  // OP1, OP2, OP3 (gaps 0-1, 1-2, 2-3)
-    80.4f,  93.6f,          // OP4, OP5      (gaps 4-5, 5-6)
-    120.0f, 133.2f, 146.4f, // OP6, PIT, GLO (gaps 7-8, 8-9, 9-10)
-    172.8f, 186.0f,         // MONO, POLY    (gaps 11-12, 12-13)
-    212.4f,                 // 11th tall key (gap 14-15)
-};
-
-constexpr std::array<float, 4> kRegDotCenterX = {67.2f, 106.8f, 159.6f, 199.2f};
-
-inline float sdfRoundedBox(float px, float py, float cx, float cy, float hx, float hy,
-                           float radius) noexcept {
-    const float dx = absf(px - cx) - hx;
-    const float dy = absf(py - cy) - hy;
-    if (dx <= 0.0f && dy <= 0.0f) {
-        const float inside = (dx > dy) ? dx : dy;
-        return inside - radius;
-    }
-    const float qx = (dx > 0.0f) ? dx : 0.0f;
-    const float qy = (dy > 0.0f) ? dy : 0.0f;
-    const float q2 = qx * qx + qy * qy;
-    const float qLen = (q2 > 1.0e-6f) ? (q2 * fastInvSqrt(q2)) : 0.0f;
-    return qLen - radius;
-}
-
-// Anti-aliased SDF rounded stadium enclosure / silicone key capsule (zero 90-degree corners).
-inline void fillStadiumSDF(const MonoStripCanvas& cv, float x0, float y0, float x1, float y1,
-                           float radius, uint8_t fillGray, uint8_t borderGray,
-                           uint8_t maxAlpha8 = 242u) noexcept {
-    int py0 = static_cast<int>(y0) - 2;
-    int py1 = static_cast<int>(y1) + 2;
-    if (py0 < cv.y0) {
-        py0 = cv.y0;
-    }
-    if (py1 > cv.y1 - 1) {
-        py1 = cv.y1 - 1;
-    }
-    if (py0 > py1) {
-        return;
-    }
-    int px0 = static_cast<int>(x0) - 2;
-    int px1 = static_cast<int>(x1) + 2;
-    if (px0 < 0) {
-        px0 = 0;
-    }
-    if (px1 > static_cast<int>(kDisplayWidth) - 1) {
-        px1 = static_cast<int>(kDisplayWidth) - 1;
-    }
-
-    const float cx = 0.5f * (x0 + x1);
-    const float cy = 0.5f * (y0 + y1);
-    const float halfW = 0.5f * (x1 - x0);
-    const float halfH = 0.5f * (y1 - y0);
-    const float r = (radius < halfW) ? ((radius < halfH) ? radius : halfH) : halfW;
-    const float hx = halfW - r;
-    const float hy = halfH - r;
-    const float alphaScale =
-        static_cast<float>(maxAlpha8) * (static_cast<float>(cv.masterAlpha8) * (1.0f / 255.0f));
-
-    const auto interiorA8 = static_cast<uint8_t>(alphaScale + 0.5f);
-    const float fillBase = static_cast<float>(fillGray);
-    const float borderDelta = static_cast<float>(borderGray) - fillBase;
-    const float innerThresh = (r < 1.15f) ? (r - 1.15f) : 0.0f;
-
-    for (int py = py0; py <= py1; ++py) {
-        const float dy = absf(static_cast<float>(py) - cy) - hy;
-        const float qy = (dy > 0.0f) ? dy : 0.0f;
-        const float qy2 = qy * qy;
-        const bool rowInner = (dy <= innerThresh);
-        uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
-        for (int px = px0; px <= px1; ++px) {
-            const float dx = absf(static_cast<float>(px) - cx) - hx;
-            if (rowInner && dx <= innerThresh) {
-                if (interiorA8 > 0u) {
-                    row[px] = blendLum8(row[px], fillGray, interiorA8);
-                }
-                continue;
-            }
-            float d;
-            if (dx <= 0.0f && dy <= 0.0f) {
-                d = ((dx > dy) ? dx : dy) - r;
-            } else {
-                const float qx = (dx > 0.0f) ? dx : 0.0f;
-                const float q2 = qx * qx + qy2;
-                d = ((q2 > 1.0e-6f) ? (q2 * fastInvSqrt(q2)) : 0.0f) - r;
-            }
-            if (d >= 0.65f) {
-                continue;
-            }
-            const float outerCov = clampf(0.55f - d, 0.0f, 1.0f);
-            const float rimMix = clampf(1.15f + d, 0.0f, 1.0f);
-            const float grayF = fillBase + borderDelta * rimMix;
-            const auto a8 = static_cast<uint8_t>(outerCov * alphaScale + 0.5f);
-            if (a8 > 0u) {
-                row[px] = blendLum8(row[px], static_cast<uint8_t>(grayF + 0.5f), a8);
-            }
-        }
-    }
-}
-
-// Anti-aliased SDF translucent silicone LED diffuser slit with varibright phosphor bloom.
-inline void fillLedSlitSDF(const MonoStripCanvas& cv, float cx, float yTop, float yBot,
-                           float slitHalfW, float glow01) noexcept {
-    const float g = clampf(glow01, 0.0f, 1.0f);
-    // Perceptual varibright mapping so 0%, 6%, 15%, 30%, 50%, 75%, 80%, 100% are all distinct
-    const float lifted = g * (1.58f - 0.58f * g);
-    const auto slitGray = static_cast<uint8_t>(38.0f + 217.0f * clampf(lifted, 0.0f, 1.0f) + 0.5f);
-
-    const float reach = (g > 0.20f) ? 3.2f : 1.5f;
-    int py0 = static_cast<int>(yTop - reach);
-    int py1 = static_cast<int>(yBot + reach) + 1;
-    if (py0 < cv.y0) {
-        py0 = cv.y0;
-    }
-    if (py1 > cv.y1 - 1) {
-        py1 = cv.y1 - 1;
-    }
-    if (py0 > py1) {
-        return;
-    }
-    int px0 = static_cast<int>(cx - slitHalfW - reach);
-    int px1 = static_cast<int>(cx + slitHalfW + reach) + 1;
-    if (px0 < 0) {
-        px0 = 0;
-    }
-    if (px1 > static_cast<int>(kDisplayWidth) - 1) {
-        px1 = static_cast<int>(kDisplayWidth) - 1;
-    }
-
-    const float cy = 0.5f * (yTop + yBot);
-    const float halfH = 0.5f * (yBot - yTop);
-    const float r = (slitHalfW < halfH) ? slitHalfW : halfH;
-    const float hy = halfH - r;
-    const float masterF = static_cast<float>(cv.masterAlpha8) * (1.0f / 255.0f);
-
-    for (int py = py0; py <= py1; ++py) {
-        const float fy = static_cast<float>(py);
-        uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
-        for (int px = px0; px <= px1; ++px) {
-            const float d = sdfRoundedBox(static_cast<float>(px), fy, cx, cy, 0.0f, hy, r);
-            if (d < 0.65f) {
-                const float cov = clampf(0.58f - d, 0.0f, 1.0f);
-                const auto a8 = static_cast<uint8_t>(cov * 250.0f * masterF + 0.5f);
-                if (a8 > 0u) {
-                    row[px] = blendLum8(row[px], slitGray, a8);
-                }
-            } else if (g > 0.22f && d < 2.8f) {
-                const float halo = fastExpNeg(d * d * 0.62f) * (g - 0.18f) * 0.52f;
-                const auto h8 =
-                    static_cast<uint8_t>(clampf(halo, 0.0f, 1.0f) * 255.0f * masterF + 0.5f);
-                if (h8 >= 2u) {
-                    row[px] = blendLum8(row[px], 255u, h8);
-                }
-            }
-        }
-    }
-}
+// 4 piano natural-gap registration dots (`3` in Left 20-Pad Bay + `1` in Right 7-Switch Bay).
+constexpr std::array<float, 4> kRegDotCenterX = {61.20f, 98.80f, 149.60f, 208.25f};
 
 struct TopZoneSpan {
     float xL;
@@ -190,34 +29,134 @@ struct TopZoneSpan {
     uint8_t keyCount;
 };
 
-// 4 model-specific top-row zones across OP1..POLY (leaving the universal 11th Freeze/Tap key open).
-constexpr std::array<TopZoneSpan, 4> kTopZoneSpans = {{
-    {kBlackCenterX[0] - 3.8f, kBlackCenterX[0] + 3.8f, 21, 0u, 1u},  // OP1
-    {kBlackCenterX[1] - 3.2f, kBlackCenterX[3] + 3.2f, 70, 1u, 3u},  // OP2, OP3, OP4
-    {kBlackCenterX[4] - 3.2f, kBlackCenterX[5] + 3.2f, 115, 4u, 2u}, // OP5, OP6
-    {kBlackCenterX[6] - 3.2f, kBlackCenterX[9] + 3.2f, 160, 6u, 4u}, // PIT..POLY (SOLO 1-4)
+// 3 model-specific pressure clusters across `OP1..GLO` (`Black 0..7`) in the Left 20-Pad Bay:
+constexpr std::array<TopZoneSpan, 3> kLeftTopZoneSpans = {{
+    {blackKeyDiagramCenterX(0u) - 3.2f, blackKeyDiagramCenterX(2u) + 3.2f, 36, 0u, 3u},  // OP1..OP3
+    {blackKeyDiagramCenterX(3u) - 3.2f, blackKeyDiagramCenterX(4u) + 3.2f, 81, 3u, 2u},  // OP4..OP5
+    {blackKeyDiagramCenterX(5u) - 3.2f, blackKeyDiagramCenterX(7u) + 3.2f, 125, 5u, 3u}, // OP6..GLO
 }};
-
-inline void formatSignedOctave(char* dst, size_t cap, const char* signPrefix, float mag) noexcept {
-    const auto tenths = static_cast<uint32_t>(clampf(mag, 0.0f, 2.0f) * 10.0f + 0.5f);
-    size_t rp = appendStr(dst, 0u, cap, signPrefix);
-    rp = appendUInt(dst, rp, cap, tenths / 10u);
-    rp = appendStr(dst, rp, cap, ".");
-    rp = appendUInt(dst, rp, cap, tenths % 10u);
-    appendStr(dst, rp, cap, " OCT");
-}
 
 } // namespace
 
+void compositeFm1KeybedDiagram(const MonoStripCanvas& cv, float topY,
+                               const std::array<float, kNumBlackKeys>& blackGlow,
+                               const std::array<float, kNumWhiteKeys>& whiteGlow,
+                               const HudState* liveHud, uint16_t activeBlackMask,
+                               uint16_t activeWhiteMask) noexcept {
+    const float botY = topY + 72.0f;
+    if (cv.y1 <= static_cast<int>(topY) - 2 || cv.y0 >= static_cast<int>(botY) + 3) {
+        return;
+    }
+
+    // Two Separate Stadium Enclosures: Left 20-Pad Pressure Bay | Right 7-Switch Permanent Bay
+    fillKeybedStadiumSDF(cv, 7.0f, topY, 166.5f, botY, 12.5f, 13u, 74u, 242u);
+    fillKeybedStadiumSDF(cv, 170.5f, topY, 233.0f, botY, 12.5f, 13u, 74u, 242u);
+
+    const uint16_t liveBlackMask =
+        (liveHud != nullptr)
+            ? static_cast<uint16_t>(liveHud->heldBlackMask | liveHud->latchedBlackMask)
+            : 0u;
+    const uint16_t liveWhiteMask =
+        (liveHud != nullptr)
+            ? static_cast<uint16_t>(liveHud->heldWhiteMask | liveHud->latchedWhiteMask)
+            : 0u;
+
+    const float bTop = topY + 6.0f;
+    const float bBot = topY + 32.0f;
+    const float bMidY = 0.5f * (bTop + bBot);
+    if (cv.y1 > static_cast<int>(bTop) - 3 && cv.y0 <= static_cast<int>(bBot) + 3) {
+        for (size_t i = 0u; i < kNumBlackKeys; ++i) {
+            const float cx = blackKeyDiagramCenterX(i);
+            const bool activeKey = ((activeBlackMask >> i) & 1u) != 0u;
+            const float g = activeKey ? clampf(blackGlow[i], 0.0f, 1.0f) : 0.0f;
+            const bool isPressurePad = isAnalogPressureBlackKey(i);
+            const bool analogLatched =
+                activeKey && isPressurePad && (((liveBlackMask >> i) & 1u) != 0u);
+            const bool holdLatched = activeKey && (i == kHoldBlackKeyIdx) &&
+                                     (liveHud != nullptr && liveHud->keyHoldLatched);
+            const float pFill =
+                (analogLatched && liveHud != nullptr)
+                    ? (static_cast<float>(liveHud->blackPressureQ8[i]) * (1.0f / 255.0f))
+                    : -1.0f;
+            const bool physHeld =
+                activeKey && (liveHud != nullptr) && (((liveHud->heldBlackMask >> i) & 1u) != 0u);
+            const uint8_t fillGray = !activeKey ? 13u
+                                     : physHeld ? 32u
+                                     : (holdLatched && !physHeld)
+                                         ? static_cast<uint8_t>(11.0f + 27.0f * g + 0.5f)
+                                         : (analogLatched ? 24u : 19u);
+            const uint8_t rimGray = !activeKey ? 34u
+                                    : physHeld ? 250u
+                                    : (holdLatched && !physHeld)
+                                        ? static_cast<uint8_t>(52.0f + 200.0f * g + 0.5f)
+                                        : (analogLatched ? 212u : 132u);
+            fillKeybedStadiumSDF(cv, cx - kKeyHalfW, bTop, cx + kKeyHalfW, bBot, kKeyHalfW,
+                                 fillGray, rimGray, 248u);
+            if (isPressurePad) {
+                fillKeybedSlitSDF(cv, cx, bTop + 4.2f, bBot - 4.2f, 1.08f, g, pFill, activeKey);
+            } else {
+                fillKeybedSwitchDotSDF(cv, cx, bMidY, g, activeKey);
+                if (holdLatched && !physHeld && g > 0.25f) {
+                    cv.drawOpticalBead(cx, bMidY, (g - 0.25f) * 0.85f, 2.5f);
+                }
+            }
+        }
+    }
+
+    if (cv.y1 > static_cast<int>(topY) + 31 && cv.y0 <= static_cast<int>(topY) + 41) {
+        for (float dotX : kRegDotCenterX) {
+            cv.drawOpticalBead(dotX, topY + 36.0f, 0.38f, 0.95f);
+        }
+    }
+
+    const float wTop = topY + 40.0f;
+    const float wBot = topY + 66.0f;
+    const float wMidY = 0.5f * (wTop + wBot);
+    if (cv.y1 > static_cast<int>(wTop) - 3 && cv.y0 <= static_cast<int>(wBot) + 3) {
+        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
+            const float cx = whiteKeyDiagramCenterX(i);
+            const bool activeKey = ((activeWhiteMask >> i) & 1u) != 0u;
+            const float g = activeKey ? clampf(whiteGlow[i], 0.0f, 1.0f) : 0.0f;
+            const bool isPressurePad = isAnalogPressureWhiteKey(i);
+            const bool analogLatched =
+                activeKey && isPressurePad && (((liveWhiteMask >> i) & 1u) != 0u);
+            const float pFill =
+                (analogLatched && liveHud != nullptr)
+                    ? (static_cast<float>(liveHud->whitePressureQ8[i]) * (1.0f / 255.0f))
+                    : -1.0f;
+            const bool physHeld =
+                activeKey && (liveHud != nullptr) && (((liveHud->heldWhiteMask >> i) & 1u) != 0u);
+            const uint8_t fillGray =
+                !activeKey ? 13u : (physHeld ? 32u : (analogLatched ? 24u : 19u));
+            const uint8_t rimGray =
+                !activeKey ? 34u : (physHeld ? 250u : (analogLatched ? 212u : 132u));
+            fillKeybedStadiumSDF(cv, cx - kKeyHalfW, wTop, cx + kKeyHalfW, wBot, kKeyHalfW,
+                                 fillGray, rimGray, 248u);
+            if (isPressurePad) {
+                fillKeybedSlitSDF(cv, cx, wTop + 4.2f, wBot - 4.2f, 1.12f, g, pFill, activeKey);
+            } else {
+                fillKeybedSwitchDotSDF(cv, cx, wMidY, g, activeKey);
+            }
+        }
+    }
+}
+
 void formatKeybedTopHeader(const HudState& hud, char* leftMain, size_t leftMainCap,
                            char* leftSuffix, size_t leftSuffixCap, char* rightText, size_t rightCap,
-                           bool& outShowBar, float& outBarNorm) noexcept {
+                           bool& outShowBar, float& outBarNorm, bool* outShowSceneDots) noexcept {
     outShowBar = false;
     outBarNorm = 0.0f;
+    if (outShowSceneDots != nullptr) {
+        *outShowSceneDots = false;
+    }
 
     if (hud.mode == HudMode::KeyboardModel) {
-        (void)rightText;
-        (void)rightCap;
+        if (hud.activePunch != KeyPunchKind::None) {
+            formatKeyPunchReadout(hud, leftMain, leftMainCap, leftSuffix, leftSuffixCap, rightText,
+                                  rightCap, outShowBar, outBarNorm, outShowSceneDots);
+            outShowBar = false;
+            return;
+        }
         appendStr(leftMain, 0u, leftMainCap, "KEYBOARD");
         size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " ");
         sp = appendUInt(leftSuffix, sp, leftSuffixCap,
@@ -227,103 +166,51 @@ void formatKeybedTopHeader(const HudState& hud, char* leftMain, size_t leftMainC
         return;
     }
 
-    const KeyPunchSpec& spec = keyPunchSpec(hud.activePunch);
-    if (spec.readoutKind == PunchReadoutKind::Snapshot) {
-        formatSnapshotHeader(hud, leftMain, leftMainCap, leftSuffix, leftSuffixCap, rightText,
-                             rightCap, outShowBar, outBarNorm);
-        return;
-    }
-    if (spec.readoutKind == PunchReadoutKind::ModelPreview) {
-        appendStr(leftMain, 0u, leftMainCap, keyboardModelTitle(hud.keyboardModel));
-        appendStr(rightText, 0u, rightCap, "PREVIEW");
+    if (hud.mode == HudMode::ShiftMap) {
+        if (hud.shiftFocus == ShiftFocus::Tempo) {
+            appendStr(leftMain, 0u, leftMainCap, "TEMPO");
+            outBarNorm = normalizeClockBpmLog01(hud.effectiveClockBpm);
+            outShowBar = true;
+            const bool showTenths =
+                !hud.midiClockSynced && (hud.rateHoldActive && hud.knobRate == KnobRate::Fine);
+            formatClockBpm(rightText, rightCap, hud.effectiveClockBpm, hud.midiClockSynced,
+                           showTenths);
+            return;
+        }
+        if (hud.shiftFocus == ShiftFocus::Scene ||
+            hud.activePunch == KeyPunchKind::SnapshotRecall) {
+            formatSnapshotHeader(hud, leftMain, leftMainCap, leftSuffix, leftSuffixCap, rightText,
+                                 rightCap, outShowBar, outBarNorm, outShowSceneDots);
+            return;
+        }
+        if (hud.shiftFocus == ShiftFocus::Model) {
+            appendStr(leftMain, 0u, leftMainCap, "KEYBOARD");
+            size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " ");
+            sp = appendUInt(leftSuffix, sp, leftSuffixCap,
+                            static_cast<uint32_t>(hud.keyboardModel) + 1u);
+            sp = appendStr(leftSuffix, sp, leftSuffixCap, "/");
+            appendUInt(leftSuffix, sp, leftSuffixCap, static_cast<uint32_t>(KeyboardModel::Count));
+            appendStr(rightText, 0u, rightCap, keyboardModelTitle(hud.keyboardModel));
+            return;
+        }
+        if (hud.activePunch == KeyPunchKind::SpotlightSolo) {
+            formatKeyPunchReadout(hud, leftMain, leftMainCap, leftSuffix, leftSuffixCap, rightText,
+                                  rightCap, outShowBar, outBarNorm, outShowSceneDots);
+            return;
+        }
+        appendStr(leftMain, 0u, leftMainCap, "SHIFT");
         return;
     }
 
-    appendStr(leftMain, 0u, leftMainCap, spec.title);
-    if (spec.showOscSuffix) {
-        const uint32_t oscNum = static_cast<uint32_t>((hud.activePunchVoice & 3u) + 1u);
-        const size_t sp = appendStr(leftSuffix, 0u, leftSuffixCap, " OSC ");
-        appendUInt(leftSuffix, sp, leftSuffixCap, oscNum);
-    }
-    outShowBar = evalKeyPunchHeaderBar(hud, outBarNorm);
-
-    switch (spec.readoutKind) {
-    case PunchReadoutKind::Percent:
-        formatPercent(rightText, rightCap, outBarNorm);
-        break;
-    case PunchReadoutKind::SoloState:
-        appendStr(rightText, 0u, rightCap, (hud.activePunchValue > 0.5f) ? "SOLOED" : "UNSOLOED");
-        break;
-    case PunchReadoutKind::MuteState:
-        appendStr(rightText, 0u, rightCap, (hud.activePunchValue > 0.5f) ? "MUTED" : "UNMUTED");
-        break;
-    case PunchReadoutKind::Holding:
-        appendStr(rightText, 0u, rightCap, "HOLDING");
-        break;
-    case PunchReadoutKind::SubOctave:
-        formatSignedOctave(rightText, rightCap, "-", -hud.activePunchValue);
-        break;
-    case PunchReadoutKind::PosOctave:
-        formatSignedOctave(rightText, rightCap, "+", hud.activePunchValue);
-        break;
-    case PunchReadoutKind::JustRatio: {
-        const size_t rIdx = (hud.activePunchVoice < kNumJustRatios) ? hud.activePunchVoice : 12u;
-        size_t rp = appendUInt(rightText, 0u, rightCap, kJustRatioTable[rIdx].num);
-        rp = appendStr(rightText, rp, rightCap, ":");
-        appendUInt(rightText, rp, rightCap, kJustRatioTable[rIdx].den);
-        break;
-    }
-    case PunchReadoutKind::RawCutoffHz:
-        formatCompactHz(rightText, rightCap, clampf(hud.activePunchValue, 20.0f, 28000.0f));
-        break;
-    case PunchReadoutKind::StutterHz:
-        formatCompactHz(rightText, rightCap, computeStutterRateHz(outBarNorm));
-        break;
-    case PunchReadoutKind::FoldStages:
-        formatMultiplierX(rightText, rightCap, computeWavefoldStages(outBarNorm));
-        break;
-    case PunchReadoutKind::CrushHz:
-        formatCompactHz(rightText, rightCap, computeCrushClockHz(outBarNorm));
-        break;
-    case PunchReadoutKind::TurboMult:
-        formatMultiplierX(rightText, rightCap, fastExp2(5.0f * outBarNorm));
-        break;
-    case PunchReadoutKind::ClockDiv:
-        appendStr(rightText, 0u, rightCap,
-                  clockDivisionLabel(selectVoiceClockDivIndex(hud.activePunchVoice, outBarNorm)));
-        break;
-    case PunchReadoutKind::EuclidHits: {
-        const uint8_t hits = kEuclidHitCounts[selectEuclidTierIndex(outBarNorm)];
-        const size_t rp = appendUInt(rightText, 0u, rightCap, hits);
-        appendStr(rightText, rp, rightCap, "/16");
-        break;
-    }
-    case PunchReadoutKind::TempoBpm: {
-        const auto bpmInt =
-            static_cast<uint32_t>(clampf(hud.effectiveClockBpm * computeTempoMultiplier(outBarNorm),
-                                         kMinInternalClockBpm, kMaxEffectiveClockBpm) +
-                                  0.5f);
-        const size_t rp = appendUInt(rightText, 0u, rightCap, bpmInt);
-        appendStr(rightText, rp, rightCap, hud.midiClockSynced ? " BPM EXT" : " BPM");
-        break;
-    }
-    case PunchReadoutKind::TapBpm:
-        formatClockBpm(rightText, rightCap, hud.effectiveClockBpm, hud.midiClockSynced, false);
-        break;
-    case PunchReadoutKind::SwingPct:
-        formatPercent(rightText, rightCap, computeSwingRatio(outBarNorm));
-        break;
-    case PunchReadoutKind::ModelPreview:
-    case PunchReadoutKind::Snapshot:
-        break;
-    }
+    formatKeyPunchReadout(hud, leftMain, leftMainCap, leftSuffix, leftSuffixCap, rightText,
+                          rightCap, outShowBar, outBarNorm, outShowSceneDots);
 }
 
 void HudKeybedView::reset() noexcept {
     blackGlow_.fill(0.0f);
     whiteGlow_.fill(0.0f);
     phase_ = 0.0f;
-    breathPhase_ = 0.0f;
+    shiftPhase_ = 0.0f;
     idleTimerSec_ = 0.0f;
     brightPhase_ = 1.0f;
     lastWakeSeq_ = 0u;
@@ -333,6 +220,7 @@ void HudKeybedView::reset() noexcept {
 
 void HudKeybedView::clearImmediate() noexcept {
     phase_ = 0.0f;
+    shiftPhase_ = 0.0f;
     idleTimerSec_ = 0.0f;
     brightPhase_ = 1.0f;
     primed_ = false;
@@ -346,20 +234,23 @@ float HudKeybedView::brightnessScale() const noexcept {
 void HudKeybedView::update(float dtClamped, const EngineControlState& control,
                            const HudState& rawHud,
                            const std::array<float, kNumOscillators>& voicePeak,
-                           uint8_t stutterGateMask) noexcept {
+                           uint8_t stutterGateMask, float rhythmPhase01) noexcept {
     (void)voicePeak;
+    (void)stutterGateMask;
 
-    if (rawHud.selPageOpen && !wasSelPageOpen_) {
+    const bool anyKeyDown = (rawHud.heldBlackMask | rawHud.heldWhiteMask) != 0u;
+    const bool selLikeOpen = rawHud.selPageOpen && !rawHud.shiftHeld;
+    if (selLikeOpen && !wasSelPageOpen_) {
         idleTimerSec_ = 0.0f;
         brightPhase_ = 1.0f;
         lastWakeSeq_ = rawHud.selWakeSeq;
-    } else if (rawHud.selPageOpen && rawHud.selWakeSeq != lastWakeSeq_) {
+    } else if (selLikeOpen && (rawHud.selWakeSeq != lastWakeSeq_ || anyKeyDown)) {
         idleTimerSec_ = 0.0f;
         lastWakeSeq_ = rawHud.selWakeSeq;
     }
-    wasSelPageOpen_ = rawHud.selPageOpen;
+    wasSelPageOpen_ = selLikeOpen;
 
-    if (rawHud.selPageOpen) {
+    if (selLikeOpen) {
         if (idleTimerSec_ < kIdleHoldSec) {
             idleTimerSec_ += dtClamped;
             if (brightPhase_ < 1.0f) {
@@ -371,40 +262,37 @@ void HudKeybedView::update(float dtClamped, const EngineControlState& control,
     }
 
     const bool active = isActive(rawHud);
-    const bool wasInvisible = !hasResidualPhase();
+    const bool shiftAct = isShiftActive(rawHud);
+    const bool wasInvisible = (phase_ <= 0.002f);
     phase_ = stepHudFadeLinear(phase_, active, dtClamped);
-    if (!active && !hasResidualPhase()) {
+    shiftPhase_ = stepHudFadeLinear(shiftPhase_, shiftAct, dtClamped);
+    if (!active && !shiftAct && !hasResidualPhase()) {
         primed_ = false;
         return;
     }
 
-    breathPhase_ += dtClamped * 0.35f;
-    if (breathPhase_ >= 1.0f) {
-        breathPhase_ -= 1.0f;
-    }
-    const float subBreath01 = 0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(breathPhase_)));
-    const float savePulse01 = 0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(breathPhase_ * 7.0f)));
-
     std::array<float, kNumBlackKeys> tgtBlack{};
     std::array<float, kNumWhiteKeys> tgtWhite{};
-    computeKeyboardModelRestLeds(rawHud.keyboardModel, control, rawHud, stutterGateMask,
-                                 subBreath01, savePulse01, tgtBlack, tgtWhite);
+    computeKeyboardModelRestLeds(rawHud.keyboardModel, control, rawHud, tgtBlack, tgtWhite);
+    if (!rawHud.shiftHeld && rawHud.keyboardModel == KeyboardModel::RhythmLab) {
+        tgtBlack[kTapBlackKeyIdx] = computeTapTempoBeatGlow(control, rhythmPhase01);
+    }
 
+    const uint16_t activeBlack =
+        static_cast<uint16_t>(rawHud.heldBlackMask | rawHud.latchedBlackMask);
+    const uint16_t activeWhite =
+        static_cast<uint16_t>(rawHud.heldWhiteMask | rawHud.latchedWhiteMask);
     for (size_t i = 0u; i < kNumBlackKeys; ++i) {
-        if (i >= kSoloBlackKeyBase && i < kSoloBlackKeyBase + kNumOscillators) {
+        if (i == kTapBlackKeyIdx && rawHud.keyboardModel != KeyboardModel::RhythmLab) {
             continue;
         }
-        if (((rawHud.heldBlackMask >> i) & 1u) != 0u) {
+        if (((activeBlack >> i) & 1u) != 0u) {
             tgtBlack[i] = 1.0f;
         }
     }
     for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
-        if (((rawHud.heldWhiteMask >> i) & 1u) != 0u) {
-            const bool emptySnapKey =
-                (i >= kSceneWhiteKeyBase && i < kSceneWhiteKeyBase + kNumSnapshots) &&
-                (rawHud.keyboardModel == KeyboardModel::LiveMixer) &&
-                ((rawHud.snapshotOccupiedMask & (1u << (i - kSceneWhiteKeyBase))) == 0u);
-            tgtWhite[i] = emptySnapKey ? 0.15f : 1.0f;
+        if (((activeWhite >> i) & 1u) != 0u) {
+            tgtWhite[i] = 1.0f;
         }
     }
 
@@ -425,7 +313,7 @@ void HudKeybedView::update(float dtClamped, const EngineControlState& control,
 
 void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
                                    const HudState& frameHud) const noexcept {
-    if (alpha8 == 0u || y1 <= 28 || y0 >= 236) {
+    if (alpha8 == 0u || y1 <= 28 || y0 >= 230) {
         return;
     }
     const auto effAlpha8 =
@@ -438,29 +326,19 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
     const auto modelIdx = static_cast<uint8_t>(frameHud.keyboardModel);
     constexpr uint8_t kModelCount = static_cast<uint8_t>(KeyboardModel::Count);
 
-    // 1. Swappable Model Carousel & Role Banner (y = 33..69)
+    // 1. Swappable Model Carousel & Clean Subtitle (`y = 33..69`)
     if (y1 > 30 && y0 < 72) {
         if (modelIdx > 0u) {
-            cv.drawSans(kFontSansMedium, 18, 34, "<", 132u, 0);
+            cv.drawSans(kFontSansMedium, kKeybedCarouselArrowLeftX, kKeybedCarouselArrowY, "<",
+                        132u, 0);
         }
         if (modelIdx + 1u < kModelCount) {
-            cv.drawSansRight(kFontSansMedium, 222, 34, ">", 132u, 0);
+            cv.drawSansRight(kFontSansMedium, kKeybedCarouselArrowRightX, kKeybedCarouselArrowY,
+                             ">", 132u, 0);
         }
-        cv.drawSansCentered(kFontSansBold, 120, 33, spec.title, 255u, 0);
-        if (frameHud.keyboardModel == KeyboardModel::RhythmLab) {
-            char subBuf[36]{};
-            char bpmBuf[20]{};
-            formatClockBpm(bpmBuf, sizeof(bpmBuf), frameHud.effectiveClockBpm, false, false);
-            const size_t sp =
-                appendStr(subBuf, 0u, sizeof(subBuf),
-                          frameHud.midiClockSynced ? "MIDI CLOCK: " : "ALGORITHM / TAP: ");
-            appendStr(subBuf, sp, sizeof(subBuf), bpmBuf);
-            cv.drawSansCentered(kFontSansSmall, 120, 50, subBuf, 192u, 0);
-        } else {
-            cv.drawSansCentered(kFontSansSmall, 120, 50, spec.subtitle, 168u, 1);
-        }
+        cv.drawSansCentered(kFontSansBold, 120, kKeybedCarouselTitleY, spec.title, 255u, 0);
+        cv.drawSansCentered(kFontSansSmall, 120, 50, spec.subtitle, 168u, 1);
 
-        // Centered N-slot optical model indicator pips around x = 120
         constexpr float kBeadSpacing = 14.0f;
         const float firstX = 120.0f - 0.5f * static_cast<float>(kModelCount - 1u) * kBeadSpacing;
         for (uint8_t m = 0u; m + 1u < kModelCount; ++m) {
@@ -475,92 +353,94 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
         }
     }
 
-    // 2. Top-Row Zone Brackets & Labels over OP1..POLY (+ 11th TAP key in Rhythm Lab)
+    // 2. Top-Row Brackets: 3 Pressure Clusters across Left Bay + LATCH / TAP above Right Bay
     if (y1 > 70 && y0 < 92) {
-        for (size_t z = 0u; z < kTopZoneSpans.size(); ++z) {
-            const TopZoneSpan& span = kTopZoneSpans[z];
+        for (size_t z = 0u; z < kLeftTopZoneSpans.size(); ++z) {
+            const TopZoneSpan& span = kLeftTopZoneSpans[z];
             float glowSum = 0.0f;
             for (uint8_t k = 0u; k < span.keyCount; ++k) {
                 glowSum += blackGlow_[span.firstKey + k];
             }
             const float zoneGlow = glowSum * (1.0f / static_cast<float>(span.keyCount));
             const float brkLum = 56.0f + 92.0f * clampf(zoneGlow, 0.0f, 1.0f);
-            cv.drawSansCentered(kFontSansSmall, span.labelX, 72, spec.topZones[z], 210u, 0);
+            cv.drawSansCentered(kFontSansSmall, span.labelX, 72, spec.topZones[z], 214u, 0);
             cv.drawHorizontalFilament(span.xL, span.xR, 87.0f, brkLum, 0.58f, true);
             cv.drawVerticalSlit(span.xL, 87.0f, 89.6f, brkLum);
             cv.drawVerticalSlit(span.xR, 87.0f, 89.6f, brkLum);
         }
+
+        const float latchKeyX = blackKeyDiagramCenterX(kHoldBlackKeyIdx);
+        const float latchLum = 56.0f + 92.0f * clampf(blackGlow_[kHoldBlackKeyIdx], 0.0f, 1.0f);
         if (frameHud.keyboardModel == KeyboardModel::RhythmLab) {
-            const float tapX0 = kBlackCenterX[10] - 3.8f;
-            const float tapX1 = kBlackCenterX[10] + 3.8f;
-            const float tapLum = 56.0f + 92.0f * clampf(blackGlow_[10], 0.0f, 1.0f);
-            cv.drawSansCentered(kFontSansSmall, 213, 72, "TAP", 210u, 0);
-            cv.drawHorizontalFilament(tapX0, tapX1, 87.0f, tapLum, 0.58f, true);
-            cv.drawVerticalSlit(tapX0, 87.0f, 89.6f, tapLum);
-            cv.drawVerticalSlit(tapX1, 87.0f, 89.6f, tapLum);
+            const float tapKeyX = blackKeyDiagramCenterX(kTapBlackKeyIdx);
+            const float tapLum = 56.0f + 92.0f * clampf(blackGlow_[kTapBlackKeyIdx], 0.0f, 1.0f);
+            cv.drawSansCentered(kFontSansSmall, 172, 72, "LATCH", 214u, 0);
+            cv.drawVerticalSlit(172.0f, 84.5f, 87.0f, latchLum);
+            cv.drawHorizontalFilament(172.0f, latchKeyX, 87.0f, latchLum, 0.58f, false);
+            cv.drawVerticalSlit(latchKeyX, 87.0f, 89.6f, latchLum);
+
+            cv.drawSansCentered(kFontSansSmall, 203, 72, "TAP", 214u, 0);
+            cv.drawVerticalSlit(203.0f, 84.5f, 87.0f, tapLum);
+            cv.drawHorizontalFilament(tapKeyX, 203.0f, 87.0f, tapLum, 0.58f, false);
+            cv.drawVerticalSlit(tapKeyX, 87.0f, 89.6f, tapLum);
+        } else {
+            cv.drawSansCentered(kFontSansSmall, static_cast<int>(latchKeyX + 0.5f), 72, "LATCH",
+                                214u, 0);
+            cv.drawVerticalSlit(latchKeyX, 84.5f, 89.6f, latchLum);
         }
     }
 
-    // 3. Anatomically Accurate Rounded-Capsule FM-1 Keybed Map (y = 92..164)
-    if (y1 > 90 && y0 < 167) {
-        fillStadiumSDF(cv, 8.0f, 92.0f, 232.0f, 164.0f, 13.0f, 13u, 74u, 242u);
+    // 3. Two-Bay Rounded-Capsule FM-1 Keybed Map (`y = 92..164`: lines for pads, dots for switches)
+    const uint16_t activeBlackMask =
+        (frameHud.keyboardModel == KeyboardModel::RhythmLab) ? 0x07FFu : 0x05FFu;
+    compositeFm1KeybedDiagram(cv, kKeybedDiagramTopY, blackGlow_, whiteGlow_, &frameHud,
+                              activeBlackMask, 0xFFFFu);
 
-        // Top 11 raised keys: OP1-POLY have short upper slits + lower silkscreen bar;
-        // 11th key has a tall full-height slit (matching physical FM-1 faceplate 1-to-1).
-        for (size_t i = 0u; i < kNumBlackKeys; ++i) {
-            const float cx = kBlackCenterX[i];
-            const float g = clampf(blackGlow_[i], 0.0f, 1.0f);
-            const auto rimGray = static_cast<uint8_t>(62.0f + 68.0f * g + 0.5f);
-            fillStadiumSDF(cv, cx - kKeyHalfW, 98.0f, cx + kKeyHalfW, 124.0f, kKeyHalfW, 20u,
-                           rimGray, 248u);
-            if (i < 10u) {
-                fillLedSlitSDF(cv, cx, 101.8f, 109.8f, 1.05f, g);
-                cv.drawHorizontalFilament(cx - 2.0f, cx + 2.0f, 117.5f, 48.0f, 0.55f, true);
-            } else {
-                fillLedSlitSDF(cv, cx, 102.2f, 119.8f, 1.10f, g);
-            }
-        }
-
-        // 4 piano E-F / B-C registration dots (4 . 3 . 4 . 3 . 2)
-        for (float dotX : kRegDotCenterX) {
-            cv.drawOpticalBead(dotX, 128.0f, 0.38f, 0.95f);
-        }
-
-        // Bottom 16 keys with tall centered LED slits driven by live varibright zone levels
-        for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-            const float cx = kWhiteFirstCenterX + static_cast<float>(i) * kWhitePitchX;
-            const float g = clampf(whiteGlow_[i], 0.0f, 1.0f);
-            const auto rimGray = static_cast<uint8_t>(62.0f + 68.0f * g + 0.5f);
-            fillStadiumSDF(cv, cx - kKeyHalfW, 132.0f, cx + kKeyHalfW, 158.0f, kKeyHalfW, 20u,
-                           rimGray, 248u);
-            fillLedSlitSDF(cv, cx, 136.2f, 153.8f, 1.15f, g);
-        }
-    }
-
-    // 4. Bottom 4x4 Zone Brackets & Labels (y = 167..192)
-    if (y1 > 166 && y0 < 194) {
+    // 4. Bottom 4 Zone Brackets & Labels (`y = 167..190`: 3 Pressure Banks + Permanent MUTE)
+    if (y1 > 166 && y0 < 192) {
         for (size_t z = 0u; z < 4u; ++z) {
-            const float xL =
-                (kWhiteFirstCenterX + static_cast<float>(z * 4u) * kWhitePitchX) - 3.2f;
-            const float xR =
-                (kWhiteFirstCenterX + static_cast<float>(z * 4u + 3u) * kWhitePitchX) + 3.2f;
+            const float xL = whiteKeyDiagramCenterX(z * 4u) - kKeybedBracketOverhangX;
+            const float xR = whiteKeyDiagramCenterX(z * 4u + 3u) + kKeybedBracketOverhangX;
             const float cxF = 0.5f * (xL + xR);
             const float zoneGlow = 0.25f * (whiteGlow_[z * 4u] + whiteGlow_[z * 4u + 1u] +
                                             whiteGlow_[z * 4u + 2u] + whiteGlow_[z * 4u + 3u]);
             const float brkLum = 56.0f + 92.0f * clampf(zoneGlow, 0.0f, 1.0f);
-            cv.drawHorizontalFilament(xL, xR, 170.0f, brkLum, 0.58f, true);
-            cv.drawVerticalSlit(xL, 167.4f, 170.0f, brkLum);
-            cv.drawVerticalSlit(xR, 167.4f, 170.0f, brkLum);
-            cv.drawSansCentered(kFontSansSmall, static_cast<int>(cxF + 0.5f), 175,
-                                spec.bottomZones[z], 222u, 0);
+            cv.drawHorizontalFilament(xL, xR, kKeybedBracketY, brkLum, 0.58f, true);
+            cv.drawVerticalSlit(xL, kKeybedBracketTickTopY, kKeybedBracketY, brkLum);
+            cv.drawVerticalSlit(xR, kKeybedBracketTickTopY, kKeybedBracketY, brkLum);
+            const char* lbl = spec.bottomZones[z];
+            const int trk = (measureSansText(kFontSansSmall, lbl, 0) > 46) ? -1 : 0;
+            cv.drawSansCentered(kFontSansSmall, static_cast<int>(cxF + 0.5f), kKeybedBracketLabelY,
+                                lbl, 222u, trk);
         }
     }
 
-    // 5. Swappable-Model & Pressure Guidance Layer (y = 202..230; dims with view to 50% after 5 s)
-    if (y1 > 200 && y0 < 234) {
-        cv.drawSansCentered(kFontSansSmall, 120, 202, "TURN SELECT TO SWAP MODEL", 148u, 0);
-        cv.drawSansCentered(kFontSansSmall, 120, 217, "KEYS ARE PRESSURE SENSITIVE", 122u, 0);
+    // 5. Full-Width Horizontal Pressure Bar + Bottom Guidance / Live Effect Description
+    if (y1 > 192 && y0 < 226 && frameHud.knobBank == KnobBankMode::None) {
+        float press01 = 0.0f;
+        const bool showPressBar = evalKeybedBottomPressureBar(frameHud, press01);
+        if (showPressBar) {
+            drawKeybedBottomPressureBar(cv, press01);
+        }
+        const char* desc = (frameHud.activePunch != KeyPunchKind::None)
+                               ? keyPunchGuidanceDesc(frameHud.activePunch)
+                               : "";
+        if (desc[0] != '\0') {
+            cv.drawSansCentered(kFontSansSmall, 120, showPressBar ? 208 : 206, desc, 195u, 0);
+        } else {
+            cv.drawSansCentered(kFontSansSmall, 120, 206, "TAP SEL OR TURN SELECT", 138u, 0);
+        }
     }
+}
+
+void HudKeybedView::compositeShiftStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
+                                        const EngineControlState& control,
+                                        const HudState& frameHud) const noexcept {
+    if (alpha8 == 0u || y1 <= 26 || y0 >= 230) {
+        return;
+    }
+    const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
+    compositeFullChassisShiftStrip(cv, control, frameHud);
 }
 
 } // namespace ruido

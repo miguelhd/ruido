@@ -47,6 +47,7 @@ size_t strlen(const char* s) {
 } // extern "C"
 
 // Unity-include the 100% platform-independent Ruido C++17 sources
+#include "core/ControllerEncoder.cpp"
 #include "core/ControllerPageNav.cpp"
 #include "core/KeyboardCircuitLab.cpp"
 #include "core/KeyboardEngine.cpp"
@@ -56,6 +57,7 @@ size_t strlen(const char* s) {
 #include "core/RuidoController.cpp"
 #include "core/SnapshotBank.cpp"
 #include "core/SnapshotCodec.cpp"
+#include "core/SnapshotMorph.cpp"
 #include "dsp/DroneEngine.cpp"
 #include "dsp/HalfBandDecimator.cpp"
 #include "dsp/SallenKeyFilter.cpp"
@@ -68,6 +70,7 @@ size_t strlen(const char* s) {
 #include "ui/HudGraphs.cpp"
 #include "ui/HudHeader.cpp"
 #include "ui/HudKeybedView.cpp"
+#include "ui/HudSceneView.cpp"
 #include "ui/ScopeHudRenderer.cpp"
 #include "ui/ScopeTraceEngine.cpp"
 #include "ui/ScopeTraceRender.cpp"
@@ -157,8 +160,8 @@ void refreshSummary() noexcept {
     gSummaryOut[WasmSummaryIdx::kEditPageOpen] = gCtrl->hud().editPageOpen ? 1.0f : 0.0f;
     gSummaryOut[WasmSummaryIdx::kFxPageOpen] = gCtrl->hud().fxPageOpen ? 1.0f : 0.0f;
     gSummaryOut[WasmSummaryIdx::kFxVoiceFocus] = static_cast<float>(gCtrl->hud().fxVoiceFocus);
-    gSummaryOut[WasmSummaryIdx::kEditTarget] =
-        static_cast<float>(static_cast<uint8_t>(gCtrl->hud().editTarget));
+    gSummaryOut[WasmSummaryIdx::kHomeTarget] =
+        static_cast<float>(static_cast<uint8_t>(gCtrl->hud().homeTarget));
     gSummaryOut[WasmSummaryIdx::kPanPageOpen] = gCtrl->hud().panPageOpen ? 1.0f : 0.0f;
     gSummaryOut[WasmSummaryIdx::kKeyboardModel] =
         static_cast<float>(static_cast<uint8_t>(gCtrl->hud().keyboardModel));
@@ -185,6 +188,10 @@ void wasm_dsp_init(float sampleRate) {
     memset(dspMem, 0, sizeof(ruido::DroneEngine));
     gDsp = new (dspMem) ruido::DroneEngine();
     gDspStagedControl = ruido::EngineControlState::makeDefault();
+    ruido::applyPatchFrame(ruido::decodePatchSnapshot(
+                               ruido::encodePatchSnapshot(ruido::makeFactorySnapshotPreset(0u))),
+                           gDspStagedControl);
+    gDsp->controlBus().publish(gDspStagedControl);
     gDsp->init(sampleRate);
 }
 
@@ -389,7 +396,7 @@ void wasm_ui_black_pressure(uint32_t keyId, float pressure) {
 
 RUIDO_EXPORT("wasm_ui_white_gate")
 void wasm_ui_white_gate(uint32_t whiteIdx, int32_t pressed) {
-    if (gCtrl == nullptr) {
+    if (gCtrl == nullptr || whiteIdx >= ruido::kNumWhiteKeys) {
         return;
     }
     if (gRenderer != nullptr) {
@@ -402,7 +409,7 @@ void wasm_ui_white_gate(uint32_t whiteIdx, int32_t pressed) {
 
 RUIDO_EXPORT("wasm_ui_white_pressure")
 void wasm_ui_white_pressure(uint32_t whiteIdx, float pressure) {
-    if (gCtrl == nullptr) {
+    if (gCtrl == nullptr || whiteIdx >= ruido::kNumWhiteKeys) {
         return;
     }
     if (gRenderer != nullptr) {

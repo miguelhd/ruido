@@ -22,14 +22,14 @@ typedef struct {
     volatile uint32_t c1_last64_ticks;     /* [9] Live Core 1 64-frame render duration (ticks) */
     volatile uint32_t clk_con0_div;        /* [10] (sys_div << 24) | (clk_con0 & 0x00FFFFFF) */
     volatile uint32_t c1_flags; /* [11] b0=started, b1=fallback, [15:8]=underruns, [31:16]=assist */
-    volatile uint32_t panel_state; /* [12] [1:0]=model, [3:2]=slot, b4=sync, b5=run, [13:8]=hud,
-                                      [31:16]=events */
-    volatile uint32_t midi_clock_state;       /* [13] [15:0]=bpm_x10, [31:16]=midi_rt_events */
-    volatile uint32_t led_state_summary;      /* [14] [7:0]=lit, [15:8]=dim, [23:16]=bg, b24=play,
-                                                 b25=stop */
+    volatile uint32_t panel_state;       /* [12] [1:0]=model, [3:2]=slot, b4=sync, b5=run, b6=dirty,
+                                            [13:8]=hud, [31:16]=events */
+    volatile uint32_t midi_clock_state;  /* [13] [15:0]=bpm_x10, [31:16]=midi_rt_events */
+    volatile uint32_t led_state_summary; /* [14] [7:0]=lit, [15:8]=dim, [23:16]=bg, b24=play,
+                                            b25=stop */
     volatile uint32_t nvs_and_osc1_state;     /* [15] [7:0]=boot_mask, [15:8]=saves_ok,
                                                  [31:16]=osc1_hz_x10 */
-    volatile uint32_t nvs_flash_readback[42]; /* [16..57] 140B @ 0xF5000 + 28B @ 0xF8000 SPI read */
+    volatile uint32_t nvs_flash_readback[68]; /* [16..83] 128B S2 + 16B Cfg + 128B Live SPI read */
 } RuidoFm1Status;
 
 extern RuidoFm1Status g_ruido_fm1_status;
@@ -53,8 +53,10 @@ void ruido_fm1_diag_sync_c1(void);
 
 typedef int (*RuidoFm1BlobLoadFn)(uint32_t idx, void* dst, uint32_t len);
 typedef int (*RuidoFm1BlobSaveFn)(uint32_t idx, const void* src, uint32_t len);
-typedef int (*RuidoFm1SettingsTailReadFn)(uint32_t off_in_sector, void* dst, uint32_t len);
-typedef int (*RuidoFm1SettingsTailWriteFn)(uint32_t off_in_sector, const void* src, uint32_t len);
+typedef int (*RuidoFm1TailReadFn)(uint32_t sector_id, uint32_t off_in_sector, void* dst,
+                                  uint32_t len);
+typedef int (*RuidoFm1TailWriteFn)(uint32_t sector_id, uint32_t off_in_sector, const void* src,
+                                   uint32_t len);
 typedef void (*RuidoFm1PreEraseFn)(void);
 
 /* Placement-new construct shared buses, Core 1 DSP state, Core 0 controller/HUD, panel/LED I/O,
@@ -77,24 +79,19 @@ uint32_t ruido_fm1_measure_bench64_ticks(void);
 /* Reset controller, DSP core, panel I/O, and HUD cleanly after boot benchmarks complete. */
 void ruido_fm1_restore_default_patch(void);
 
-/* Load CRC-verified `PatchSnapshot`s (`blob 0..3` @ `0xF4000..0xF7FFF`) and `DeviceSettingsBlob`
- * (`blob 4` @ `0xF8000` + append-only `0xF8020..0xF8FF0` journal, compacting silently at boot if
- * >= 64 journal slots were used) before arming audio. Returns bitmask of valid loaded blobs. */
-uint32_t ruido_fm1_nvs_load_boot(RuidoFm1BlobLoadFn load_fn,
-                                 RuidoFm1SettingsTailReadFn tail_read_fn,
+/* Load CRC-verified `PatchSnapshot`s (`sector 0..3` @ `0xF4000..0xF7FFF`), `DeviceSettingsBlob`
+ * (`sector 4` @ `0xF8000`), and `LIVE` scratchpad (`blob 5` @ `0xF9000`), scanning all
+ * append-only tail journals and compacting silently at cold boot while Core 1 & audio are off. */
+uint32_t ruido_fm1_nvs_load_boot(RuidoFm1BlobLoadFn load_fn, RuidoFm1TailReadFn tail_read_fn,
                                  RuidoFm1BlobSaveFn boot_compact_save_fn);
 
-/* Persist newly saved Scene slots immediately (`SAVE + White Key 9-12`) and debounce Global
- * Config / scene-selection edits (`1,500 ms` idle with no keys held) via erase-free 16 B journal
- * appends in `0xF8020..0xF8FF0` (~150 us page program, zero sector erase, zero audio/LED glitch).
+/* Persist newly saved/deleted Scene slots immediately (`SAVE` + White Key 9-12) and debounce
+ * Global Config + `LIVE` drone scratchpad edits (`1,500 ms` idle with no keys held) via erase-free
+ * 128 B / 16 B journal appends (~150-500 us page program, zero sector erase, zero audio dropout).
  */
 uint32_t ruido_fm1_nvs_poll_save(uint32_t now_ms, uint32_t force_flush, RuidoFm1BlobSaveFn save_fn,
-                                 RuidoFm1SettingsTailWriteFn tail_write_fn,
+                                 RuidoFm1TailWriteFn tail_write_fn,
                                  RuidoFm1PreEraseFn pre_erase_fn);
-
-/* Return 1 (and clear flag) if the most recent `ruido_fm1_nvs_poll_save` rewrote a base sector
- * (`0xF4000..0xF8000`) rather than appending to the `0xF8020..0xF8FF0` settings journal. */
-uint32_t ruido_fm1_nvs_take_base_written(void);
 
 /* Pre-prime `Fm1AudioBlockRing` with 8 blocks (512 frames) and enable audio + Core 1 worker. */
 void ruido_fm1_arm_audio(uint32_t enable_core1);

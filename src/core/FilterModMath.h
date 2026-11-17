@@ -24,16 +24,18 @@ struct FilterMacroContext {
     float filterScream = 0.0f;
     float rhythmPluck = 0.0f;
     float pluckEnv01 = 0.0f;
+    float masterHpfSweep = 0.0f;
 
     static constexpr FilterMacroContext fromKeyMod(const KeyboardModState& km,
                                                    float pluckEnv = 0.0f) noexcept {
         return {
-            km.dubLpfDrop, km.overloadSurge, km.filterScream, km.rhythmPluck, pluckEnv,
+            km.dubLpfDrop,  km.overloadSurge, km.filterScream,
+            km.rhythmPluck, pluckEnv,         km.masterHpfSweep,
         };
     }
 };
 
-// White Keys 5-8 continuous pressure macro:
+// White Keys 1-4 (Live Mixer FILTER 1-4) continuous pressure macro:
 //  - Filter/LPG mode (pitchMode = 0): active voices sweep MS-20 vocal formant + Korg35 resonance;
 //    muted voices swell through a warm 85 Hz -> base LPF vactrol low-pass gate.
 //  - Pitch Bend mode (pitchMode = 1): filter stays at base settings while muted voices swell gate.
@@ -111,6 +113,15 @@ applyFilterPerformanceMacros(ModulatedFilterParams mod, const FilterMacroContext
         }
         const float dubResBump = 0.76f * dubDrop * (0.55f + 0.45f * dubDrop);
         mod.lpResonance = clampf(mod.lpResonance + dubResBump, 0.0f, 0.92f);
+    }
+    const float hpfSweep = clampf(macros.masterHpfSweep, 0.0f, 1.0f);
+    if (hpfSweep > 1.0e-4f) {
+        const float hpFloorHz = 20.0f * fastExp2(7.32f * hpfSweep); // 20 Hz -> 3.2 kHz bass cut
+        if (hpFloorHz > mod.hpCutoffHz) {
+            mod.hpCutoffHz = clampf(hpFloorHz, kFilterCutoffMinHz, kFilterCutoffMaxHz);
+        }
+        const float hpResBump = 0.74f * hpfSweep * (0.55f + 0.45f * hpfSweep);
+        mod.hpResonance = clampf(mod.hpResonance + hpResBump, 0.0f, 0.90f);
     }
     const float scream = clampf(macros.filterScream, 0.0f, 1.0f);
     if (scream > 1.0e-4f) {

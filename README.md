@@ -26,7 +26,7 @@ Ruido/
 │   └── ui/                # 240x240 RGB565 scanline strip compositor, scope & varibright LED logic
 ├── platforms/             # Thin target-specific hardware wrappers
 │   ├── sim/               # Native macOS / WebAssembly simulator (real-time audio + 240x240 UI)
-│   └── fm1/               # M-VAVE FM-1 composite HAL (dinghy/felucca-bsp, fm1_cpu1 SRAM DSP, SARADC, .fwsc)
+│   └── fm1/               # M-VAVE FM-1 target (Dinghy HAL, fm1_cpu1 SRAM DSP, SARADC, .fwsc)
 ├── tests/                 # Headless DSP unit tests (aliasing, DC offset, filter stability, CPU bounds)
 └── tools/                 # Build scripts, Docker pi32v2 cross-compiler & SysEx flashing utilities
 ```

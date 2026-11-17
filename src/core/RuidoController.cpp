@@ -20,6 +20,7 @@ void RuidoController::reset() noexcept {
     keyboard_.reset();
     keyboard_.syncConfig(hud_.config);
     snapshots_.reset();
+    applyPatchFrame(decodePatchSnapshot(snapshots_.slotBinary(0u)), state_);
     snapshots_.syncHud(hud_);
     midiClock_.reset();
     (void)syncClockState();
@@ -28,12 +29,16 @@ void RuidoController::reset() noexcept {
     ledSmooth_.reset(state_);
     knobTurnedDuringRateHold_ = false;
     dismissedByHome_ = false;
+    editRememberPan_ = false;
     settingsDirty_ = false;
-    saveSwallowedMask_ = 0u;
+    livePatchDirty_ = false;
+    saveSwallowedWhiteMask_ = 0u;
+    saveSwallowedBlackMask_ = 0u;
     savedSlotMask_ = 0u;
     latchedHudMode_ = HudMode::None;
     latchedButton_ = ButtonId::Count;
     selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
+    shiftBlinkPhaseQ8_ = 64u;
 
     keyboard_.evaluate(state_, hud_);
     EngineTelemetry zeroTel{};
@@ -63,305 +68,180 @@ bool RuidoController::syncClockState() noexcept {
     return false;
 }
 
-void RuidoController::applyKeyboardPerformanceChange() noexcept {
-    keys_.anyPerfKeyHeld = keyboard_.anyKeyHeld();
-    if (keyboard_.model() == KeyboardModel::LiveMixer) {
-        const uint8_t prevSlot = snapshots_.activeSlot();
-        const auto sHeld = keyboard_.snapKeysHeld();
-        snapshots_.onSnapKeysChanged(sHeld, keyboard_.snapKeysPressure(), hud_.config.snapMode,
-                                     state_);
-        if (hud_.config.snapMode == KeySwitchMode::Latching &&
-            snapshots_.activeSlot() != prevSlot) {
-            settingsDirty_ = true;
-        }
-        if (sHeld[0] || sHeld[1] || sHeld[2] || sHeld[3]) {
-            hud_.snapshotSavedToast = false;
-            hud_.snapshotDeletedToast = false;
-        }
-        snapshots_.syncHud(hud_);
+constexpr float kShiftModelPulseHz = 0.50f;
+
+void RuidoController::snapShiftBlinkToPeak() noexcept {
+    const float basePh = wrapLfoPhase01(ledSmooth_.animPhase * kShiftModelPulseHz);
+    shiftBlinkPhaseQ8_ = static_cast<uint8_t>(
+        static_cast<uint32_t>(wrapLfoPhase01(1.25f - basePh) * 256.0f) & 0xFFu);
+}
+
+void RuidoController::triggerUnassignedFeedback(uint8_t channel) noexcept {
+    hud_.phantomPinIndex = channel;
+    ++hud_.phantomPinSeq;
+}
+
+void RuidoController::applyKeyboardModel(KeyboardModel nextModel) noexcept {
+    const KeyboardModel prevModel = keyboard_.model();
+    keyboard_.setModel(nextModel);
+    if (keyboard_.model() != prevModel) {
+        settingsDirty_ = true;
     }
+    snapshots_.cancelMomentaryIfActive(state_);
+    snapshots_.syncHud(hud_);
+    hud_.selPageOpen = true;
+    ++hud_.selWakeSeq;
     keyboard_.evaluate(state_, hud_);
-    syncModifierHud();
+    hud_.knobBank = KnobBankMode::None;
+    latchSwitchHud(HudMode::KeyboardModel, ButtonId::Sel);
     publishState();
 }
 
-void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept {
-    if (ticks == 0) {
-        return;
-    }
-    const KnobRate rate = hud_.knobRate;
-
-    if (hud_.rateHoldActive) {
-        knobTurnedDuringRateHold_ = true;
-    }
-
-    if (encoder == EncoderId::Algorithm) {
-        if (hud_.configPageOpen) {
-            handleConfigEncoder(encoder, ticks, rate);
-            return;
+void RuidoController::applyKeyboardPerformanceChange() noexcept {
+    keys_.anyPerfKeyHeld = keyboard_.anyKeyHeld() || keyboard_.isShiftHeld();
+    if (keyboard_.isShiftHeld() && hud_.saveArmed) {
+        hud_.saveArmed = false;
+        hud_.saveDeleteMode = false;
+        if (latchedHudMode_ == HudMode::SaveArmed) {
+            setLatchedPage(HudMode::None, ButtonId::Count);
         }
+    }
+
+    const int16_t unassCh = keyboard_.consumeUnassignedChannelEvent();
+    if (unassCh >= 0) {
+        triggerUnassignedFeedback(static_cast<uint8_t>(unassCh));
+    }
+
+    const int8_t shiftModel = keyboard_.consumeShiftModelEvent();
+    if (shiftModel >= 0) {
+        const KeyboardModel prevModel = keyboard_.model();
+        keyboard_.setModel(static_cast<KeyboardModel>(shiftModel));
+        if (keyboard_.model() != prevModel) {
+            settingsDirty_ = true;
+        }
+        snapShiftBlinkToPeak();
+        hud_.shiftFocus = ShiftFocus::Model;
+        snapshots_.cancelMomentaryIfActive(state_);
+        snapshots_.syncHud(hud_);
         if (hud_.selPageOpen) {
             ++hud_.selWakeSeq;
         }
-        if (keyboard_.model() == KeyboardModel::RhythmLab) {
-            if (!hud_.midiClockSynced) {
-                const float prevBpm = midiClock_.internalBpm();
-                const float nextBpm = adjustClockBpm(prevBpm, ticks, rate);
-                if (absf(nextBpm - prevBpm) > 1.0e-5f) {
-                    midiClock_.setInternalBpm(nextBpm);
-                    settingsDirty_ = true;
-                    (void)syncClockState();
-                    if (keyboard_.anyKeyHeld()) {
-                        keyboard_.evaluate(state_, hud_);
-                    }
-                }
-            }
-            hud_.knobBank = baseKnobBank();
-            triggerHud(HudMode::MasterTempo, hud_.focusedVoice, kNoFocusedKnob);
-            publishState();
-            return;
-        }
-        state_.global.circuitCoupling =
-            adjustLinear01(state_.global.circuitCoupling, ticks, rate, 0.0f, 1.0f);
-        snapshots_.notifyManualEdit(state_);
-        snapshots_.syncHud(hud_);
-        hud_.knobBank = baseKnobBank();
-        triggerHud(HudMode::RailCoupling, hud_.focusedVoice, kNoFocusedKnob);
-        publishState();
-        return;
     }
 
-    if (encoder == EncoderId::Select) {
-        if (hud_.saveArmed) {
-            hud_.lastEncoder = EncoderId::Select;
-            const int32_t curMode = hud_.saveDeleteMode ? 1 : 0;
-            const int32_t nextMode = stepClampedDetent(curMode, 1, ticks, rate, selectTickAccum_);
-            hud_.saveDeleteMode = (nextMode != 0);
-            hud_.knobBank = KnobBankMode::Snapshot;
-            if (keyboard_.anyKeyHeld()) {
-                keyboard_.evaluate(state_, hud_);
-            }
-            latchSwitchHud(HudMode::SaveArmed, ButtonId::Save);
-            return;
+    const uint8_t prevSlot = snapshots_.activeSlot();
+    const bool prevDirty = snapshots_.isDirty();
+    const auto sHeld = keyboard_.snapKeysHeld();
+    snapshots_.onSnapKeysChanged(sHeld, keyboard_.snapKeysPressure(), hud_.config.snapMode, state_);
+    if (hud_.config.snapMode == KeySwitchMode::Latching) {
+        if (snapshots_.activeSlot() != prevSlot) {
+            settingsDirty_ = true;
         }
-        if (hud_.selPageOpen || (hud_.mode == HudMode::KeyboardModel && !dismissedByHome_)) {
-            const KeyboardModel prevModel = keyboard_.model();
-            const int32_t maxModel = static_cast<int32_t>(KeyboardModel::Count) - 1;
-            const int32_t nextIdx = stepClampedDetent(static_cast<int32_t>(prevModel), maxModel,
-                                                      ticks, rate, selectTickAccum_);
-            keyboard_.setModel(static_cast<KeyboardModel>(nextIdx));
-            if (keyboard_.model() != prevModel) {
-                settingsDirty_ = true;
-            }
-            snapshots_.cancelMomentaryIfActive(state_);
-            snapshots_.syncHud(hud_);
-            keyboard_.evaluate(state_, hud_);
-            hud_.selPageOpen = true;
-            ++hud_.selWakeSeq;
-            hud_.knobBank = KnobBankMode::None;
-            latchSwitchHud(HudMode::KeyboardModel, ButtonId::Sel);
-            publishState();
-            return;
+        if (snapshots_.isDirty() != prevDirty || snapshots_.isDirty()) {
+            livePatchDirty_ = true;
         }
-        if (hud_.configPageOpen) {
-            handleConfigEncoder(encoder, ticks, rate);
-            return;
-        }
-        if (hud_.fxPageOpen || hud_.lfoPageOpen) {
-            const bool isFx = hud_.fxPageOpen;
-            uint8_t& focusRef = isFx ? hud_.fxVoiceFocus : hud_.lfoVoiceFocus;
-            const int32_t maxFocus =
-                static_cast<int32_t>(isFx ? kNumOscillators : kNumVoiceLfos) - 1;
-            focusRef = static_cast<uint8_t>(stepClampedDetent(
-                static_cast<int32_t>(focusRef), maxFocus, ticks, rate, selectTickAccum_));
-            hud_.focusedVoice = isFx ? focusRef : lfoFocusVoice(focusRef);
-            targetTickAccum_ = 0;
-            hud_.knobBank = isFx ? KnobBankMode::VoiceFilter : KnobBankMode::Lfo;
-            latchSwitchHud(isFx ? HudMode::VoiceFilter : HudMode::VoiceLfo,
-                           isFx ? ButtonId::Fx : ButtonId::Lfo);
-            return;
-        }
-        if (hud_.editPageOpen) {
-            const int32_t maxEdit = static_cast<int32_t>(EditTarget::Count) - 1;
-            hud_.editTarget = static_cast<EditTarget>(stepClampedDetent(
-                static_cast<int32_t>(hud_.editTarget), maxEdit, ticks, rate, selectTickAccum_));
-            targetTickAccum_ = 0;
-            hud_.knobBank = knobBankForEditTarget(hud_.editTarget);
-            latchSwitchHud(hudModeForEditTarget(hud_.editTarget), ButtonId::Edit);
-            return;
-        }
-        if (hud_.panPageOpen) {
-            const int32_t curIdx =
-                globalConfigGetIndex(ConfigItemId::OutputRouting, hud_.config, state_.global);
-            const int32_t nextIdx =
-                stepClampedDetent(curIdx, globalConfigMaxIndex(ConfigItemId::OutputRouting), ticks,
-                                  rate, selectTickAccum_);
-            if (globalConfigSetIndex(ConfigItemId::OutputRouting, nextIdx, hud_.config,
-                                     state_.global)) {
-                settingsDirty_ = true;
-                publishState();
-            }
-            hud_.knobBank = KnobBankMode::Panning;
-            latchSwitchHud(HudMode::Panning, ButtonId::Edit);
-            return;
-        }
-        hud_.lastEncoder = EncoderId::Select;
-        const int32_t maxTb = static_cast<int32_t>(ScopeTimebase::Count) - 1;
-        const int32_t nextTb = stepClampedDetent(static_cast<int32_t>(hud_.scopeTimebase), maxTb,
-                                                 ticks, rate, selectTickAccum_);
-        hud_.scopeTimebase = static_cast<ScopeTimebase>(nextTb);
-        hud_.knobBank = hud_.saveArmed      ? KnobBankMode::Snapshot
-                        : hud_.freqPageOpen ? KnobBankMode::Frequency
-                                            : KnobBankMode::None;
-        triggerHud(HudMode::ScopeTimebase, hud_.focusedVoice, kNoFocusedKnob);
-        return;
     }
-
-    if (encoder == EncoderId::Presets) {
-        if (hud_.configSubView != ConfigSubView::List) {
-            exitConfigSubView();
-        }
-        hud_.lastEncoder = EncoderId::Presets;
-        if (hud_.saveArmed) {
-            hud_.saveArmed = false;
-            hud_.saveDeleteMode = false;
-            if (latchedHudMode_ == HudMode::SaveArmed) {
-                setLatchedPage(HudMode::None, ButtonId::Count);
-            }
-        }
+    if (sHeld[0] || sHeld[1] || sHeld[2] || sHeld[3]) {
         hud_.snapshotSavedToast = false;
         hud_.snapshotDeletedToast = false;
-
-        const uint8_t prevSlot = snapshots_.activeSlot();
-        if (snapshots_.morphByEncoder(ticks, rate, state_)) {
-            if (snapshots_.activeSlot() != prevSlot) {
-                settingsDirty_ = true;
-            }
-            if (keyboard_.anyKeyHeld()) {
-                keyboard_.evaluate(state_, hud_);
-            }
-            publishState();
-        }
-        snapshots_.syncHud(hud_);
-        hud_.snapshotToastSlot = snapshots_.activeSlot();
-        hud_.knobBank = KnobBankMode::Snapshot;
-        triggerHud(HudMode::SnapshotSlot, snapshots_.activeSlot(), kNoFocusedKnob);
-        return;
+        hud_.shiftFocus = ShiftFocus::Scene;
     }
-
-    const int knobIdx = static_cast<int>(encoder) - static_cast<int>(EncoderId::Knob1);
-    if (knobIdx < 0 || knobIdx >= static_cast<int>(kNumOscillators)) {
-        return;
-    }
-    const uint8_t kIdx = static_cast<uint8_t>(knobIdx);
-    if (hud_.configSubView != ConfigSubView::List) {
-        exitConfigSubView();
-    }
-
-    if (hud_.fxPageOpen) {
-        const size_t vIdx = static_cast<size_t>(hud_.fxVoiceFocus & 3u);
-        applyVoiceFilterKnobDelta(state_.voices[vIdx], kIdx, ticks, rate);
-        latchKnobEdit(KnobBankMode::VoiceFilter, HudMode::VoiceFilter, kIdx,
-                      static_cast<uint8_t>(vIdx));
-    } else if (hud_.lfoPageOpen) {
-        const uint8_t slotFocus = static_cast<uint8_t>(hud_.lfoVoiceFocus & 7u);
-        const size_t vIdx = lfoFocusVoice(slotFocus);
-        applyVoiceLfoKnobDelta(state_.voices[vIdx], lfoFocusSub(slotFocus), kIdx, ticks, rate,
-                               targetTickAccum_);
-        latchKnobEdit(KnobBankMode::Lfo, HudMode::VoiceLfo, kIdx, static_cast<uint8_t>(vIdx));
-    } else if (hud_.panPageOpen) {
-        if (state_.global.monoCollapse) {
-            return;
-        }
-        state_.voices[kIdx].pan = adjustLinear01(state_.voices[kIdx].pan, ticks, rate, -1.0f, 1.0f);
-        latchKnobEdit(KnobBankMode::Panning, HudMode::Panning, kIdx, kIdx);
-    } else if (hud_.editPageOpen) {
-        applyEditKnobDelta(hud_.editTarget, state_.voices[kIdx], ticks, rate);
-        latchKnobEdit(knobBankForEditTarget(hud_.editTarget), hudModeForEditTarget(hud_.editTarget),
-                      kIdx, kIdx);
-    } else {
-        adjustVoiceFrequency(state_.voices[kIdx], ticks, rate);
-        if (hud_.freqPageOpen) {
-            latchKnobEdit(KnobBankMode::Frequency, HudMode::VoiceFrequency, kIdx, kIdx);
-        } else {
-            hud_.knobBank = KnobBankMode::Frequency;
-            triggerHud(HudMode::VoiceFrequency, kIdx, kIdx);
-        }
-    }
-
-    snapshots_.notifyManualEdit(state_);
     snapshots_.syncHud(hud_);
-    if (keyboard_.anyKeyHeld()) {
-        keyboard_.evaluate(state_, hud_);
-    }
-    publishState();
-}
 
-void RuidoController::onMasterPot(float normalizedLevel) noexcept {
-    const float next = clampf(normalizedLevel, 0.0f, 1.0f);
-    masterPot_ = next;
-    state_.global.masterTrim = masterPot_;
-    if (absf(next - masterPotHudAnchor_) > 0.002f) {
-        masterPotHudAnchor_ = next;
-        if (hud_.rateHoldActive) {
-            knobTurnedDuringRateHold_ = true;
-        }
-        hud_.knobBank = baseKnobBank();
-        triggerHud(HudMode::MasterLevel, hud_.focusedVoice, kNoFocusedKnob);
-    }
-    publishState();
-}
-
-void RuidoController::onBlackKeyEvent(BlackKeyId key, bool pressed) noexcept {
-    if (static_cast<size_t>(key) >= kNumBlackKeys) {
-        return;
-    }
-    const bool wasHeld = keyboard_.blackHeld()[static_cast<size_t>(key)];
-    keyboard_.setBlackGate(key, pressed);
-    if (!wasHeld && keyboard_.blackHeld()[static_cast<size_t>(key)] &&
-        key == BlackKeyId::ScopeFreezeKey && keyboard_.model() == KeyboardModel::RhythmLab) {
+    if (keyboard_.consumeTapTempoEvent()) {
         if (midiClock_.onTapTempo(hud_.config.clockSync)) {
             settingsDirty_ = true;
         }
         (void)syncClockState();
     }
+    (void)keyboard_.consumeHoldToggledEvent();
+
+    keyboard_.evaluate(state_, hud_);
+    if (!hud_.shiftHeld) {
+        hud_.shiftFocus = ShiftFocus::Idle;
+    } else if (hud_.activePunch == KeyPunchKind::SpotlightSolo) {
+        hud_.shiftFocus = ShiftFocus::Idle;
+    }
+    syncModifierHud();
+    publishState();
+}
+
+bool RuidoController::tryInterceptSaveBlackKey(BlackKeyId key, bool active) noexcept {
+    const size_t idx = static_cast<size_t>(key);
+    if (idx >= kNumBlackKeys || idx == kShiftBlackKeyIdx) {
+        return false;
+    }
+    const uint16_t bBit = static_cast<uint16_t>(1u << idx);
+    if ((saveSwallowedBlackMask_ & bBit) != 0u) {
+        if (!active) {
+            saveSwallowedBlackMask_ &= static_cast<uint16_t>(~bBit);
+        }
+        return true;
+    }
+    if (!active || !hud_.saveArmed || (hud_.heldBlackMask & bBit) != 0u) {
+        return false;
+    }
+    saveSwallowedBlackMask_ |= bBit;
+    triggerUnassignedFeedback(phantomBlackKeyChannel(idx));
+    return true;
+}
+
+void RuidoController::onBlackKeyEvent(BlackKeyId key, bool pressed) noexcept {
+    if (static_cast<size_t>(key) >= kNumBlackKeys || tryInterceptSaveBlackKey(key, pressed)) {
+        return;
+    }
+    if (key == BlackKeyId::ScopeFreezeKey && pressed && !keyboard_.isShiftHeld()) {
+        snapShiftBlinkToPeak();
+        hud_.shiftFocus = ShiftFocus::Idle;
+    }
+    keyboard_.setBlackGate(key, pressed);
     hud_.lastBlackKey = key;
     applyKeyboardPerformanceChange();
 }
 
 void RuidoController::onBlackKeyPressure(BlackKeyId key, float pressure) noexcept {
-    if (static_cast<size_t>(key) >= kNumBlackKeys) {
+    if (static_cast<size_t>(key) >= kNumBlackKeys ||
+        tryInterceptSaveBlackKey(key, pressure > 0.001f)) {
         return;
     }
-    const bool wasHeld = keyboard_.blackHeld()[static_cast<size_t>(key)];
-    keyboard_.setBlackPressure(key, pressure);
-    if (!wasHeld && keyboard_.blackHeld()[static_cast<size_t>(key)] &&
-        key == BlackKeyId::ScopeFreezeKey && keyboard_.model() == KeyboardModel::RhythmLab) {
-        if (midiClock_.onTapTempo(hud_.config.clockSync)) {
-            settingsDirty_ = true;
-        }
-        (void)syncClockState();
+    if (key == BlackKeyId::ScopeFreezeKey && pressure > 0.001f && !keyboard_.isShiftHeld()) {
+        snapShiftBlinkToPeak();
+        hud_.shiftFocus = ShiftFocus::Idle;
     }
+    keyboard_.setBlackPressure(key, pressure);
     hud_.lastBlackKey = key;
     applyKeyboardPerformanceChange();
 }
 
 bool RuidoController::tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active) noexcept {
-    if (whiteKeyIndex < kSceneWhiteKeyBase || whiteKeyIndex >= kSceneWhiteKeyBase + kNumSnapshots) {
+    if (whiteKeyIndex >= kNumWhiteKeys) {
         return false;
     }
-    const uint8_t slot = static_cast<uint8_t>(whiteKeyIndex - kSceneWhiteKeyBase);
-    const uint8_t sBit = static_cast<uint8_t>(1u << slot);
-    if ((saveSwallowedMask_ & sBit) != 0u) {
+    const uint16_t wBit = static_cast<uint16_t>(1u << whiteKeyIndex);
+    if ((saveSwallowedWhiteMask_ & wBit) != 0u) {
         if (!active) {
-            saveSwallowedMask_ &= static_cast<uint8_t>(~sBit);
+            saveSwallowedWhiteMask_ &= static_cast<uint16_t>(~wBit);
         }
         return true;
     }
     if (!active || !hud_.saveArmed) {
         return false;
     }
-    saveSwallowedMask_ |= sBit;
+    if (whiteKeyIndex < kSceneWhiteKeyBase || whiteKeyIndex >= kSceneWhiteKeyBase + kNumSnapshots) {
+        if ((hud_.heldWhiteMask & wBit) != 0u) {
+            return false;
+        }
+        saveSwallowedWhiteMask_ |= wBit;
+        triggerUnassignedFeedback(phantomWhiteKeyChannel(whiteKeyIndex));
+        return true;
+    }
+    const uint8_t slot = static_cast<uint8_t>(whiteKeyIndex - kSceneWhiteKeyBase);
+    const uint8_t sBit = static_cast<uint8_t>(1u << slot);
+    saveSwallowedWhiteMask_ |= wBit;
+    if (hud_.saveDeleteMode && !snapshots_.isSlotOccupied(slot)) {
+        // Unassigned feedback (CRT ripple + 120 ms 15% glint) on 0%-dark EMPTY slot in DELETE SCENE
+        triggerUnassignedFeedback(phantomWhiteKeyChannel(whiteKeyIndex));
+        return true;
+    }
     const bool deleting = hud_.saveDeleteMode;
     hud_.saveArmed = false;
     hud_.saveDeleteMode = false;
@@ -374,6 +254,7 @@ bool RuidoController::tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active
         if (deleted) {
             savedSlotMask_ |= sBit;
             settingsDirty_ = true;
+            livePatchDirty_ = true;
         }
     } else {
         snapshots_.saveSlot(slot, state_);
@@ -381,10 +262,11 @@ bool RuidoController::tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active
         hud_.snapshotDeletedToast = false;
         savedSlotMask_ |= sBit;
         settingsDirty_ = true;
+        livePatchDirty_ = true;
     }
     snapshots_.syncHud(hud_);
     keyboard_.evaluate(state_, hud_);
-    hud_.knobBank = KnobBankMode::Snapshot;
+    hud_.knobBank = KnobBankMode::None;
     triggerHud(HudMode::SnapshotSlot, slot, kNoFocusedKnob);
     publishState();
     return true;
@@ -392,6 +274,16 @@ bool RuidoController::tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active
 
 bool RuidoController::loadSnapshotSlot(uint8_t slot, const PatchSnapshot& snap) noexcept {
     if (!snapshots_.loadSlotBinary(slot, snap, state_)) {
+        return false;
+    }
+    snapshots_.syncHud(hud_);
+    keyboard_.evaluate(state_, hud_);
+    publishState();
+    return true;
+}
+
+bool RuidoController::loadLivePatch(const PatchSnapshot& snap) noexcept {
+    if (!snapshots_.restoreLiveSnapshot(snap, state_)) {
         return false;
     }
     snapshots_.syncHud(hud_);
@@ -474,16 +366,14 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
     if (syncClockState()) {
         publishState();
     }
-    const std::array<bool, kNumSnapshots> snapHeld =
-        (keyboard_.model() == KeyboardModel::LiveMixer)
-            ? keyboard_.snapKeysHeld()
-            : std::array<bool, kNumSnapshots>{false, false, false, false};
-    const std::array<float, kNumSnapshots> snapPress =
-        (keyboard_.model() == KeyboardModel::LiveMixer)
-            ? keyboard_.snapKeysPressure()
-            : std::array<float, kNumSnapshots>{0.0f, 0.0f, 0.0f, 0.0f};
+    const std::array<bool, kNumSnapshots> snapHeld = keyboard_.snapKeysHeld();
+    const std::array<float, kNumSnapshots> snapPress = keyboard_.snapKeysPressure();
     const bool wasTransitioning = snapshots_.isTransitioning();
     if (snapshots_.step(dt, snapHeld, snapPress, hud_.config.snapMode, state_)) {
+        if (hud_.config.snapMode == KeySwitchMode::Latching &&
+            (snapshots_.isDirty() || !snapshots_.isTransitioning())) {
+            livePatchDirty_ = true;
+        }
         snapshots_.syncHud(hud_);
         keyboard_.evaluate(state_, hud_);
         publishState();
@@ -522,12 +412,21 @@ void RuidoController::updateLeds(float dtSec, const EngineTelemetry& telemetry) 
     const float punchEnergy01 = keyboard_.maxHeldPressure();
     const LedInputContext ctx{state_, hud_, telemetry, punchEnergy01};
     stepAndComputePanelLeds(dtSec, ctx, ledSmooth_, leds_);
-    hud_.fxLedSync01 = ledSmooth_.fxSync01;
-    hud_.lfoLedSync01 = ledSmooth_.lfoSync01;
+    hud_.savePulseQ8 =
+        static_cast<uint8_t>(clampf(ledSmooth_.savePulse01, 0.0f, 1.0f) * 255.0f + 0.5f);
+    // 0.50 Hz slow SAVE-style pulse (exact 500x multiple of 1000 s animPhase wrap, 5x slower than
+    // SAVE's 2.50 Hz flash) for SHIFT OP1..OP3
+    const float blinkPhase =
+        wrapLfoPhase01(ledSmooth_.animPhase * kShiftModelPulseHz +
+                       static_cast<float>(shiftBlinkPhaseQ8_) * (1.0f / 256.0f));
+    const float shiftBlink01 = 0.5f * (1.0f + evalAnalogSine(blinkPhase));
+    hud_.shiftBlinkQ8 = static_cast<uint8_t>(clampf(shiftBlink01, 0.0f, 1.0f) * 255.0f + 0.5f);
 
-    // 2. Compute 27-key zones + momentary full-device 42-LED punch-in choreography
-    keyboard_.stepAndComputeKeyLeds(dtSec, ledSmooth_.animPhase, ledSmooth_.subBreathWave01, state_,
-                                    hud_, telemetry, leds_);
+    // 2. Compute 27-key zones + momentary full-device 42-LED punch-in choreography + unassigned
+    // glints
+    keyboard_.stepAndComputeKeyLeds(dtSec, ledSmooth_.animPhase, state_, hud_, telemetry, leds_);
+    hud_.modeWipeQ8 = keyboard_.modeWipeQ8();
+    applyUnassignedLedGlints(ledSmooth_, leds_);
 }
 
 } // namespace ruido

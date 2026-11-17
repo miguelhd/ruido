@@ -11,15 +11,15 @@ namespace ruido {
 
 namespace {
 
-// User-tuned Physical CRT Boot Intro Spec (1.00 s total):
+// User-tuned Physical CRT Boot Intro Spec (2.00 s total):
 constexpr float kBeamPeakMs = 90.0f;
 constexpr float kBeamHandoffMs = 60.0f;
 constexpr float kUnfoldDelayMs = 100.0f;
 constexpr float kUnfoldDurMs = 200.0f;
-constexpr float kHoldDurMs = 520.0f;
-constexpr float kHoldEndMs = kUnfoldDelayMs + kUnfoldDurMs + kHoldDurMs; // 820 ms
+constexpr float kHoldDurMs = 1520.0f;
+constexpr float kHoldEndMs = kUnfoldDelayMs + kUnfoldDurMs + kHoldDurMs; // 1820 ms
 constexpr float kExitDurMs = 180.0f;
-constexpr float kIntroTotalMs = kHoldEndMs + kExitDurMs; // 1000 ms
+constexpr float kIntroTotalMs = kHoldEndMs + kExitDurMs; // 2000 ms
 constexpr float kFastDismissSpeed = 2.0f;                // ~90 ms smooth collapse on user touch
 
 constexpr float kBzX1 = 0.12f;

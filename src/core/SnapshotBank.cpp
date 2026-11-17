@@ -31,54 +31,77 @@ inline size_t normalizeHeldWeights(const std::array<bool, kNumSnapshots>& held,
     return count;
 }
 
+inline float interpolateLoopPhase4(float fromPhase, uint8_t toSlot, float t01,
+                                   int8_t arcDir) noexcept {
+    const float a = wrapCircularPhase(fromPhase, 4.0f);
+    const float b = static_cast<float>(toSlot & 3u);
+    float delta = b - a;
+    if (absf(delta) > 1.0e-5f) {
+        if (arcDir > 0) {
+            if (delta < 0.0f) {
+                delta += 4.0f;
+            }
+        } else if (arcDir < 0) {
+            if (delta > 0.0f) {
+                delta -= 4.0f;
+            }
+        } else {
+            if (delta > 2.0f) {
+                delta -= 4.0f;
+            } else if (delta < -2.0f) {
+                delta += 4.0f;
+            }
+        }
+    }
+    return wrapCircularPhase(a + clampf(t01, 0.0f, 1.0f) * delta, 4.0f);
+}
+
+inline float computeShortestArcPhase(uint8_t fromSlot, uint8_t toSlot, float t01,
+                                     int8_t arcDir) noexcept {
+    return interpolateLoopPhase4(static_cast<float>(fromSlot & 3u), toSlot, t01, arcDir);
+}
+
+inline uint8_t dominantWeightSlot(const std::array<float, kNumSnapshots>& weights, uint8_t occMask,
+                                  uint8_t fallback) noexcept {
+    uint8_t best = fallback & 3u;
+    float bestW = -1.0f;
+    for (uint8_t s = 0u; s < kNumSnapshots; ++s) {
+        if (((occMask & (1u << s)) != 0u) && weights[s] > bestW) {
+            bestW = weights[s];
+            best = s;
+        }
+    }
+    return best;
+}
+
 } // namespace
 
 void SnapshotBank::reset() noexcept {
     for (size_t s = 0u; s < kNumSnapshots; ++s) {
         slots_[s] = encodePatchSnapshot(makeFactorySnapshotPreset(s));
     }
-    originFrame_ = extractPatchFrame(EngineControlState::makeDefault());
+    originFrame_ = decodePatchSnapshot(slots_[0]);
     slotWeights_ = {1.0f, 0.0f, 0.0f, 0.0f};
-    originWeights_ = slotWeights_;
-    targetWeights_ = slotWeights_;
+    originWeightsQ16_ = packWeightsQ16(slotWeights_);
+    targetWeightsQ16_ = originWeightsQ16_;
     prevHeld_ = {false, false, false, false};
     glideProgress_ = 1.0f;
     glideDurationSec_ = 0.50f;
     momentaryBlend_ = 0.0f;
     morphPos_ = 1.0f;
-    knobMorphPos_ = 0.0f;
+    loopPhase_ = 0.0f;
+    visualLoopPhase_ = 0.0f;
+    liveTakeoverBlend_ = 0.0f;
+    glideOriginPhaseQ14_ = 0u;
+    presetsCoarseAccum_ = 0;
+    glideArcDir_ = 0;
     activeSlot_ = 0u;
+    momentaryHomeSlot_ = 0u;
     dirty_ = false;
     latchGliding_ = false;
     latchHybridHeld_ = false;
     momentaryActive_ = false;
     knobMorphActive_ = false;
-}
-
-void SnapshotBank::syncKnobMorphAnchor() noexcept {
-    knobMorphActive_ = false;
-    std::array<uint8_t, kNumSnapshots> occSlots{};
-    int32_t occCount = 0;
-    for (uint8_t s = 0u; s < kNumSnapshots; ++s) {
-        if (isSlotOccupied(s)) {
-            occSlots[static_cast<size_t>(occCount++)] = s;
-        }
-    }
-    if (occCount <= 1) {
-        knobMorphPos_ = 0.0f;
-        return;
-    }
-    int32_t ord = 0;
-    for (int32_t i = 0; i < occCount; ++i) {
-        if (occSlots[static_cast<size_t>(i)] == activeSlot_) {
-            ord = i;
-            break;
-        }
-        if (occSlots[static_cast<size_t>(i)] < activeSlot_) {
-            ord = i;
-        }
-    }
-    knobMorphPos_ = static_cast<float>(ord) / static_cast<float>(occCount - 1);
 }
 
 uint8_t SnapshotBank::occupiedMask() const noexcept {
@@ -91,93 +114,37 @@ uint8_t SnapshotBank::occupiedMask() const noexcept {
     return mask;
 }
 
-PatchFrame
-SnapshotBank::blendSlots(const std::array<float, kNumSnapshots>& normWeights) const noexcept {
-    size_t domSlot = 0u;
-    float domWeight = -1.0f;
-    size_t nonZeroCount = 0u;
-    for (size_t s = 0u; s < kNumSnapshots; ++s) {
-        if (isSlotOccupied(s) && normWeights[s] > 1.0e-4f) {
-            ++nonZeroCount;
-            if (normWeights[s] > domWeight) {
-                domWeight = normWeights[s];
-                domSlot = s;
-            }
-        }
-    }
-    if (nonZeroCount == 0u) {
-        return originFrame_;
-    }
-    if (nonZeroCount == 1u) {
-        return decodePatchSnapshot(slots_[domSlot]);
-    }
+PatchSnapshot SnapshotBank::exportLiveSnapshot(const EngineControlState& state) const noexcept {
+    return dirty_ ? encodePatchSnapshot(state) : makeEmptyPatchSnapshot();
+}
 
-    std::array<PatchFrame, kNumSnapshots> decoded{};
-    for (size_t s = 0u; s < kNumSnapshots; ++s) {
-        if (isSlotOccupied(s) && normWeights[s] > 1.0e-4f) {
-            decoded[s] = decodePatchSnapshot(slots_[s]);
-        }
+bool SnapshotBank::restoreLiveSnapshot(const PatchSnapshot& snap,
+                                       EngineControlState& state) noexcept {
+    if (!verifyPatchSnapshotCrc(snap)) {
+        return false;
     }
-
-    PatchFrame out{};
-    out.circuitCoupling = 0.0f;
-    for (size_t s = 0u; s < kNumSnapshots; ++s) {
-        out.circuitCoupling += normWeights[s] * decoded[s].circuitCoupling;
+    if (!isPatchSnapshotOccupied(snap)) {
+        return true;
     }
-
-    for (size_t v = 0u; v < kNumOscillators; ++v) {
-        float logF = 0.0f, logHp = 0.0f, logLp = 0.0f, logRa = 0.0f, logRb = 0.0f;
-        float pw = 0.0f, drift = 0.0f, hpRes = 0.0f, lpRes = 0.0f, amp = 0.0f, pan = 0.0f;
-        float shA = 0.0f, dpA = 0.0f, shB = 0.0f, dpB = 0.0f;
-        bool allMuted = true;
-
-        for (size_t s = 0u; s < kNumSnapshots; ++s) {
-            const float w = isSlotOccupied(s) ? normWeights[s] : 0.0f;
-            if (w <= 1.0e-4f) {
-                continue;
-            }
-            const VoiceParams& vp = decoded[s].voices[v];
-            logF += w * fastLog2(clampf(vp.frequencyHz, kAudioFreqMinHz, kAudioFreqMaxHz));
-            logHp += w * fastLog2(clampf(vp.hpCutoffHz, kFilterCutoffMinHz, kFilterCutoffMaxHz));
-            logLp += w * fastLog2(clampf(vp.lpCutoffHz, kFilterCutoffMinHz, kFilterCutoffMaxHz));
-            logRa += w * fastLog2(clampf(vp.lfoRateHz, kLfoFreqMinHz, kLfoFreqMaxHz));
-            logRb += w * fastLog2(clampf(vp.lfoBRateHz, kLfoFreqMinHz, kLfoFreqMaxHz));
-            pw += w * vp.pulseWidth;
-            drift += w * vp.drift;
-            hpRes += w * vp.hpResonance;
-            lpRes += w * vp.lpResonance;
-            amp += w * (vp.muted ? 0.0f : vp.amplitude);
-            pan += w * vp.pan;
-            shA += w * vp.lfoShape;
-            dpA += w * vp.lfoDepth;
-            shB += w * vp.lfoBShape;
-            dpB += w * vp.lfoBDepth;
-            if (!vp.muted) {
-                allMuted = false;
-            }
-        }
-
-        VoiceParams& dst = out.voices[v];
-        dst.frequencyHz = clampf(fastExp2(logF), kAudioFreqMinHz, kAudioFreqMaxHz);
-        dst.hpCutoffHz = clampf(fastExp2(logHp), kFilterCutoffMinHz, kFilterCutoffMaxHz);
-        dst.lpCutoffHz = clampf(fastExp2(logLp), kFilterCutoffMinHz, kFilterCutoffMaxHz);
-        dst.lfoRateHz = clampf(fastExp2(logRa), kLfoFreqMinHz, kLfoFreqMaxHz);
-        dst.lfoBRateHz = clampf(fastExp2(logRb), kLfoFreqMinHz, kLfoFreqMaxHz);
-        dst.pulseWidth = clampf(pw, kPulseWidthMin, kPulseWidthMax);
-        dst.drift = clampf(drift, 0.0f, 1.0f);
-        dst.hpResonance = clampf(hpRes, 0.0f, 1.0f);
-        dst.lpResonance = clampf(lpRes, 0.0f, 1.0f);
-        dst.muted = allMuted;
-        dst.amplitude = allMuted ? decoded[domSlot].voices[v].amplitude : clampf(amp, 0.0f, 1.0f);
-        dst.pan = clampf(pan, -1.0f, 1.0f);
-        dst.lfoShape = clampf(shA, 0.0f, 1.0f);
-        dst.lfoDepth = clampf(dpA, 0.0f, 1.0f);
-        dst.lfoBShape = clampf(shB, 0.0f, 1.0f);
-        dst.lfoBDepth = clampf(dpB, 0.0f, 1.0f);
-        dst.lfoTarget = decoded[domSlot].voices[v].lfoTarget;
-        dst.lfoBTarget = decoded[domSlot].voices[v].lfoBTarget;
+    originFrame_ = decodePatchSnapshot(snap);
+    applyPatchFrame(originFrame_, state);
+    dirty_ = true;
+    latchGliding_ = false;
+    latchHybridHeld_ = false;
+    momentaryActive_ = false;
+    knobMorphActive_ = false;
+    liveTakeoverBlend_ = 0.0f;
+    glideProgress_ = 1.0f;
+    momentaryBlend_ = 0.0f;
+    morphPos_ = 1.0f;
+    slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (isSlotOccupied(activeSlot_)) {
+        slotWeights_[activeSlot_] = 1.0f;
     }
-    return out;
+    originWeightsQ16_ = packWeightsQ16(slotWeights_);
+    targetWeightsQ16_ = originWeightsQ16_;
+    syncKnobMorphAnchor();
+    return true;
 }
 
 void SnapshotBank::saveSlot(uint8_t slot, EngineControlState& state) noexcept {
@@ -188,7 +155,9 @@ void SnapshotBank::saveSlot(uint8_t slot, EngineControlState& state) noexcept {
         momentaryBlend_ = 0.0f;
     }
     slots_[idx] = encodePatchSnapshot(state);
+    originFrame_ = decodePatchSnapshot(slots_[idx]);
     activeSlot_ = idx;
+    momentaryHomeSlot_ = idx;
     dirty_ = false;
     latchGliding_ = false;
     latchHybridHeld_ = false;
@@ -196,8 +165,8 @@ void SnapshotBank::saveSlot(uint8_t slot, EngineControlState& state) noexcept {
     morphPos_ = 1.0f;
     slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
     slotWeights_[idx] = 1.0f;
-    originWeights_ = slotWeights_;
-    targetWeights_ = slotWeights_;
+    originWeightsQ16_ = packWeightsQ16(slotWeights_);
+    targetWeightsQ16_ = originWeightsQ16_;
     syncKnobMorphAnchor();
 }
 
@@ -208,7 +177,7 @@ bool SnapshotBank::deleteSlot(uint8_t slot, EngineControlState& state) noexcept 
         momentaryActive_ = false;
         momentaryBlend_ = 0.0f;
     }
-    if (latchGliding_) {
+    if (latchGliding_ || knobMorphActive_) {
         originFrame_ = extractPatchFrame(state);
         latchGliding_ = false;
         latchHybridHeld_ = false;
@@ -217,12 +186,8 @@ bool SnapshotBank::deleteSlot(uint8_t slot, EngineControlState& state) noexcept 
     const bool wasOccupied = isSlotOccupied(idx);
     slots_[idx] = makeEmptyPatchSnapshot();
     slotWeights_[idx] = 0.0f;
-    originWeights_[idx] = 0.0f;
-    targetWeights_[idx] = 0.0f;
     if (idx == activeSlot_) {
         slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
-        originWeights_ = slotWeights_;
-        targetWeights_ = slotWeights_;
         morphPos_ = 0.0f;
         dirty_ = true;
     } else {
@@ -238,9 +203,9 @@ bool SnapshotBank::deleteSlot(uint8_t slot, EngineControlState& state) noexcept 
         } else {
             dirty_ = true;
         }
-        originWeights_ = slotWeights_;
-        targetWeights_ = slotWeights_;
     }
+    originWeightsQ16_ = packWeightsQ16(slotWeights_);
+    targetWeightsQ16_ = originWeightsQ16_;
     syncKnobMorphAnchor();
     return wasOccupied;
 }
@@ -270,18 +235,21 @@ void SnapshotBank::selectActiveSlotImmediate(uint8_t slot, EngineControlState& s
         const uint8_t mask = occupiedMask();
         if (mask == 0u) {
             activeSlot_ = 0u;
+            momentaryHomeSlot_ = 0u;
             dirty_ = true;
             latchGliding_ = false;
             latchHybridHeld_ = false;
             momentaryActive_ = false;
             knobMorphActive_ = false;
+            liveTakeoverBlend_ = 0.0f;
             glideProgress_ = 1.0f;
             momentaryBlend_ = 0.0f;
             morphPos_ = 0.0f;
-            knobMorphPos_ = 0.0f;
+            loopPhase_ = 0.0f;
+            visualLoopPhase_ = 0.0f;
             slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
-            originWeights_ = slotWeights_;
-            targetWeights_ = slotWeights_;
+            originWeightsQ16_ = packWeightsQ16(slotWeights_);
+            targetWeightsQ16_ = originWeightsQ16_;
             originFrame_ = extractPatchFrame(EngineControlState::makeDefault());
             applyPatchFrame(originFrame_, state);
             return;
@@ -294,6 +262,7 @@ void SnapshotBank::selectActiveSlotImmediate(uint8_t slot, EngineControlState& s
         }
     }
     activeSlot_ = idx;
+    momentaryHomeSlot_ = idx;
     dirty_ = false;
     latchGliding_ = false;
     latchHybridHeld_ = false;
@@ -303,149 +272,24 @@ void SnapshotBank::selectActiveSlotImmediate(uint8_t slot, EngineControlState& s
     morphPos_ = 1.0f;
     slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
     slotWeights_[idx] = 1.0f;
-    originWeights_ = slotWeights_;
-    targetWeights_ = slotWeights_;
+    originWeightsQ16_ = packWeightsQ16(slotWeights_);
+    targetWeightsQ16_ = originWeightsQ16_;
     originFrame_ = decodePatchSnapshot(slots_[idx]);
     syncKnobMorphAnchor();
     applyPatchFrame(originFrame_, state);
 }
 
-void SnapshotBank::recallSlotStepped(uint8_t slot, KnobRate rate,
-                                     EngineControlState& state) noexcept {
-    const uint8_t idx = slot & 3u;
-    if (!isSlotOccupied(idx)) {
-        return;
-    }
-    if (momentaryActive_) {
-        momentaryActive_ = false;
-        momentaryBlend_ = 0.0f;
-    }
-    originFrame_ = extractPatchFrame(state);
-    float keptSum = 0.0f;
+void SnapshotBank::applyMomentaryWeightsAndPhase(
+    const std::array<float, kNumSnapshots>& tgtW) noexcept {
+    const bool canHomeTrack = !dirty_ && isSlotOccupied(momentaryHomeSlot_);
+    visualLoopPhase_ =
+        canHomeTrack ? computeShortestArcPhase(momentaryHomeSlot_, activeSlot_, momentaryBlend_, 0)
+                     : static_cast<float>(activeSlot_ & 3u);
+    morphPos_ = momentaryBlend_;
     for (size_t s = 0u; s < kNumSnapshots; ++s) {
-        const float w = isSlotOccupied(s) ? slotWeights_[s] : 0.0f;
-        originWeights_[s] = (w >= 0.035f) ? w : 0.0f;
-        keptSum += originWeights_[s];
+        const float homeW = (canHomeTrack && s == momentaryHomeSlot_) ? 1.0f : 0.0f;
+        slotWeights_[s] = homeW + momentaryBlend_ * (tgtW[s] - homeW);
     }
-    if (keptSum > 1.0e-5f) {
-        const float invSum = 1.0f / keptSum;
-        for (float& w : originWeights_) {
-            w *= invSum;
-        }
-    }
-    slotWeights_ = originWeights_;
-    targetWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
-    targetWeights_[idx] = 1.0f;
-    activeSlot_ = idx;
-    syncKnobMorphAnchor();
-    dirty_ = false;
-    latchHybridHeld_ = false;
-    glideDurationSec_ = (rate == KnobRate::Fine)     ? 1.80f
-                        : (rate == KnobRate::Coarse) ? 0.10f
-                                                     : 0.50f;
-    glideProgress_ = 0.0f;
-    morphPos_ = 0.0f;
-    latchGliding_ = true;
-}
-
-bool SnapshotBank::morphByEncoder(int32_t ticks, KnobRate rate,
-                                  EngineControlState& state) noexcept {
-    if (ticks == 0) {
-        return false;
-    }
-    std::array<uint8_t, kNumSnapshots> occSlots{};
-    int32_t occCount = 0;
-    for (uint8_t s = 0u; s < kNumSnapshots; ++s) {
-        if (isSlotOccupied(s)) {
-            occSlots[static_cast<size_t>(occCount++)] = s;
-        }
-    }
-    if (occCount == 0) {
-        knobMorphActive_ = false;
-        return false;
-    }
-    if (occCount == 1) {
-        const uint8_t onlySlot = occSlots[0];
-        if (!dirty_ && !knobMorphActive_ && !momentaryActive_ && !latchGliding_ &&
-            activeSlot_ == onlySlot && slotWeights_[onlySlot] >= 0.999f) {
-            return false;
-        }
-        selectActiveSlotImmediate(onlySlot, state);
-        return true;
-    }
-
-    const float maxU = static_cast<float>(occCount - 1);
-    if (momentaryActive_ || latchGliding_) {
-        float wSum = 0.0f;
-        float wOrdSum = 0.0f;
-        for (int32_t i = 0; i < occCount; ++i) {
-            const float w = slotWeights_[occSlots[static_cast<size_t>(i)]];
-            wSum += w;
-            wOrdSum += w * static_cast<float>(i);
-        }
-        if (wSum > 1.0e-5f) {
-            knobMorphPos_ = clampf((wOrdSum / wSum) / maxU, 0.0f, 1.0f);
-        }
-        momentaryActive_ = false;
-        momentaryBlend_ = 0.0f;
-        latchGliding_ = false;
-        latchHybridHeld_ = false;
-        glideProgress_ = 1.0f;
-    } else if (!knobMorphActive_) {
-        syncKnobMorphAnchor();
-    }
-
-    const float stepPerTick = (rate == KnobRate::Fine)     ? (1.0f / 192.0f)
-                              : (rate == KnobRate::Coarse) ? (1.0f / 16.0f)
-                                                           : (1.0f / 48.0f);
-    const float prevU = clampf(knobMorphPos_ * maxU, 0.0f, maxU);
-    const float nextU = clampf(prevU + static_cast<float>(ticks) * stepPerTick, 0.0f, maxU);
-    if (absf(nextU - prevU) <= 1.0e-6f && !dirty_ && !knobMorphActive_) {
-        return false;
-    }
-
-    knobMorphPos_ = nextU / maxU;
-    const float railDist = (nextU < (maxU - nextU)) ? nextU : (maxU - nextU);
-    const bool atRail = (railDist <= 1.0e-4f);
-    // Overlapping multi-scene kernel: radius = 1.0 at exact endpoints so 0% and 100% seat cleanly
-    // on pure first/last scenes, expanding to 1.55 across the interior so 2-3 scenes overlap.
-    const float radius = 1.0f + 0.55f * clampf(railDist * 1.25f, 0.0f, 1.0f);
-    const float invRadius = 1.0f / radius;
-
-    slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
-    float wSum = 0.0f;
-    uint8_t domSlot = occSlots[0];
-    float domW = -1.0f;
-    for (int32_t i = 0; i < occCount; ++i) {
-        const float d = absf(nextU - static_cast<float>(i)) * invRadius;
-        const float oneMinusD2 = (d < 1.0f) ? (1.0f - d * d) : 0.0f;
-        const float w = oneMinusD2 * oneMinusD2;
-        const uint8_t s = occSlots[static_cast<size_t>(i)];
-        slotWeights_[s] = w;
-        wSum += w;
-        if (w > domW) {
-            domW = w;
-            domSlot = s;
-        }
-    }
-    if (wSum > 1.0e-5f) {
-        const float invSum = 1.0f / wSum;
-        for (float& w : slotWeights_) {
-            w *= invSum;
-        }
-    } else {
-        slotWeights_[domSlot] = 1.0f;
-    }
-
-    activeSlot_ = domSlot;
-    originWeights_ = slotWeights_;
-    targetWeights_ = slotWeights_;
-    knobMorphActive_ = !atRail;
-    dirty_ = false;
-    morphPos_ = atRail ? 1.0f : knobMorphPos_;
-    originFrame_ = blendSlots(slotWeights_);
-    applyPatchFrame(originFrame_, state);
-    return true;
 }
 
 bool SnapshotBank::onSnapKeysChanged(const std::array<bool, kNumSnapshots>& held,
@@ -480,53 +324,95 @@ bool SnapshotBank::onSnapKeysChanged(const std::array<bool, kNumSnapshots>& held
         if (heldCount > 0u) {
             if (!momentaryActive_) {
                 latchGliding_ = false;
+                latchHybridHeld_ = false;
                 knobMorphActive_ = false;
+                liveTakeoverBlend_ = 0.0f;
+                momentaryHomeSlot_ = activeSlot_;
                 originFrame_ = extractPatchFrame(state);
                 momentaryBlend_ = 0.0f;
                 momentaryActive_ = true;
             }
-            targetWeights_ = normW;
+            targetWeightsQ16_ = packWeightsQ16(normW);
             activeSlot_ = domSlot;
             const float tgtBlend = clampf(maxP, 0.0f, 1.0f);
             if (tgtBlend > momentaryBlend_) {
                 momentaryBlend_ += 0.35f * (tgtBlend - momentaryBlend_);
             }
-            morphPos_ = momentaryBlend_;
-            for (size_t s = 0u; s < kNumSnapshots; ++s) {
-                slotWeights_[s] = normW[s] * momentaryBlend_;
-            }
-            applyPatchFrame(
-                morphPatchFrames(originFrame_, blendSlots(targetWeights_), momentaryBlend_), state);
+            applyMomentaryWeightsAndPhase(normW);
+            applyPatchFrame(morphPatchFrames(originFrame_, blendSlots(normW), momentaryBlend_),
+                            state);
             return true;
         }
         return false;
     }
 
-    // Latching mode: rising edge or multi-key pressure sculpt
+    // Latching mode: multi-key chord release protection keeps sculpted hybrid frozen as fingers
+    // lift
     if (heldCount == 0u) {
+        if (latchHybridHeld_) {
+            latchHybridHeld_ = false;
+            latchGliding_ = false;
+            glideProgress_ = 1.0f;
+            morphPos_ = 1.0f;
+            originFrame_ = extractPatchFrame(state);
+        }
+        return false;
+    }
+
+    if (latchHybridHeld_ && heldCount < 2u && !anyRising) {
+        // Staggered release from a 2..4-finger chord: hold frozen hybrid weights until all lift
+        return false;
+    }
+
+    if (heldCount == 1u && anyRising && !dirty_ && !latchGliding_ && !knobMorphActive_ &&
+        domSlot == activeSlot_ && slotWeights_[domSlot] >= 0.999f) {
+        // Already sitting cleanly at 100% of this unedited Scene
+        morphPos_ = 1.0f;
+        visualLoopPhase_ = static_cast<float>(domSlot);
         return false;
     }
 
     if (anyRising || heldCount >= 2u || latchGliding_) {
+        const uint8_t prevSlot = activeSlot_;
+        const float prevVisLoop = wrapCircularPhase(visualLoopPhase_, 4.0f);
+        uint8_t prevActiveWeights = 0u;
+        for (uint8_t s = 0u; s < kNumSnapshots; ++s) {
+            if (isSlotOccupied(s) && slotWeights_[s] > 0.035f) {
+                ++prevActiveWeights;
+            }
+        }
+        const bool startNewGlide = anyRising || (!latchGliding_ && !latchHybridHeld_);
+        const bool isSnapBack = (heldCount == 1u && domSlot == prevSlot && dirty_);
         momentaryActive_ = false;
-        originFrame_ = extractPatchFrame(state);
-        originWeights_ = slotWeights_;
-        targetWeights_ = normW;
+        liveTakeoverBlend_ = 0.0f;
+        if (startNewGlide) {
+            originFrame_ = extractPatchFrame(state);
+            if (isSnapBack) {
+                slotWeights_ = normW;
+            }
+            originWeightsQ16_ = packWeightsQ16(slotWeights_);
+            glideProgress_ = 0.0f;
+            morphPos_ = 0.0f;
+        }
+        targetWeightsQ16_ = packWeightsQ16(normW);
         activeSlot_ = domSlot;
+        momentaryHomeSlot_ = domSlot;
         syncKnobMorphAnchor();
         if (heldCount >= 2u) {
             latchHybridHeld_ = true;
             dirty_ = true;
+            visualLoopPhase_ = static_cast<float>(domSlot);
         } else if (anyRising) {
             latchHybridHeld_ = false;
             dirty_ = false;
+            visualLoopPhase_ = (prevActiveWeights > 0u && isSlotOccupied(prevSlot))
+                                   ? prevVisLoop
+                                   : static_cast<float>(domSlot & 3u);
+            glideOriginPhaseQ14_ =
+                static_cast<uint16_t>(clampf(visualLoopPhase_, 0.0f, 3.9999f) * 16384.0f + 0.5f);
         }
-        // Pressure accelerates glide: light touch = ~0.55s dreamy glide, 100% firm = ~0.08s snap
+        // Pressure accelerates glide: light touch = ~0.55 s melt, 100% firm = ~0.08 s snap-back
         glideDurationSec_ = 0.55f - 0.47f * clampf(maxP, 0.0f, 1.0f);
-        if (anyRising) {
-            glideProgress_ = 0.0f;
-            morphPos_ = 0.0f;
-        }
         latchGliding_ = true;
     }
     return false;
@@ -540,17 +426,19 @@ bool SnapshotBank::step(float dtSec, const std::array<bool, kNumSnapshots>& held
         return false;
     }
 
+    const uint8_t occMask = occupiedMask();
     if (momentaryActive_) {
         if (snapMode != KeySwitchMode::Momentary) {
             momentaryActive_ = false;
             momentaryBlend_ = 0.0f;
+            activeSlot_ = momentaryHomeSlot_;
         } else {
             float maxP = 0.0f;
             std::array<float, kNumSnapshots> liveW{};
-            const size_t heldCount =
-                normalizeHeldWeights(held, pressure, occupiedMask(), liveW, maxP);
+            const size_t heldCount = normalizeHeldWeights(held, pressure, occMask, liveW, maxP);
             if (heldCount > 0u) {
-                targetWeights_ = liveW;
+                targetWeightsQ16_ = packWeightsQ16(liveW);
+                activeSlot_ = dominantWeightSlot(liveW, occMask, activeSlot_);
                 const float alphaAtk = 1.0f - fastExp2(-1.44269504f * dt * (1.0f / 0.032f));
                 momentaryBlend_ += alphaAtk * (clampf(maxP, 0.0f, 1.0f) - momentaryBlend_);
             } else {
@@ -559,48 +447,80 @@ bool SnapshotBank::step(float dtSec, const std::array<bool, kNumSnapshots>& held
                 if (momentaryBlend_ <= 0.002f) {
                     momentaryBlend_ = 0.0f;
                     momentaryActive_ = false;
+                    activeSlot_ = momentaryHomeSlot_;
                     morphPos_ = dirty_ ? 0.0f : 1.0f;
                     slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
                     if (!dirty_ && isSlotOccupied(activeSlot_)) {
                         slotWeights_[activeSlot_] = 1.0f;
                     }
+                    visualLoopPhase_ = static_cast<float>(activeSlot_ & 3u);
                     applyPatchFrame(originFrame_, state);
                     return true;
                 }
             }
 
-            morphPos_ = momentaryBlend_;
-            for (size_t s = 0u; s < kNumSnapshots; ++s) {
-                slotWeights_[s] = targetWeights_[s] * momentaryBlend_;
-            }
-            applyPatchFrame(
-                morphPatchFrames(originFrame_, blendSlots(targetWeights_), momentaryBlend_), state);
+            const auto tgtW = unpackWeightsQ16(targetWeightsQ16_);
+            applyMomentaryWeightsAndPhase(tgtW);
+            applyPatchFrame(morphPatchFrames(originFrame_, blendSlots(tgtW), momentaryBlend_),
+                            state);
             return true;
         }
     }
 
-    if (!latchGliding_) {
+    if (!latchGliding_ && !latchHybridHeld_) {
         return false;
     }
 
     if (snapMode == KeySwitchMode::Latching) {
         float maxHeldP = 0.0f;
-        size_t heldCount = 0u;
-        for (size_t s = 0u; s < kNumSnapshots; ++s) {
-            if (held[s] && isSlotOccupied(s)) {
-                ++heldCount;
-                if (pressure[s] > maxHeldP) {
-                    maxHeldP = pressure[s];
+        std::array<float, kNumSnapshots> liveW{};
+        const size_t heldCount = normalizeHeldWeights(held, pressure, occMask, liveW, maxHeldP);
+
+        if (latchHybridHeld_) {
+            if (heldCount == 0u) {
+                latchHybridHeld_ = false;
+                latchGliding_ = false;
+                glideProgress_ = 1.0f;
+                morphPos_ = 1.0f;
+                originFrame_ = extractPatchFrame(state);
+                return false;
+            }
+            if (heldCount < 2u) {
+                // Hold sculpted chord weights steady while remaining fingers lift asynchronously
+                latchGliding_ = false;
+                glideProgress_ = 1.0f;
+                morphPos_ = 1.0f;
+                originFrame_ = extractPatchFrame(state);
+                return false;
+            }
+            targetWeightsQ16_ = packWeightsQ16(liveW);
+            activeSlot_ = dominantWeightSlot(liveW, occMask, activeSlot_);
+            momentaryHomeSlot_ = activeSlot_;
+            visualLoopPhase_ = static_cast<float>(activeSlot_);
+            if (glideProgress_ >= 1.0f) {
+                // Continuous live pressure sculpting across 2..4 held Scene keys indefinitely!
+                const float alphaSculpt = 1.0f - fastExp2(-1.44269504f * dt * (1.0f / 0.032f));
+                float wSum = 0.0f;
+                for (size_t s = 0u; s < kNumSnapshots; ++s) {
+                    const float nextW =
+                        slotWeights_[s] + alphaSculpt * (liveW[s] - slotWeights_[s]);
+                    slotWeights_[s] = isSlotOccupied(s) ? clampf(nextW, 0.0f, 1.0f) : 0.0f;
+                    wSum += slotWeights_[s];
                 }
+                if (wSum > 1.0e-5f) {
+                    const float invSum = 1.0f / wSum;
+                    for (float& w : slotWeights_) {
+                        w *= invSum;
+                    }
+                }
+                originWeightsQ16_ = packWeightsQ16(slotWeights_);
+                morphPos_ = 1.0f;
+                originFrame_ = blendSlots(slotWeights_);
+                applyPatchFrame(originFrame_, state);
+                return true;
             }
         }
-        if (heldCount == 0u && latchHybridHeld_) {
-            latchHybridHeld_ = false;
-            latchGliding_ = false;
-            glideProgress_ = 1.0f;
-            morphPos_ = 1.0f;
-            return false;
-        }
+
         if (heldCount > 0u) {
             const float pDur = 0.55f - 0.47f * clampf(maxHeldP, 0.0f, 1.0f);
             if (pDur < glideDurationSec_) {
@@ -609,67 +529,48 @@ bool SnapshotBank::step(float dtSec, const std::array<bool, kNumSnapshots>& held
         }
     }
 
-    const PatchFrame targetFrame = blendSlots(targetWeights_);
+    if (!latchGliding_) {
+        return false;
+    }
+
+    const auto origW = unpackWeightsQ16(originWeightsQ16_);
+    const auto tgtW = unpackWeightsQ16(targetWeightsQ16_);
+    const PatchFrame targetFrame = blendSlots(tgtW);
     const float dur = (glideDurationSec_ > 0.02f) ? glideDurationSec_ : 0.02f;
     glideProgress_ += dt / dur;
     if (glideProgress_ >= 1.0f) {
         glideProgress_ = 1.0f;
-        latchGliding_ = false;
+        latchGliding_ = latchHybridHeld_;
+        glideArcDir_ = 0;
         morphPos_ = 1.0f;
-        slotWeights_ = targetWeights_;
+        slotWeights_ = tgtW;
+        originWeightsQ16_ = targetWeightsQ16_;
+        originFrame_ = targetFrame;
+        visualLoopPhase_ = static_cast<float>(activeSlot_ & 3u);
         applyPatchFrame(targetFrame, state);
         return true;
     }
 
     const float eased = smoothstep01(glideProgress_);
     morphPos_ = eased;
-    // Endpoint deadband on visual scene weights keeps intermediate detents brushed past on
-    // `PRESETS` locked at 0% (eliminating `0% -> 1% -> 0%` wobble) while audio morphs continuously.
     const float wEased = (eased < 0.015f) ? 0.0f : ((eased > 0.985f) ? 1.0f : eased);
-    for (size_t s = 0u; s < kNumSnapshots; ++s) {
-        slotWeights_[s] =
-            isSlotOccupied(s)
-                ? (originWeights_[s] + wEased * (targetWeights_[s] - originWeights_[s]))
-                : 0.0f;
+    bool hasOrig = false;
+    for (uint8_t s = 0u; s < kNumSnapshots; ++s) {
+        if (isSlotOccupied(s) && origW[s] > 1.0e-4f) {
+            hasOrig = true;
+        }
+        slotWeights_[s] = isSlotOccupied(s) ? (origW[s] + wEased * (tgtW[s] - origW[s])) : 0.0f;
+    }
+    if (!latchHybridHeld_) {
+        if (hasOrig) {
+            const float origPhase = static_cast<float>(glideOriginPhaseQ14_) * (1.0f / 16384.0f);
+            visualLoopPhase_ = interpolateLoopPhase4(origPhase, activeSlot_, eased, glideArcDir_);
+        } else {
+            visualLoopPhase_ = static_cast<float>(activeSlot_ & 3u);
+        }
     }
     applyPatchFrame(morphPatchFrames(originFrame_, targetFrame, eased), state);
     return true;
-}
-
-void SnapshotBank::notifyManualEdit(EngineControlState& state) noexcept {
-    if (momentaryActive_) {
-        originFrame_ = extractPatchFrame(state);
-    }
-    latchGliding_ = false;
-    latchHybridHeld_ = false;
-    knobMorphActive_ = false;
-    glideProgress_ = 1.0f;
-    dirty_ = true;
-}
-
-bool SnapshotBank::cancelMomentaryIfActive(EngineControlState& state) noexcept {
-    prevHeld_ = {false, false, false, false};
-    if (!momentaryActive_) {
-        return false;
-    }
-    momentaryActive_ = false;
-    momentaryBlend_ = 0.0f;
-    morphPos_ = dirty_ ? 0.0f : 1.0f;
-    slotWeights_ = {0.0f, 0.0f, 0.0f, 0.0f};
-    if (!dirty_ && isSlotOccupied(activeSlot_)) {
-        slotWeights_[activeSlot_] = 1.0f;
-    }
-    applyPatchFrame(originFrame_, state);
-    return true;
-}
-
-void SnapshotBank::syncHud(HudState& hud) const noexcept {
-    hud.snapshotSlot = activeSlot_;
-    hud.snapshotOccupiedMask = occupiedMask();
-    hud.snapshotWeights = slotWeights_;
-    hud.morphPosition = morphPos_;
-    hud.snapshotDirty = dirty_;
-    hud.snapshotGliding = latchGliding_ || momentaryActive_ || knobMorphActive_;
 }
 
 } // namespace ruido

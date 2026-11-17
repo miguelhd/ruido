@@ -266,9 +266,9 @@ def main() -> None:
     b_med = gaussian_blur_2d(core, 1.5, 1.5 * 0.58)
     b_wide = gaussian_blur_2d(core, 1.0, max(0.8, 1.0 * 0.09))
 
-    # 1. Core 4-bit anti-aliased glyph bitmap (`x in [10..229]`, `y in [90..147]` -> 220 x 58)
+    # 1. Core 4-bit anti-aliased glyph bitmap (`x in [10..229]`, `y in [95..143]` -> 220 x 49)
     core_x0, core_w = 10, 220
-    core_y0, core_h = 90, 58
+    core_y0, core_h = 95, 49
     assert core_w % 2 == 0
     core_packed: list[int] = []
     for y in range(core_y0, core_y0 + core_h):
@@ -278,8 +278,8 @@ def main() -> None:
             core_packed.append((n0 << 4) | n1)
 
     # 2. Near-field phosphor bloom `1 - (1 - b_tight)(1 - b_med)` at 2x2 step
-    #    Covers y in [82..157] (76 px -> 39 grid rows @ 2px stride), x in [0..240] (121 grid cols @ 2px stride)
-    near_y0, near_rows = 82, 39
+    #    Covers y in [92..147] (56 px -> 28 grid rows @ 2px stride), x in [0..240] (121 grid cols @ 2px stride)
+    near_y0, near_rows = 92, 28
     near_cols = 121  # x = 0, 2, ..., 240 (clamped to 239)
     bloom_near: list[int] = []
     for gr in range(near_rows):
@@ -291,9 +291,9 @@ def main() -> None:
             merged = 1.0 - (1.0 - bt) * (1.0 - bm)
             bloom_near.append(min(255, max(0, int(round(merged * 255.0)))))
 
-    # 3. Wide horizontal electron-beam bleed `b_wide` (sigma_x = 20.0, sigma_y = 2.5) at 4x2 step
-    #    Covers y in [78..161] (84 px -> 43 grid rows @ 2px stride), x in [0..240] (61 grid cols @ 4px stride)
-    wide_y0, wide_rows = 78, 43
+    # 3. Wide horizontal electron-beam bleed `b_wide` at 4x2 step
+    #    Covers y in [92..147] (56 px -> 28 grid rows @ 2px stride), x in [0..240] (61 grid cols @ 4px stride)
+    wide_y0, wide_rows = 92, 28
     wide_cols = 61  # x = 0, 4, ..., 240 (clamped to 239)
     bloom_wide: list[int] = []
     for gr in range(wide_rows):

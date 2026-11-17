@@ -9,6 +9,7 @@ namespace ruido {
 // Shared across controller opacity, HOME LED, center acoustic graphs, and 72% backdrop dim.
 inline constexpr float kHudFadeSec = 0.150f;
 inline constexpr float kHudToastHoldSec = 1.500f;
+inline constexpr float kHudCouplingHoldSec = 3.000f;
 
 // Advance any [0, 1] linear phase toward 1.0 (active=true) or 0.0 (active=false) in 150 ms.
 inline float stepHudFadeLinear(float level, bool active, float dtSec) noexcept {
@@ -28,9 +29,9 @@ struct HudEnvelopeTracker {
         active = false;
     }
 
-    void triggerToast() noexcept {
+    void triggerToast(float holdSec = kHudToastHoldSec) noexcept {
         active = true;
-        holdRemainingSec = kHudToastHoldSec;
+        holdRemainingSec = holdSec;
     }
 
     void latchPage() noexcept {

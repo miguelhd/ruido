@@ -201,10 +201,6 @@ Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& st,
                     h1 = y2 - x;
                     vs[sub] = y2;
                 }
-                s1 = scrubFilterState(s1);
-                s2 = scrubFilterState(s2);
-                h1 = scrubFilterState(h1);
-                h2 = scrubFilterState(h2);
             }
         } else {
             for (size_t k = 0u; k < numFrames; ++k) {
@@ -222,10 +218,6 @@ Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& st,
                     h1 = y2 - x;
                     vs[sub] = y2;
                 }
-                s1 = scrubFilterState(s1);
-                s2 = scrubFilterState(s2);
-                h1 = scrubFilterState(h1);
-                h2 = scrubFilterState(h2);
             }
         }
     } else {
@@ -249,10 +241,6 @@ Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& st,
                         stepHpNonlinearPrecomputed(x, s1, s2, h1, h2, g, kHp, pos1, neg1, invPos1,
                                                    invNeg1, rail2, invRail2, dSpan, invDSpan);
                 }
-                s1 = scrubFilterState(s1);
-                s2 = scrubFilterState(s2);
-                h1 = scrubFilterState(h1);
-                h2 = scrubFilterState(h2);
             }
         } else {
             for (size_t k = 0u; k < numFrames; ++k) {
@@ -263,18 +251,14 @@ Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& st,
                         stepHpNonlinearPrecomputed(x, s1, s2, h1, h2, g, kHp, pos1, neg1, invPos1,
                                                    invNeg1, rail2, invRail2, dSpan, invDSpan);
                 }
-                s1 = scrubFilterState(s1);
-                s2 = scrubFilterState(s2);
-                h1 = scrubFilterState(h1);
-                h2 = scrubFilterState(h2);
             }
         }
     }
 
-    st.s1 = s1;
-    st.s2 = s2;
-    st.hist1 = h1;
-    st.hist2 = h2;
+    st.s1 = scrubFilterState(s1);
+    st.s2 = scrubFilterState(s2);
+    st.hist1 = scrubFilterState(h1);
+    st.hist2 = scrubFilterState(h2);
 }
 
 RUIDO_NOINLINE void
@@ -305,10 +289,6 @@ Ms20DualFilter::processVoiceLpSpan4x(OtaSallenKeyStage& st,
                 h1 = w;
                 vs[sub] = y2 * outScale;
             }
-            s1 = scrubFilterState(s1);
-            s2 = scrubFilterState(s2);
-            h1 = scrubFilterState(h1);
-            h2 = scrubFilterState(h2);
         }
     } else {
         const float g = c.gLp;
@@ -329,17 +309,13 @@ Ms20DualFilter::processVoiceLpSpan4x(OtaSallenKeyStage& st,
                                     pos2, neg2, invPos2, invNeg2, dSpan, invDSpan);
                 vs[sub] = y2 * outScale;
             }
-            s1 = scrubFilterState(s1);
-            s2 = scrubFilterState(s2);
-            h1 = scrubFilterState(h1);
-            h2 = scrubFilterState(h2);
         }
     }
 
-    st.s1 = s1;
-    st.s2 = s2;
-    st.hist1 = h1;
-    st.hist2 = h2;
+    st.s1 = scrubFilterState(s1);
+    st.s2 = scrubFilterState(s2);
+    st.hist1 = scrubFilterState(h1);
+    st.hist2 = scrubFilterState(h2);
 }
 
 void Ms20DualFilter::processSpan4x(std::array<float, kOversampleFactor>* frames4x, size_t numFrames,
@@ -433,12 +409,12 @@ void Ms20DualFilter::processQuadBank4x(
         alignas(16) std::array<float, 4> dSpan{};
         alignas(16) std::array<float, 4> invDSpan{};
         for (size_t v = 0u; v < 4u; ++v) {
-            pos1[v] = kHpOta1Pos * coeffs[v].otaScaleHp;
-            neg1[v] = kHpOta1Neg * coeffs[v].otaScaleHp;
-            invPos1[v] = kInvHpOta1Pos * coeffs[v].invOtaScaleHp;
-            invNeg1[v] = kInvHpOta1Neg * coeffs[v].invOtaScaleHp;
-            rail2[v] = kHpOta2Rail * coeffs[v].otaScaleHp;
-            invRail2[v] = kInvHpOta2Rail * coeffs[v].invOtaScaleHp;
+            pos1[v] = coeffs[v].hpPos1;
+            neg1[v] = coeffs[v].hpNeg1;
+            invPos1[v] = coeffs[v].invHpPos1;
+            invNeg1[v] = coeffs[v].invHpNeg1;
+            rail2[v] = coeffs[v].hpRail2;
+            invRail2[v] = coeffs[v].invHpRail2;
             dSpan[v] = coeffs[v].hpDiodeSpan;
             invDSpan[v] = coeffs[v].invHpDiodeSpan;
         }

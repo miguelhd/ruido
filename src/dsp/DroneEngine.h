@@ -42,10 +42,7 @@ class DroneEngineCore {
 
   private:
     struct VoiceSmoothers {
-        LogFreqSmoother freqHz;
-        LogFreqSmoother hpCutoffHz;
-        LogFreqSmoother lpCutoffHz;
-        LogFreqSmoother keyPitchMul;
+        LogFreqSmootherBank<4> logSmoothers; // [0]=freqHz, [1]=hpHz, [2]=lpHz, [3]=pitchMul
         CriticallyDampedSmootherBank<6> potSmoothers; // [0..5] pw, drift, hpRes, lpRes, amp, pan
         VactrolSmoother pressure;
         OnePoleSmoother stutterGate;
@@ -99,10 +96,11 @@ class DroneEngineCore {
     bool prevStatesValid_ = false;
     CriticallyDampedSmoother couplingSmoother_{};
     CriticallyDampedSmoother masterTrimSmoother_{};
-    OnePoleSmoother monoMixSmoother_{};          // 0.0 = Stereo (POLY), 1.0 = Dual-Mono (MONO)
-    OnePoleSmoother masterRunSmoother_{};        // 0.0 = Muted (STOP), 1.0 = Active (PLAY)
-    OnePoleSmoother pitchModeSmoother_{};        // 0.0 = MS-20 Filter/LPG, 1.0 = Pitch Bend
-    OnePoleSmootherBank<6> punchBusSmoothers_{}; // [0..5] surge, dubLpf, spatial, ring, sync, scrm
+    OnePoleSmoother monoMixSmoother_{};   // 0.0 = Stereo (POLY), 1.0 = Dual-Mono (MONO)
+    OnePoleSmoother masterRunSmoother_{}; // 0.0 = Muted (STOP), 1.0 = Active (PLAY)
+    OnePoleSmoother pitchModeSmoother_{}; // 0.0 = MS-20 Filter/LPG, 1.0 = Pitch Bend
+    OnePoleSmootherBank<7>
+        punchBusSmoothers_{}; // [0..6] surge, dubLpf, spatial, ring, sync, scrm, hpf
     const EngineControlState* lastControlPtr_ = nullptr;
     uint32_t lastControlSeq_ = 0u;
     float prevStutterEdgeSec_ = -1.0f;
@@ -113,6 +111,12 @@ class DroneEngineCore {
     std::array<uint8_t, kScopeAlignDelaySlots> voiceRisingMaskDelay_{};
     std::array<std::array<int16_t, kNumOscillators>, kScopeAlignDelaySlots> voiceScopeDelay_{};
     uint32_t voiceScopeDelayWrite_ = 0u;
+
+    // Resident 16-frame 4x-oversampled voice & stereo span scratch (keeps 1,536 B off Core 1's
+    // 7.25 KiB _c1_ustack and guarantees VoiceFilterCoProcessor never references a stack frame).
+    alignas(16) VoiceFilterCoProcessor::VoiceSpanBuffer spanSub_{};
+    alignas(16) std::array<std::array<StereoFrame, kOversampleFactor>,
+                           kMaxFilterSpanFrames> osStereoSpan_{};
 };
 
 // Complete Core 1 portable synthesis & filtering engine composing `EngineSharedBuses` +

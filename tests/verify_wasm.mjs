@@ -9,7 +9,9 @@ import { WASM_SUMMARY, WASM_TELEMETRY } from '../platforms/sim/web/wasm-abi.js';
 
 const wasmPath = new URL('../platforms/sim/web/ruido.wasm', import.meta.url);
 const bytes = fs.readFileSync(wasmPath);
-assert.ok(bytes.length > 4096 && bytes.length < 600000, `Unexpected wasm size: ${bytes.length}`);
+// Unlinked `-O3 -c` Wasm object includes `.linking` + `.reloc.*` sections (FM-1 `.fwsc` < 600 KiB
+// XIP ceiling is enforced separately in `platforms/fm1/build_fm1.py`).
+assert.ok(bytes.length > 4096 && bytes.length < 720000, `Unexpected wasm size: ${bytes.length}`);
 
 const mod = await WebAssembly.compile(bytes);
 const imports = WebAssembly.Module.imports(mod);
@@ -121,31 +123,36 @@ const summaryIdx = ex.wasm_ui_get_summary_ptr() >> 2;
 assert.equal(f32[summaryIdx + WASM_SUMMARY.FX_PAGE_OPEN], 1.0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.FX_VOICE_FOCUS], 0.0); // OSC 1
 assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 0.0); // LiveMixer
-ex.wasm_ui_encoder(0, 4);                                         // SELECT -> OSC 2 on FX page
+ex.wasm_ui_button(2, 1);                                          // 2nd FX tap -> OSC 2
+ex.wasm_ui_button(2, 0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.FX_VOICE_FOCUS], 1.0);
-assert.ok(Math.abs(f32[ledsIdx + 0] - 0.86) < 1e-4);      // OP1 Drive rest -> 86%
-assert.ok(Math.abs(f32[ledsIdx + 1] - 0.50) < 1e-4);      // OP2 Sub Octave rest -> 50%
-assert.ok(Math.abs(f32[ledsIdx + 2] - 0.50) < 1e-4);      // OP3 Ratio Lock rest -> 50%
-assert.ok(Math.abs(f32[ledsIdx + 3] - 0.50) < 1e-4);      // OP4 Low Pass rest -> 50%
-assert.ok(Math.abs(f32[ledsIdx + 4] - 0.22) < 1e-4);      // OP5 Unison rest -> 22%
-assert.ok(Math.abs(f32[ledsIdx + 5] - 0.22) < 1e-4);      // OP6 Spread rest -> 22%
-for (let s = 0; s < 4; s++) {
-  assert.ok(Math.abs(f32[ledsIdx + 6 + s] - 0.0) < 1e-4); // PIT..POLY Solo rest -> 0% (binary off)
-}
-assert.ok(Math.abs(f32[ledsIdx + 10] - 0.12) < 1e-4);     // 11th Freeze rest -> 12%
+ex.wasm_ui_encoder(0, -4);                                        // SELECT CCW -> back to OSC 1
+assert.equal(f32[summaryIdx + WASM_SUMMARY.FX_VOICE_FOCUS], 0.0);
+assert.ok(Math.abs(f32[ledsIdx + 0] - 0.65) < 1e-4);      // OP1 Drive rest -> 65%
+assert.ok(Math.abs(f32[ledsIdx + 1] - 0.65) < 1e-4);      // OP2 Sub Octave rest -> 65%
+assert.ok(Math.abs(f32[ledsIdx + 2] - 0.65) < 1e-4);      // OP3 Ratio Lock rest -> 65%
+assert.ok(Math.abs(f32[ledsIdx + 3] - 0.40) < 1e-4);      // OP4 Low Pass rest -> 40%
+assert.ok(Math.abs(f32[ledsIdx + 4] - 0.40) < 1e-4);      // OP5 High Pass rest -> 40%
+assert.ok(Math.abs(f32[ledsIdx + 5] - 0.15) < 1e-4);      // OP6 Unison rest -> 15%
+assert.ok(Math.abs(f32[ledsIdx + 6] - 0.15) < 1e-4);      // PIT Detune rest -> 15%
+assert.ok(Math.abs(f32[ledsIdx + 7] - 0.15) < 1e-4);      // GLO Spread rest -> 15%
+assert.ok(Math.abs(f32[ledsIdx + 8] - 0.15) < 1e-4);      // MONO Hold rest -> 15%
+assert.ok(Math.abs(f32[ledsIdx + 9] - 0.0) < 1e-4);       // POLY Tap Tempo rest -> 0% in LiveMixer
+assert.ok(Math.abs(f32[ledsIdx + 10] - 1.0) < 1e-4);      // 11th SHIFT beacon -> 100%
 assert.ok(Math.abs(f32[ledsIdx + 27 + 2] - 1.0) < 1e-4);  // FX button -> 100% while open
 assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.15) < 1e-4); // SEL button -> 15% rest when closed
-assert.ok(Math.abs(f32[ledsIdx + 27 + 5] - 0.15) < 1e-4); // LFO button -> 15% rest when closed & depth==0
+assert.ok(f32[ledsIdx + 27 + 5] > 0.15 && f32[ledsIdx + 27 + 5] <= 0.375); // LFO button breathes w/ active boot LFOs
 assert.ok(Math.abs(f32[ledsIdx + 27 + 6] - 0.15) < 1e-4); // EDIT button -> 15% rest when closed & clean
 assert.ok(Math.abs(f32[ledsIdx + 27 + 7] - 0.15) < 1e-4); // GLO right button -> 15% rest when closed
+assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 0.15) < 1e-4); // HOME button -> 15% while FX page is open
 assert.ok(Math.abs(f32[ledsIdx + 27 + 12] - 0.0) < 1e-6); // PLAY Green LED -> 0% while sound ON
 assert.ok(Math.abs(f32[ledsIdx + 27 + 13] - 0.0) < 1e-6); // REC Red LED -> 0%
 assert.ok(Math.abs(f32[ledsIdx + 41] - 1.0) < 1e-4);      // STOP Red LED -> 100% while sound ON
 for (let i = 0; i < 4; i++) {
-  assert.ok(Math.abs(f32[ledsIdx + 11 + i] - 0.82) < 1e-4);       // Keys 1-4 Filter -> 82% rest
-  assert.ok(Math.abs(f32[ledsIdx + 11 + 4 + i] - 0.48) < 1e-4);   // Keys 5-8 Octave -> 48% rest
-  assert.ok(Math.abs(f32[ledsIdx + 11 + 8 + i] - 0.16) < 1e-4);   // Keys 9-12 Scene (edited) -> 16% rest
-  assert.ok(Math.abs(f32[ledsIdx + 11 + 12 + i] - 0.0) < 1e-4);   // Keys 13-16 Mute -> 0% unmuted rest
+  assert.ok(Math.abs(f32[ledsIdx + 11 + i] - 0.65) < 1e-4);       // Keys 1-4 Filter -> 65% rest
+  assert.ok(Math.abs(f32[ledsIdx + 11 + 4 + i] - 0.40) < 1e-4);   // Keys 5-8 Octave -> 40% rest
+  assert.ok(Math.abs(f32[ledsIdx + 11 + 8 + i] - 0.15) < 1e-4);   // Keys 9-12 Duty -> 15% rest
+  assert.ok(Math.abs(f32[ledsIdx + 11 + 12 + i] - 0.80) < 1e-4);   // Keys 13-16 Mute -> 80% audible (>=20 Hz)
 }
 
 // Tapping SEL (button 3) opens persistent Keyboard Model Status & Guidance screen (closing FX page),
@@ -156,7 +163,7 @@ ex.wasm_ui_tick_and_render(0.2);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.FX_PAGE_OPEN], 0.0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.PAN_PAGE_OPEN], 0.0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.SEL_PAGE_OPEN], 1.0);
-assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 9.0); // KnobBankMode::None (9) while SEL map is open
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 8.0); // KnobBankMode::None (8) while SEL map is open
 assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 1.0) < 1e-4);
 assert.ok(f32[ledsIdx + 27 + 2] > 0.30 && f32[ledsIdx + 27 + 2] <= 0.85);
 const selRgbaStart = ex.wasm_ui_get_rgba_ptr();
@@ -171,7 +178,7 @@ ex.wasm_ui_encoder(0, 4); // SELECT -> RhythmLab (2)
 assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 2.0);
 ex.wasm_ui_encoder(0, -8); // SELECT -> back to LiveMixer (0)
 assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 0.0);
-// Persists across 3.0s until dismissed by 2nd SEL tap
+// Persists across 3.0s; subsequent SEL taps cycle 0 -> 1 -> 2 -> 0; HOME dismisses!
 for (let i = 0; i < 15; i++) {
   ex.wasm_ui_tick_and_render(0.2);
 }
@@ -179,6 +186,15 @@ assert.equal(f32[summaryIdx + WASM_SUMMARY.SEL_PAGE_OPEN], 1.0);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 1.0) < 1e-4);
 ex.wasm_ui_button(3, 1);
 ex.wasm_ui_button(3, 0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 1.0);
+ex.wasm_ui_button(3, 1);
+ex.wasm_ui_button(3, 0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 2.0);
+ex.wasm_ui_button(3, 1);
+ex.wasm_ui_button(3, 0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 0.0);
+ex.wasm_ui_button(8, 1);
+ex.wasm_ui_button(8, 0);
 ex.wasm_ui_tick_and_render(0.2);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.SEL_PAGE_OPEN], 0.0);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 3] - 0.15) < 1e-4);
@@ -193,12 +209,13 @@ assert.equal(f32[summaryIdx + 40], 0.0); // lfoVoiceFocus === 0 (LFO A OSC 1)
 
 ex.wasm_ui_encoder(0, 4); // SELECT -> 1 (LFO B OSC 1)
 assert.equal(f32[summaryIdx + 40], 1.0);
-assert.equal(f32[summaryIdx + 41], 2.0); // Default TARGET === LPF (2)
-ex.wasm_ui_encoder(3, 28);  // KNOB1 TARGET -> A DEPTH (9, exclusive to LFO B!)
+assert.equal(f32[summaryIdx + 41], 1.0); // Scene 1 LFO B1 TARGET === WIDTH (1)
+ex.wasm_ui_encoder(3, 32);  // KNOB1 TARGET -> A DEPTH (9, exclusive to LFO B!)
 assert.equal(f32[summaryIdx + 41], 9.0);
 ex.wasm_ui_encoder(6, 120); // KNOB4 DEPTH on LFO B OSC 1
 
-ex.wasm_ui_encoder(0, 4); // SELECT -> 2 (LFO A OSC 2)
+ex.wasm_ui_button(5, 1);  // 2nd LFO tap -> 2 (LFO A OSC 2)
+ex.wasm_ui_button(5, 0);
 assert.equal(f32[summaryIdx + 40], 2.0);
 assert.equal(f32[summaryIdx + 41], 2.0); // Default TARGET === LPF (2)
 ex.wasm_ui_encoder(3, -8);  // KNOB1 TARGET -> PITCH (0, past WIDTH=1)
@@ -229,25 +246,42 @@ ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.1);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 5] - 1.0) < 1e-4); // LFO LED === 100% while open
 
-// Verify EDIT Page 3-Step Cycle (button 6):
-//  1st tap = Page 1 (WIDTH=0, DRIFT=1, LEVEL=2)
-//  2nd tap = Page 2 (PAN)
-//  3rd tap = Close
+// Verify HOME 4-Step Oscillator Core Cycle (button 8: Clean -> FREQUENCY(0) -> DUTY(1) -> DRIFT(2)
+// -> Clean) and EDIT 2-Step Console Mixer Cycle (button 6: LEVEL <-> PAN):
+ex.wasm_ui_button(8, 1);                  // Escape LFO -> Clean Scope
+ex.wasm_ui_button(8, 0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.LFO_PAGE_OPEN], 0.0);
+
+ex.wasm_ui_button(8, 1);                  // 1st HOME tap -> FREQUENCY (0)
+ex.wasm_ui_button(8, 0);
+ex.wasm_ui_tick_and_render(0.05);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.HOME_TARGET], 0.0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 0.0); // KnobBankMode::Frequency
+assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 1.0) < 1e-4);     // HOME LED === 100%
+
+ex.wasm_ui_button(8, 1);                  // 2nd HOME tap -> DUTY (1)
+ex.wasm_ui_button(8, 0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.HOME_TARGET], 1.0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 1.0); // KnobBankMode::PulseWidth
+ex.wasm_ui_encoder(3, -40);               // Narrow Osc 1 pulse width
+
+ex.wasm_ui_button(8, 1);                  // 3rd HOME tap -> DRIFT (2)
+ex.wasm_ui_button(8, 0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.HOME_TARGET], 2.0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 2.0); // KnobBankMode::VoiceDrift
+ex.wasm_ui_encoder(4, 60);                // Increase Osc 2 analog drift
+
+ex.wasm_ui_button(8, 1);                  // 4th HOME tap -> Clean Scope (Off)
+ex.wasm_ui_button(8, 0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.HOME_TARGET], 0.0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 0.0);
+
+// Open EDIT (button 6): 1st tap = LEVEL, 2nd tap = PAN, 3rd tap = wraps to LEVEL
 ex.wasm_ui_button(6, 1);
 ex.wasm_ui_button(6, 0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.EDIT_PAGE_OPEN], 1.0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.PAN_PAGE_OPEN], 0.0);
-assert.equal(f32[summaryIdx + WASM_SUMMARY.EDIT_TARGET], 2.0); // Level (2) default
-assert.equal(f32[summaryIdx + WASM_SUMMARY.LFO_PAGE_OPEN], 0.0);
-ex.wasm_ui_encoder(0, -8);               // SELECT -> Width (0)
-assert.equal(f32[summaryIdx + WASM_SUMMARY.EDIT_TARGET], 0.0);
-ex.wasm_ui_encoder(3, -40);              // Narrow Osc 1 pulse width
-ex.wasm_ui_encoder(0, 4);                // SELECT -> Drift (1)
-assert.equal(f32[summaryIdx + WASM_SUMMARY.EDIT_TARGET], 1.0);
-ex.wasm_ui_encoder(4, 60);               // Increase Osc 2 analog drift
-ex.wasm_ui_encoder(0, 4);                // SELECT -> Level (2)
-assert.equal(f32[summaryIdx + WASM_SUMMARY.EDIT_TARGET], 2.0);
-ex.wasm_ui_encoder(3, 180);              // Crank Osc 1 into 100% (4.5x pre-filter overdrive)
+ex.wasm_ui_encoder(3, 180);               // Crank Osc 1 into 100% (4.5x pre-filter overdrive)
 u8.copyWithin(
   ex.wasm_dsp_get_control_ptr(),
   ex.wasm_ui_get_control_ptr(),
@@ -262,25 +296,23 @@ for (let i = 0; i < WASM_TELEMETRY.COUNT; i++) {
 }
 ex.wasm_ui_apply_telemetry();
 ex.wasm_ui_tick_and_render(0.1);
-assert.ok(Math.abs(f32[ledsIdx + 27 + 6] - 1.0) < 1e-4); // EDIT LED === 100% on Page 1
+assert.ok(Math.abs(f32[ledsIdx + 27 + 6] - 1.0) < 1e-4); // EDIT LED === 100% on LEVEL
 
-// 2nd EDIT tap -> Page 2 (Spatial PAN), EDIT LED remains 100%
+// 2nd EDIT tap -> Spatial PAN, EDIT LED remains 100%
 ex.wasm_ui_button(6, 1);
 ex.wasm_ui_button(6, 0);
 ex.wasm_ui_tick_and_render(0.05);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.EDIT_PAGE_OPEN], 0.0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.PAN_PAGE_OPEN], 1.0);
-assert.ok(Math.abs(f32[ledsIdx + 27 + 6] - 1.0) < 1e-4); // EDIT LED === 100% on Page 2
-ex.wasm_ui_encoder(6, -30);              // Pan Osc 4 inward
+assert.ok(Math.abs(f32[ledsIdx + 27 + 6] - 1.0) < 1e-4); // EDIT LED === 100% on PAN
+ex.wasm_ui_encoder(6, -30);               // Pan Osc 4 inward
 assert.ok(f32[summaryIdx + 26] < 0.65);
 
-// 3rd EDIT tap -> closes EDIT/PAN cleanly, then re-open Page 1 for RGBA neutrality check
+// 3rd EDIT tap -> wraps to LEVEL for HudAmpGraph RGBA neutrality check!
 ex.wasm_ui_button(6, 1);
 ex.wasm_ui_button(6, 0);
-assert.equal(f32[summaryIdx + WASM_SUMMARY.EDIT_PAGE_OPEN], 0.0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.EDIT_PAGE_OPEN], 1.0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.PAN_PAGE_OPEN], 0.0);
-ex.wasm_ui_button(6, 1);
-ex.wasm_ui_button(6, 0);
 ex.wasm_ui_tick_and_render(0.2);
 
 // Re-open LFO page briefly so the subsequent LFO RGBA & HOME tests exercise LFO graph too,
@@ -312,31 +344,35 @@ for (let i = 0; i < rgbaBytes.length; i += 4) {
 }
 assert.ok(shades.size >= 24, `Expected smooth anti-aliased monochrome palette, got ${shades.size}`);
 
-// Exit LFO Page via HOME: active LFO keeps pulsing LFO LED between 15% and 60%
+// Exit LFO Page via HOME: HOME LED lights to 100% on Clean Scope while LFO LED pulses!
 ex.wasm_ui_button(8, 1);
 ex.wasm_ui_button(8, 0);
 ex.wasm_ui_tick_and_render(0.2);
 assert.equal(f32[summaryIdx + 39], 0.0);
-assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 0.12) < 1e-4);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 1.0) < 1e-4);
 assert.ok(f32[ledsIdx + 27 + 5] >= 0.149 && f32[ledsIdx + 27 + 5] <= 0.61);
 
-// Pressing HOME when no HUD is active latches FREQUENCY HUD open (100% HOME LED); pressing again hides it
+// Pressing HOME when no HUD is active latches FREQUENCY HUD open (100% HOME LED);
+// 3 more taps step DUTY -> DRIFT -> Clean Scope (still 100% HOME LED across all Home states!)
 ex.wasm_ui_button(8, 1);
 ex.wasm_ui_button(8, 0);
 ex.wasm_ui_tick_and_render(2.0);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 1.0) < 1e-4);
-ex.wasm_ui_button(8, 1);
-ex.wasm_ui_button(8, 0);
+for (let step = 0; step < 3; step++) {
+  ex.wasm_ui_button(8, 1);
+  ex.wasm_ui_button(8, 0);
+}
 ex.wasm_ui_tick_and_render(0.2);
-assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 0.12) < 1e-4);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 1.0) < 1e-4);
 
-// Verify right-panel GLO opens GLOBAL CONFIG (button 7, OUTPUT ROUTING at row 0),
+// Verify right-panel GLO opens GLOBAL CONFIG (button 7, dimming HOME LED to 15%),
 // 4-slot SAVE + SNAP 1-4 + PRESETS smooth glide, and 3/3 CIRCUIT LAB Stutter chopper!
 ex.wasm_ui_button(7, 1);
 ex.wasm_ui_button(7, 0);
 ex.wasm_ui_tick_and_render(0.2);
 assert.equal(f32[summaryIdx + 45], 1.0);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 7] - 1.0) < 1e-4);
+assert.ok(Math.abs(f32[ledsIdx + 27 + 8] - 0.15) < 1e-4);
 assert.equal(f32[summaryIdx + 35], 0.0); // STEREO initially
 ex.wasm_ui_encoder(2, 4);                // ALGORITHM -> MONO!
 assert.equal(f32[summaryIdx + 35], 1.0);
@@ -347,41 +383,75 @@ ex.wasm_ui_button(7, 0);
 ex.wasm_ui_tick_and_render(0.2);
 assert.equal(f32[summaryIdx + 45], 0.0);
 
-// Arm SAVE (button 9) + tap Key 10 (white 9 = SNAP 2) to store current patch, then PRESETS -> SNAP 3
+// Verify 3-step SAVE cycle (1st = STORE SCENE, 2nd = DELETE SCENE, 3rd = clean 150ms exit),
+// then store current patch into SCENE 2 (Key 10 = white 9)
 const osc1HzBeforeSave = f32[summaryIdx + 0];
 ex.wasm_ui_button(9, 1);
 ex.wasm_ui_button(9, 0);
-assert.equal(f32[summaryIdx + 38], 1.0); // saveArmed === true
-ex.wasm_ui_white_pressure(9, 0.90);      // Store into SNAP 2!
+assert.equal(f32[summaryIdx + 38], 1.0); // 1/2 STORE SCENE armed
+ex.wasm_ui_button(9, 1);
+ex.wasm_ui_button(9, 0);
+assert.equal(f32[summaryIdx + 38], 1.0); // 2/2 DELETE SCENE armed
+ex.wasm_ui_button(9, 1);
+ex.wasm_ui_button(9, 0);
+assert.equal(f32[summaryIdx + 38], 0.0); // 3rd press exits cleanly!
+ex.wasm_ui_tick_and_render(0.2);
+
+ex.wasm_ui_button(9, 1);
+ex.wasm_ui_button(9, 0);
+assert.equal(f32[summaryIdx + 38], 1.0);
+ex.wasm_ui_white_pressure(9, 0.90);      // Store into SCENE 2!
 ex.wasm_ui_white_gate(9, 0);
 assert.equal(f32[summaryIdx + 38], 0.0); // saveArmed cleared!
 for (let i = 0; i < 12; i++) {
   ex.wasm_ui_tick_and_render(0.2);
 }
-// Clean active SNAP 2 rests at 100%, inactive occupied SNAP slots rest at 16%
-assert.ok(Math.abs(f32[ledsIdx + 11 + 9] - 1.0) < 1e-4);
-assert.ok(Math.abs(f32[ledsIdx + 11 + 8] - 0.16) < 1e-4);
+// While holding SHIFT (black key 10), ACTIVE SCENE 2 lights at 80%, other STORED slots at 40%
+ex.wasm_ui_black_key(10, 1);
+ex.wasm_ui_tick_and_render(0.016);
+assert.ok(Math.abs(f32[ledsIdx + 11 + 9] - 0.80) < 1e-4);
+assert.ok(Math.abs(f32[ledsIdx + 11 + 8] - 0.40) < 1e-4);
+ex.wasm_ui_black_key(10, 0);
+ex.wasm_ui_tick_and_render(0.016);
 
-// Turn PRESETS encoder (1) CW -> smooth continuous overlapping morph toward SNAP 3 (27.5 Hz)!
+// Endless 360-deg circular PRESETS morph (2 -> 3 -> 4 -> 1 -> 2):
 ex.wasm_ui_consume_dirty();
-ex.wasm_ui_encoder(1, 4); // 1 detent: gentle partial morph (not a discrete jump!)
+ex.wasm_ui_encoder(1, 24); // +6 detents: smooth midpoint blend between SCENE 2 and SCENE 3
 assert.equal(ex.wasm_ui_consume_dirty(), 1);
 ex.wasm_ui_tick_and_render(0.016);
 const partialMorphHz = f32[summaryIdx + 0];
-assert.ok(partialMorphHz < osc1HzBeforeSave && partialMorphHz > 40.0);
-ex.wasm_ui_encoder(1, 44); // +11 more detents -> centered on SNAP 3 with neighboring overlap
+assert.ok(partialMorphHz < osc1HzBeforeSave && partialMorphHz > 56.0);
+ex.wasm_ui_encoder(1, 24); // +6 more detents (48 ticks) -> 100% pure SCENE 3 (55.0 Hz)!
 ex.wasm_ui_tick_and_render(0.016);
-assert.ok(f32[summaryIdx + 0] < partialMorphHz && f32[summaryIdx + 0] < 42.0);
+assert.ok(Math.abs(f32[summaryIdx + 0] - 55.0) < 0.15);
+ex.wasm_ui_encoder(1, 96); // +2 spans (3 -> 4 -> wraps seamlessly to 100% pure SCENE 1 = 65.41 Hz!)
+ex.wasm_ui_tick_and_render(0.016);
+assert.ok(Math.abs(f32[summaryIdx + 0] - 65.41) < 0.15);
+ex.wasm_ui_encoder(1, 48); // +1 span (1 -> 100% pure SCENE 2)
+for (let i = 0; i < 12; i++) {
+  ex.wasm_ui_tick_and_render(0.2);
+}
+assert.ok(Math.abs(f32[summaryIdx + 0] - osc1HzBeforeSave) < 0.1);
 
-// Tap Key 10 (white 9 = SNAP 2) -> glides smoothly back to saved patch & dirties control in tick!
+// Tweak KNOB 1 -> SHIFT + SCENE 2 stays at 80% ACTIVE (zero EDITED dimming); 1-Tap Snap-Back glides back!
+ex.wasm_ui_encoder(3, -40);
+ex.wasm_ui_black_key(10, 1);
+ex.wasm_ui_tick_and_render(0.016);
+assert.ok(Math.abs(f32[ledsIdx + 11 + 9] - 0.80) < 1e-3);
 ex.wasm_ui_white_pressure(9, 1.0);
 ex.wasm_ui_white_gate(9, 0);
+ex.wasm_ui_black_key(10, 0);
 ex.wasm_ui_consume_dirty();
 for (let i = 0; i < 6; i++) {
   ex.wasm_ui_tick_and_render(0.1);
 }
 assert.equal(ex.wasm_ui_consume_dirty(), 1);
 assert.ok(Math.abs(f32[summaryIdx + 0] - osc1HzBeforeSave) < 0.1);
+ex.wasm_ui_black_key(10, 1);
+ex.wasm_ui_tick_and_render(0.016);
+assert.ok(Math.abs(f32[ledsIdx + 11 + 9] - 0.80) < 1e-4);
+ex.wasm_ui_black_key(10, 0);
+ex.wasm_ui_tick_and_render(0.016);
 
 // Switch across 3-model SEL carousel (0..2 -> RhythmLab at end) then select 2/3 CIRCUIT LAB (1)
 ex.wasm_ui_button(3, 1);
@@ -390,8 +460,8 @@ ex.wasm_ui_encoder(0, 12); // -> RhythmLab (2)
 assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 2.0);
 ex.wasm_ui_encoder(0, -4); // -> CircuitLab (1)
 assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 1.0);
-ex.wasm_ui_button(3, 1);
-ex.wasm_ui_button(3, 0);
+ex.wasm_ui_button(8, 1);
+ex.wasm_ui_button(8, 0);
 
 // Exercise CROSS-PIN (white 0), FOLD (white 4), CRUSH (white 8), RING MOD (OP2), HARD SYNC (OP5), SCREAM (OP4)
 ex.wasm_ui_white_pressure(0, 0.85);
@@ -437,18 +507,22 @@ ex.wasm_ui_tick_and_render(0.2);
 // engage EUCLID + PLUCK + SWING, verify DSP rhythmPhase + 42-LED bounds + B&W RGBA strips, then MIDI Stop!
 ex.wasm_ui_button(3, 1);
 ex.wasm_ui_button(3, 0);
-ex.wasm_ui_encoder(0, 8); // -> RhythmLab (2)
-assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 2.0);
-ex.wasm_ui_button(3, 1);
+ex.wasm_ui_button(3, 1); // 2nd SEL tap -> RhythmLab (2) from CircuitLab (1)
 ex.wasm_ui_button(3, 0);
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KEYBOARD_MODEL], 2.0);
+ex.wasm_ui_button(8, 1);
+ex.wasm_ui_button(8, 0);
 
 assert.equal(f32[summaryIdx + WASM_SUMMARY.EFFECTIVE_CLOCK_BPM], 120.0); // Default internal 120 BPM
 assert.equal(f32[summaryIdx + WASM_SUMMARY.MIDI_CLOCK_SYNCED], 0.0);
 
-// In 3/3 RHYTHM LAB, turning ALGORITHM (encoder 2) adjusts Master Tempo logarithmically across
-// [20, 3000] BPM without touching circuitCoupling, and 11th key (index 10) performs TAP TEMPO!
+// Across all 3 models, SHIFT + ALGORITHM (black key 10 + encoder 2) adjusts Master Tempo
+// logarithmically across [20, 3000] BPM without touching circuitCoupling, and POLY (black key 9)
+// performs TAP TEMPO!
 const couplingBeforeAlg = f32[summaryIdx + WASM_SUMMARY.CIRCUIT_COUPLING];
+ex.wasm_ui_black_key(10, 1);
 ex.wasm_ui_encoder(2, 48); // +1.0 octave -> ~240.0 BPM
+ex.wasm_ui_black_key(10, 0);
 assert.ok(Math.abs(f32[summaryIdx + WASM_SUMMARY.EFFECTIVE_CLOCK_BPM] - 240.0) < 0.5);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.CIRCUIT_COUPLING], couplingBeforeAlg);
 ex.wasm_ui_tick_and_render(0.05);
@@ -457,14 +531,14 @@ for (let i = 0; i < tempoRgba.length; i += 4) {
   assert.equal(tempoRgba[i], tempoRgba[i + 1]);
   assert.equal(tempoRgba[i + 1], tempoRgba[i + 2]);
 }
-// Tap Tempo on 11th tall key (black key 10) spaced by 0.40 s (4 x 0.10 s) -> 150.0 BPM!
-ex.wasm_ui_black_key(10, 1);
-ex.wasm_ui_black_key(10, 0);
+// Tap Tempo on POLY key (black key 9) spaced by 0.40 s (4 x 0.10 s) -> 150.0 BPM!
+ex.wasm_ui_black_key(9, 1);
+ex.wasm_ui_black_key(9, 0);
 for (let i = 0; i < 4; i++) {
   ex.wasm_ui_tick_and_render(0.10);
 }
-ex.wasm_ui_black_key(10, 1);
-ex.wasm_ui_black_key(10, 0);
+ex.wasm_ui_black_key(9, 1);
+ex.wasm_ui_black_key(9, 0);
 assert.ok(Math.abs(f32[summaryIdx + WASM_SUMMARY.EFFECTIVE_CLOCK_BPM] - 150.0) < 0.5);
 
 ex.wasm_ui_midi_realtime(0xFA, 5.0);       // MIDI Start (seconds)
@@ -571,7 +645,7 @@ for (let i = 0; i < 6; i++) {
 }
 ex.wasm_ui_encoder(0, 4); // SELECT -> OSCILLOSCOPE Wide2x
 ex.wasm_ui_tick_and_render(0.05);
-assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 9.0); // KnobBankMode::None (9)
+assert.equal(f32[summaryIdx + WASM_SUMMARY.KNOB_BANK], 8.0); // KnobBankMode::None (8)
 for (let i = 0; i < 20; i++) {
   ex.wasm_ui_tick_and_render(0.1);
 }
@@ -585,7 +659,7 @@ ex.wasm_ui_tick_and_render(0.065);
 assert.ok(Math.abs(f32[ledsIdx + 27 + 4]) < 1e-4);
 
 // Arm SAVE (button 9), turn SELECT (encoder 0) to DELETE SCENE, delete SCENE 2 (white key 9),
-// and verify PRESETS (encoder 1) skips deleted SCENE 2 straight from SCENE 1 -> SCENE 3 (27.5 Hz):
+// and verify PRESETS (encoder 1) skips deleted SCENE 2 straight from SCENE 1 -> SCENE 3 (55.0 Hz):
 ex.wasm_ui_button(9, 1); // SAVE -> arm STORE SCENE
 ex.wasm_ui_button(9, 0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.SAVE_ARMED], 1.0);
@@ -595,7 +669,7 @@ ex.wasm_ui_white_gate(9, 0);
 assert.equal(f32[summaryIdx + WASM_SUMMARY.SAVE_ARMED], 0.0);
 ex.wasm_ui_encoder(1, 48); // PRESETS +12 detents -> skips deleted SCENE 2 & centers on SCENE 3
 ex.wasm_ui_tick_and_render(0.06);
-assert.ok(f32[summaryIdx + WASM_SUMMARY.VOICE_BASE] < 45.0 && f32[summaryIdx + WASM_SUMMARY.VOICE_BASE] > 25.0);
+assert.ok(f32[summaryIdx + WASM_SUMMARY.VOICE_BASE] < 58.0 && f32[summaryIdx + WASM_SUMMARY.VOICE_BASE] > 52.0);
 
 console.log(
   `[PASS] Wasm V8 verification (${(bytes.length / 1024).toFixed(1)} KB wasm, ${shades.size} neutral B&W shades).`

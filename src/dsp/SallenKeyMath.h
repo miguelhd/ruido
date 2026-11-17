@@ -171,15 +171,6 @@ RUIDO_ALWAYS_INLINE float stepHpNonlinearPrecomputed(float x, float& s1, float& 
     return y2;
 }
 
-inline float stepHpNonlinear(float x, float& s1, float& s2, float& hist1, float& hist2, float g,
-                             float k, float otaScale, float invOtaScale, float diodeSpan,
-                             float invDiodeSpan) noexcept {
-    return stepHpNonlinearPrecomputed(x, s1, s2, hist1, hist2, g, k, kHpOta1Pos * otaScale,
-                                      kHpOta1Neg * otaScale, kInvHpOta1Pos * invOtaScale,
-                                      kInvHpOta1Neg * invOtaScale, kHpOta2Rail * otaScale,
-                                      kInvHpOta2Rail * invOtaScale, diodeSpan, invDiodeSpan);
-}
-
 RUIDO_ALWAYS_INLINE float stepLpNonlinear(float x, float& s1, float& s2, float& hist1, float& hist2,
                                           float g, float k, float rail1, float invRail1, float pos2,
                                           float neg2, float invPos2, float invNeg2, float diodeSpan,

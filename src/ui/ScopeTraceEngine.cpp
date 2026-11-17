@@ -87,8 +87,11 @@ void ScopeTraceEngine::pushScopeSamples(const ScopeFrame* frames, size_t count,
     for (size_t i = 0u; i < count; ++i) {
         if (!scopeFrozen) {
             CompactScopeSample packed{};
-            packed.leftQ12 = packQ3_12(frames[i].left);
-            packed.rightQ12 = packQ3_12(frames[i].right);
+            const int32_t l13 = frames[i].leftQ13;
+            const int32_t r13 = frames[i].rightQ13;
+            packed.leftQ12 = static_cast<int16_t>((l13 >= 0) ? ((l13 + 1) >> 1) : ((l13 - 1) >> 1));
+            packed.rightQ12 =
+                static_cast<int16_t>((r13 >= 0) ? ((r13 + 1) >> 1) : ((r13 - 1) >> 1));
             const uint8_t mask = frames[i].voiceRisingMask;
             for (size_t v = 0u; v < kNumOscillators; ++v) {
                 const bool edge = ((mask >> v) & 1u) != 0u;
@@ -114,7 +117,8 @@ void ScopeTraceEngine::refreshOverdriveHair(const EngineControlState& control,
 
 void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState& control,
                                           bool scopeFrozen, uint8_t stutterGateMask,
-                                          ScopeTimebase timebase) noexcept {
+                                          ScopeTimebase timebase, bool skipRasterAndBloom,
+                                          void (*coProcYield)() noexcept) noexcept {
     if (scopeFrozen && scopeValid_) {
         return;
     }
@@ -274,6 +278,9 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
             chosenTrigInt = candidates[bestC].trigInt;
             chosenTrigFrac = candidates[bestC].trigFrac;
         }
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
 
         thermalPhase_ += clampf(dtSec, 0.0f, 0.10f) * 0.065f;
         while (thermalPhase_ >= 1.0f) {
@@ -334,6 +341,9 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
             vc.fill(0.0f);
         }
     }
+    if (coProcYield != nullptr) {
+        coProcYield();
+    }
 
     std::array<float, kNumOscillators> rawVoicePres{};
     float rawTotalVoicePres = 0.0f;
@@ -387,6 +397,10 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
         trigSigValid_ = true;
     } else if (busPresenceSmooth_ <= 0.005f) {
         trigSigValid_ = false;
+    }
+    if (skipRasterAndBloom) {
+        phosphorPrimed_ = true;
+        return;
     }
 
     const float stoppingBlend = clampf((busPresenceSmooth_ - rawAnyPres) * 1.5f, 0.0f, 1.0f);
@@ -544,6 +558,9 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
         applyStrandPhosphor(baseStrand + 2u, scratchB.data(), vAlphaFast, snapColdBoot);
         strandWeightQ8_[baseStrand + 2u] =
             static_cast<uint16_t>((0.45f + 0.27f * soloFactor) * pres * 256.0f + 0.5f);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
 
     smoothZeroPhase(liveL.data(), scratchB.data(), kTracePoints, 0.24f, 2u);
@@ -571,7 +588,9 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
     updateOverdriveHair<kHistorySize>(history_, historyWrite_, historyCount_, streamStalled,
                                       snapColdBoot, control, overdriveHair_);
     phosphorPrimed_ = true;
-
+    if (coProcYield != nullptr) {
+        coProcYield();
+    }
     rebuildTilesAndBloom();
     scopeValid_ = true;
 }

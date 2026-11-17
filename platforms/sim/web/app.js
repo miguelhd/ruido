@@ -404,11 +404,11 @@ function bindKnobs() {
         e.preventDefault();
         const knobBank =
           uiWasm && uiPtrs ? Math.round(uiF32[uiPtrs.summary + WASM_SUMMARY.KNOB_BANK]) : 0;
-        // KnobBankMode: Lfo = 6, None (GlobalConfig / SEL) = 9
+        // KnobBankMode: Lfo = 6, None (GlobalConfig / SEL / SAVE / Scene) = 8
         const isDiscrete =
           encId === 0 ||
           encId === 1 ||
-          (encId === 2 && knobBank === 9) ||
+          (encId === 2 && knobBank === 8) ||
           (encId === 3 && knobBank === 6);
 
         if (isDiscrete) {
@@ -536,9 +536,12 @@ function bindButtonsAndKeybed() {
       const startY = e.clientY;
 
       uiWasm.wasm_ui_black_key(keyId, 1);
-      setBlackPressure(basePressure);
+      if (keyId < 8) {
+        setBlackPressure(basePressure);
+      }
 
       const onMove = (ev) => {
+        if (keyId >= 8) return;
         const dy = startY - ev.clientY;
         setBlackPressure(basePressure + dy / 115);
       };
@@ -609,9 +612,12 @@ function bindButtonsAndKeybed() {
       const startY = e.clientY;
 
       uiWasm.wasm_ui_white_gate(wIdx, 1);
-      setPadPressure(basePressure);
+      if (wIdx < 12) {
+        setPadPressure(basePressure);
+      }
 
       const onMove = (ev) => {
+        if (wIdx >= 12) return;
         const dy = startY - ev.clientY;
         setPadPressure(basePressure + dy / 115);
       };

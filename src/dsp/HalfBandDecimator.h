@@ -53,9 +53,6 @@ class StereoHalfBandDecimator4x {
         }
     };
 
-    StereoFrame decimate2xStage1Stereo(StereoFrame s0, StereoFrame s1) noexcept;
-    StereoFrame decimate2xStage2Stereo(StereoFrame s0, StereoFrame s1) noexcept;
-
     ChannelState left_{};
     ChannelState right_{};
     size_t ew1_ = 0u;

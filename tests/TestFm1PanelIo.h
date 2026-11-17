@@ -4,11 +4,13 @@
 #include "../platforms/fm1/fm1_panel_io.h"
 #include "../platforms/fm1/fm1_storage_io.h"
 #include "core/RuidoController.h"
+#include "ui/HudFormat.h"
 
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace ruido_test {
 
@@ -205,20 +207,21 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
     RUIDO_FM1_CHECK((lit[kStopRedCol] & (1u << kStopRedRow)) != 0u);
     RUIDO_FM1_CHECK((lit[kPlayGreenCol] & (1u << kPlayGreenRow)) == 0u);
     RUIDO_FM1_CHECK((bg[kPlayGreenCol] & (1u << kPlayGreenRow)) == 0u);
-    // Rest panel buttons (e.g. FX at col 6, row 1 = 15% perceptual) sit cleanly on `fm1_led_bg`
-    RUIDO_FM1_CHECK((bg[6u] & (1u << 1u)) != 0u);
-    // Left-bright -> right-dark gradient: FILTER 1 (n0 at col 3, row 4 = 82% -> `dim|lit`),
-    // OCTAVE 1 (n7 at col 9, row 4 = 48% -> `dim|lit`), active SCENE 1 (n14 at col 5, row 3 = 100%
-    // -> `lit`), occupied SCENE 2 (n16 at col 7, row 3 = 16% -> `bg|dim`), and unmuted MUTE 1 (n21
-    // at col 1, row 2 = 0% dark):
+    // Rest panel buttons (SEL = 15% perceptual -> `fm1_led_bg`; active boot FX -> `bg|dim`)
+    const MatrixCoord selMc = kFm1KeyIdCoord[static_cast<size_t>(ButtonId::Sel)];
+    RUIDO_FM1_CHECK((bg[selMc.col] & (1u << selMc.row)) != 0u);
+    RUIDO_FM1_CHECK(((bg[6u] | dim[6u]) & (1u << 1u)) != 0u);
+    // Left-bright -> right-dark gradient: FILTER 1 (n0 at col 3, row 4 = 65% -> `dim|lit`),
+    // OCTAVE 1 (n7 at col 9, row 4 = 40% -> `dim|lit`), DUTY 1 (n14 at col 5, row 3 = 15% -> `bg`),
+    // DUTY 2 (n16 at col 7, row 3 = 15% -> `bg`), and audible MUTE 1 (n21 at col 1, row 2 = 100%
+    // -> `lit`):
     RUIDO_FM1_CHECK(((dim[3u] | lit[3u]) & (1u << 4u)) != 0u);
     RUIDO_FM1_CHECK(((dim[9u] | lit[9u]) & (1u << 4u)) != 0u);
-    RUIDO_FM1_CHECK((lit[5u] & (1u << 3u)) != 0u);
-    RUIDO_FM1_CHECK(((bg[7u] | dim[7u]) & (1u << 3u)) != 0u);
-    RUIDO_FM1_CHECK(((lit[1u] | dim[1u] | bg[1u]) & (1u << 2u)) == 0u);
+    RUIDO_FM1_CHECK((bg[5u] & (1u << 3u)) != 0u);
+    RUIDO_FM1_CHECK((bg[7u] & (1u << 3u)) != 0u);
+    RUIDO_FM1_CHECK((lit[1u] & (1u << 2u)) != 0u);
 
-    // Stop audio via PLAY/STOP: PLAY green (col 8, row 1) lights, STOP red (col 10, row 2) goes
-    // dark
+    // Stop audio via PLAY/STOP: PLAY green (col 8, row 1) lights, STOP red & MUTE 1-4 go 0% dark
     ctrl.onButtonEvent(ButtonId::PlayStop, true);
     ctrl.onButtonEvent(ButtonId::PlayStop, false);
     for (int f = 0; f < 16; ++f) {
@@ -228,6 +231,7 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
     ledMod.stepFrame909Hz(lit, dim, bg);
     RUIDO_FM1_CHECK((lit[kPlayGreenCol] & (1u << kPlayGreenRow)) != 0u);
     RUIDO_FM1_CHECK((lit[kStopRedCol] & (1u << kStopRedRow)) == 0u);
+    RUIDO_FM1_CHECK(((lit[1u] | dim[1u] | bg[1u]) & (1u << 2u)) == 0u);
 
     // Verify mid-scale Delta-Sigma duty accuracy AND spatial phase staggering across columns:
     LedState customLeds{};
@@ -366,22 +370,27 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
         }
     }
 
-    // 7. Verify erase-free `0xF8020..0xF8FF0` DeviceSettingsBlob journal + deduplication
+    // 7. Verify erase-free 128 B Scene / LIVE journals & 16 B Settings journal + cold compaction
     {
         struct MockNvsFlash {
             std::array<PatchSnapshot, kNumSnapshots> slots{};
             std::array<bool, kNumSnapshots> slotValid{};
+            PatchSnapshot baseLive{};
+            bool baseLiveValid = false;
             DeviceSettingsBlob baseSettings{};
             bool baseSettingsValid = false;
-            std::array<uint8_t, 0x1000u> sectorF8{};
+            std::array<std::array<uint8_t, 0x1000u>, 6u> sectors{};
             uint32_t eraseCount = 0u;
             uint32_t baseSaveCount = 0u;
             uint32_t journalWriteCount = 0u;
 
             void initBlank() noexcept {
                 slotValid.fill(false);
+                baseLiveValid = false;
                 baseSettingsValid = false;
-                sectorF8.fill(0xFFu);
+                for (auto& sec : sectors) {
+                    sec.fill(0xFFu);
+                }
                 eraseCount = 0u;
                 baseSaveCount = 0u;
                 journalWriteCount = 0u;
@@ -405,48 +414,75 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
                 std::memcpy(dst, &gMockNvs.baseSettings, len);
                 return 0;
             }
+            if (idx == kNvsLivePatchIdx) {
+                if (!gMockNvs.baseLiveValid || len != sizeof(PatchSnapshot)) {
+                    return -1;
+                }
+                std::memcpy(dst, &gMockNvs.baseLive, len);
+                return 0;
+            }
             return -1;
         };
         const RuidoFm1BlobSaveFn saveFn = [](uint32_t idx, const void* src, uint32_t len) -> int {
+            if (idx >= gMockNvs.sectors.size()) {
+                return -1;
+            }
             if (idx < kNumSnapshots && len == sizeof(PatchSnapshot)) {
                 std::memcpy(&gMockNvs.slots[idx], src, len);
                 gMockNvs.slotValid[idx] = true;
+                gMockNvs.sectors[idx].fill(0xFFu);
+                std::memcpy(gMockNvs.sectors[idx].data() + 12u, src, len);
                 ++gMockNvs.baseSaveCount;
                 return 0;
             }
             if (idx == kNvsSettingsBlobIdx && len == sizeof(DeviceSettingsBlob)) {
                 std::memcpy(&gMockNvs.baseSettings, src, len);
                 gMockNvs.baseSettingsValid = true;
-                gMockNvs.sectorF8.fill(0xFFu);
-                std::memcpy(gMockNvs.sectorF8.data() + 12u, src, len);
+                gMockNvs.sectors[idx].fill(0xFFu);
+                std::memcpy(gMockNvs.sectors[idx].data() + 12u, src, len);
+                ++gMockNvs.baseSaveCount;
+                return 0;
+            }
+            if (idx == kNvsLivePatchIdx && len == sizeof(PatchSnapshot)) {
+                std::memcpy(&gMockNvs.baseLive, src, len);
+                gMockNvs.baseLiveValid = true;
+                gMockNvs.sectors[idx].fill(0xFFu);
+                std::memcpy(gMockNvs.sectors[idx].data() + 12u, src, len);
                 ++gMockNvs.baseSaveCount;
                 return 0;
             }
             return -1;
         };
         const RuidoFm1PreEraseFn preEraseFn = []() { ++gMockNvs.eraseCount; };
-        const RuidoFm1SettingsTailReadFn tailReadFn = [](uint32_t off, void* dst,
-                                                         uint32_t len) -> int {
-            if (off < kSettingsJournalBaseOff || off + len > gMockNvs.sectorF8.size()) {
+        const RuidoFm1TailReadFn tailReadFn = [](uint32_t sec, uint32_t off, void* dst,
+                                                 uint32_t len) -> int {
+            const uint32_t minOff =
+                (sec == kNvsSettingsBlobIdx) ? kSettingsJournalBaseOff : kPatchJournalBaseOff;
+            if (sec >= gMockNvs.sectors.size() || off < minOff ||
+                off + len > gMockNvs.sectors[sec].size()) {
                 return -1;
             }
-            std::memcpy(dst, gMockNvs.sectorF8.data() + off, len);
+            std::memcpy(dst, gMockNvs.sectors[sec].data() + off, len);
             return 0;
         };
-        const RuidoFm1SettingsTailWriteFn tailWriteFn = [](uint32_t off, const void* src,
-                                                           uint32_t len) -> int {
-            if (off < kSettingsJournalBaseOff || len != kSettingsJournalEntryBytes ||
-                (off & 0x0Fu) != 0u || off + len > gMockNvs.sectorF8.size()) {
+        const RuidoFm1TailWriteFn tailWriteFn = [](uint32_t sec, uint32_t off, const void* src,
+                                                   uint32_t len) -> int {
+            const uint32_t minOff =
+                (sec == kNvsSettingsBlobIdx) ? kSettingsJournalBaseOff : kPatchJournalBaseOff;
+            const uint32_t reqLen =
+                (sec == kNvsSettingsBlobIdx) ? kSettingsJournalEntryBytes : kPatchJournalEntryBytes;
+            if (sec >= gMockNvs.sectors.size() || off < minOff || len != reqLen ||
+                (off & (reqLen - 1u)) != 0u || off + len > gMockNvs.sectors[sec].size()) {
                 return -1;
             }
             const auto* inBytes = static_cast<const uint8_t*>(src);
             for (uint32_t i = 0u; i < len; ++i) {
                 // Enforce real SPI NOR flash physics: Page Program can only clear bits (1 -> 0)!
-                if ((gMockNvs.sectorF8[off + i] & inBytes[i]) != inBytes[i]) {
+                if ((gMockNvs.sectors[sec][off + i] & inBytes[i]) != inBytes[i]) {
                     return -4;
                 }
-                gMockNvs.sectorF8[off + i] =
-                    static_cast<uint8_t>(gMockNvs.sectorF8[off + i] & inBytes[i]);
+                gMockNvs.sectors[sec][off + i] =
+                    static_cast<uint8_t>(gMockNvs.sectors[sec][off + i] & inBytes[i]);
             }
             ++gMockNvs.journalWriteCount;
             return 0;
@@ -456,9 +492,12 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
         Fm1PanelState nvsPanel{};
         Fm1LedModulator nvsLeds{};
         Fm1NvsRuntimeState nvsRt{};
+        const EngineTelemetry dummyTel{};
         RUIDO_FM1_CHECK(loadBootNvsBlobs(loadFn, nvsCtrl, nvsPanel, nvsLeds, 0.6f, nvsRt,
                                          tailReadFn, saveFn) == 0u);
         RUIDO_FM1_CHECK(nvsRt.nextJournalSlot == 0u);
+        RUIDO_FM1_CHECK(nvsRt.nextLiveSlot == 0u);
+        RUIDO_FM1_CHECK(nvsRt.nextPatchSlot[1] == 0u);
 
         // Live Mixer pressure-key bounce `Scene 1 -> Scene 2 -> Scene 1` before 1.5 s deduplicates
         // to ZERO flash operations (neither erase nor journal write)!
@@ -466,65 +505,241 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
         nvsCtrl.onWhiteKeyGate(9u, false);
         nvsCtrl.onWhiteKeyGate(8u, true); // Back to Scene 1
         nvsCtrl.onWhiteKeyGate(8u, false);
+        for (int i = 0; i < 40; ++i) {
+            nvsCtrl.tick(0.02f, dummyTel);
+        }
         nvsRt.lastPanelTouchMs = 100u;
         RUIDO_FM1_CHECK(
             pollAndSaveNvsBlobs(1700u, 0u, saveFn, preEraseFn, nvsCtrl, nvsRt, tailWriteFn) == 0u);
         RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u && gMockNvs.journalWriteCount == 0u);
 
-        // Live Mixer pressure-key recall `Scene 1 -> Scene 3` appends 16 B at `0x020` after 1.5 s
-        // with ZERO `preEraseFn` / sector-erase calls (eliminating the ~50 ms audio+LED glitch)!
-        nvsCtrl.onWhiteKeyGate(10u, true); // Scene 3 (slot 2)
-        nvsRt.lastPanelTouchMs = 200u;
-        // Held key keeps save deferred even past 1.5 s
+        // Live `SAVE + Key 10` (`Scene 2`) writes 128 B Scene 2 journal + 16 B Settings journal
+        // with ZERO `preEraseFn` / sector erases!
+        nvsCtrl.onEncoderDelta(EncoderId::Knob1, 24);
+        const float savedScene2Hz = nvsCtrl.state().voices[0].frequencyHz;
+        nvsCtrl.onButtonEvent(ButtonId::Save, true);
+        nvsCtrl.onButtonEvent(ButtonId::Save, false);
+        nvsCtrl.onWhiteKeyGate(9u, true); // Store Scene 2
+        nvsCtrl.onWhiteKeyGate(9u, false);
         RUIDO_FM1_CHECK(
-            pollAndSaveNvsBlobs(2000u, 0u, saveFn, preEraseFn, nvsCtrl, nvsRt, tailWriteFn) == 0u);
-        nvsCtrl.onWhiteKeyGate(10u, false);
-        nvsRt.lastPanelTouchMs = 2100u;
+            pollAndSaveNvsBlobs(1800u, 0u, saveFn, preEraseFn, nvsCtrl, nvsRt, tailWriteFn) == 2u);
+        RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u && gMockNvs.baseSaveCount == 0u);
+        RUIDO_FM1_CHECK(nvsRt.nextPatchSlot[1] == 1u && nvsRt.nextJournalSlot == 1u);
+
+        // Tweak `KNOB 1` live WITHOUT saving: after 1.5 s idle, `LIVE` scratchpad appends 128 B
+        // with ZERO sector erases and restores across power-off with 50% Home Base LED!
+        nvsCtrl.onEncoderDelta(EncoderId::Knob1, 32);
+        const float liveTweakedHz = nvsCtrl.state().voices[0].frequencyHz;
+        nvsRt.lastPanelTouchMs = 2000u;
         RUIDO_FM1_CHECK(
             pollAndSaveNvsBlobs(3600u, 0u, saveFn, preEraseFn, nvsCtrl, nvsRt, tailWriteFn) == 1u);
-        RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u);
-        RUIDO_FM1_CHECK(gMockNvs.baseSaveCount == 0u);
-        RUIDO_FM1_CHECK(gMockNvs.journalWriteCount == 1u);
-        RUIDO_FM1_CHECK(nvsRt.nextJournalSlot == 1u);
-        RUIDO_FM1_CHECK(nvsRt.takeBaseBlobWritten() == 0u);
+        RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u && nvsRt.nextLiveSlot == 1u);
 
-        // Simulate a torn/corrupt slot 1 at `0x030`: cold boot must recover Scene 3 from slot 0 and
-        // advance `nextJournalSlot` past the dirty slot (`2`) so NOR `1 -> 0` writes stay clean!
-        gMockNvs.sectorF8[kSettingsJournalBaseOff + 16u + 4u] = 0x01u;
-        gMockNvs.sectorF8[kSettingsJournalBaseOff + 16u + 0u] = 0xAAu;
+        // Simulate a torn/corrupt Settings slot 1 at `0x030`: cold boot recovers Scene 2 + LIVE
+        // tweak and advances `nextJournalSlot` past the dirty slot (`2`)!
+        gMockNvs.sectors[kNvsSettingsBlobIdx][kSettingsJournalBaseOff + 16u + 4u] = 0x01u;
+        gMockNvs.sectors[kNvsSettingsBlobIdx][kSettingsJournalBaseOff + 16u + 0u] = 0xAAu;
 
         RuidoController bootCtrl2{};
         Fm1PanelState bootPanel2{};
         Fm1LedModulator bootLeds2{};
         Fm1NvsRuntimeState bootRt2{};
         RUIDO_FM1_CHECK(loadBootNvsBlobs(loadFn, bootCtrl2, bootPanel2, bootLeds2, 0.6f, bootRt2,
-                                         tailReadFn, saveFn) == (1u << kNvsSettingsBlobIdx));
-        RUIDO_FM1_CHECK(bootCtrl2.snapshots().activeSlot() == 2u);
-        RUIDO_FM1_CHECK(bootRt2.nextJournalSlot == 2u);
+                                         tailReadFn, saveFn) ==
+                        ((1u << 1u) | (1u << kNvsSettingsBlobIdx) | (1u << kNvsLivePatchIdx)));
+        RUIDO_FM1_CHECK(bootCtrl2.snapshots().activeSlot() == 1u);
+        RUIDO_FM1_CHECK(bootCtrl2.snapshots().isDirty());
+        bootCtrl2.onBlackKeyEvent(BlackKeyId::ScopeFreezeKey, true);
+        bootCtrl2.tick(0.016f, dummyTel);
+        RUIDO_FM1_CHECK(absf(bootCtrl2.leds().whiteKeyLeds[9] - 0.80f) < 1.0e-4f);
+        bootCtrl2.onBlackKeyEvent(BlackKeyId::ScopeFreezeKey, false);
+        RUIDO_FM1_CHECK(absf(bootCtrl2.state().voices[0].frequencyHz - liveTweakedHz) < 0.2f);
+        // Cold boot compacts LIVE (`afterLiveNonFf >= 1`) so all 30 journal slots start free (`0`)!
+        RUIDO_FM1_CHECK(bootRt2.nextJournalSlot == 2u && bootRt2.nextLiveSlot == 0u);
+        RUIDO_FM1_CHECK(gMockNvs.baseSaveCount == 1u);
 
-        // Fill journal past `kSettingsJournalBootCompactThreshold` (64 slots) with zero live
-        // erases, then verify cold-boot silent compaction resets `nextJournalSlot` back to `0`!
+        // 1-Tap Snap-Back on `SHIFT + Key 10` (`Scene 2`) glides back to `savedScene2Hz` and
+        // appends an `EMPTY` marker to `LIVE` scratchpad (`sector 5`) with ZERO erases!
+        bootCtrl2.onBlackKeyEvent(BlackKeyId::ScopeFreezeKey, true);
+        bootCtrl2.onWhiteKeyPressure(9u, 1.0f);
+        bootCtrl2.onWhiteKeyGate(9u, true);
+        bootCtrl2.onWhiteKeyGate(9u, false);
+        bootCtrl2.onWhiteKeyPressure(9u, 0.0f);
+        bootCtrl2.onBlackKeyEvent(BlackKeyId::ScopeFreezeKey, false);
+        for (int i = 0; i < 20; ++i) {
+            bootCtrl2.tick(0.02f, dummyTel);
+        }
+        RUIDO_FM1_CHECK(!bootCtrl2.snapshots().isDirty());
+        bootRt2.lastPanelTouchMs = 4000u;
+        RUIDO_FM1_CHECK(pollAndSaveNvsBlobs(5600u, 0u, saveFn, preEraseFn, bootCtrl2, bootRt2,
+                                            tailWriteFn) == 1u);
+        RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u && bootRt2.nextLiveSlot == 1u);
+
+        // Fill Settings journal past `kSettingsJournalBootCompactThreshold` (64) & Scene 2 journal
+        // past `kPatchJournalBootCompactThreshold` (8) with zero live erases, then verify cold-boot
+        // silent compaction resets both back to `0`!
+        for (uint32_t i = 0u; i < kPatchJournalBootCompactThreshold; ++i) {
+            bootCtrl2.onButtonEvent(ButtonId::Save, true);
+            bootCtrl2.onButtonEvent(ButtonId::Save, false);
+            bootCtrl2.onWhiteKeyGate(9u, true);
+            bootCtrl2.onWhiteKeyGate(9u, false);
+            (void)pollAndSaveNvsBlobs(6000u + i * 100u, 0u, saveFn, preEraseFn, bootCtrl2, bootRt2,
+                                      tailWriteFn);
+        }
         for (uint32_t i = 0u; i < kSettingsJournalBootCompactThreshold; ++i) {
             const uint8_t targetKey = static_cast<uint8_t>(8u + (i & 3u));
+            bootCtrl2.onBlackKeyEvent(BlackKeyId::ScopeFreezeKey, true);
             bootCtrl2.onWhiteKeyGate(targetKey, true);
             bootCtrl2.onWhiteKeyGate(targetKey, false);
-            bootRt2.lastPanelTouchMs = 5000u + i * 2000u;
-            (void)pollAndSaveNvsBlobs(6600u + i * 2000u, 0u, saveFn, preEraseFn, bootCtrl2, bootRt2,
+            bootCtrl2.onBlackKeyEvent(BlackKeyId::ScopeFreezeKey, false);
+            for (int t = 0; t < 35; ++t) {
+                bootCtrl2.tick(0.02f, dummyTel);
+            }
+            bootRt2.lastPanelTouchMs = 8000u + i * 2000u;
+            (void)pollAndSaveNvsBlobs(9600u + i * 2000u, 0u, saveFn, preEraseFn, bootCtrl2, bootRt2,
                                       tailWriteFn);
         }
         RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u);
-        RUIDO_FM1_CHECK(bootRt2.nextJournalSlot >= kSettingsJournalBootCompactThreshold);
         const uint8_t expectedFinalSlot = bootCtrl2.snapshots().activeSlot();
 
         RuidoController bootCtrl3{};
         Fm1PanelState bootPanel3{};
         Fm1LedModulator bootLeds3{};
         Fm1NvsRuntimeState bootRt3{};
-        RUIDO_FM1_CHECK(loadBootNvsBlobs(loadFn, bootCtrl3, bootPanel3, bootLeds3, 0.6f, bootRt3,
-                                         tailReadFn, saveFn) == (1u << kNvsSettingsBlobIdx));
+        (void)loadBootNvsBlobs(loadFn, bootCtrl3, bootPanel3, bootLeds3, 0.6f, bootRt3, tailReadFn,
+                               saveFn);
         RUIDO_FM1_CHECK(bootCtrl3.snapshots().activeSlot() == expectedFinalSlot);
-        RUIDO_FM1_CHECK(gMockNvs.baseSaveCount == 1u);
-        RUIDO_FM1_CHECK(bootRt3.nextJournalSlot == 0u);
+        RUIDO_FM1_CHECK(!bootCtrl3.snapshots().isDirty());
+        bootCtrl3.onBlackKeyEvent(BlackKeyId::ScopeFreezeKey, true);
+        bootCtrl3.onWhiteKeyGate(9u, true);
+        bootCtrl3.onWhiteKeyGate(9u, false);
+        bootCtrl3.onBlackKeyEvent(BlackKeyId::ScopeFreezeKey, false);
+        for (int t = 0; t < 35; ++t) {
+            bootCtrl3.tick(0.02f, dummyTel);
+        }
+        RUIDO_FM1_CHECK(absf(bootCtrl3.state().voices[0].frequencyHz - savedScene2Hz) < 0.2f);
+        RUIDO_FM1_CHECK(gMockNvs.baseSaveCount == 4u);
+        RUIDO_FM1_CHECK(bootRt3.nextPatchSlot[1] == 0u && bootRt3.nextJournalSlot == 0u &&
+                        bootRt3.nextLiveSlot == 0u);
+
+        // Dirty mid-journal NOR slot (`0x00` byte -> `tailWriteFn` `-4`) steps past the dirty slot
+        // into the next clean `0xFF` slot with ZERO live sector erases!
+        bootRt3.lastPanelTouchMs = 195000u;
+        (void)pollAndSaveNvsBlobs(197000u, 0u, saveFn, preEraseFn, bootCtrl3, bootRt3, tailWriteFn);
+        RUIDO_FM1_CHECK(bootRt3.nextLiveSlot == 0u);
+        gMockNvs.sectors[kNvsLivePatchIdx][kPatchJournalBaseOff] = 0x00u;
+        bootCtrl3.onEncoderDelta(EncoderId::Knob1, 8);
+        bootRt3.lastPanelTouchMs = 200000u;
+        RUIDO_FM1_CHECK(pollAndSaveNvsBlobs(202000u, 0u, saveFn, preEraseFn, bootCtrl3, bootRt3,
+                                            tailWriteFn) == 1u);
+        RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u && bootRt3.nextLiveSlot == 2u);
+
+        // Exhausting all 30 `LIVE` slots while `masterRun == true` performs ZERO mid-drone sector
+        // erases (`pendingLiveSave` stays armed until `PLAY/STOP` mute or cold boot)!
+        for (uint32_t i = 0u; i < kPatchJournalMaxSlots; ++i) {
+            bootCtrl3.onEncoderDelta(EncoderId::Knob1, (i & 1u) != 0u ? -4 : 4);
+            bootRt3.lastPanelTouchMs = 210000u + i * 2000u;
+            (void)pollAndSaveNvsBlobs(211600u + i * 2000u, 0u, saveFn, preEraseFn, bootCtrl3,
+                                      bootRt3, tailWriteFn);
+        }
+        RUIDO_FM1_CHECK(bootCtrl3.state().global.masterRun);
+        RUIDO_FM1_CHECK(gMockNvs.eraseCount == 0u);
+        RUIDO_FM1_CHECK(bootRt3.nextLiveSlot == kPatchJournalMaxSlots &&
+                        bootRt3.pendingLiveSave == 1u);
+
+        // Toggling `PLAY/STOP` (`masterRun == false`) flushes and compacts `LIVE` safely!
+        bootCtrl3.onButtonEvent(ButtonId::PlayStop, true);
+        bootCtrl3.onButtonEvent(ButtonId::PlayStop, false);
+        RUIDO_FM1_CHECK(!bootCtrl3.state().global.masterRun);
+        RUIDO_FM1_CHECK(pollAndSaveNvsBlobs(280000u, 0u, saveFn, preEraseFn, bootCtrl3, bootRt3,
+                                            tailWriteFn) == 1u);
+        RUIDO_FM1_CHECK(gMockNvs.eraseCount == 1u && bootRt3.nextLiveSlot == 0u &&
+                        bootRt3.pendingLiveSave == 0u);
+
+        // Full-sector foreign non-`0xFF` bytes (`afterNonFf == MaxSlots`) with `tailReadOk == true`
+        // clean at cold boot, whereas a `tailReadFn` read failure (`tailReadOk == false`) never
+        // overwrites flash!
+        gMockNvs.slotValid[2] = false;
+        gMockNvs.sectors[2].fill(0xA5u);
+        gMockNvs.slotValid[3] = false;
+        gMockNvs.sectors[3].fill(0xA5u);
+        RuidoController bootCtrl4{};
+        Fm1PanelState bootPanel4{};
+        Fm1LedModulator bootLeds4{};
+        Fm1NvsRuntimeState bootRt4{};
+        (void)loadBootNvsBlobs(loadFn, bootCtrl4, bootPanel4, bootLeds4, 0.6f, bootRt4, tailReadFn,
+                               saveFn);
+        RUIDO_FM1_CHECK(bootRt4.nextPatchSlot[2] == 0u &&
+                        gMockNvs.sectors[2][kPatchJournalBaseOff] == 0xFFu);
+
+        gMockNvs.slotValid[3] = false;
+        gMockNvs.sectors[3].fill(0xA5u);
+        const RuidoFm1TailReadFn failReadFn = [](uint32_t, uint32_t, void*, uint32_t) -> int {
+            return -1;
+        };
+        RuidoController bootCtrl5{};
+        Fm1PanelState bootPanel5{};
+        Fm1LedModulator bootLeds5{};
+        Fm1NvsRuntimeState bootRt5{};
+        (void)loadBootNvsBlobs(loadFn, bootCtrl5, bootPanel5, bootLeds5, 0.6f, bootRt5, failReadFn,
+                               saveFn);
+        RUIDO_FM1_CHECK(bootRt5.nextPatchSlot[3] == kPatchJournalMaxSlots &&
+                        gMockNvs.sectors[3][kPatchJournalBaseOff] == 0xA5u);
+    }
+
+    // 7. True-zero MASTER volume & honest "0%" readout regression:
+    //    - `masterQ12ToGain` maps physical CCW pot offset (`master_q12 <= 36` / `k10 <= 96`) to
+    //      exact `0.0f` and scales `(36..4088]` continuously up to `1.0f`.
+    //    - `platform_poll()`'s 1-ms exponential `knob_avg` decay into `syncMasterPot` reaches
+    //      exact `0.0f` (never trapped below the `0.0025f` jitter deadband) without idle re-wakes.
+    //    - `formatPercent` reserves `"0%"` strictly for `<= kSilentAmpThreshold` (`0.0f` silence).
+    {
+        RUIDO_FM1_CHECK(masterQ12ToGain(0u) == 0.0f);
+        RUIDO_FM1_CHECK(masterQ12ToGain(kMinPlatformMasterQ12) == 0.0f);
+        RUIDO_FM1_CHECK(masterQ12ToGain(kMinPlatformMasterQ12 + 1u) > 0.0f);
+        RUIDO_FM1_CHECK(masterQ12ToGain(kMinPlatformMasterQ12 + 1u) < 0.001f);
+        RUIDO_FM1_CHECK(masterQ12ToGain(kMaxPlatformMasterQ12) == 1.0f);
+        float prevG = 0.0f;
+        for (uint32_t mq = kMinPlatformMasterQ12 + 1u; mq <= kMaxPlatformMasterQ12; ++mq) {
+            const float g = masterQ12ToGain(mq);
+            RUIDO_FM1_CHECK(g > prevG);
+            prevG = g;
+        }
+
+        for (int32_t ccwAdc : {0, 48, 88}) {
+            RuidoController zCtrl{};
+            Fm1PanelState zPanel{};
+            int32_t knobAvg = 512 * 16;
+            const uint32_t initK10 = static_cast<uint32_t>(knobAvg / 16);
+            const uint32_t initMq = (initK10 * initK10) >> 8u;
+            zPanel.reset(masterQ12ToGain(initMq));
+            zPanel.syncMasterPot(zCtrl, masterQ12ToGain(initMq));
+            RUIDO_FM1_CHECK(zCtrl.state().global.masterTrim > 0.24f);
+
+            for (int ms = 0; ms < 120; ++ms) {
+                knobAvg += (ccwAdc * 16 - knobAvg) / 8;
+                const auto k10 = static_cast<uint32_t>(knobAvg / 16);
+                const uint32_t mq = (k10 * k10) >> 8u;
+                zPanel.syncMasterPot(zCtrl, masterQ12ToGain(mq));
+            }
+            RUIDO_FM1_CHECK(zCtrl.state().global.masterTrim == 0.0f);
+            RUIDO_FM1_CHECK(zCtrl.hud().mode == HudMode::MasterLevel);
+            const uint32_t settledEvents = zPanel.inputEventCount();
+            for (int ms = 0; ms < 20; ++ms) {
+                zPanel.syncMasterPot(zCtrl, 0.0f);
+            }
+            RUIDO_FM1_CHECK(zPanel.inputEventCount() == settledEvents);
+        }
+
+        char pctBuf[12]{};
+        formatPercent(pctBuf, sizeof(pctBuf), 0.0f);
+        RUIDO_FM1_CHECK(std::strcmp(pctBuf, "0%") == 0);
+        formatPercent(pctBuf, sizeof(pctBuf), 0.5f * kSilentAmpThreshold);
+        RUIDO_FM1_CHECK(std::strcmp(pctBuf, "0%") == 0);
+        formatPercent(pctBuf, sizeof(pctBuf), 0.0036f); // 1 Fine detent above 0 -> never lies "0%"
+        RUIDO_FM1_CHECK(std::strcmp(pctBuf, "1%") == 0);
+        RUIDO_FM1_CHECK(computeVoiceChannelGain(0.0f).postVca == 0.0f);
+        RUIDO_FM1_CHECK(computeVoiceChannelGain(kSilentAmpThreshold).postVca == 0.0f);
     }
 
 #undef RUIDO_FM1_CHECK

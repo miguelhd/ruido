@@ -12,11 +12,10 @@ namespace ruido {
 
 enum class PunchBarKind : uint8_t {
     None = 0,
-    Unit01 = 1,        // Normalized [0, 1] directly from activePunchValue
-    NegTwoOct = 2,     // [-2.0, 0.0] octave drop mapped to [0, 1]
-    PosTwoOct = 3,     // [0.0, +2.0] octave rise mapped to [0, 1]
-    SnapshotGlide = 4, // Active only while hud.snapshotGliding is true (morphPosition)
-    LogTempo = 5,      // Normalized log-octave [20, 3000] BPM bar for Tap Tempo
+    Unit01 = 1,    // Normalized [0, 1] directly from activePunchValue
+    NegTwoOct = 2, // [-2.0, 0.0] octave drop mapped to [0, 1]
+    PosTwoOct = 3, // [0.0, +2.0] octave rise mapped to [0, 1]
+    LogTempo = 4,  // Normalized log-octave [20, 3000] BPM bar for Tap Tempo
 };
 
 enum class PunchReadoutKind : uint8_t {
@@ -36,7 +35,7 @@ enum class PunchReadoutKind : uint8_t {
     ClockDiv = 13,
     EuclidHits = 14,
     TempoBpm = 15,
-    SwingPct = 16,
+    HoldState = 16,
     Snapshot = 17,
     TapBpm = 18,
 };
@@ -68,8 +67,8 @@ inline constexpr std::array<KeyPunchSpec, kNumKeyPunchKinds> kKeyPunchSpecs = {{
      PunchReadoutKind::RawCutoffHz, false, "LOW PASS"},
     {KeyPunchKind::MonoFocus, KnobBankMode::Frequency, PunchBarKind::Unit01,
      PunchReadoutKind::Percent, false, "UNISON"},
-    {KeyPunchKind::PolySpread, KnobBankMode::Frequency, PunchBarKind::Unit01,
-     PunchReadoutKind::Percent, false, "DETUNE SPREAD"},
+    {KeyPunchKind::PolySpread, KnobBankMode::Panning, PunchBarKind::Unit01,
+     PunchReadoutKind::Percent, false, "SPREAD"},
     {KeyPunchKind::StasisFreeze, KnobBankMode::Frequency, PunchBarKind::None,
      PunchReadoutKind::Holding, false, "FREEZE"},
     {KeyPunchKind::VoiceCut, KnobBankMode::Frequency, PunchBarKind::None,
@@ -80,7 +79,7 @@ inline constexpr std::array<KeyPunchSpec, kNumKeyPunchKinds> kKeyPunchSpecs = {{
      PunchReadoutKind::StutterHz, true, "STUTTER"},
     {KeyPunchKind::VoiceSiren, KnobBankMode::Frequency, PunchBarKind::PosTwoOct,
      PunchReadoutKind::PosOctave, true, "OCTAVE"},
-    {KeyPunchKind::SnapshotRecall, KnobBankMode::Snapshot, PunchBarKind::SnapshotGlide,
+    {KeyPunchKind::SnapshotRecall, KnobBankMode::None, PunchBarKind::None,
      PunchReadoutKind::Snapshot, false, ""},
     {KeyPunchKind::VoiceXMod, KnobBankMode::Frequency, PunchBarKind::Unit01,
      PunchReadoutKind::Percent, true, "CROSS-PIN"},
@@ -109,15 +108,31 @@ inline constexpr std::array<KeyPunchSpec, kNumKeyPunchKinds> kKeyPunchSpecs = {{
     {KeyPunchKind::RhythmChase, KnobBankMode::Frequency, PunchBarKind::Unit01,
      PunchReadoutKind::Percent, false, "CHASE"},
     {KeyPunchKind::RhythmTempo, KnobBankMode::Frequency, PunchBarKind::Unit01,
-     PunchReadoutKind::TempoBpm, false, "TEMPO"},
+     PunchReadoutKind::TempoBpm, false, "SPEED"},
     {KeyPunchKind::RhythmPluck, KnobBankMode::GlobalFilter, PunchBarKind::Unit01,
      PunchReadoutKind::Percent, false, "PLUCK"},
     {KeyPunchKind::RhythmShort, KnobBankMode::Frequency, PunchBarKind::Unit01,
      PunchReadoutKind::Percent, false, "SHORT"},
     {KeyPunchKind::RhythmSwing, KnobBankMode::Frequency, PunchBarKind::Unit01,
-     PunchReadoutKind::SwingPct, false, "SWING"},
+     PunchReadoutKind::Percent, false, "SHUFFLE"},
     {KeyPunchKind::TapTempo, KnobBankMode::Frequency, PunchBarKind::LogTempo,
      PunchReadoutKind::TapBpm, false, "TAP TEMPO"},
+    {KeyPunchKind::HighPass, KnobBankMode::GlobalFilter, PunchBarKind::None,
+     PunchReadoutKind::RawCutoffHz, false, "HIGH PASS"},
+    {KeyPunchKind::DetuneChorus, KnobBankMode::Frequency, PunchBarKind::Unit01,
+     PunchReadoutKind::Percent, false, "DETUNE"},
+    {KeyPunchKind::VoiceDuty, KnobBankMode::PulseWidth, PunchBarKind::Unit01,
+     PunchReadoutKind::Percent, true, "DUTY"},
+    {KeyPunchKind::SubXor, KnobBankMode::Frequency, PunchBarKind::Unit01, PunchReadoutKind::Percent,
+     false, "SUB-XOR"},
+    {KeyPunchKind::FeedbackRoar, KnobBankMode::GlobalFilter, PunchBarKind::Unit01,
+     PunchReadoutKind::Percent, false, "FEEDBACK"},
+    {KeyPunchKind::RhythmPingPong, KnobBankMode::Panning, PunchBarKind::Unit01,
+     PunchReadoutKind::Percent, false, "PING-PONG"},
+    {KeyPunchKind::RhythmRoll, KnobBankMode::Frequency, PunchBarKind::Unit01,
+     PunchReadoutKind::Percent, false, "ROLL"},
+    {KeyPunchKind::KeyHoldSwitch, KnobBankMode::None, PunchBarKind::None,
+     PunchReadoutKind::HoldState, false, "LATCH"},
 }};
 
 constexpr bool verifyKeyPunchSpecsAligned() noexcept {
@@ -156,14 +171,6 @@ inline bool evalKeyPunchHeaderBar(const HudState& hud, float& outNorm) noexcept 
     case PunchBarKind::PosTwoOct:
         outNorm = clampf(hud.activePunchValue * 0.5f, 0.0f, 1.0f);
         return true;
-    case PunchBarKind::SnapshotGlide: {
-        const uint8_t s = hud.activePunchVoice & 3u;
-        if (!hud.snapshotGliding || (hud.snapshotOccupiedMask & (1u << s)) == 0u) {
-            return false;
-        }
-        outNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
-        return true;
-    }
     case PunchBarKind::LogTempo:
         outNorm = normalizeClockBpmLog01(hud.effectiveClockBpm);
         return true;

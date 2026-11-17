@@ -3,6 +3,7 @@
 #include "core/Config.h"
 #include "core/ControlSurface.h"
 #include "core/DspMath.h"
+#include "core/KeyboardModelSpec.h"
 #include "core/Parameters.h"
 #include "core/VoiceCircuit.h"
 
@@ -42,14 +43,15 @@ inline void scalePanelGrid(LedState& leds, float factor) noexcept {
     }
 }
 
-// Per-model latched key switch state (managed by KeyboardEngine, cleared on model swap or reset).
+// Persistent console switch state across the right-hand 7-switch bay.
 struct KeyboardLatchState {
-    uint8_t muteMask = 0u; // 4-bit latched oscillator mute mask (bit v = OSC v+1)
-    uint8_t soloMask = 0u; // 4-bit latched oscillator solo mask (bit v = OSC v+1)
+    uint8_t muteMask = 0u;        // 4-bit latched oscillator mute mask (Keys 13-16)
+    uint8_t preSoloMuteMask = 0u; // 4-bit muteMask saved before latching SHIFT + SOLO
+    bool preSoloValid = false;    // True while in a latched SHIFT + SOLO isolate state
 };
 
-// Zero-copy read-only snapshot of the 27-key gates, continuous pressures, and LIFO press order
-// passed from KeyboardEngine into whichever KeyboardModelOps plugin is active.
+// Effective 27-key view passed from KeyboardEngine into the active KeyboardModelOps evaluator
+// (combines live physical unshifted key presses with any hands-free HOLD-latched expressive pads).
 struct KeyboardInputView {
     const std::array<bool, kNumBlackKeys>& blackHeld;
     const std::array<bool, kNumWhiteKeys>& whiteHeld;
@@ -59,11 +61,13 @@ struct KeyboardInputView {
     const std::array<uint16_t, kNumWhiteKeys>& whitePressSeq;
     uint16_t heldBlackMask = 0u;
     uint16_t heldWhiteMask = 0u;
+    uint8_t muteHeldMask = 0u; // Bits 0..3 = Keys 13-16 held unshifted (MUTE 1-4)
+    uint8_t soloHeldMask = 0u; // Bits 0..3 = Keys 13-16 held under SHIFT (SOLO 1-4)
     KeyboardLatchState latch{};
     GlobalConfigState config{};
 };
 
-// LIFO most-recently-pressed key punch tracker for HudMode::KeyboardPlay headers.
+// LIFO most-recently-pressed key punch tracker for HudMode::KeyboardPlay & SEL/SHIFT inspectors.
 struct PunchTracker {
     uint16_t latestSeq = 0u;
     KeyPunchKind latestKind = KeyPunchKind::None;
@@ -71,7 +75,7 @@ struct PunchTracker {
     float latestValue = 0.0f;
 
     void note(uint16_t seq, KeyPunchKind kind, uint8_t vIdx, float val) noexcept {
-        if (seq >= latestSeq) {
+        if (seq > 0u && seq >= latestSeq) {
             latestSeq = seq;
             latestKind = kind;
             latestVoice = vIdx;
@@ -86,75 +90,47 @@ struct PunchTracker {
     }
 };
 
-// Shared Momentary/Latching Console SOLO 1-4 (PIT..POLY, Black 6-9) & MUTE 1-4 (Keys 13-16,
-// White 12-15) switch logic on the right-hand non-pressure keys.
-inline void onConsoleSoloMuteKeyPress(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
+// Single-state Console MUTE 1-4 (Keys 13-16 unshifted) & Exclusive Isolate SOLO 1-4 (SHIFT + Keys
+// 13-16) with pre-Solo mix memory in LATCHING mode.
+inline void onConsoleSoloMuteKeyPress(bool shiftHeld, uint8_t whiteKeyIdx,
+                                      uint8_t shiftSoloHeldMask, const GlobalConfigState& config,
                                       KeyboardLatchState& latch) noexcept {
-    if (isBlack) {
-        if (keyIdx < kSoloBlackKeyBase || keyIdx >= kSoloBlackKeyBase + kNumOscillators) {
-            return;
-        }
-        const uint8_t bit = static_cast<uint8_t>(1u << (keyIdx - kSoloBlackKeyBase));
-        if (config.soloMode == KeySwitchMode::Latching) {
-            latch.soloMask ^= bit;
-            if ((latch.soloMask & bit) != 0u) {
-                latch.muteMask &= static_cast<uint8_t>(~bit);
-            }
-        }
-    } else {
-        if (keyIdx < kMuteWhiteKeyBase || keyIdx >= kMuteWhiteKeyBase + kNumOscillators) {
-            return;
-        }
-        const uint8_t bit = static_cast<uint8_t>(1u << (keyIdx - kMuteWhiteKeyBase));
-        if (config.muteMode == KeySwitchMode::Latching) {
-            latch.muteMask ^= bit;
-            if ((latch.muteMask & bit) != 0u) {
-                latch.soloMask &= static_cast<uint8_t>(~bit);
-            }
-        }
+    if (whiteKeyIdx < kMuteWhiteKeyBase || whiteKeyIdx >= kMuteWhiteKeyBase + kNumOscillators) {
+        return;
     }
+    if (config.muteMode != KeySwitchMode::Latching) {
+        return;
+    }
+    const uint8_t bit = static_cast<uint8_t>(1u << (whiteKeyIdx - kMuteWhiteKeyBase));
+    if (!shiftHeld) {
+        latch.muteMask ^= bit;
+        latch.preSoloValid = false;
+        return;
+    }
+
+    const uint8_t chordBits = static_cast<uint8_t>((shiftSoloHeldMask | bit) & 0x0Fu);
+    const uint8_t singleIsoMute = static_cast<uint8_t>((~bit) & 0x0Fu);
+    if (chordBits == bit && latch.muteMask == singleIsoMute) {
+        // Already isolated on this sole oscillator: restore pre-Solo mix (or unmute all 4)
+        latch.muteMask = (latch.preSoloValid && latch.preSoloMuteMask != singleIsoMute)
+                             ? latch.preSoloMuteMask
+                             : 0u;
+        latch.preSoloValid = false;
+        return;
+    }
+
+    if (!latch.preSoloValid) {
+        latch.preSoloMuteMask = latch.muteMask;
+        latch.preSoloValid = true;
+    }
+    latch.muteMask = static_cast<uint8_t>((~chordBits) & 0x0Fu);
 }
 
 inline void evaluateConsoleSoloMute(const KeyboardInputView& in, KeyboardModState& mod,
                                     PunchTracker& punch) noexcept {
-    const bool soloLatch = (in.config.soloMode == KeySwitchMode::Latching);
     const bool muteLatch = (in.config.muteMode == KeySwitchMode::Latching);
-    uint8_t soloMask = soloLatch ? in.latch.soloMask : 0u;
-    uint8_t muteMask = muteLatch ? in.latch.muteMask : 0u;
-
-    uint16_t latestSoloSeq = 0u;
-    uint8_t latestSoloVoice = 0u;
-    bool latestSoloOn = true;
-
-    for (uint8_t v = 0u; v < kNumOscillators; ++v) {
-        const size_t sIdx = kSoloBlackKeyBase + v;
-        const size_t mIdx = kMuteWhiteKeyBase + v;
-        const uint8_t bit = static_cast<uint8_t>(1u << v);
-        if (!soloLatch && in.blackHeld[sIdx]) {
-            soloMask |= bit;
-        }
-        if (!muteLatch && in.whiteHeld[mIdx]) {
-            muteMask |= bit;
-        }
-        if (!soloLatch && muteLatch && in.blackHeld[sIdx]) {
-            muteMask &= static_cast<uint8_t>(~bit);
-        }
-        if (!soloLatch && !muteLatch && in.blackHeld[sIdx] && in.whiteHeld[mIdx]) {
-            if (in.blackPressSeq[sIdx] > in.whitePressSeq[mIdx]) {
-                muteMask &= static_cast<uint8_t>(~bit);
-            } else {
-                soloMask &= static_cast<uint8_t>(~bit);
-            }
-        }
-        if ((muteMask & bit) != 0u) {
-            soloMask &= static_cast<uint8_t>(~bit);
-        }
-        if (in.blackHeld[sIdx] && in.blackPressSeq[sIdx] >= latestSoloSeq) {
-            latestSoloSeq = in.blackPressSeq[sIdx];
-            latestSoloVoice = v;
-            latestSoloOn = ((soloMask & bit) != 0u);
-        }
-    }
+    uint8_t muteMask = muteLatch ? (in.latch.muteMask & 0x0Fu) : (in.muteHeldMask & 0x0Fu);
+    uint8_t soloMask = muteLatch ? 0u : static_cast<uint8_t>((in.soloHeldMask & 0x0Fu) & ~muteMask);
 
     mod.soloMask = soloMask;
     mod.muteMask = muteMask;
@@ -165,10 +141,6 @@ inline void evaluateConsoleSoloMute(const KeyboardInputView& in, KeyboardModStat
             }
         }
     }
-    if (latestSoloSeq > 0u) {
-        punch.note(latestSoloSeq, KeyPunchKind::SpotlightSolo, latestSoloVoice,
-                   latestSoloOn ? 1.0f : 0.0f);
-    }
 
     for (uint8_t v = 0u; v < kNumOscillators; ++v) {
         const size_t mIdx = kMuteWhiteKeyBase + v;
@@ -177,89 +149,64 @@ inline void evaluateConsoleSoloMute(const KeyboardInputView& in, KeyboardModStat
         if (isChMuted) {
             mod.voiceGainMul[v] = 0.0f;
         }
-        if (in.whiteHeld[mIdx]) {
+        if ((in.muteHeldMask & bit) != 0u) {
             punch.note(in.whitePressSeq[mIdx], KeyPunchKind::VoiceCut, v, isChMuted ? 1.0f : 0.0f);
         }
-    }
-}
-
-inline void evaluateUniversalFreeze(const KeyboardInputView& in, KeyboardModState& mod,
-                                    HudState& hud, PunchTracker& punch) noexcept {
-    constexpr size_t kFreezeIdx = static_cast<size_t>(BlackKeyId::ScopeFreezeKey);
-    if (in.blackHeld[kFreezeIdx]) {
-        mod.stasisFreeze = true;
-        hud.scopeFrozen = true;
-        punch.note(in.blackPressSeq[kFreezeIdx], KeyPunchKind::StasisFreeze, 0u, 1.0f);
-    }
-}
-
-inline void applyFreezeStillFrameLeds(const KeyboardInputView& in, LedState& outLeds) noexcept {
-    constexpr size_t kFreezeIdx = static_cast<size_t>(BlackKeyId::ScopeFreezeKey);
-    if (!in.blackHeld[kFreezeIdx]) {
-        return;
-    }
-    for (size_t i = 0u; i < kNumBlackKeys; ++i) {
-        outLeds.blackKeyLeds[i] = 0.52f;
-    }
-    for (size_t i = 0u; i < kNumWhiteKeys; ++i) {
-        outLeds.whiteKeyLeds[i] = 0.52f;
-    }
-    outLeds.blackKeyLeds[kFreezeIdx] = 1.0f;
-    setPanelBtnLed(outLeds, ButtonId::OctMinus, 0.48f);
-    setPanelBtnLed(outLeds, ButtonId::OctPlus, 0.48f);
-    for (size_t c = 0u; c < 6u; ++c) {
-        setPanelBtnLed(outLeds, kPanelGridTop[c], 0.48f);
-        if (c < 4u) {
-            setPanelBtnLed(outLeds, kPanelGridBot[c], 0.48f);
+        if ((in.soloHeldMask & bit) != 0u) {
+            const bool isSoloed =
+                muteLatch ? (in.latch.preSoloValid && !isChMuted) : ((soloMask & bit) != 0u);
+            punch.note(in.whitePressSeq[mIdx], KeyPunchKind::SpotlightSolo, v,
+                       isSoloed ? 1.0f : 0.0f);
         }
     }
 }
 
-inline void applyAuthoritativeConsoleLeds(const EngineControlState& state,
+inline void applyAuthoritativeConsoleLeds(const EngineControlState& state, const HudState& hud,
                                           LedState& outLeds) noexcept {
+    outLeds.blackKeyLeds[kShiftBlackKeyIdx] = 1.0f;
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        evaluateVoiceConsoleLeds(state.keyMod, v, outLeds.blackKeyLeds[kSoloBlackKeyBase + v],
-                                 outLeds.whiteKeyLeds[kMuteWhiteKeyBase + v]);
+        outLeds.whiteKeyLeds[kMuteWhiteKeyBase + v] = evaluateVoiceSoundLedSteady(state, v);
+    }
+    if (hud.shiftHeld && !hud.saveArmed) {
+        return;
+    }
+    outLeds.blackKeyLeds[kHoldBlackKeyIdx] = computeLatchKeyLed(hud);
+    if (hud.keyboardModel != KeyboardModel::RhythmLab) {
+        outLeds.blackKeyLeds[kTapBlackKeyIdx] = 0.0f;
+    } else if ((hud.heldBlackMask & (1u << kTapBlackKeyIdx)) != 0u) {
+        outLeds.blackKeyLeds[kTapBlackKeyIdx] = 1.0f;
     }
 }
 
 // Pluggable behavior contract for each 27-key interaction model (LiveMixer, CircuitLab, RhythmLab)
 struct KeyboardModelOps {
-    void (*onKeyPress)(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
-                       KeyboardLatchState& latch) noexcept;
     void (*evaluate)(const KeyboardInputView& input, EngineControlState& state,
                      HudState& hud) noexcept;
     void (*choreographActiveLeds)(const KeyboardInputView& input, float animPhase,
-                                  float subBreathWave01, const EngineControlState& state,
-                                  const HudState& hud, uint8_t stutterGateMask, float rhythmPhase01,
+                                  const EngineControlState& state, const HudState& hud,
+                                  uint8_t stutterGateMask, float rhythmPhase01,
                                   LedState& outLeds) noexcept;
 };
 
-void onLiveMixerKeyPress(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
-                         KeyboardLatchState& latch) noexcept;
 void evaluateLiveMixerModel(const KeyboardInputView& input, EngineControlState& state,
                             HudState& hud) noexcept;
 void choreographLiveMixerLeds(const KeyboardInputView& input, float animPhase,
-                              float subBreathWave01, const EngineControlState& state,
-                              const HudState& hud, uint8_t stutterGateMask, float rhythmPhase01,
+                              const EngineControlState& state, const HudState& hud,
+                              uint8_t stutterGateMask, float rhythmPhase01,
                               LedState& outLeds) noexcept;
 
-void onCircuitLabKeyPress(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
-                          KeyboardLatchState& latch) noexcept;
 void evaluateCircuitLabModel(const KeyboardInputView& input, EngineControlState& state,
                              HudState& hud) noexcept;
 void choreographCircuitLabLeds(const KeyboardInputView& input, float animPhase,
-                               float subBreathWave01, const EngineControlState& state,
-                               const HudState& hud, uint8_t stutterGateMask, float rhythmPhase01,
+                               const EngineControlState& state, const HudState& hud,
+                               uint8_t stutterGateMask, float rhythmPhase01,
                                LedState& outLeds) noexcept;
 
-void onRhythmLabKeyPress(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
-                         KeyboardLatchState& latch) noexcept;
 void evaluateRhythmLabModel(const KeyboardInputView& input, EngineControlState& state,
                             HudState& hud) noexcept;
 void choreographRhythmLabLeds(const KeyboardInputView& input, float animPhase,
-                              float subBreathWave01, const EngineControlState& state,
-                              const HudState& hud, uint8_t stutterGateMask, float rhythmPhase01,
+                              const EngineControlState& state, const HudState& hud,
+                              uint8_t stutterGateMask, float rhythmPhase01,
                               LedState& outLeds) noexcept;
 
 const KeyboardModelOps& keyboardModelOps(KeyboardModel model) noexcept;

@@ -1,5 +1,6 @@
 #include "core/DspMath.h"
 #include "core/SnapshotBank.h"
+#include "core/SnapshotPresets.h"
 
 namespace ruido {
 
@@ -45,75 +46,29 @@ inline uint32_t computeSnapshotPayloadCrc32(const PatchSnapshot& snap) noexcept 
 
 EngineControlState makeFactorySnapshotPreset(size_t slot) noexcept {
     EngineControlState s = EngineControlState::makeDefault();
-    if (slot == 0u) {
-        // SNAP 1: Open Fifth Foundation (exact boot default)
-        return s;
-    }
-    if (slot == 1u) {
-        // SNAP 2: Formant Pulse Choir (narrow Schmitt PWM + vocal MS-20 peaks + slow LFO breath)
-        constexpr std::array<float, 4> kFreq = {55.0f, 110.0f, 137.5f, 220.0f};
-        constexpr std::array<float, 4> kDuty = {0.22f, 0.76f, 0.30f, 0.68f};
-        constexpr std::array<float, 4> kHp = {65.0f, 180.0f, 320.0f, 440.0f};
-        constexpr std::array<float, 4> kLp = {1400.0f, 2200.0f, 1850.0f, 3400.0f};
-        s.global.circuitCoupling = 0.32f;
-        for (size_t v = 0u; v < kNumOscillators; ++v) {
-            s.voices[v].frequencyHz = kFreq[v];
-            s.voices[v].pulseWidth = kDuty[v];
-            s.voices[v].drift = 0.16f;
-            s.voices[v].hpCutoffHz = kHp[v];
-            s.voices[v].hpResonance = 0.42f;
-            s.voices[v].lpCutoffHz = kLp[v];
-            s.voices[v].lpResonance = 0.56f;
-            s.voices[v].amplitude = 0.68f;
-            s.voices[v].lfoTarget = LfoTarget::LpCutoff;
-            s.voices[v].lfoRateHz = 0.14f + 0.05f * static_cast<float>(v);
-            s.voices[v].lfoShape = 0.0f;
-            s.voices[v].lfoDepth = 0.24f;
-        }
-        return s;
-    }
-    if (slot == 2u) {
-        // SNAP 3: Sub-Harmonic Tectonic (deep sub-octave foundation + warm Korg35 low-pass drive)
-        constexpr std::array<float, 4> kFreq = {27.5f, 41.20f, 55.0f, 82.41f};
-        constexpr std::array<float, 4> kLp = {340.0f, 520.0f, 780.0f, 1250.0f};
-        s.global.circuitCoupling = 0.38f;
-        for (size_t v = 0u; v < kNumOscillators; ++v) {
-            s.voices[v].frequencyHz = kFreq[v];
-            s.voices[v].pulseWidth = (v & 1u) != 0u ? 0.42f : 0.50f;
-            s.voices[v].drift = 0.22f;
-            s.voices[v].hpCutoffHz = 24.0f;
-            s.voices[v].hpResonance = 0.28f;
-            s.voices[v].lpCutoffHz = kLp[v];
-            s.voices[v].lpResonance = 0.48f;
-            s.voices[v].amplitude = 0.80f;
-            s.voices[v].lfoTarget = LfoTarget::PulseWidth;
-            s.voices[v].lfoRateHz = 0.08f + 0.03f * static_cast<float>(v);
-            s.voices[v].lfoShape = 1.0f;
-            s.voices[v].lfoDepth = 0.30f;
-        }
-        return s;
-    }
-    // SNAP 4: Starved-Rail Swarm (CMOS sync tension + organic B->A modulation + MS-20 bite)
-    constexpr std::array<float, 4> kFreq = {55.0f, 82.65f, 123.75f, 192.5f};
-    constexpr std::array<float, 4> kDuty = {0.16f, 0.62f, 0.28f, 0.82f};
-    s.global.circuitCoupling = 0.68f;
+    const FactorySceneSpec& spec = kFactoryScenes[(slot < kNumSnapshots) ? slot : 3u];
+    s.global.circuitCoupling = static_cast<float>(spec.couplingPct) * 0.01f;
     for (size_t v = 0u; v < kNumOscillators; ++v) {
-        s.voices[v].frequencyHz = kFreq[v];
-        s.voices[v].pulseWidth = kDuty[v];
-        s.voices[v].drift = 0.35f;
-        s.voices[v].hpCutoffHz = 48.0f + 45.0f * static_cast<float>(v);
-        s.voices[v].hpResonance = 0.36f;
-        s.voices[v].lpCutoffHz = 2600.0f + 1100.0f * static_cast<float>(v);
-        s.voices[v].lpResonance = 0.64f;
-        s.voices[v].amplitude = 0.84f;
-        s.voices[v].lfoTarget = LfoTarget::LpCutoff;
-        s.voices[v].lfoRateHz = 0.32f + 0.11f * static_cast<float>(v);
-        s.voices[v].lfoShape = 0.25f;
-        s.voices[v].lfoDepth = 0.32f;
-        s.voices[v].lfoBTarget = LfoTarget::LfoARate;
-        s.voices[v].lfoBRateHz = 0.09f + 0.04f * static_cast<float>(v);
-        s.voices[v].lfoBShape = 1.0f;
-        s.voices[v].lfoBDepth = 0.35f;
+        const VoicePresetSpec& vs = spec.voices[v];
+        VoiceParams& vp = s.voices[v];
+        vp.frequencyHz = vs.freqHz;
+        vp.pulseWidth = static_cast<float>(vs.dutyPct) * 0.01f;
+        vp.drift = static_cast<float>(vs.driftPct) * 0.01f;
+        vp.hpCutoffHz = static_cast<float>(vs.hpHz);
+        vp.hpResonance = static_cast<float>(vs.hpResPct) * 0.01f;
+        vp.lpCutoffHz = static_cast<float>(vs.lpHz);
+        vp.lpResonance = static_cast<float>(vs.lpResPct) * 0.01f;
+        vp.amplitude = static_cast<float>(vs.ampPct) * 0.01f;
+        vp.pan = static_cast<float>(vs.panPct) * 0.01f;
+        vp.lfoRateHz = static_cast<float>(vs.lfoAMilliHz) * 0.001f;
+        vp.lfoShape = static_cast<float>(vs.lfoAShapePct) * 0.01f;
+        vp.lfoDepth = static_cast<float>(vs.lfoADepthPct) * 0.01f;
+        vp.lfoBRateHz = static_cast<float>(vs.lfoBMilliHz) * 0.001f;
+        vp.lfoBShape = static_cast<float>(vs.lfoBShapePct) * 0.01f;
+        vp.lfoBDepth = static_cast<float>(vs.lfoBDepthPct) * 0.01f;
+        vp.lfoTarget = static_cast<LfoTarget>(vs.targetsPacked & 0x0Fu);
+        vp.lfoBTarget = static_cast<LfoTarget>((vs.targetsPacked >> 4u) & 0x0Fu);
+        vp.muted = false;
     }
     return s;
 }
@@ -279,6 +234,112 @@ PatchFrame morphPatchFrames(const PatchFrame& a, const PatchFrame& b, float t01)
             dst.muted = (t >= 0.999f);
             dst.amplitude = dst.muted ? vb.amplitude : ((1.0f - t) * va.amplitude);
         }
+    }
+    return out;
+}
+
+PatchFrame blendPatchSnapshots(const std::array<PatchSnapshot, kNumSnapshots>& slots,
+                               const std::array<float, kNumSnapshots>& normWeights,
+                               const PatchFrame& fallbackFrame) noexcept {
+    size_t domSlot = 0u;
+    float domWeight = -1.0f;
+    float keptSum = 0.0f;
+    size_t nonZeroCount = 0u;
+    for (size_t s = 0u; s < kNumSnapshots; ++s) {
+        if (isPatchSnapshotOccupied(slots[s]) && normWeights[s] > 1.0e-4f) {
+            ++nonZeroCount;
+            keptSum += normWeights[s];
+            if (normWeights[s] > domWeight) {
+                domWeight = normWeights[s];
+                domSlot = s;
+            }
+        }
+    }
+    if (nonZeroCount == 0u) {
+        return fallbackFrame;
+    }
+    if (nonZeroCount == 1u) {
+        return decodePatchSnapshot(slots[domSlot]);
+    }
+
+    const float invKept = (keptSum > 1.0e-5f) ? (1.0f / keptSum) : 1.0f;
+    std::array<float, kNumSnapshots> effWeights{};
+    for (size_t s = 0u; s < kNumSnapshots; ++s) {
+        if (isPatchSnapshotOccupied(slots[s]) && normWeights[s] > 1.0e-4f) {
+            effWeights[s] = normWeights[s] * invKept;
+        }
+    }
+
+    PatchFrame out{};
+    out.circuitCoupling = 0.0f;
+    for (size_t s = 0u; s < kNumSnapshots; ++s) {
+        out.circuitCoupling += effWeights[s] * unquantizeNormQ16(slots[s].circuitCouplingQ16);
+    }
+
+    for (size_t v = 0u; v < kNumOscillators; ++v) {
+        float normF = 0.0f, normHp = 0.0f, normLp = 0.0f, normRa = 0.0f, normRb = 0.0f;
+        float normPw = 0.0f, drift = 0.0f, hpRes = 0.0f, lpRes = 0.0f, amp = 0.0f, normPan = 0.0f;
+        float shA = 0.0f, dpA = 0.0f, shB = 0.0f, dpB = 0.0f;
+        bool allMuted = true;
+
+        for (size_t s = 0u; s < kNumSnapshots; ++s) {
+            const float w = effWeights[s];
+            if (w <= 0.0f) {
+                continue;
+            }
+            const VoiceSnapshotBin& src = slots[s].voices[v];
+            const bool vMuted = (src.flags & 1u) != 0u;
+            normF += w * unquantizeNormQ16(src.freqLogQ16);
+            normHp += w * unquantizeNormQ16(src.hpCutLogQ16);
+            normLp += w * unquantizeNormQ16(src.lpCutLogQ16);
+            normRa += w * unquantizeNormQ16(src.lfoRateLogQ16);
+            normRb += w * unquantizeNormQ16(src.lfoBRateLogQ16);
+            normPw += w * unquantizeNormQ16(src.pulseWidthQ16);
+            drift += w * unquantizeNormQ16(src.driftQ16);
+            hpRes += w * unquantizeNormQ16(src.hpResQ16);
+            lpRes += w * unquantizeNormQ16(src.lpResQ16);
+            amp += w * (vMuted ? 0.0f : unquantizeNormQ16(src.amplitudeQ16));
+            normPan += w * unquantizeNormQ16(src.panBiQ16);
+            shA += w * unquantizeNormQ8(src.lfoShapeQ8);
+            dpA += w * unquantizeNormQ16(src.lfoDepthQ16);
+            shB += w * unquantizeNormQ8(src.lfoBShapeQ8);
+            dpB += w * unquantizeNormQ16(src.lfoBDepthQ16);
+            if (!vMuted) {
+                allMuted = false;
+            }
+        }
+
+        const VoiceSnapshotBin& domSrc = slots[domSlot].voices[v];
+        const uint8_t rawTA = domSrc.lfoTargetsPacked & 0x0Fu;
+        const uint8_t rawTB = (domSrc.lfoTargetsPacked >> 4u) & 0x0Fu;
+
+        VoiceParams& dst = out.voices[v];
+        dst.frequencyHz =
+            clampf(fastExp2(kFreqLogMin + normF * kFreqLogSpan), kAudioFreqMinHz, kAudioFreqMaxHz);
+        dst.hpCutoffHz = clampf(fastExp2(kFltLogMin + normHp * kFltLogSpan), kFilterCutoffMinHz,
+                                kFilterCutoffMaxHz);
+        dst.lpCutoffHz = clampf(fastExp2(kFltLogMin + normLp * kFltLogSpan), kFilterCutoffMinHz,
+                                kFilterCutoffMaxHz);
+        dst.lfoRateHz = clampf(fastExp2(kLfoLogMinSnap + normRa * kLfoLogSpanSnap), kLfoFreqMinHz,
+                               kLfoFreqMaxHz);
+        dst.lfoBRateHz = clampf(fastExp2(kLfoLogMinSnap + normRb * kLfoLogSpanSnap), kLfoFreqMinHz,
+                                kLfoFreqMaxHz);
+        dst.pulseWidth = clampf(kPulseWidthMin + normPw * (kPulseWidthMax - kPulseWidthMin),
+                                kPulseWidthMin, kPulseWidthMax);
+        dst.drift = clampf(drift, 0.0f, 1.0f);
+        dst.hpResonance = clampf(hpRes, 0.0f, 1.0f);
+        dst.lpResonance = clampf(lpRes, 0.0f, 1.0f);
+        dst.muted = allMuted;
+        dst.amplitude = allMuted ? unquantizeNormQ16(domSrc.amplitudeQ16) : clampf(amp, 0.0f, 1.0f);
+        dst.pan = clampf(2.0f * normPan - 1.0f, -1.0f, 1.0f);
+        dst.lfoShape = clampf(shA, 0.0f, 1.0f);
+        dst.lfoDepth = clampf(dpA, 0.0f, 1.0f);
+        dst.lfoBShape = clampf(shB, 0.0f, 1.0f);
+        dst.lfoBDepth = clampf(dpB, 0.0f, 1.0f);
+        dst.lfoTarget =
+            (rawTA < kNumLfoATargets) ? static_cast<LfoTarget>(rawTA) : LfoTarget::LpCutoff;
+        dst.lfoBTarget =
+            (rawTB < kNumLfoBTargets) ? static_cast<LfoTarget>(rawTB) : LfoTarget::LpCutoff;
     }
     return out;
 }

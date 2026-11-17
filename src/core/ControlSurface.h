@@ -66,20 +66,37 @@ enum class BlackKeyId : uint8_t {
     Count = 11
 };
 
-// Physical 27-key layout groups (all continuous-pressure macros & zones sit on PA8/PA7 SARADC;
-// binary non-pressure SOLO 1-4 and MUTE 1-4 switches sit on the right-hand keys):
-//   Top 11 Black Keys:    [0..5 = OP1..OP6 Macros] [6..9 = SOLO 1..4 (PIT..POLY)] [10 = FREEZE/TAP]
-//   Bottom 16 White Keys: [0..3 = Bank A] [4..7 = Bank B] [8..11 = Bank C / SCENE] [12..15 = MUTE]
-inline constexpr size_t kNumTopMacroKeys = 6u;   // Black 0..5 (OP1..OP6)
-inline constexpr size_t kSoloBlackKeyBase = 6u;  // Black 6..9 (PIT, GLO, MONO, POLY) -> SOLO 1..4
+// Physical 27-key hardware split on the M-VAVE FM-1 PCB (`kFm1KeyIdCoord` in
+// `fm1_led_modulator.h`):
+//   - Left 20 Keys (`PA8` + `PA7` SARADC carbon-pill pressure):
+//       Top 8 Black Keys:    `0..7`  (`OP1..OP6, PIT, GLO` in `3 · 2 · 3` clusters)
+//       Bottom 12 White Keys:`0..11` (`Bank A 0..3` | `Bank B 4..7` | `Bank C 8..11`,
+//       +`SHIFT=SCENE`)
+//   - Right 7 Keys (`PA6` digital-only GPIO — permanent utility switches across all models):
+//       Top 3 Black Keys:    `8` = `HOLD` (`MONO`), `9` = `TAP TEMPO` (`POLY`), `10` = `SHIFT`
+//       (`11th`) Bottom 4 White Keys: `12..15` = `MUTE 1..4` (unshifted) / `SOLO 1..4` (`SHIFT`
+//       held)
+inline constexpr size_t kNumTopMacroKeys = 8u;   // Black 0..7 (OP1..GLO analog pressure macros)
+inline constexpr size_t kHoldBlackKeyIdx = 8u;   // Black 8 (MONO): Key Hold latch switch
+inline constexpr size_t kTapBlackKeyIdx = 9u;    // Black 9 (POLY): Tap Tempo switch
+inline constexpr size_t kShiftBlackKeyIdx = 10u; // Black 10 (11th): Universal SHIFT modifier
 inline constexpr size_t kBankAWhiteKeyBase = 0u; // White 0..3 (W01..W04): FILTER / CROSS / STUTTER
 inline constexpr size_t kBankBWhiteKeyBase = 4u; // White 4..7 (W05..W08): OCTAVE / FOLD / DIVIDE
-inline constexpr size_t kSceneWhiteKeyBase = 8u; // White 8..11 (W09..W12): SCENE / CRUSH / EUCLID
-inline constexpr size_t kMuteWhiteKeyBase = 12u; // White 12..15 (W13..W16): MUTE 1..4
+inline constexpr size_t kSceneWhiteKeyBase =
+    8u; // White 8..11 (W09..W12): DUTY / CRUSH / EUCLID (+SHIFT SCENE)
+inline constexpr size_t kMuteWhiteKeyBase = 12u; // White 12..15 (W13..W16): MUTE 1..4 (+SHIFT SOLO)
 
-// 3 per-oscillator modes selected via discrete SELECT on the latching EDIT page
-// (signal-flow order: Osc Width -> Osc Drift -> Channel Level/Drive; default = Level)
-enum class EditTarget : uint8_t { Width = 0, Drift = 1, Level = 2, Count = 3 };
+constexpr bool isAnalogPressureBlackKey(size_t blackIdx) noexcept {
+    return blackIdx < kNumTopMacroKeys;
+}
+
+constexpr bool isAnalogPressureWhiteKey(size_t whiteIdx) noexcept {
+    return whiteIdx < kMuteWhiteKeyBase;
+}
+
+// 3 per-oscillator modes cycled via HOME presses (returning to Clean Scope on 4th press)
+// or SELECT on the HOME page (signal-flow order: Frequency -> Duty -> Drift)
+enum class HomeTarget : uint8_t { Frequency = 0, Width = 1, Drift = 2, Count = 3 };
 
 // Active mapping of top-right KNOB1..KNOB4 (displayed in the 4 bottom HUD columns unless None)
 enum class KnobBankMode : uint8_t {
@@ -91,8 +108,7 @@ enum class KnobBankMode : uint8_t {
     Panning = 5,
     Lfo = 6,
     GlobalFilter = 7,
-    Snapshot = 8,
-    None = 9
+    None = 8
 };
 
 // Encoder sweep rate selected via OCT- (Fine) and OCT+ (Coarse: ~1.3 turns full sweep)
@@ -134,6 +150,11 @@ constexpr float scopeTimebaseNorm01(ScopeTimebase tb) noexcept {
     return static_cast<float>(idx) * 0.2f;
 }
 
+inline constexpr uint8_t kPhantomButtonBase = 0u;
+inline constexpr uint8_t kPhantomBlackKeyBase = 14u;
+inline constexpr uint8_t kPhantomWhiteKeyBase = 25u;
+inline constexpr uint8_t kNumPhantomChannels = 41u;
+
 inline constexpr std::array<ButtonId, 4> kPhantomPinButtons = {
     ButtonId::Env,
     ButtonId::Arp,
@@ -141,20 +162,36 @@ inline constexpr std::array<ButtonId, 4> kPhantomPinButtons = {
     ButtonId::Rec,
 };
 
+inline constexpr std::array<ButtonId, kNumPanelButtons> kPhantomButtonOrder = {
+    ButtonId::Env,     ButtonId::Arp,  ButtonId::Seq,  ButtonId::Rec,      ButtonId::OctMinus,
+    ButtonId::OctPlus, ButtonId::Fx,   ButtonId::Sel,  ButtonId::Lfo,      ButtonId::GloRight,
+    ButtonId::Home,    ButtonId::Save, ButtonId::Edit, ButtonId::PlayStop,
+};
+
 constexpr uint8_t phantomPinSlot(ButtonId button) noexcept {
-    switch (button) {
-    case ButtonId::Env:
-        return 0u;
-    case ButtonId::Arp:
-        return 1u;
-    case ButtonId::Seq:
-        return 2u;
-    case ButtonId::Rec:
-        return 3u;
-    default:
-        return 0u;
+    for (uint8_t i = 0u; i < kPhantomButtonOrder.size(); ++i) {
+        if (kPhantomButtonOrder[i] == button) {
+            return i;
+        }
     }
+    return 0u;
 }
+
+constexpr uint8_t phantomBlackKeyChannel(size_t bIdx) noexcept {
+    return static_cast<uint8_t>(kPhantomBlackKeyBase + (bIdx < kNumBlackKeys ? bIdx : 0u));
+}
+
+constexpr uint8_t phantomWhiteKeyChannel(size_t wIdx) noexcept {
+    return static_cast<uint8_t>(kPhantomWhiteKeyBase + (wIdx < kNumWhiteKeys ? wIdx : 0u));
+}
+
+// Active SHIFT-layer encoder/key focus while 11th corner key (SHIFT) is held
+enum class ShiftFocus : uint8_t {
+    Idle = 0,
+    Tempo = 1, // SHIFT + ALGORITHM (Master Tempo)
+    Scene = 2, // SHIFT + PRESETS (Scene Morph)
+    Model = 3, // SHIFT + SELECT or SHIFT + OP1..OP3 (Keyboard Model select)
+};
 
 // Active function displayed in the top HUD header whenever any control or key is touched
 enum class HudMode : uint8_t {
@@ -180,49 +217,60 @@ enum class HudMode : uint8_t {
     GlobalConfig = 19,
     KeyboardModel = 20, // Latching SEL Keyboard Model status & guidance screen
     KeyboardPlay = 21,  // Momentary live punch-in routed 1-to-1 to native Ruido views
-    MasterTempo = 22,   // ALGORITHM encoder Master Tempo control in 3/3 RHYTHM LAB
-    Count = 23
+    MasterTempo = 22,   // SHIFT + ALGORITHM / TAP TEMPO Master Tempo control
+    KeyHold = 23,       // MONO switch Key Hold latch / release toast
+    ShiftMap = 24,      // Universal Full-Chassis SHIFT Map overlay while 11th key is held
+    Count = 25
 };
 
 // Active momentary punch-in family displayed in the top header during HudMode::KeyboardPlay
 enum class KeyPunchKind : uint8_t {
     None = 0,
-    SpotlightSolo = 1,   // OP1-OP4: Solo OSC 1-4
-    OverloadSurge = 2,   // LiveMixer OP5: Drive (4.5x MS-20 overdrive + rail coupling)
-    SubDrop = 3,         // LiveMixer OP6: Sub Octave (-1 / -2 Oct)
-    RatioMagnet = 4,     // LiveMixer PIT: Ratio Lock (Just Intonation)
-    DubLpfDrop = 5,      // LiveMixer GLO: Low Pass sweep (28 kHz -> 31 Hz)
-    MonoFocus = 6,       // LiveMixer MONO: 4-oscillator unison pitch collapse
-    PolySpread = 7,      // LiveMixer POLY: Detuned + PWM swarm spread
-    StasisFreeze = 8,    // 11th tall key: Freeze (8 LFOs + Drift + Scope)
-    VoiceCut = 9,        // White Keys 1-4: Mute OSC 1-4
-    VoiceFormant = 10,   // LiveMixer Keys 5-8: Filter OSC 1-4
-    VoiceStutter = 11,   // RhythmLab: Stutter chopper gate OSC 1-4
-    VoiceSiren = 12,     // LiveMixer Keys 9-12: Octave OSC 1-4 (+1 / +2 Oct)
-    SnapshotRecall = 13, // LiveMixer Keys 13-16: Scene 1-4 recall / pressure morph
-    VoiceXMod = 14,      // CircuitLab Keys 5-8: Cross-Pin neighbor FM/XOR into OSC 1-4
-    VoiceFold = 15,      // CircuitLab Keys 9-12: 4x West-Coast capacitor wavefolder OSC 1-4
-    RailStarve = 16,     // CircuitLab OP5: Starved 9V CMOS rail collapse
-    RingXor = 17,        // CircuitLab OP6: 4x paired Ring/XOR sidebands
-    LfoTurbo = 18,       // CircuitLab PIT: 1x -> 32x LFO overclock
-    FilterScream = 19,   // CircuitLab GLO: Twin Korg35 HPF + LPF self-oscillation
-    HardSync = 20,       // CircuitLab MONO: Band-limited OSC 1 -> 2..4 hard sync
-    PhaseScatter = 21,   // CircuitLab POLY: Duty, pitch, filter & stereo scatter
-    VoiceCrush = 22,     // CircuitLab Keys 13-16: CD4013 S&H clock crush + CD4040 ripple XOR
-    VoiceDivide = 23,    // RhythmLab Keys 9-12: Master-clock-locked divider OSC 1-4 (/2..x8)
-    VoiceEuclid = 24,    // RhythmLab Keys 13-16: 16-step Euclidean groove OSC 1-4 (2/16..16/16)
-    RhythmPump = 25,     // RhythmLab OP5: 4-on-the-floor sidechain ducking pump
-    RhythmChase = 26,    // RhythmLab OP6: 1->2->3->4 round-robin step loop
-    RhythmTempo = 27,    // RhythmLab PIT: 1x -> 4x master clock speed
-    RhythmPluck = 28,    // RhythmLab GLO: Percussive MS-20 low-pass filter pluck
-    RhythmShort = 29,    // RhythmLab MONO: Pinpoint short gate duty
-    RhythmSwing = 30,    // RhythmLab POLY: 50% -> 72% shuffle swing + stereo bounce
-    TapTempo = 31,       // RhythmLab 11th tall key: Tap Tempo & Beat-1 downbeat sync
-    Count = 32
+    SpotlightSolo = 1,   // SHIFT + Keys 13-16: Solo OSC 1-4
+    OverloadSurge = 2,   // LiveMixer OP1: Drive (4.5x MS-20 overdrive + rail coupling)
+    SubDrop = 3,         // LiveMixer OP2: Sub Octave (-1 / -2 Oct)
+    RatioMagnet = 4,     // LiveMixer OP3: Ratio Lock (Just Intonation)
+    DubLpfDrop = 5,      // LiveMixer OP4: Low Pass sweep (28 kHz -> 31 Hz)
+    MonoFocus = 6,       // LiveMixer OP6: 4-oscillator unison pitch collapse
+    PolySpread = 7,      // LiveMixer GLO: Wide stereo + PWM swarm spread
+    StasisFreeze = 8,    // Legacy freeze slot
+    VoiceCut = 9,        // Keys 13-16: Mute OSC 1-4
+    VoiceFormant = 10,   // LiveMixer Keys 1-4: Filter OSC 1-4
+    VoiceStutter = 11,   // RhythmLab Keys 1-4: Stutter chopper gate OSC 1-4
+    VoiceSiren = 12,     // LiveMixer Keys 5-8: Octave OSC 1-4 (+1 / +2 Oct)
+    SnapshotRecall = 13, // SHIFT + Keys 9-12: Scene 1-4 recall / pressure morph
+    VoiceXMod = 14,      // CircuitLab Keys 1-4: Cross-Pin neighbor FM/XOR into OSC 1-4
+    VoiceFold = 15,      // CircuitLab Keys 5-8: 4x West-Coast capacitor wavefolder OSC 1-4
+    RailStarve = 16,     // CircuitLab OP1: Starved 9V CMOS rail collapse
+    RingXor = 17,        // CircuitLab OP2: 4x paired Ring/XOR sidebands
+    LfoTurbo = 18,       // CircuitLab OP3: 1x -> 32x LFO overclock
+    FilterScream = 19,   // CircuitLab OP4: Twin Korg35 HPF + LPF self-oscillation
+    HardSync = 20,       // CircuitLab OP5: Band-limited OSC 1 -> 2..4 hard sync
+    PhaseScatter = 21,   // CircuitLab OP6: Duty, pitch, filter & stereo scatter
+    VoiceCrush = 22,     // CircuitLab Keys 9-12: CD4013 S&H clock crush + CD4040 ripple XOR
+    VoiceDivide = 23,    // RhythmLab Keys 5-8: Master-clock-locked divider OSC 1-4 (/2..x8)
+    VoiceEuclid = 24,    // RhythmLab Keys 9-12: 16-step Euclidean groove OSC 1-4 (2/16..16/16)
+    RhythmPump = 25,     // RhythmLab OP1: 4-on-the-floor sidechain ducking pump
+    RhythmChase = 26,    // RhythmLab OP2: 1->2->3->4 round-robin step loop
+    RhythmTempo = 27,    // RhythmLab OP3: 1x -> 4x master clock speed
+    RhythmPluck = 28,    // RhythmLab OP4: Percussive MS-20 low-pass filter pluck
+    RhythmShort = 29,    // RhythmLab OP5: Pinpoint short gate duty
+    RhythmSwing = 30,    // RhythmLab OP6: 0-100% pure 16th-note shuffle groove
+    TapTempo = 31,       // POLY switch: Universal Tap Tempo & Beat-1 downbeat sync
+    HighPass = 32,       // LiveMixer OP5: Master resonant MS-20 HPF bass-cut sweep
+    DetuneChorus = 33,   // LiveMixer PIT: 4-voice analog detune chorus
+    VoiceDuty = 34,      // LiveMixer Keys 9-12: Per-voice Schmitt PWM duty sweep OSC 1-4
+    SubXor = 35,         // CircuitLab PIT: Octave sub-divider + XOR sideband ring
+    FeedbackRoar = 36,   // CircuitLab GLO: Cross-coupled rail + resonant filter feedback
+    RhythmPingPong = 37, // RhythmLab PIT: Alternating L/R stereo gate bounce
+    RhythmRoll = 38,     // RhythmLab GLO: Momentary x2..x8 fast ratchet fill
+    KeyHoldSwitch = 39,  // MONO switch: LATCH pad capture / release inspection
+    Count = 40
 };
 
 struct PureRatioEntry {
     float ratio;
+    float log2Ratio;
     uint8_t num;
     uint8_t den;
 };
@@ -230,11 +278,16 @@ struct PureRatioEntry {
 inline constexpr size_t kNumJustRatios = 19u;
 
 inline constexpr std::array<PureRatioEntry, kNumJustRatios> kJustRatioTable = {{
-    {0.2500000f, 1u, 4u}, {0.3333333f, 1u, 3u}, {0.3750000f, 3u, 8u}, {0.5000000f, 1u, 2u},
-    {0.6250000f, 5u, 8u}, {0.6666667f, 2u, 3u}, {0.7500000f, 3u, 4u}, {0.8750000f, 7u, 8u},
-    {1.0000000f, 1u, 1u}, {1.1250000f, 9u, 8u}, {1.2500000f, 5u, 4u}, {1.3333333f, 4u, 3u},
-    {1.5000000f, 3u, 2u}, {1.6666667f, 5u, 3u}, {1.7500000f, 7u, 4u}, {2.0000000f, 2u, 1u},
-    {2.5000000f, 5u, 2u}, {3.0000000f, 3u, 1u}, {4.0000000f, 4u, 1u},
+    {0.2500000f, -2.0000000f, 1u, 4u}, {0.3333333f, -1.5849625f, 1u, 3u},
+    {0.3750000f, -1.4150375f, 3u, 8u}, {0.5000000f, -1.0000000f, 1u, 2u},
+    {0.6250000f, -0.6780719f, 5u, 8u}, {0.6666667f, -0.5849625f, 2u, 3u},
+    {0.7500000f, -0.4150375f, 3u, 4u}, {0.8750000f, -0.1926451f, 7u, 8u},
+    {1.0000000f, 0.0000000f, 1u, 1u},  {1.1250000f, 0.1699250f, 9u, 8u},
+    {1.2500000f, 0.3219281f, 5u, 4u},  {1.3333333f, 0.4150375f, 4u, 3u},
+    {1.5000000f, 0.5849625f, 3u, 2u},  {1.6666667f, 0.7369656f, 5u, 3u},
+    {1.7500000f, 0.8073549f, 7u, 4u},  {2.0000000f, 1.0000000f, 2u, 1u},
+    {2.5000000f, 1.3219281f, 5u, 2u},  {3.0000000f, 1.5849625f, 3u, 1u},
+    {4.0000000f, 2.0000000f, 4u, 1u},
 }};
 
 constexpr const char* keyboardModelTitle(KeyboardModel model) noexcept {
@@ -251,30 +304,30 @@ constexpr const char* keyboardModelTitle(KeyboardModel model) noexcept {
     return "LIVE MIXER";
 }
 
-constexpr KnobBankMode knobBankForEditTarget(EditTarget target) noexcept {
+constexpr KnobBankMode knobBankForHomeTarget(HomeTarget target) noexcept {
     switch (target) {
-    case EditTarget::Width:
+    case HomeTarget::Width:
         return KnobBankMode::PulseWidth;
-    case EditTarget::Drift:
+    case HomeTarget::Drift:
         return KnobBankMode::VoiceDrift;
-    case EditTarget::Level:
-    case EditTarget::Count:
-        return KnobBankMode::Amplitude;
+    case HomeTarget::Frequency:
+    case HomeTarget::Count:
+        return KnobBankMode::Frequency;
     }
-    return KnobBankMode::Amplitude;
+    return KnobBankMode::Frequency;
 }
 
-constexpr HudMode hudModeForEditTarget(EditTarget target) noexcept {
+constexpr HudMode hudModeForHomeTarget(HomeTarget target) noexcept {
     switch (target) {
-    case EditTarget::Width:
+    case HomeTarget::Width:
         return HudMode::PulseWidth;
-    case EditTarget::Drift:
+    case HomeTarget::Drift:
         return HudMode::VoiceDrift;
-    case EditTarget::Level:
-    case EditTarget::Count:
-        return HudMode::Amplitude;
+    case HomeTarget::Frequency:
+    case HomeTarget::Count:
+        return HudMode::VoiceFrequency;
     }
-    return HudMode::Amplitude;
+    return HudMode::VoiceFrequency;
 }
 
 constexpr bool isPerOscKnobBank(KnobBankMode bank) noexcept {
@@ -283,15 +336,24 @@ constexpr bool isPerOscKnobBank(KnobBankMode bank) noexcept {
            bank == KnobBankMode::Panning;
 }
 
-// Monochrome PWM LED rest brightness for White Keys 5-8 carbon-pill filter/LPG pads
-inline constexpr float kPadFilterBaseLed = 0.24f;
-
 struct HudState {
+    GlobalConfigState config{};
+    std::array<float, kNumSnapshots> snapshotWeights{1.0f, 0.0f, 0.0f, 0.0f};
+    float activePunchValue = 0.0f;    // Live acoustic readout (pressure 0..1, Hz, or octave/ratio)
+    float morphPosition = 1.0f;       // [0.0f, 1.0f] snapshot glide/pressure morph progress
+    float snapshotLoopPhase = 0.0f;   // [0.0f, 4.0f) continuous circular position across S1..S4..S1
+    float opacity = 0.0f;             // [0.0f, 1.0f] smooth 150 ms S-curve alpha envelope
+    float effectiveClockBpm = 120.0f; // Live master clock BPM (internal 120 or synced MIDI BPM)
+    uint16_t heldBlackMask = 0u;      // Bitmask of physically held raised keys (bits 0..10)
+    uint16_t heldWhiteMask = 0u;      // Bitmask of physically held bottom keys (bits 0..15)
+    uint16_t latchedBlackMask = 0u;   // Bitmask of raised keys latched by HOLD (bits 0..7)
+    uint16_t latchedWhiteMask = 0u;   // Bitmask of bottom keys latched by HOLD (bits 0..11)
+    std::array<uint8_t, kNumBlackKeys> blackPressureQ8{};
+    std::array<uint8_t, kNumWhiteKeys> whitePressureQ8{};
     HudMode mode = HudMode::None;
     KnobBankMode knobBank = KnobBankMode::Frequency;
     KnobRate knobRate = KnobRate::Standard;
-    EditTarget editTarget = EditTarget::Level;
-    GlobalConfigState config{};
+    HomeTarget homeTarget = HomeTarget::Frequency;
     ButtonId lastButton = ButtonId::Count;
     BlackKeyId lastBlackKey = BlackKeyId::Count;
     EncoderId lastEncoder = EncoderId::Select;
@@ -305,42 +367,47 @@ struct HudState {
     uint8_t snapshotSlot = 0u;            // 0..3 active/selected Snapshot 1..4
     uint8_t snapshotToastSlot = 0u;       // 0..3 target slot for SAVE / DELETE / EMPTY toast
     uint8_t snapshotOccupiedMask = 0x0Fu; // Bits 0..3 = Scene 1..4 occupied (0 = deleted/EMPTY)
-    std::array<float, kNumSnapshots> snapshotWeights{1.0f, 0.0f, 0.0f, 0.0f};
     KeyboardModel keyboardModel = KeyboardModel::LiveMixer;
     KeyPunchKind activePunch = KeyPunchKind::None;
+    ShiftFocus shiftFocus = ShiftFocus::Idle;
     uint8_t activePunchVoice = 0u; // 0..3 voice/slot index
-    float activePunchValue = 0.0f; // Live acoustic readout (pressure 0..1, Hz, or octave/ratio)
-    uint16_t heldBlackMask = 0u;   // Bitmask of held raised keys (bits 0..10)
-    uint16_t heldWhiteMask = 0u;   // Bitmask of held bottom keys (bits 0..15)
-    std::array<uint8_t, kNumBlackKeys> blackPressureQ8{};
-    std::array<uint8_t, kNumWhiteKeys> whitePressureQ8{};
-    float morphPosition = 1.0f;       // [0.0f, 1.0f] snapshot glide/pressure morph progress
-    float opacity = 0.0f;             // [0.0f, 1.0f] smooth 150 ms S-curve alpha envelope
-    float fxLedSync01 = 0.5f;         // [0.0f, 1.0f] Core 0 FX button breath/flare sync
-    float lfoLedSync01 = 0.5f;        // [0.0f, 1.0f] Core 0 LFO button wave sync
-    float effectiveClockBpm = 120.0f; // Live master clock BPM (internal 120 or synced MIDI BPM)
-    bool midiClockSynced = false;     // True when locked to external 24-PPQN MIDI Clock
+    bool midiClockSynced = false;  // True when locked to external 24-PPQN MIDI Clock
     bool modifierHeld = false;
     bool rateHoldActive = false; // True whenever OCT- or OCT+ is physically held
-    bool scopeFrozen = false;    // Momentary waveform freeze on 11th black key
+    bool shiftHeld = false;      // True whenever 11th corner key (SHIFT) is physically held
+    uint8_t modeWipeQ8 = 0u;     // [0..255] hardware-synced 220 ms keyboard-change LED wave phase
+    bool keyHoldLatched = false; // True whenever MONO (LATCH) key-latch switch is engaged
+    uint8_t keyHoldCount = 0u;   // Count of expressive pads currently captured by LATCH
+    uint8_t shiftBlinkQ8 = 255u; // [0..255] hardware-synced 0.40 Hz slow blink for active OP1..3
+    bool scopeFrozen = false;    // Legacy scope freeze flag
     bool saveArmed = false;
-    bool saveDeleteMode = false;       // True when SELECT toggles armed SAVE to DELETE SCENE
+    bool saveDeleteMode = false;       // True when 2nd SAVE / SELECT switches to DELETE SCENE
     bool snapshotDirty = false;        // True when knobs diverged from the recalled snapshot
-    bool snapshotSavedToast = false;   // True right after SAVE + Key 13-16 stores a slot
-    bool snapshotDeletedToast = false; // True right after DELETE SCENE + Key 13-16 clears a slot
+    bool snapshotSavedToast = false;   // True right after SAVE + Key 9-12 stores a slot
+    bool snapshotDeletedToast = false; // True right after DELETE SCENE + Key 9-12 clears a slot
     bool snapshotGliding = false;      // True while actively gliding/morphing into a snapshot
     bool freqPageOpen = false;         // Latching Frequency HUD toggle state (ButtonId::Home)
     bool fxPageOpen = false;           // Latching MS-20 Filter page state (ButtonId::Fx)
-    bool panPageOpen = false;    // Latching EDIT Page 2 Stereo Panning state (ButtonId::Edit x2)
+    bool panPageOpen = false;    // Latching EDIT Stereo Panning sub-page state (ButtonId::Edit)
     bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
-    bool editPageOpen = false;   // Latching EDIT Page 1 Channel Mix state (ButtonId::Edit x1)
+    bool editPageOpen = false;   // Latching EDIT Channel Mix sub-page state (ButtonId::Edit)
     bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
     bool selPageOpen = false;    // Latching KEYBOARD MODEL status & guidance page (ButtonId::Sel)
     uint8_t selWakeSeq = 0u;     // Incremented on SEL open or SELECT/ALGORITHM knob interaction
     ScopeTimebase scopeTimebase = ScopeTimebase::Auto; // CRT horizontal timebase (idle SELECT)
     uint8_t phantomPinSeq = 0u;   // Incremented when an unconnected switch (ENV/ARP/SEQ/REC) fires
     uint8_t phantomPinIndex = 0u; // 0 = ENV, 1 = ARP, 2 = SEQ, 3 = REC
+    uint8_t savePulseQ8 = 128u;   // [0..255] hardware-synced 2.50 Hz SAVE LED pulse phase
 };
+
+constexpr bool hasNonHomePageOpen(const HudState& hud) noexcept {
+    return hud.fxPageOpen || hud.panPageOpen || hud.lfoPageOpen || hud.editPageOpen ||
+           hud.configPageOpen || hud.selPageOpen;
+}
+
+constexpr bool hasPinnedPageOpen(const HudState& hud) noexcept {
+    return hud.freqPageOpen || hasNonHomePageOpen(hud);
+}
 
 constexpr uint8_t resolveFilterViewVoice(const HudState& hud) noexcept {
     if (hud.mode == HudMode::KeyboardPlay && hud.activePunch == KeyPunchKind::VoiceFormant) {

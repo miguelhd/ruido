@@ -102,6 +102,9 @@ struct VoiceChannelGain {
 
 inline constexpr VoiceChannelGain computeVoiceChannelGain(float amplitude) noexcept {
     const float a = clampf(amplitude, 0.0f, 1.0f);
+    if (a <= kSilentAmpThreshold) {
+        return {1.0f, 0.0f};
+    }
     if (a <= kCleanAmpKnee) {
         return {1.0f, a * (0.72f / kCleanAmpKnee)};
     }
@@ -151,6 +154,7 @@ struct KeyboardModState {
     std::array<uint8_t, kNumOscillators> rhythmParam{0u, 0u, 0u, 0u}; // Div/Euclid index per osc
     float overloadSurge = 0.0f;   // [0, 1] -> 4.5x MS-20 drive + 100% starved-rail sync
     float dubLpfDrop = 0.0f;      // [0, 1] -> master resonant MS-20 LPF curtain
+    float masterHpfSweep = 0.0f;  // [0, 1] -> master resonant MS-20 HPF bass-cut sweep
     float spatialFocus = 0.0f;    // -1.0 = center focus, +1.0 = hyper-wide spread
     float ratioLockAmount = 0.0f; // [0, 1] thermal drift damping
     float ringModMix = 0.0f;      // [0, 1] 4x paired ring/XOR sideband crossfade
@@ -162,10 +166,12 @@ struct KeyboardModState {
     float rhythmTempo = 0.0f;     // [0, 1] 1x -> 4x master rhythm clock speed
     float rhythmPluck = 0.0f;     // [0, 1] percussive MS-20 low-pass filter pluck
     float rhythmShort = 0.0f;     // [0, 1] 50% -> 6% pinpoint gate length
-    float rhythmSwing = 0.0f;     // [0, 1] 50% -> 72% shuffle swing + stereo bounce
+    float rhythmSwing = 0.0f;     // [0, 1] pure 16th-note timing shuffle groove
+    float rhythmPingPong = 0.0f;  // [0, 1] alternating L/R stereo gate bounce
+    float rhythmRoll = 0.0f;      // [0, 1] momentary x2..x8 fast ratchet gate fill
     uint8_t soloMask = 0u;        // 4-bit mask of soloed oscillators (bit v = OSC v+1 solo active)
     uint8_t muteMask = 0u;        // 4-bit mask of muted oscillators (bit v = OSC v+1 mute active)
-    bool stasisFreeze = false;    // 11th tall key: freezes 8 LFOs + thermal drift + clock + scope
+    bool stasisFreeze = false;    // DSP modulation freeze flag (unit-test & engine stasis hook)
 };
 
 // Complete patch state + momentary SARADC finger-pressure modulation from Core 0 -> Core 1.
@@ -293,13 +299,14 @@ inline constexpr float unquantizeVoiceScopeQ13(int16_t q) noexcept {
     return static_cast<float>(q) * (1.0f / 8192.0f);
 }
 
-// Decimated stereo + 4-voice scope frame & rising-edge trigger flags (Core 1 -> Core 0).
+// Decimated stereo + 4-voice scope frame & rising-edge trigger flags (Core 1 -> Core 0, 14 bytes).
 struct ScopeFrame {
-    float left = 0.0f;
-    float right = 0.0f;
-    uint8_t voiceRisingMask = 0u;
+    int16_t leftQ13 = 0;
+    int16_t rightQ13 = 0;
     std::array<int16_t, kNumOscillators> voiceQ13{0, 0, 0, 0};
+    uint8_t voiceRisingMask = 0u;
 };
+static_assert(sizeof(ScopeFrame) == 14u, "ScopeFrame must pack tightly into 14 bytes");
 static_assert(__is_trivially_copyable(ScopeFrame), "ScopeFrame must remain trivially copyable");
 
 // Lock-free SPSC ring buffer feeding the 240x240 CRT scope on Core 0.

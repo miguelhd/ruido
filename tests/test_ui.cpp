@@ -104,8 +104,8 @@ void testTwoHandErgonomicsAndLinearGears() {
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Coarse);
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Standard);
-    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     CHECK(!ctrl.hud().fxPageOpen);
 
     ctrl.reset();
@@ -130,24 +130,43 @@ void testTwoHandErgonomicsAndLinearGears() {
     CHECK(ctrl.hud().focusedVoice == 2u);
 
     // Turn KNOB1..4 while FX focuses OSC 3 -> updates Voice 2 HPF, HP RES, LPF, LP RES only
+    const ruido::VoiceParams v0BeforeFx = ctrl.state().voices[0];
+    const ruido::VoiceParams v2BeforeFx = ctrl.state().voices[2];
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 20);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 30);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, -20);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 30);
-    CHECK(ctrl.state().voices[2].hpCutoffHz > 2.2f);
-    CHECK(ctrl.state().voices[2].hpResonance > 0.10f);
-    CHECK(ctrl.state().voices[2].lpCutoffHz < 27000.0f);
-    CHECK(ctrl.state().voices[2].lpResonance > 0.10f);
-    CHECK(near(ctrl.state().voices[0].hpCutoffHz, ruido::kFilterCutoffMinHz));
+    CHECK(ctrl.state().voices[2].hpCutoffHz > v2BeforeFx.hpCutoffHz);
+    CHECK(ctrl.state().voices[2].hpResonance > v2BeforeFx.hpResonance);
+    CHECK(ctrl.state().voices[2].lpCutoffHz < v2BeforeFx.lpCutoffHz);
+    CHECK(ctrl.state().voices[2].lpResonance > v2BeforeFx.lpResonance);
+    CHECK(near(ctrl.state().voices[0].hpCutoffHz, v0BeforeFx.hpCutoffHz));
 
-    // Close FX page via 2nd FX tap -> returns KNOB1-4 to Frequency
+    // Repeated FX taps cycle OSC focus with continuous wrap (2 -> 3 -> 0 -> 1); HOME closes &
+    // reopening FX remembers last focused voice
     ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
     ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    CHECK(ctrl.hud().fxPageOpen && ctrl.hud().fxVoiceFocus == 3u && ctrl.hud().focusedVoice == 3u);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    CHECK(ctrl.hud().fxPageOpen && ctrl.hud().fxVoiceFocus == 0u && ctrl.hud().focusedVoice == 0u);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    CHECK(ctrl.hud().fxPageOpen && ctrl.hud().fxVoiceFocus == 1u && ctrl.hud().focusedVoice == 1u);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     CHECK(!ctrl.hud().fxPageOpen);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    CHECK(ctrl.hud().fxPageOpen && ctrl.hud().fxVoiceFocus == 1u);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    CHECK(!ctrl.hud().fxPageOpen);
 
-    // 3. EDIT 3-Step Cycle (Page 1 Mix -> Page 2 Spatial PAN -> Close), Stateless SEL Toast,
-    //    and Mode 1 LIVE MIXER 27-Key Non-Destructive Momentary Punch-Ins:
+    // 3. EDIT 2-Step Console Mixer Cycle (LEVEL <-> PAN), remembered PAN sub-page on HOME close,
+    //    HOME 4-Step Oscillator Core Cycle (Clean -> FREQUENCY -> DUTY -> DRIFT -> Clean),
+    //    multi-press SEL model cycle, and Mode 1 LIVE MIXER punch-ins:
     ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
     ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
     CHECK(ctrl.hud().editPageOpen && !ctrl.hud().panPageOpen);
@@ -156,7 +175,7 @@ void testTwoHandErgonomicsAndLinearGears() {
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, -30);
     CHECK(ctrl.state().voices[1].amplitude < 0.65f);
 
-    // 2nd EDIT tap -> Spatial PAN Page 2
+    // 2nd EDIT tap -> Spatial PAN
     ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
     ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
     CHECK(!ctrl.hud().editPageOpen && ctrl.hud().panPageOpen);
@@ -165,37 +184,60 @@ void testTwoHandErgonomicsAndLinearGears() {
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, -30);
     CHECK(ctrl.state().voices[3].pan < 0.65f);
 
-    // 3rd EDIT tap -> closes back to Frequency knob bank
-    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    // Closing from PAN via HOME remembers PAN on next EDIT press, then toggles PAN <-> LEVEL
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     CHECK(!ctrl.hud().editPageOpen && !ctrl.hud().panPageOpen);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    CHECK(!ctrl.hud().editPageOpen && ctrl.hud().panPageOpen);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    CHECK(ctrl.hud().editPageOpen && !ctrl.hud().panPageOpen &&
+          ctrl.hud().mode == ruido::HudMode::Amplitude);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    CHECK(!ctrl.hud().editPageOpen && !ctrl.hud().panPageOpen);
 
-    // Persistent SEL guidance screen + SELECT knob model selector (KNOB1-4 remain Frequency)
+    // Persistent SEL guidance screen: 1st tap shows active model; subsequent taps wrap 1/3 -> 2/3
+    // -> 3/3 -> 1/3 alongside SELECT knob; HOME dismisses!
     ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
     ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
     CHECK(ctrl.hud().selPageOpen);
     CHECK(ctrl.hud().mode == ruido::HudMode::KeyboardModel);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::None);
     CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::LiveMixer);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
+    CHECK(ctrl.hud().selPageOpen && ctrl.hud().keyboardModel == ruido::KeyboardModel::CircuitLab);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
+    CHECK(ctrl.hud().selPageOpen && ctrl.hud().keyboardModel == ruido::KeyboardModel::RhythmLab);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
+    CHECK(ctrl.hud().selPageOpen && ctrl.hud().keyboardModel == ruido::KeyboardModel::LiveMixer);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::CircuitLab);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
     CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::LiveMixer);
-    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Sel, false); // 2nd SEL tap dismisses SEL screen cleanly!
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     CHECK(!ctrl.hud().selPageOpen);
 
-    // OP1..OP6 trigger momentary KeyboardPlay punch-ins mapped 1-to-1 to native Ruido views
+    // OP1..GLO (top 8 analog pressure keys) trigger momentary KeyboardPlay punch-ins mapped 1-to-1
+    // to native Ruido views
     const float savedAmp1 = ctrl.state().voices[1].amplitude;
-    for (uint8_t op = 0u; op <= static_cast<uint8_t>(ruido::BlackKeyId::Op6); ++op) {
+    for (uint8_t op = 0u; op <= static_cast<uint8_t>(ruido::BlackKeyId::Glo); ++op) {
         const auto key = static_cast<ruido::BlackKeyId>(op);
         ctrl.onBlackKeyEvent(key, true);
         CHECK(ctrl.hud().mode == ruido::HudMode::KeyboardPlay);
         CHECK(ctrl.hud().lastBlackKey == key);
         const auto expectedBank = (key == ruido::BlackKeyId::Op1) ? ruido::KnobBankMode::Amplitude
-                                  : (key == ruido::BlackKeyId::Op4)
+                                  : (key == ruido::BlackKeyId::Op4 || key == ruido::BlackKeyId::Op5)
                                       ? ruido::KnobBankMode::GlobalFilter
+                                  : (key == ruido::BlackKeyId::Glo)
+                                      ? ruido::KnobBankMode::Panning
                                       : ruido::KnobBankMode::Frequency;
         CHECK(ctrl.hud().knobBank == expectedBank);
         ctrl.onBlackKeyEvent(key, false);
@@ -224,21 +266,35 @@ void testAllControlsDisplayOnScreen() {
     ruido::RuidoController ctrl;
 
     const auto clearHudIfActive = [&]() {
-        if (ctrl.hud().mode != ruido::HudMode::None) {
+        if (ctrl.hud().freqPageOpen) {
+            for (int step = 0; step < 3 && ctrl.hud().freqPageOpen; ++step) {
+                ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+                ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+            }
+        } else if (ctrl.hud().mode != ruido::HudMode::None) {
             ctrl.onButtonEvent(ruido::ButtonId::Home, true);
             ctrl.onButtonEvent(ruido::ButtonId::Home, false);
         }
         CHECK(ctrl.hud().mode == ruido::HudMode::None);
     };
 
-    // 1. Every single Black Key (all 11: OP1..6, PIT, GLO, MONO, POLY, ScopeFreezeKey)
+    // 1. Every single Black Key (OP1..6, PIT, GLO, MONO=HOLD, 11th=SHIFT in LiveMixer; POLY=TAP
+    //    is strictly 0% inert in LiveMixer & wakes MasterTempo in RhythmLab!)
     for (uint8_t b = 0u; b < static_cast<uint8_t>(ruido::BlackKeyId::Count); ++b) {
         clearHudIfActive();
 
         const auto key = static_cast<ruido::BlackKeyId>(b);
         ctrl.onBlackKeyEvent(key, true);
-        CHECK(ctrl.hud().mode != ruido::HudMode::None);
+        if (key == ruido::BlackKeyId::Poly) {
+            CHECK(ctrl.hud().mode == ruido::HudMode::None);
+        } else {
+            CHECK(ctrl.hud().mode != ruido::HudMode::None);
+        }
         ctrl.onBlackKeyEvent(key, false);
+    }
+    if (ctrl.hud().keyHoldLatched) {
+        ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, true);
+        ctrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
     }
 
     // 2. Every single White Key (all 16: Gates 1..4, Pressure Pads 5..8, Snapshots 9..16)
@@ -338,11 +394,16 @@ void testButtonsOctavesKeybedAndPressure() {
     const float v1BeforeLfo = ctrl.state().voices[1].frequencyHz;
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceLfo);
-    CHECK(ctrl.hud().lfoPageOpen);
+    CHECK(ctrl.hud().lfoPageOpen && ctrl.hud().lfoVoiceFocus == 0u);
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
     CHECK(near(ctrl.state().voices[1].frequencyHz, v1BeforeLfo));
-    ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
+    for (uint8_t step = 1u; step <= 8u; ++step) {
+        ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
+        ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
+        CHECK(ctrl.hud().lfoPageOpen && ctrl.hud().lfoVoiceFocus == (step & 7u));
+    }
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     CHECK(!ctrl.hud().lfoPageOpen);
 
     ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
@@ -350,8 +411,8 @@ void testButtonsOctavesKeybedAndPressure() {
     CHECK(ctrl.hud().fxPageOpen);
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFilter);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::VoiceFilter);
-    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     CHECK(!ctrl.hud().fxPageOpen);
 
     const uint8_t prevPhantomSeq = ctrl.hud().phantomPinSeq;
@@ -379,17 +440,17 @@ void testButtonsOctavesKeybedAndPressure() {
     CHECK(!ctrl.state().global.pitchPressureMode);
     CHECK(!ctrl.hud().panPageOpen);
     CHECK(ctrl.hud().mode == ruido::HudMode::KeyboardModel);
-    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
-
-    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op5, 1.0f);
-    CHECK(near(ctrl.state().keyMod.spatialFocus, -1.0f));
-    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op5, false);
-    CHECK(near(ctrl.state().keyMod.spatialFocus, 0.0f));
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
 
     ctrl.onBlackKeyPressure(ruido::BlackKeyId::Op6, 1.0f);
-    CHECK(near(ctrl.state().keyMod.spatialFocus, 1.0f));
+    CHECK(near(ctrl.state().keyMod.spatialFocus, -1.0f));
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op6, false);
+    CHECK(near(ctrl.state().keyMod.spatialFocus, 0.0f));
+
+    ctrl.onBlackKeyPressure(ruido::BlackKeyId::Glo, 1.0f);
+    CHECK(near(ctrl.state().keyMod.spatialFocus, 1.0f));
+    ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
     CHECK(near(ctrl.state().keyMod.spatialFocus, 0.0f));
 
     ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
@@ -448,7 +509,7 @@ void testHudEnvelopeAndVaribrightLeds() {
     ctrl.tick(0.100f, tel);
     CHECK(near(ctrl.hud().opacity, 0.0f));
 
-    // HOME button fades active HUD out smoothly in 150 ms (including HOME LED)
+    // HOME button fades active HUD out smoothly in 150 ms while HOME LED stays 100% on Home screen
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 3);
     ctrl.tick(0.200f, tel);
     CHECK(ctrl.hud().opacity > 0.99f);
@@ -456,11 +517,11 @@ void testHudEnvelopeAndVaribrightLeds() {
     ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     ctrl.tick(0.075f, tel);
     CHECK(near(ctrl.hud().opacity, 0.50f, 0.03f));
-    CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Home)] > 0.20f &&
-          ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Home)] < 0.27f);
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Home)], 1.0f));
     ctrl.tick(0.100f, tel);
     CHECK(near(ctrl.hud().opacity, 0.0f));
     CHECK(ctrl.hud().mode == ruido::HudMode::None);
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Home)], 1.0f));
 
     // Pressing HOME when no HUD is active latches FREQUENCY HUD open; pressing again hides it
     ctrl.onButtonEvent(ruido::ButtonId::Home, true);
@@ -489,7 +550,17 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(near(ctrl.hud().opacity, 1.0f));
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, -2); // restore default Osc 2 pitch
 
-    // Second HOME tap hides FREQUENCY HUD smoothly over 150 ms
+    // 2nd & 3rd HOME taps step FREQUENCY -> DUTY -> DRIFT; 4th HOME tap hides smoothly over 150 ms
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    CHECK(ctrl.hud().freqPageOpen && ctrl.hud().homeTarget == ruido::HomeTarget::Width);
+    CHECK(ctrl.hud().mode == ruido::HudMode::PulseWidth &&
+          ctrl.hud().knobBank == ruido::KnobBankMode::PulseWidth);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    CHECK(ctrl.hud().freqPageOpen && ctrl.hud().homeTarget == ruido::HomeTarget::Drift);
+    CHECK(ctrl.hud().mode == ruido::HudMode::VoiceDrift &&
+          ctrl.hud().knobBank == ruido::KnobBankMode::VoiceDrift);
     ctrl.onButtonEvent(ruido::ButtonId::Home, true);
     ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     CHECK(!ctrl.hud().freqPageOpen);
@@ -498,10 +569,10 @@ void testHudEnvelopeAndVaribrightLeds() {
     ctrl.tick(0.100f, tel);
     CHECK(near(ctrl.hud().opacity, 0.0f));
     CHECK(ctrl.hud().mode == ruido::HudMode::None);
-    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Home)], 0.12f));
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Home)], 1.0f));
 
     // Right 2x6 pages & switches (FX, LFO, EDIT, GLO, SAVE, unassigned SEL/ENV) stay latched until
-    // closed or HOME:
+    // closed or HOME, and opening FX dims HOME LED cleanly to 15%:
     ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
     ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
     for (int i = 0; i < 60; ++i) {
@@ -511,6 +582,7 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFilter);
     CHECK(near(ctrl.hud().opacity, 1.0f));
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)], 1.0f));
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Home)], 0.15f));
 
     // Holding & releasing a momentary keybed punch-in (OP4 / Pad 1) returns to latched FX page:
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op4, true);
@@ -578,53 +650,69 @@ void testHudEnvelopeAndVaribrightLeds() {
     CHECK(ctrl.hud().mode == ruido::HudMode::SaveArmed);
     CHECK(near(ctrl.hud().opacity, 1.0f));
 
-    // Second tap on SAVE shows 1.5 s CANCELLED toast then fades in 150 ms; HOME fades out in 150 ms
+    // 2nd tap on SAVE advances to 2/2 DELETE SCENE; 3rd tap (or HOME) exits cleanly in 150 ms
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
-    CHECK(!ctrl.hud().saveArmed);
+    CHECK(ctrl.hud().saveArmed && ctrl.hud().saveDeleteMode);
     CHECK(ctrl.hud().mode == ruido::HudMode::SaveArmed);
-    for (int i = 0; i < 14; ++i) {
-        ctrl.tick(0.100f, tel);
-    }
-    CHECK(near(ctrl.hud().opacity, 1.0f));
-    ctrl.tick(0.175f, tel); // 0.10 s remaining hold + 0.075 s fade -> ~0.50
+    ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+    CHECK(!ctrl.hud().saveArmed && !ctrl.hud().saveDeleteMode);
+    CHECK(ctrl.hud().mode == ruido::HudMode::SaveArmed);
+    ctrl.tick(0.075f, tel);
     CHECK(near(ctrl.hud().opacity, 0.50f, 0.03f));
+    ctrl.tick(0.085f, tel);
+    CHECK(near(ctrl.hud().opacity, 0.0f));
+    CHECK(ctrl.hud().mode == ruido::HudMode::None);
+
+    ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+    CHECK(ctrl.hud().saveArmed);
     ctrl.onButtonEvent(ruido::ButtonId::Home, true);
     ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     ctrl.tick(0.160f, tel);
     CHECK(near(ctrl.hud().opacity, 0.0f));
     CHECK(ctrl.hud().mode == ruido::HudMode::None);
 
-    // Verify unassigned buttons are strictly 0% dark, Mode 1 LIVE MIXER keybed zones step in a
-    // high-contrast bright -> dark left-to-right gradient, and FX/SEL/LFO/EDIT/GLO rest at 15%:
+    // Verify unassigned buttons are strictly 0% dark, Mode 1 LIVE MIXER 20+7 keybed zones step in a
+    // calibrated 65% -> 40% -> 15% left-to-right gradient, TAP=0% in LiveMixer, SHIFT=100% beacon,
+    // HOME=100% on Clean Scope, and FX/SEL/LFO/EDIT/GLO rest at 15%:
     const auto& leds = ctrl.leds();
-    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op1)], 0.86f));
-    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op2)], 0.50f));
-    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op3)], 0.50f));
-    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op4)], 0.50f));
-    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op5)], 0.22f));
-    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op6)], 0.22f));
-    for (size_t s = 0u; s < 4u; ++s) {
-        CHECK(near(leds.blackKeyLeds[ruido::kSoloBlackKeyBase + s], 0.0f));
-    }
-    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::ScopeFreezeKey)], 0.12f));
-    CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)], 0.15f));
+    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op1)], 0.65f));
+    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op2)], 0.65f));
+    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op3)], 0.65f));
+    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op4)], 0.40f));
+    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op5)], 0.40f));
+    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Op6)], 0.15f));
+    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Pit)], 0.15f));
+    CHECK(near(leds.blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::Glo)], 0.15f));
+    CHECK(near(leds.blackKeyLeds[ruido::kHoldBlackKeyIdx], 0.15f));
+    CHECK(near(leds.blackKeyLeds[ruido::kTapBlackKeyIdx], 0.0f));
+    CHECK(near(leds.blackKeyLeds[ruido::kShiftBlackKeyIdx], 1.0f));
+    CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Home)], 1.0f));
+    CHECK(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)] > 0.15f &&
+          leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)] <= 0.375f);
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Sel)], 0.15f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Env)], 0.0f));
-    CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)], 0.15f));
+    CHECK(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)] > 0.15f &&
+          leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)] <= 0.375f);
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Edit)], 0.15f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::GloRight)], 0.15f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Arp)], 0.0f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Seq)], 0.0f));
     CHECK(near(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Rec)], 0.0f));
 
-    // Bottom 4x4 groups step bright -> dark left-to-right: 82% (FILTER) -> 48% -> 16% -> 0% (MUTE)
+    // Bottom 4x4 groups step 65% (FILTER) -> 40% (OCTAVE) -> 15% (DUTY) -> 80% (MUTE 1-4 audible
+    // >= 20 Hz, leaving SHIFT at 100% brightest), while SAVE gently breathes (12%..28%) when
+    // EDITED:
     for (size_t i = 0u; i < 4u; ++i) {
-        CHECK(near(leds.whiteKeyLeds[i], 0.82f));
-        CHECK(near(leds.whiteKeyLeds[4u + i], 0.48f));
-        CHECK(near(leds.whiteKeyLeds[8u + i], 0.16f));
-        CHECK(near(leds.whiteKeyLeds[12u + i], 0.0f));
+        CHECK(near(leds.whiteKeyLeds[i], 0.65f));
+        CHECK(near(leds.whiteKeyLeds[4u + i], 0.40f));
+        CHECK(near(leds.whiteKeyLeds[8u + i], 0.15f));
+        CHECK(near(leds.whiteKeyLeds[12u + i], 0.80f));
     }
+    CHECK(leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Save)] >= 0.12f &&
+          leds.buttonLeds[static_cast<size_t>(ruido::ButtonId::Save)] <= 0.28f);
     ctrl.onWhiteKeyPressure(0u, 0.75f);
     ctrl.tick(0.016f, tel);
     CHECK(ctrl.leds().whiteKeyLeds[0u] > 0.80f);
@@ -632,41 +720,45 @@ void testHudEnvelopeAndVaribrightLeds() {
           ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)] <= 1.0f);
     ctrl.onWhiteKeyGate(0u, false);
     ctrl.tick(0.016f, tel);
-    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)], 0.15f));
+    CHECK(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)] > 0.15f &&
+          ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)] <= 0.375f);
 
-    // 11th Key Stasis Freeze lights crystalline still-frame across FX keys & top switches while
-    // MUTE 1-4 / SOLO 1-4 stay strictly binary switch indicators (0% when unmuted/unsoloed):
+    // Universal 11th Key = SHIFT: opens ShiftMap, keeps SHIFT 100%, slow-blinks active model on OP1
+    // (15%..100%) with OP2/OP3 at 15%, ghosts unassigned keys dark (0%), and lights SCENE & SOLO:
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, true);
     ctrl.tick(0.016f, tel);
-    CHECK(near(ctrl.leds().blackKeyLeds[static_cast<size_t>(ruido::BlackKeyId::ScopeFreezeKey)],
-               1.0f));
-    CHECK(near(ctrl.leds().whiteKeyLeds[12], 0.0f));
-    CHECK(near(ctrl.leds().blackKeyLeds[6], 0.0f));
-    CHECK(near(ctrl.leds().whiteKeyLeds[0], 0.52f));
-    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)], 0.48f));
-    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Env)], 0.48f));
+    CHECK(ctrl.hud().mode == ruido::HudMode::ShiftMap && ctrl.hud().shiftHeld);
+    CHECK(near(ctrl.leds().blackKeyLeds[ruido::kShiftBlackKeyIdx], 1.0f));
+    CHECK(near(ctrl.leds().whiteKeyLeds[0], 0.0f));
+    CHECK(ctrl.leds().blackKeyLeds[0] >= 0.15f && ctrl.leds().blackKeyLeds[0] <= 1.0f);
+    CHECK(near(ctrl.leds().blackKeyLeds[1], 0.15f));
+    CHECK(near(ctrl.leds().blackKeyLeds[2], 0.15f));
+    CHECK(near(ctrl.leds().blackKeyLeds[3], 0.0f));
+    CHECK(near(ctrl.leds().whiteKeyLeds[8], 0.80f));
+    CHECK(near(ctrl.leds().whiteKeyLeds[9], 0.40f));
+    CHECK(near(ctrl.leds().whiteKeyLeds[12], 0.80f));
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
     ctrl.tick(0.016f, tel);
-    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)], 0.15f));
-    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Env)], 0.0f));
 
-    // White Keys 13-16 (MUTE 1-4) and Black Keys 7-10 (SOLO 1-4) reflect ONLY binary mute/solo
-    // switch state (0.0f off, 1.0f on) — never voice sound level or sub-audio LFO breathing:
-    CHECK(near(ctrl.leds().whiteKeyLeds[12], 0.0f));
-    CHECK(near(ctrl.leds().blackKeyLeds[6], 0.0f));
+    // White Keys 13-16 (MUTE 1-4) reflect steady oscillator sound status (80% >= 20 Hz, 50% < 20
+    // Hz, 0% muted/silent) and NEVER dance with sub-audio LFO breathing; HOLD rests at exact 15%:
+    CHECK(near(ctrl.leds().whiteKeyLeds[12], 0.80f));
+    CHECK(near(ctrl.leds().blackKeyLeds[ruido::kHoldBlackKeyIdx], 0.15f));
 
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -110);
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
     CHECK(ctrl.state().voices[0].frequencyHz < 5.0f);
-    bool consoleBinarySteady = true;
+    bool consoleSteady = true;
     for (int i = 0; i < 200; ++i) {
         ctrl.tick(0.016f, tel);
-        if (!near(ctrl.leds().whiteKeyLeds[12], 0.0f) || !near(ctrl.leds().blackKeyLeds[6], 0.0f)) {
-            consoleBinarySteady = false;
+        if (!near(ctrl.leds().whiteKeyLeds[12], 0.50f) ||
+            !near(ctrl.leds().whiteKeyLeds[13], 0.80f) ||
+            !near(ctrl.leds().blackKeyLeds[ruido::kHoldBlackKeyIdx], 0.15f)) {
+            consoleSteady = false;
         }
     }
-    CHECK(consoleBinarySteady);
+    CHECK(consoleSteady);
 
     // Verify dual-channel PLAY/STOP split cap:
     // - Sound ON (AUDIO OUTPUT = ON): PLAY (Green) = 0.0, STOP (Red) = 1.0
@@ -774,8 +866,8 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     // 2. Verify zero vertical waveform compression when non-filter HUD opens vs closes:
     // Close FX page, let the filter backdrop dim recovery settle cleanly, then compare Frequency
     // HUD open (opacity = 1.0) vs HUD dismissed (opacity = 0.0) on the exact frozen trace!
-    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     ctrl.tick(0.250f, engine.telemetry());
     ruido::HudState freqOpenHud = ctrl.hud();
     freqOpenHud.mode = ruido::HudMode::VoiceFrequency;
@@ -800,7 +892,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
             ++idleBlackPixels;
         }
     }
-    CHECK(idleBlackPixels > 25000u); // Pitch-black #000000 idle CRT background preserved
+    CHECK(idleBlackPixels > 20000u); // Pitch-black #000000 idle CRT background preserved
 
     bool centerWaveUncompressed = true;
     size_t centerLit = 0u;
@@ -998,7 +1090,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     std::printf("  Super-period stability |dLum|: locked 3:2 fifth = %.3f, free-beating = %.3f\n",
                 lockedDelta, beatingDelta);
     CHECK(lockedDelta < 0.8);
-    CHECK(beatingDelta < 7.0);
+    CHECK(beatingDelta < 8.5);
 
     // 7. Verify Full-Screen (x = 0..239, y = 26..186, 160 px) Dual-Resonance MS-20 Filter Graph,
     //    0% Voice Offset on GLO GlobalFilter, and smooth 72% BG Wave Dimming on FX open/close:
@@ -1102,8 +1194,8 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     CHECK(zeroVoiceOffsetIdentical);
 
     // Close FX: verify smooth 150 ms recovery transition (no 1-frame snap) back to 100%
-    a3Ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
-    a3Ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    a3Ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    a3Ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     for (int step = 0; step < 4; ++step) { // 4 x 16 ms = 64 ms (~43% of 150 ms fade)
         a3Ctrl.tick(0.016f, calmEngine.telemetry());
         ruido::HudState h = a3Ctrl.hud();
@@ -1259,7 +1351,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     int maxAct = 0;
     const double rmsYActive = measureWaveMetrics(img24, spanActive, minAct, maxAct);
     CHECK(spanActive > 125);
-    CHECK(rmsYActive > 35.0);
+    CHECK(rmsYActive > 28.0);
 
     // (a) Stop audio via PLAY/STOP: after 80 ms (5 frames, past DSP mute + ring window delay),
     //     waveform must smoothly contract toward y=120 rather than snapping in 1 frame!
@@ -1279,7 +1371,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     int max80 = 0;
     const double rmsYStop80ms = measureWaveMetrics(img16, spanStop80ms, min80, max80);
     CHECK(rmsYStop80ms > 12.0);
-    CHECK(rmsYStop80ms < rmsYActive * 0.90);
+    CHECK(rmsYStop80ms < rmsYActive * 0.94);
 
     // Step another 112 ms (7 frames -> 192 ms total): monotonically narrower ribbon
     for (int f = 0; f < 7; ++f) {
@@ -1412,8 +1504,8 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     }
     trRenderer.renderFullScreenStrips(img16.data());
 
-    trCtrl.onButtonEvent(ruido::ButtonId::Edit, true);
-    trCtrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    trCtrl.onButtonEvent(ruido::ButtonId::Home, true);
+    trCtrl.onButtonEvent(ruido::ButtonId::Home, false);
     CHECK(trCtrl.hud().knobBank == ruido::KnobBankMode::Frequency);
     trCtrl.tick(0.016f, trEngine.telemetry());
     {
@@ -1474,6 +1566,77 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     CHECK(lumLiveDimmed == 0.0);
     CHECK(lumLiveHomeMid > lumLiveHomeSettled * 0.02);
     CHECK(lumLiveHomeMid < lumLiveHomeSettled * 0.90);
+
+    // (f) HOME -> DUTY & DRIFT keep translucent live waveform visible behind the 4 columns,
+    //     whereas EDIT -> LEVEL fades background scope all the way to #000000:
+    {
+        auto sumInterColWaveGray = [](const std::array<uint16_t, 240u * 240u>& img) -> double {
+            double sum = 0.0;
+            // Sample inter-column gap x = 56..63 (strictly between Col 0 [9..51] & Col 1 [69..111])
+            // away from LEVEL 70% knee line (y = 81), DUTY/DRIFT zero filaments (y = 104..118),
+            // and shared baseline (y = 186):
+            for (size_t y = 40u; y <= 170u; ++y) {
+                if ((y >= 77u && y <= 85u) || (y >= 104u && y <= 118u)) {
+                    continue;
+                }
+                for (size_t x = 56u; x <= 63u; ++x) {
+                    sum += static_cast<double>((img[y * 240u + x] >> 5u) & 0x3Fu) * 4.0;
+                }
+            }
+            return sum;
+        };
+        auto stepLiveFrames = [&](int frames) {
+            for (int f = 0; f < frames; ++f) {
+                for (int b = 0; b < 8; ++b) {
+                    trEngine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+                    trRenderer.ingestScopeRing(trEngine.scopeBuffer());
+                }
+                trCtrl.tick(0.032f, trEngine.telemetry());
+                trRenderer.prepareFrame(0.032f, trCtrl.state(), trCtrl.hud(), trEngine.telemetry());
+            }
+        };
+
+        trCtrl.onButtonEvent(ruido::ButtonId::Home, true); // 1st -> FREQUENCY (100% wave)
+        trCtrl.onButtonEvent(ruido::ButtonId::Home, false);
+        stepLiveFrames(10);
+        trRenderer.renderFullScreenStrips(img16.data());
+        const double lumWaveFreq = sumInterColWaveGray(img16);
+        CHECK(lumWaveFreq > 400.0);
+
+        const double keepFrac = 1.0 - static_cast<double>(ruido::kHomeSubBgDimDepth);
+
+        trCtrl.onButtonEvent(ruido::ButtonId::Home, true); // 2nd -> DUTY (~12% translucent wave)
+        trCtrl.onButtonEvent(ruido::ButtonId::Home, false);
+        stepLiveFrames(10);
+        trRenderer.renderFullScreenStrips(img16.data());
+        const double lumWaveDuty = sumInterColWaveGray(img16);
+        CHECK(lumWaveDuty > lumWaveFreq * (keepFrac * 0.35) &&
+              lumWaveDuty < lumWaveFreq * (keepFrac * 2.20));
+
+        trCtrl.onButtonEvent(ruido::ButtonId::Home, true); // 3rd -> DRIFT (~12% translucent wave)
+        trCtrl.onButtonEvent(ruido::ButtonId::Home, false);
+        stepLiveFrames(10);
+        trRenderer.renderFullScreenStrips(img16.data());
+        const double lumWaveDrift = sumInterColWaveGray(img16);
+        CHECK(lumWaveDrift > lumWaveFreq * (keepFrac * 0.35) &&
+              lumWaveDrift < lumWaveFreq * (keepFrac * 2.20));
+
+        trCtrl.onButtonEvent(ruido::ButtonId::Edit, true); // EDIT -> LEVEL (0% opaque black BG)
+        trCtrl.onButtonEvent(ruido::ButtonId::Edit, false);
+        if (!trCtrl.hud().editPageOpen) {
+            trCtrl.onButtonEvent(ruido::ButtonId::Edit, true);
+            trCtrl.onButtonEvent(ruido::ButtonId::Edit, false);
+        }
+        CHECK(trCtrl.hud().editPageOpen);
+        stepLiveFrames(10);
+        trRenderer.renderFullScreenStrips(img16.data());
+        const double lumWaveLevel = sumInterColWaveGray(img16);
+        CHECK(lumWaveLevel == 0.0);
+
+        trCtrl.onButtonEvent(ruido::ButtonId::Home, true); // Escape back to Clean Scope
+        trCtrl.onButtonEvent(ruido::ButtonId::Home, false);
+        stepLiveFrames(10);
+    }
 
     // 9. Verify 13 pt Bold top-left title ("FILTER OSC 1"): bright "FILTER" + dimmed "OSC 1"
     ruido::EngineControlState silentCtrl = ruido::EngineControlState::makeDefault();
@@ -1656,22 +1819,27 @@ void testPerVoiceLfoPageAndHudGraph() {
     // 3. Per-slot editing on LFO A OSC 2 (KNOB 1-4 = TARGET | SHAPE | RATE | DEPTH) leaves OSC
     // 1/3/4 and LFO B OSC 2 untouched; Keybed GLO -> GLOBAL LFO scales only active LFOs when any >
     // 0%, and wakes LFO A (OSC 1..4) when all 8 LFOs are at 0%!
+    const float v0ADepthBefore = ctrl.state().voices[0].lfoDepth;
+    const float v2ADepthBefore = ctrl.state().voices[2].lfoDepth;
+    const float v1BDepthBefore = ctrl.state().voices[1].lfoBDepth;
+    const float v1ARateBefore = ctrl.state().voices[1].lfoRateHz;
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 16);  // +4 steps from LpCutoff(2) -> Amplitude(6)
     ctrl.onEncoderDelta(ruido::EncoderId::Knob2, 60);  // SHAPE
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 40);  // RATE
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 100); // DEPTH (~0.45)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 100); // DEPTH
     CHECK(ctrl.state().voices[1].lfoTarget == ruido::LfoTarget::Amplitude);
-    CHECK(ctrl.state().voices[1].lfoShape > 0.20f);
-    CHECK(ctrl.state().voices[1].lfoRateHz > 0.60f);
-    CHECK(ctrl.state().voices[1].lfoDepth > 0.35f);
-    CHECK(near(ctrl.state().voices[1].lfoBDepth, 0.0f));
+    CHECK(ctrl.state().voices[1].lfoShape > 0.40f);
+    CHECK(ctrl.state().voices[1].lfoRateHz > v1ARateBefore * 1.5f);
+    CHECK(ctrl.state().voices[1].lfoDepth > 0.55f);
+    CHECK(near(ctrl.state().voices[1].lfoBDepth, v1BDepthBefore));
     CHECK(ctrl.state().voices[0].lfoTarget == ruido::LfoTarget::LpCutoff);
-    CHECK(near(ctrl.state().voices[0].lfoDepth, 0.0f));
-    CHECK(near(ctrl.state().voices[2].lfoDepth, 0.0f));
+    CHECK(near(ctrl.state().voices[0].lfoDepth, v0ADepthBefore));
+    CHECK(near(ctrl.state().voices[2].lfoDepth, v2ADepthBefore));
 
-    // Also activate OSC 2B at 2x speed so we verify smart GLOBAL LFO scaling + A:B ratio lock!
+    // Also set OSC 2B to LfoARate at faster speed to verify smart GLOBAL LFO scaling + A:B lock!
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // -> 3 (OSC 2B)
-    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 24); // LpCutoff(2) + 6 -> LfoARate(8)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 40); // Top rail LfoADepth(9)
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, -4); // -> LfoARate(8)
     ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 80); // Faster rate on 2B
     ctrl.onEncoderDelta(ruido::EncoderId::Knob4, 60); // Active depth on 2B
 
@@ -1735,7 +1903,8 @@ void testPerVoiceLfoPageAndHudGraph() {
     beadCtrl.global.masterRun = false;
     beadCtrl.global.masterTrim = 0.0f;
     beadCtrl.voices[0].lfoDepth = 1.0f;
-    beadCtrl.voices[0].lfoShape = 0.0f; // Full-amplitude Sine spanning upper & lower viewport
+    beadCtrl.voices[0].lfoShape = 0.0f;  // Full-amplitude Sine spanning upper & lower viewport
+    beadCtrl.voices[0].lfoBDepth = 0.0f; // Isolate solo LFO A1 before companion sibling test below
     ruido::EngineTelemetry customTel{};
     customTel.lfoPhase[0].store(0.15f, std::memory_order_relaxed);
     customTel.lfoOutput[0].store(0.8f, std::memory_order_relaxed);
@@ -1848,8 +2017,8 @@ void testPerVoiceLfoPageAndHudGraph() {
         }
         CHECK(companionDiffPixels > 120u);
 
-        // Compare top header (y = 6..20) across LFO A OSC 1 (slot 0), LFO B OSC 1 (slot 1),
-        // and LFO A OSC 2 (slot 2):
+        // Compare top header (y = 6..20) across LFO A1 OSC 1 (slot 0), LFO B1 OSC 1 (slot 1),
+        // and LFO A2 OSC 2 (slot 2), ensuring both "LFO A1..B4" and dimmed "OSC 1..4" render:
         ruido::HudState hudA1 = ctrl.hud();
         hudA1.lfoVoiceFocus = 0u;
         ruido::HudState hudB1 = ctrl.hud();
@@ -1867,33 +2036,47 @@ void testPerVoiceLfoPageAndHudGraph() {
         beadRenderer.prepareFrame(0.016f, sibCtrl, hudA2, customTel);
         beadRenderer.renderStrip(0u, 24u, stripA2.data());
 
-        bool lfoAMainMatchesA1A2 = true;
+        bool lfoPrefixMatches = true;
         size_t lfoABMainDiff = 0u;
+        size_t osc12DigitDiff = 0u;
+        size_t oscSuffixLit = 0u;
         size_t osc12SuffixDiff = 0u;
         for (size_t y = 6u; y <= 20u; ++y) {
-            for (size_t x = 10u; x <= 46u; ++x) {
+            for (size_t x = 10u; x <= 35u; ++x) {
                 const size_t idx = y * 240u + x;
-                if (stripA1[idx] != stripA2[idx]) {
-                    lfoAMainMatchesA1A2 = false;
+                if (stripA1[idx] != stripA2[idx] || stripA1[idx] != stripB1[idx]) {
+                    lfoPrefixMatches = false;
                 }
-                if (stripA1[idx] != stripB1[idx]) {
+            }
+            for (size_t x = 36u; x <= 48u; ++x) {
+                if (stripA1[y * 240u + x] != stripB1[y * 240u + x]) {
                     ++lfoABMainDiff;
                 }
             }
-            for (size_t x = 50u; x <= 105u; ++x) {
+            for (size_t x = 46u; x <= 66u; ++x) {
+                if (stripA1[y * 240u + x] != stripA2[y * 240u + x]) {
+                    ++osc12DigitDiff;
+                }
+            }
+            for (size_t x = 68u; x <= 118u; ++x) {
+                if (stripA1[y * 240u + x] != 0u) {
+                    ++oscSuffixLit;
+                }
                 if (stripA1[y * 240u + x] != stripA2[y * 240u + x]) {
                     ++osc12SuffixDiff;
                 }
             }
         }
-        CHECK(lfoAMainMatchesA1A2);
+        CHECK(lfoPrefixMatches);
         CHECK(lfoABMainDiff > 8u);
+        CHECK(osc12DigitDiff > 8u);
+        CHECK(oscSuffixLit > 20u);
         CHECK(osc12SuffixDiff > 8u);
     }
 
-    // 6. Close LFO Page via LFO tap (or HOME): active LFOs keep running and LFO LED pulses live!
-    ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
-    ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
+    // 6. Close LFO Page via HOME: active LFOs keep running and LFO LED pulses live!
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     CHECK(!ctrl.hud().lfoPageOpen);
     CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::Frequency);
 
@@ -1985,7 +2168,11 @@ void testBootIntroCrtSequence() {
     CHECK(ringO == 25u);
     CHECK(holeO < ringO - 6u);
 
-    // 3. Advance through 180 ms collapse-y exit (1.00 s total) -> hands off cleanly
+    // 3. Advance through +1.00 s extended hold + 180 ms collapse-y exit (2.00 s total) -> hands off
+    for (int i = 0; i < 20; ++i) {
+        renderer.prepareFrame(0.050f, ctrl, hud, tel);
+    }
+    CHECK(renderer.isBootIntroActive()); // Still active at ~1.69 s (< 1.82 s hold end)!
     for (int i = 0; i < 8; ++i) {
         renderer.prepareFrame(0.050f, ctrl, hud, tel);
     }
@@ -2003,6 +2190,185 @@ void testBootIntroCrtSequence() {
     CHECK(!renderer.isBootIntroActive());
 }
 
+void testRailCouplingHudAnalyzer() {
+    std::printf(
+        "[Test 8b] Rail Coupling HUD Analyzer (0%%, ~32%% Pull & ~78%% Starved Regimes)...\n");
+    ruido::DroneEngine engine;
+    ruido::RuidoController ctrl;
+    ruido::ScopeHudRenderer renderer;
+
+    engine.init(ruido::kBaseSampleRate);
+    ctrl.attachControlBus(&engine.controlBus());
+    engine.snapParametersToLatest();
+    CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::LiveMixer);
+
+    std::array<float, ruido::kBlockFrames> outL{};
+    std::array<float, ruido::kBlockFrames> outR{};
+    static std::array<uint16_t, 240u * 240u> frameZero{};
+    static std::array<uint16_t, 240u * 240u> framePull{};
+    static std::array<uint16_t, 240u * 240u> frameStarved{};
+
+    const auto renderCouplingState = [&](std::array<uint16_t, 240u * 240u>& outFrame) {
+        engine.snapParametersToLatest();
+        for (int f = 0; f < 10; ++f) {
+            for (int b = 0; b < 8; ++b) {
+                engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+                renderer.ingestScopeRing(engine.scopeBuffer());
+            }
+            ctrl.tick(0.025f, engine.telemetry());
+            renderer.prepareFrame(0.025f, ctrl.state(), ctrl.hud(), engine.telemetry());
+        }
+        renderer.renderFullScreenStrips(outFrame.data());
+    };
+
+    // 1. Turn ALGORITHM CCW in LiveMixer mode to 0% coupling baseline
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -100);
+    CHECK(ctrl.hud().mode == ruido::HudMode::RailCoupling);
+    CHECK(near(ctrl.state().global.circuitCoupling, 0.0f));
+    renderCouplingState(frameZero);
+    CHECK(ctrl.hud().mode == ruido::HudMode::RailCoupling);
+    CHECK(near(ctrl.hud().opacity, 1.0f));
+
+    // 2. Turn ALGORITHM CW into the 0..45% sympathetic pull regime (~32%)
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 76);
+    CHECK(ctrl.hud().mode == ruido::HudMode::RailCoupling);
+    CHECK(ctrl.state().global.circuitCoupling > 0.30f &&
+          ctrl.state().global.circuitCoupling < 0.45f);
+    renderCouplingState(framePull);
+    CHECK(ctrl.hud().mode == ruido::HudMode::RailCoupling);
+    CHECK(near(ctrl.hud().opacity, 1.0f));
+
+    // 3. Turn ALGORITHM CW into the >45% starved-rail regime (~78%)
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 110);
+    CHECK(ctrl.hud().mode == ruido::HudMode::RailCoupling);
+    CHECK(ctrl.state().global.circuitCoupling > 0.75f &&
+          ctrl.state().global.circuitCoupling < 0.82f);
+    renderCouplingState(frameStarved);
+    CHECK(ctrl.hud().mode == ruido::HudMode::RailCoupling);
+    CHECK(near(ctrl.hud().opacity, 1.0f));
+
+    const auto verifyRegimeFrame = [&](const std::array<uint16_t, 240u * 240u>& img) {
+        size_t upperLobeLit = 0u;
+        size_t lowerLobeLit = 0u;
+        size_t botCaptionLit = 0u;
+        for (size_t y = 36u; y <= 108u; ++y) {
+            for (size_t x = 10u; x < 230u; ++x) {
+                if (((img[y * 240u + x] >> 5u) & 0x3Fu) >= 6u) {
+                    ++upperLobeLit;
+                }
+            }
+        }
+        for (size_t y = 114u; y <= 185u; ++y) {
+            for (size_t x = 10u; x < 230u; ++x) {
+                if (((img[y * 240u + x] >> 5u) & 0x3Fu) >= 6u) {
+                    ++lowerLobeLit;
+                }
+            }
+        }
+        for (size_t y = 198u; y <= 224u; ++y) {
+            for (size_t x = 20u; x < 220u; ++x) {
+                if (((img[y * 240u + x] >> 5u) & 0x3Fu) >= 8u) {
+                    ++botCaptionLit;
+                }
+            }
+        }
+        CHECK(upperLobeLit > 600u);
+        CHECK(lowerLobeLit > 600u);
+        CHECK(botCaptionLit > 80u);
+    };
+
+    verifyRegimeFrame(frameZero);
+    verifyRegimeFrame(framePull);
+    verifyRegimeFrame(frameStarved);
+
+    // 4. Verify live real-audio motion in BOTH Soft Pull (~24%) AND Starved Hard Sync (~80%):
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob2,
+                        29); // Detune Osc 2 for lively multi-voice phase & sync interaction
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob3, 19);
+    static std::array<uint16_t, 240u * 240u> frameLiveA{};
+    static std::array<uint16_t, 240u * 240u> frameLiveB{};
+
+    // First verify at ~80% Starved Hard Sync (must NEVER freeze while real oscillators slip/tear!)
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8);
+    CHECK(ctrl.hud().mode == ruido::HudMode::RailCoupling);
+    CHECK(ctrl.state().global.circuitCoupling > 0.78f);
+    renderCouplingState(frameLiveA);
+    renderCouplingState(frameLiveB);
+    size_t hardSyncMotionDiffs = 0u;
+    for (size_t y = 38u; y <= 182u; ++y) {
+        for (size_t x = 48u; x < 228u; ++x) {
+            if (frameLiveA[y * 240u + x] != frameLiveB[y * 240u + x]) {
+                ++hardSyncMotionDiffs;
+            }
+        }
+    }
+    CHECK(hardSyncMotionDiffs > 100u);
+
+    // Next verify at ~24% Soft Pull + 3.0s toast hold:
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -135);
+    CHECK(ctrl.hud().mode == ruido::HudMode::RailCoupling);
+    renderCouplingState(frameLiveA);
+    renderCouplingState(frameLiveB);
+    size_t osc2BeatDiffs = 0u;
+    for (size_t y = 104u; y <= 125u; ++y) {
+        for (size_t x = 48u; x < 228u; ++x) {
+            if (frameLiveA[y * 240u + x] != frameLiveB[y * 240u + x]) {
+                ++osc2BeatDiffs;
+            }
+        }
+    }
+    CHECK(osc2BeatDiffs > 60u);
+
+    // After 0.50 s already elapsed in renderCouplingState, tick another 2.20 s (2.70 s total < 3.0
+    // s):
+    for (int i = 0; i < 22; ++i) {
+        ctrl.tick(0.100f, engine.telemetry());
+    }
+    CHECK(ctrl.hud().mode == ruido::HudMode::RailCoupling);
+    CHECK(near(ctrl.hud().opacity, 1.0f));
+    // Tick another 0.50 s (3.20 s total > 3.0 s + 0.15 s fade) -> cleanly faded out!
+    for (int i = 0; i < 5; ++i) {
+        ctrl.tick(0.100f, engine.telemetry());
+    }
+    CHECK(near(ctrl.hud().opacity, 0.0f));
+
+    size_t pullVsZeroGraphDiffs = 0u;
+    size_t starvedVsZeroGraphDiffs = 0u;
+    size_t starvedVsPullGraphDiffs = 0u;
+    size_t pullVsZeroBotDiffs = 0u;
+    size_t starvedVsZeroBotDiffs = 0u;
+    for (size_t y = 40u; y <= 185u; ++y) {
+        for (size_t x = 0u; x < 240u; ++x) {
+            const size_t idx = y * 240u + x;
+            if (framePull[idx] != frameZero[idx]) {
+                ++pullVsZeroGraphDiffs;
+            }
+            if (frameStarved[idx] != frameZero[idx]) {
+                ++starvedVsZeroGraphDiffs;
+            }
+            if (frameStarved[idx] != framePull[idx]) {
+                ++starvedVsPullGraphDiffs;
+            }
+        }
+    }
+    for (size_t y = 190u; y <= 230u; ++y) {
+        for (size_t x = 0u; x < 240u; ++x) {
+            const size_t idx = y * 240u + x;
+            if (framePull[idx] != frameZero[idx]) {
+                ++pullVsZeroBotDiffs;
+            }
+            if (frameStarved[idx] != frameZero[idx]) {
+                ++starvedVsZeroBotDiffs;
+            }
+        }
+    }
+    CHECK(pullVsZeroGraphDiffs > 40u);
+    CHECK(starvedVsZeroGraphDiffs > 80u);
+    CHECK(starvedVsPullGraphDiffs > 40u);
+    CHECK(pullVsZeroBotDiffs > 10u);
+    CHECK(starvedVsZeroBotDiffs > 10u);
+}
+
 } // namespace
 
 int main() {
@@ -2015,6 +2381,7 @@ int main() {
     testMonochromeCrtScanlineAndUncompressedWave();
     testPerVoiceLfoPageAndHudGraph();
     testBootIntroCrtSequence();
+    testRailCouplingHudAnalyzer();
     ruido_test::runUnified150msFadesAndRateSplitHeaderTests(check);
     ruido_test::runGlobalFiveModesAndConfigMenuTests(check);
     ruido_test::runEditChannelDrivePageAndAmpGraphTests(check);

@@ -28,10 +28,9 @@ void HudGraphs::reset() noexcept {
     for (auto& lc : lfoCurvesFixed_) {
         lc.fill(lfoZeroFixed);
     }
-    lfoBeadIntensity_ = {0.0f, 0.0f, 0.0f, 0.0f};
-    lfoBeadBankIdx_ = {0u, 1u, 2u, 3u};
+    lfoBeadIntensity_ = 0.0f;
+    lfoBeadBankIdx_ = {0u, 4u};
     lfoSiblingWeight_ = 0.0f;
-    lfoDivergenceSmooth_ = 0.0f;
     lfoGraphPhase_ = 0.0f;
 }
 
@@ -129,19 +128,17 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
         snapImmediate ? tgtLpInt : slewScalar(filterLpBeadInt_, tgtLpInt, alphaCurve, 0.002f);
 }
 
-void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate, bool showAllVoices,
+void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate,
                                const EngineControlState& control, const HudState& effectiveHud,
                                const LfoSignalArray& lfoOutput,
                                const LfoDriftArray& lfoDriftPacked) noexcept {
     std::array<int16_t, kTracePoints> curve0{};
     std::array<int16_t, kTracePoints> curveN{};
-    std::array<float, kNumOscillators> tgtBeadInt{0.0f, 0.0f, 0.0f, 0.0f};
+    float tgtBeadInt = 0.0f;
     float tgtSibWeight = 0.0f;
-    bool unified = true;
 
     const float alphaCurve =
         snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.042f)));
-    const float alphaDiv = snapImmediate ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.055f)));
 
     constexpr float kInvPts = 1.0f / static_cast<float>(kTracePoints - 1u);
     static constexpr std::array<std::array<int8_t, 5>, kNumOscillators> kFallbackDriftKnots = {{
@@ -180,63 +177,35 @@ void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate, bool showAll
         }
     };
 
-    if (!showAllVoices) {
-        const uint8_t slot = effectiveHud.lfoVoiceFocus & 7u;
-        const uint8_t v = lfoFocusVoice(slot);
-        const uint8_t sub = lfoFocusSub(slot);
-        const uint8_t sibSub = static_cast<uint8_t>(sub ^ 1u);
-        float dMain = 0.0f;
-        float dSib = 0.0f;
-        buildSlotCurve(v, sub, curve0, dMain);
-        buildSlotCurve(v, sibSub, curveN, dSib);
-        slewVoiceCurve(0u, curve0);
-        slewVoiceCurve(1u, curveN);
-        slewVoiceCurve(2u, curve0);
-        slewVoiceCurve(3u, curve0);
+    const uint8_t slot = effectiveHud.lfoVoiceFocus & 7u;
+    const uint8_t v = lfoFocusVoice(slot);
+    const uint8_t sub = lfoFocusSub(slot);
+    const uint8_t sibSub = static_cast<uint8_t>(sub ^ 1u);
+    float dMain = 0.0f;
+    float dSib = 0.0f;
+    buildSlotCurve(v, sub, curve0, dMain);
+    buildSlotCurve(v, sibSub, curveN, dSib);
+    slewVoiceCurve(0u, curve0);
+    slewVoiceCurve(1u, curveN);
 
-        lfoBeadBankIdx_[0] = static_cast<uint8_t>(lfoBankIndex(v, sub));
-        lfoBeadBankIdx_[1] = static_cast<uint8_t>(lfoBankIndex(v, sibSub));
-        tgtBeadInt[0] = 0.88f + 0.12f * smoothstep01(dMain * 3.0f);
-        tgtSibWeight = (lfoSlotDepth(control.voices[v], sibSub) > 0.002f) ? 0.34f : 0.0f;
-    } else {
-        for (size_t v = 0u; v < kNumOscillators; ++v) {
-            const VoiceParams& vp = control.voices[v];
-            const size_t sub = (vp.lfoBDepth > vp.lfoDepth && vp.lfoBDepth > 0.002f) ? 1u : 0u;
-            float d = 0.0f;
-            auto& dst = (v == 0u) ? curve0 : curveN;
-            buildSlotCurve(v, sub, dst, d);
-            slewVoiceCurve(v, dst);
-            lfoBeadBankIdx_[v] = static_cast<uint8_t>(lfoBankIndex(v, sub));
-            tgtBeadInt[v] = 0.76f + 0.16f * smoothstep01(d * 3.0f);
-            if (v > 0u && unified) {
-                for (size_t i = 0u; i < kTracePoints; i += 8u) {
-                    if (curveN[i] - curve0[i] > 16 || curve0[i] - curveN[i] > 16) {
-                        unified = false;
-                        break;
-                    }
-                }
-            }
-        }
-    }
+    lfoBeadBankIdx_[0] = static_cast<uint8_t>(lfoBankIndex(v, sub));
+    lfoBeadBankIdx_[1] = static_cast<uint8_t>(lfoBankIndex(v, sibSub));
+    tgtBeadInt = 0.88f + 0.12f * smoothstep01(dMain * 3.0f);
+    tgtSibWeight = (lfoSlotDepth(control.voices[v], sibSub) > 0.002f) ? 0.34f : 0.0f;
 
-    lfoDivergenceSmooth_ =
-        slewScalar(lfoDivergenceSmooth_, unified ? 0.0f : 1.0f, alphaDiv, 0.001f);
     lfoSiblingWeight_ = snapImmediate
                             ? tgtSibWeight
                             : slewScalar(lfoSiblingWeight_, tgtSibWeight, alphaCurve, 0.002f);
-
-    for (size_t v = 0u; v < kNumOscillators; ++v) {
-        lfoBeadIntensity_[v] =
-            snapImmediate ? tgtBeadInt[v]
-                          : slewScalar(lfoBeadIntensity_[v], tgtBeadInt[v], alphaCurve, 0.002f);
-    }
+    lfoBeadIntensity_ =
+        snapImmediate ? tgtBeadInt : slewScalar(lfoBeadIntensity_, tgtBeadInt, alphaCurve, 0.002f);
 }
 
 void HudGraphs::update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                        const HudState& effectiveHud, bool extraCenterViewActive,
                        const LfoSignalArray& lfoOutput, const LfoDriftArray& lfoDriftPacked,
                        float rhythmPhase01, uint8_t stutterGateMask) noexcept {
-    const bool hudVisible = (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None);
+    const bool hudVisible =
+        (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None) && !rawHud.shiftHeld;
     const bool rawFilterActive =
         hudVisible &&
         (rawHud.knobBank == KnobBankMode::VoiceFilter ||
@@ -305,7 +274,7 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
     if (rawLfoGraphActive) {
         const bool snapLfo = (lfoGraphPhase_ <= 0.015f);
         lfoGraphPhase_ = stepHudFadeLinear(lfoGraphPhase_, true, dtClamped);
-        updateLfoGraph(dtClamped, snapLfo, false, control, effectiveHud, lfoOutput, lfoDriftPacked);
+        updateLfoGraph(dtClamped, snapLfo, control, effectiveHud, lfoOutput, lfoDriftPacked);
     } else {
         lfoGraphPhase_ = stepHudFadeLinear(lfoGraphPhase_, false, dtClamped);
     }
@@ -323,9 +292,6 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
     }
     constexpr float kFixedToPx = 1.0f / 64.0f;
     const MonoStripCanvas lfoCv{lumBuf, y0, y1, lfoAlpha8};
-    const float div = clampf(lfoDivergenceSmooth_, 0.0f, 1.0f);
-    const bool multiCurves = (div > 0.001f);
-    const size_t curveCount = multiCurves ? kNumOscillators : 1u;
 
     const uint8_t slot = hud.lfoVoiceFocus & 7u;
     const float maxD = lfoSlotDepth(control.voices[lfoFocusVoice(slot)], lfoFocusSub(slot));
@@ -336,102 +302,100 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
     lfoCv.drawHorizontalFilament(0.0f, static_cast<float>(kDisplayWidth - 1u), kLfoYZero, 38.0f,
                                  0.50f, false);
 
-    const float fillScale = (multiCurves ? (0.24f + 0.05f * div) : 1.0f) * fillModeScale;
+    const float fillScale = fillModeScale;
     if (y1 > static_cast<int>(kLfoYTop) - 1 && y0 <= static_cast<int>(kLfoYBot) + 1) {
-        for (size_t vc = 0u; vc < curveCount; ++vc) {
-            const auto& pts = lfoCurvesFixed_[vc];
-            for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
-                const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
-                const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
-                const float dy = yB - yA;
-                const float absDy = absf(dy);
-                const float yMid = 0.5f * (yA + yB);
+        const auto& pts = lfoCurvesFixed_[0];
+        for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+            const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
+            const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
+            const float dy = yB - yA;
+            const float absDy = absf(dy);
+            const float yMid = 0.5f * (yA + yB);
 
-                float envLo = (yA < yB) ? yA : yB;
-                if (kLfoYZero < envLo) {
-                    envLo = kLfoYZero;
-                }
-                float envHi = (yA > yB) ? yA : yB;
-                if (kLfoYZero > envHi) {
-                    envHi = kLfoYZero;
-                }
-                if (envHi - envLo <= 0.08f) {
-                    continue;
-                }
+            float envLo = (yA < yB) ? yA : yB;
+            if (kLfoYZero < envLo) {
+                envLo = kLfoYZero;
+            }
+            float envHi = (yA > yB) ? yA : yB;
+            if (kLfoYZero > envHi) {
+                envHi = kLfoYZero;
+            }
+            if (envHi - envLo <= 0.08f) {
+                continue;
+            }
 
-                int pyStart = static_cast<int>(envLo - 0.5f);
-                if (pyStart < static_cast<int>(kLfoYTop) - 1) {
-                    pyStart = static_cast<int>(kLfoYTop) - 1;
-                }
-                if (pyStart < y0) {
-                    pyStart = y0;
-                }
-                int pyEnd = static_cast<int>(envHi + 0.5f) + 1;
-                if (pyEnd > static_cast<int>(kLfoYBot) + 1) {
-                    pyEnd = static_cast<int>(kLfoYBot) + 1;
-                }
-                if (pyEnd > y1 - 1) {
-                    pyEnd = y1 - 1;
-                }
-                if (pyStart > pyEnd) {
-                    continue;
-                }
+            int pyStart = static_cast<int>(envLo - 0.5f);
+            if (pyStart < static_cast<int>(kLfoYTop) - 1) {
+                pyStart = static_cast<int>(kLfoYTop) - 1;
+            }
+            if (pyStart < y0) {
+                pyStart = y0;
+            }
+            int pyEnd = static_cast<int>(envHi + 0.5f) + 1;
+            if (pyEnd > static_cast<int>(kLfoYBot) + 1) {
+                pyEnd = static_cast<int>(kLfoYBot) + 1;
+            }
+            if (pyEnd > y1 - 1) {
+                pyEnd = y1 - 1;
+            }
+            if (pyStart > pyEnd) {
+                continue;
+            }
 
-                const float spanA = absf(kLfoYZero - yA);
-                const float spanB = absf(kLfoYZero - yB);
-                const float maxSpan = (spanA > spanB) ? spanA : spanB;
-                const float crestBoost =
-                    1.0f + 0.34f * clampf(maxSpan * (1.0f / kLfoMaxAmpPx), 0.0f, 1.0f);
-                const float colScale = fillScale * effLfoAlpha01;
-                const float glowAmp = 68.0f * crestBoost;
-                const float invL2 = fastRecipPos(1.0f + dy * dy);
-                const bool steepSeg = (absDy > 1.5f);
+            const float spanA = absf(kLfoYZero - yA);
+            const float spanB = absf(kLfoYZero - yB);
+            const float maxSpan = (spanA > spanB) ? spanA : spanB;
+            const float crestBoost =
+                1.0f + 0.34f * clampf(maxSpan * (1.0f / kLfoMaxAmpPx), 0.0f, 1.0f);
+            const float colScale = fillScale * effLfoAlpha01;
+            const float glowAmp = 68.0f * crestBoost;
+            const float invL2 = fastRecipPos(1.0f + dy * dy);
+            const bool steepSeg = (absDy > 1.5f);
 
-                for (int py = pyStart; py <= pyEnd; ++py) {
-                    const float pyF = static_cast<float>(py);
-                    const float boxLo = pyF - 0.5f;
-                    const float boxHi = pyF + 0.5f;
+            for (int py = pyStart; py <= pyEnd; ++py) {
+                const float pyF = static_cast<float>(py);
+                const float boxLo = pyF - 0.5f;
+                const float boxHi = pyF + 0.5f;
 
-                    float subEdge = 0.0f;
-                    if (!steepSeg) {
-                        const float segLo = (yMid < kLfoYZero) ? yMid : kLfoYZero;
-                        const float segHi = (yMid > kLfoYZero) ? yMid : kLfoYZero;
+                float subEdge = 0.0f;
+                if (!steepSeg) {
+                    const float segLo = (yMid < kLfoYZero) ? yMid : kLfoYZero;
+                    const float segHi = (yMid > kLfoYZero) ? yMid : kLfoYZero;
+                    const float ovLo = (boxLo > segLo) ? boxLo : segLo;
+                    const float ovHi = (boxHi < segHi) ? boxHi : segHi;
+                    if (ovHi > ovLo) {
+                        subEdge = ovHi - ovLo;
+                    }
+                } else {
+                    for (int s = 0; s < 4; ++s) {
+                        const float u = (static_cast<float>(s) + 0.5f) * 0.25f;
+                        const float ySub = yA + u * dy;
+                        const float segLo = (ySub < kLfoYZero) ? ySub : kLfoYZero;
+                        const float segHi = (ySub > kLfoYZero) ? ySub : kLfoYZero;
                         const float ovLo = (boxLo > segLo) ? boxLo : segLo;
                         const float ovHi = (boxHi < segHi) ? boxHi : segHi;
                         if (ovHi > ovLo) {
-                            subEdge = ovHi - ovLo;
-                        }
-                    } else {
-                        for (int s = 0; s < 4; ++s) {
-                            const float u = (static_cast<float>(s) + 0.5f) * 0.25f;
-                            const float ySub = yA + u * dy;
-                            const float segLo = (ySub < kLfoYZero) ? ySub : kLfoYZero;
-                            const float segHi = (ySub > kLfoYZero) ? ySub : kLfoYZero;
-                            const float ovLo = (boxLo > segLo) ? boxLo : segLo;
-                            const float ovHi = (boxHi < segHi) ? boxHi : segHi;
-                            if (ovHi > ovLo) {
-                                subEdge += (ovHi - ovLo) * 0.25f;
-                            }
+                            subEdge += (ovHi - ovLo) * 0.25f;
                         }
                     }
-                    if (subEdge <= 0.004f) {
-                        continue;
-                    }
+                }
+                if (subEdge <= 0.004f) {
+                    continue;
+                }
 
-                    const float vy = pyF - yMid;
-                    const float segT = clampf(vy * dy * invL2, -0.5f, 0.5f);
-                    const float ey = vy - dy * segT;
-                    const float d2 = segT * segT + ey * ey;
-                    const float perpDist = d2 * fastInvSqrt(d2 + 0.25f);
-                    const float crestGlow = glowAmp * fastExpNeg(perpDist * 0.052f);
-                    int alpha = static_cast<int>((18.0f + crestGlow) * colScale * subEdge + 0.5f);
-                    if (alpha > 215) {
-                        alpha = 215;
-                    }
-                    if (alpha > 0) {
-                        uint8_t& dst = lumBuf[static_cast<size_t>(py - y0) * kDisplayWidth + colX];
-                        dst = blendLum8(dst, 240u, static_cast<uint8_t>(alpha));
-                    }
+                const float vy = pyF - yMid;
+                const float segT = clampf(vy * dy * invL2, -0.5f, 0.5f);
+                const float ey = vy - dy * segT;
+                const float d2 = segT * segT + ey * ey;
+                const float perpDist = d2 * fastInvSqrt(d2 + 0.25f);
+                const float crestGlow = glowAmp * fastExpNeg(perpDist * 0.052f);
+                int alpha = static_cast<int>((18.0f + crestGlow) * colScale * subEdge + 0.5f);
+                if (alpha > 215) {
+                    alpha = 215;
+                }
+                if (alpha > 0) {
+                    uint8_t& dst = lumBuf[static_cast<size_t>(py - y0) * kDisplayWidth + colX];
+                    dst = blendLum8(dst, 240u, static_cast<uint8_t>(alpha));
                 }
             }
         }
@@ -440,7 +404,7 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
     if (y1 > static_cast<int>(kLfoYTop) - 4 && y0 <= static_cast<int>(kLfoYBot) + 4) {
         std::memset(linScratch, 0,
                     static_cast<size_t>(stripHeight) * kDisplayWidth * sizeof(uint16_t));
-        if (!multiCurves && lfoSiblingWeight_ > 0.005f) {
+        if (lfoSiblingWeight_ > 0.005f) {
             const float sibWgt = lfoSiblingWeight_ * effLfoAlpha01;
             const auto& sibPts = lfoCurvesFixed_[1];
             for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
@@ -450,17 +414,14 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
                                    0.60f, y0, y1, linScratch);
             }
         }
-        const float mainCurveWgt =
-            (multiCurves ? (0.28f + 0.28f * div) : 1.04f) * spineModeScale * effLfoAlpha01;
+        const float mainCurveWgt = 1.04f * spineModeScale * effLfoAlpha01;
         if (mainCurveWgt > 0.004f) {
-            for (size_t vc = 0u; vc < curveCount; ++vc) {
-                const auto& pts = lfoCurvesFixed_[vc];
-                for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
-                    splatPhotonSegment(static_cast<int>(colX),
-                                       static_cast<float>(pts[colX]) * kFixedToPx,
-                                       static_cast<float>(pts[colX + 1u]) * kFixedToPx,
-                                       mainCurveWgt, 0.64f, y0, y1, linScratch);
-                }
+            const auto& pts = lfoCurvesFixed_[0];
+            for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                splatPhotonSegment(static_cast<int>(colX),
+                                   static_cast<float>(pts[colX]) * kFixedToPx,
+                                   static_cast<float>(pts[colX + 1u]) * kFixedToPx, mainCurveWgt,
+                                   0.64f, y0, y1, linScratch);
             }
         }
         screenBlendLinearStrip(stripHeight, 0u, kDisplayWidth, linScratch, lumBuf);
@@ -479,24 +440,20 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
         outY = y0Px + frac * (y1Px - y0Px);
     };
 
-    if (!multiCurves && lfoSiblingWeight_ > 0.005f) {
+    if (lfoSiblingWeight_ > 0.005f) {
         float sibX = 0.0f;
         float sibY = 0.0f;
         evalCurveBeadPos(1u, lfoPhase[lfoBeadBankIdx_[1] & 7u], sibX, sibY);
         lfoCv.drawOpticalBead(sibX, sibY, clampf(lfoSiblingWeight_ * 1.45f, 0.0f, 0.55f), 1.65f);
     }
 
-    for (size_t bv = 0u; bv < kNumOscillators; ++bv) {
-        const float lfoVis = lfoBeadIntensity_[bv];
-        if (lfoVis <= 0.005f) {
-            continue;
-        }
-        const size_t bankIdx = lfoBeadBankIdx_[bv] & 7u;
+    if (lfoBeadIntensity_ > 0.005f) {
+        const size_t bankIdx = lfoBeadBankIdx_[0] & 7u;
         float beadX = 0.0f;
         float beadY = 0.0f;
-        evalCurveBeadPos(multiCurves ? bv : 0u, lfoPhase[bankIdx], beadX, beadY);
+        evalCurveBeadPos(0u, lfoPhase[bankIdx], beadX, beadY);
         const float dSlot = lfoSlotDepth(control.voices[bankIdx & 3u], bankIdx >> 2u);
-        lfoCv.drawLfoPhaseBeacon(beadX, beadY, lfoVis, dSlot);
+        lfoCv.drawLfoPhaseBeacon(beadX, beadY, lfoBeadIntensity_, dSlot);
     }
 }
 

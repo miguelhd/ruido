@@ -87,6 +87,13 @@ class RuidoController {
         settingsDirty_ = false;
         return dirty;
     }
+    PatchSnapshot exportLivePatch() const noexcept { return snapshots_.exportLiveSnapshot(state_); }
+    bool loadLivePatch(const PatchSnapshot& snap) noexcept;
+    bool consumeLivePatchDirty() noexcept {
+        const bool dirty = livePatchDirty_;
+        livePatchDirty_ = false;
+        return dirty;
+    }
 
   private:
     KnobBankMode baseKnobBank() const noexcept;
@@ -102,7 +109,11 @@ class RuidoController {
     void setLatchedPage(HudMode mode, ButtonId button) noexcept;
     void restoreLatchedFields() noexcept;
     bool syncClockState() noexcept;
+    void snapShiftBlinkToPeak() noexcept;
+    void triggerUnassignedFeedback(uint8_t channel) noexcept;
+    void applyKeyboardModel(KeyboardModel nextModel) noexcept;
     bool tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active) noexcept;
+    bool tryInterceptSaveBlackKey(BlackKeyId key, bool active) noexcept;
     void applyKeyboardPerformanceChange() noexcept;
     void syncModifierHud() noexcept;
     void restoreOrDissolveHud() noexcept;
@@ -126,13 +137,17 @@ class RuidoController {
     LedSmoothState ledSmooth_{};
     bool knobTurnedDuringRateHold_ = false;
     bool dismissedByHome_ = false;
+    bool editRememberPan_ = false;
     bool stateDirty_ = false;
     bool settingsDirty_ = false;
-    uint8_t saveSwallowedMask_ = 0u;
+    bool livePatchDirty_ = false;
+    uint16_t saveSwallowedWhiteMask_ = 0u;
+    uint16_t saveSwallowedBlackMask_ = 0u;
     uint8_t savedSlotMask_ = 0u;
     int8_t selectTickAccum_ = 0;
     int8_t targetTickAccum_ = 0;
     int8_t configTickAccum_ = 0;
+    uint8_t shiftBlinkPhaseQ8_ = 64u;
     HudMode latchedHudMode_ = HudMode::None;
     ButtonId latchedButton_ = ButtonId::Count;
     float masterPot_ = 0.85f;

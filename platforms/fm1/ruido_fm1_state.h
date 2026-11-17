@@ -50,13 +50,9 @@ struct alignas(64) Fm1InterCoreControl {
     std::atomic<uint32_t> c1BenchTicks{0u};
     std::atomic<uint32_t> c1FlashHold{0u};
     std::atomic<uint32_t> c1FlashAck{0u};
-    // IEEE-754 float32 bits of post-DSP quantizer trim (`1.0f = 0x3F800000u` unity; `MASTER` pot
-    // routes through `RuidoController::onMasterPot` -> `DroneEngineCore::masterTrimSmoother_`)
-    std::atomic<uint32_t> masterGainBits{0x3F800000u};
 };
 
 struct alignas(64) Fm1C1DspRuntime {
-    OnePoleSmoother masterGainSmoother{};
     Fm1TpdfQuantizer quantizer{};
     volatile uint8_t soloHalfRateActive = 0u;
     volatile uint8_t inSoloDsp = 0u;

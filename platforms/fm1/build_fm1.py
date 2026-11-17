@@ -62,8 +62,8 @@ def main(argv: list[str]) -> int:
         return delegate_to_docker(argv)
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dsp-opt", default="-O3", choices=["-Os", "-O2", "-O3"])
-    ap.add_argument("--ui-opt", default="-O2", choices=["-Os", "-O2", "-O3"])
+    ap.add_argument("--dsp-opt", default="-O3", choices=["-Oz", "-Os", "-O2", "-O3"])
+    ap.add_argument("--ui-opt", default="-O2", choices=["-Oz", "-Os", "-O2", "-O3"])
     ap.add_argument("--skip-emu", action="store_true", help="Run build + static audits without fm1-emu")
     ap.add_argument("--rebuild", action="store_true", help="Ignore `.o` cache and recompile all TUs")
     args = ap.parse_args(argv)
@@ -121,9 +121,9 @@ def main(argv: list[str]) -> int:
         f"-I{fw / 'hal'}",
         f"-I{fw / 'src'}",
         f"-I{fw / 'gen'}",
+        "-Isrc",
         f"-I{FM1_DIR}",
         f'-DFELUCCA_ID="{PRODUCT_DEV}"',
-        '-DAPP_VER="0.1.0"',
     ]
 
     common_cxxflags = [
@@ -260,7 +260,7 @@ def main(argv: list[str]) -> int:
             [
                 str(clang),
                 *common_cxxflags,
-                "-Os",
+                "-Oz",
                 "-c",
                 str(FM1_DIR / "fm1_ops_screen.cpp"),
                 "-o",
@@ -275,7 +275,10 @@ def main(argv: list[str]) -> int:
         raw_dsp_objs.append(out_o)
         specs.append(CompileSpec( OUT_DIR.parents[1] / s, out_o, [str(clang), *c1_dsp_cxxflags, "-c", s, "-o", str(out_o)]))
 
-    cold_ui_stems = {"BootIntroRender", "SnapshotCodec", "ControllerPageNav"}
+    cold_ui_stems = {
+        "BootIntroRender",
+        "SnapshotCodec",
+    }
     ui_objs: list[pathlib.Path] = []
     for s in ui_srcs:
         stem = pathlib.Path(s).stem

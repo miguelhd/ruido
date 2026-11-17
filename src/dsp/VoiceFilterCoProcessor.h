@@ -244,12 +244,10 @@ class alignas(64) VoiceFilterCoProcessor {
 #endif
         while (doneSeq_.load(std::memory_order_acquire) != seq) {
 #if defined(__pi32v2__)
-            if (++spins > 262144u) {
+            // Core 0 has already claimed `seq` (`claimedSeq_ == seq`): never mutate `filters[v]`
+            // concurrently on Core 1; bound only against a wedged Core 0 (~25 ms ceiling).
+            if (++spins > 2097152u) {
                 helperArmed_.store(0u, std::memory_order_release);
-                for (uint8_t d = 0u; d < safeCount; ++d) {
-                    const size_t v = static_cast<size_t>(c0Voices[d] & 3u);
-                    filters[v].processSpan4x(spanSub[v].data(), safeFrames, coeffs[v]);
-                }
                 return;
             }
 #endif

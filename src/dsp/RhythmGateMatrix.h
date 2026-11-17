@@ -21,7 +21,8 @@ struct RhythmClockState {
     float warpedBar01 = 0.0f;
     std::array<uint8_t, kNumOscillators> voiceMode{0u, 0u, 0u, 0u};
     std::array<uint8_t, kNumOscillators> voiceParam{0u, 0u, 0u, 0u};
-    OnePoleSmootherBank<6> macroSmoothers{}; // [0..5] = pump, chase, tempo, pluck, short, swing
+    // [0..7] = pump, chase, tempo, pluck, short, swing, pingPong, roll
+    OnePoleSmootherBank<8> macroSmoothers{};
     OnePoleSmoother swingPanSmoother{};
     uint8_t lastResetSeq = 0u;
 
@@ -33,7 +34,7 @@ struct RhythmClockState {
         voiceParam = {0u, 0u, 0u, 0u};
         lastResetSeq = 0u;
         macroSmoothers.setTimeConstant(slewSec, sampleRate);
-        for (size_t k = 0u; k < 6u; ++k) {
+        for (size_t k = 0u; k < 8u; ++k) {
             macroSmoothers.snapChannel(k, 0.0f);
         }
         swingPanSmoother.init(0.0f, 0.0045f, sampleRate);
@@ -48,22 +49,24 @@ struct RhythmClockState {
         voiceMode = state.keyMod.rhythmMode;
         voiceParam = state.keyMod.rhythmParam;
 
-        const std::array<float, 6> targets = {
+        const std::array<float, 8> targets = {
             clampf(state.keyMod.rhythmPump, 0.0f, 1.0f),
             clampf(state.keyMod.rhythmChase, 0.0f, 1.0f),
             clampf(state.keyMod.rhythmTempo, 0.0f, 1.0f),
             clampf(state.keyMod.rhythmPluck, 0.0f, 1.0f),
             clampf(state.keyMod.rhythmShort, 0.0f, 1.0f),
             clampf(state.keyMod.rhythmSwing, 0.0f, 1.0f),
+            clampf(state.keyMod.rhythmPingPong, 0.0f, 1.0f),
+            clampf(state.keyMod.rhythmRoll, 0.0f, 1.0f),
         };
 
         if (snapImmediate) {
-            for (size_t k = 0u; k < 6u; ++k) {
+            for (size_t k = 0u; k < 8u; ++k) {
                 macroSmoothers.snapChannel(k, targets[k]);
             }
             swingPanSmoother.snapTo(0.0f);
         } else {
-            for (size_t k = 0u; k < 6u; ++k) {
+            for (size_t k = 0u; k < 8u; ++k) {
                 macroSmoothers.setTarget(k, targets[k]);
             }
         }
@@ -73,7 +76,10 @@ struct RhythmClockState {
         const float tempo = (macroSmoothers.current(2u) > macroSmoothers.target(2u))
                                 ? macroSmoothers.current(2u)
                                 : macroSmoothers.target(2u);
-        return (clockBpm * computeTempoMultiplier(tempo)) > 360.0f;
+        const float roll = (macroSmoothers.current(7u) > macroSmoothers.target(7u))
+                               ? macroSmoothers.current(7u)
+                               : macroSmoothers.target(7u);
+        return (clockBpm * computeTempoMultiplier(tempo)) > 360.0f || roll > 0.25f;
     }
 };
 
@@ -98,6 +104,8 @@ stepRhythmSubBlock(RhythmClockState& rs, std::array<uint32_t, kNumOscillators>& 
     const float pluck = rs.macroSmoothers.nextN(3u, stride);
     const float shrt = rs.macroSmoothers.nextN(4u, stride);
     const float swing = rs.macroSmoothers.nextN(5u, stride);
+    const float pingPong = rs.macroSmoothers.nextN(6u, stride);
+    const float roll = rs.macroSmoothers.nextN(7u, stride);
     out.pluckDepth = pluck;
 
     // 1. Advance 4-beat bar clock (1 bar = 4 quarter-note beats = 240 / BPM seconds)
@@ -114,16 +122,17 @@ stepRhythmSubBlock(RhythmClockState& rs, std::array<uint32_t, kNumOscillators>& 
         ((rs.voiceMode[0] | rs.voiceMode[1] | rs.voiceMode[2] | rs.voiceMode[3]) != 0u);
     const bool hasChase = (chase > 0.02f);
     const bool hasPump = (pump > 1.0e-4f);
-    const bool soloTopPulse =
-        !anyVoiceMode && !hasChase && !hasPump &&
-        ((tempo > 0.02f) || (pluck > 0.02f) || (shrt > 0.02f) || (swing > 0.02f));
+    const bool hasRoll = (roll > 0.02f);
+    const bool soloTopPulse = !anyVoiceMode && !hasChase && !hasPump &&
+                              ((tempo > 0.02f) || (pluck > 0.02f) || (shrt > 0.02f) ||
+                               (swing > 0.02f) || (pingPong > 0.02f) || hasRoll);
     const float stut01 =
         (stutterDepths[0] > stutterDepths[1]) ? stutterDepths[0] : stutterDepths[1];
     const float stut23 =
         (stutterDepths[2] > stutterDepths[3]) ? stutterDepths[2] : stutterDepths[3];
     const float maxStut = (stut01 > stut23) ? stut01 : stut23;
     if (!anyVoiceMode && !hasChase && !hasPump && !soloTopPulse && maxStut <= 1.0e-4f &&
-        swing <= 1.0e-4f && rs.swingPanSmoother.current() == 0.0f) {
+        swing <= 1.0e-4f && pingPong <= 1.0e-4f && rs.swingPanSmoother.current() == 0.0f) {
         rs.swingPanSmoother.setTarget(0.0f);
         rs.warpedBar01 = rawBar01;
         stutterPhases = {0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u};
@@ -138,15 +147,20 @@ stepRhythmSubBlock(RhythmClockState& rs, std::array<uint32_t, kNumOscillators>& 
     const uint8_t step16 = static_cast<uint8_t>(step16Idx & 15u);
     const float step16Frac = step16Scaled - static_cast<float>(step16Idx);
 
-    // Stereo ping-pong bounce on odd swung 16th off-beats
+    // Pure PING-PONG alternating stereo bounce (decoupled from SHUFFLE timing groove!)
     const float panTarget =
-        (swing > 1.0e-4f) ? (((step16 & 1u) != 0u ? 0.56f : -0.56f) * swing) : 0.0f;
+        (pingPong > 1.0e-4f) ? (((step16 & 1u) != 0u ? 0.78f : -0.78f) * pingPong) : 0.0f;
     rs.swingPanSmoother.setTarget(panTarget);
     out.swingPanOffset = rs.swingPanSmoother.nextN(stride);
 
-    // Gate duty: 50% standard -> 6% pinpoint click with MONO SHORT (or 88% decay window on PLUCK)
+    // Gate duty: 50% standard -> 6% pinpoint click with SHORT (or 42% crisp ratchet on ROLL)
     const float baseDuty = 0.50f - 0.44f * shrt;
-    const float effDuty = (shrt > 0.02f) ? baseDuty : (baseDuty + 0.38f * pluck);
+    const float rawEffDuty = (shrt > 0.02f) ? baseDuty : (baseDuty + 0.38f * pluck);
+    const float effDuty =
+        hasRoll ? clampf(rawEffDuty * (1.0f - 0.32f * roll), 0.12f, 0.65f) : rawEffDuty;
+    const float rollCycles = (roll >= 0.72f) ? 64.0f : ((roll >= 0.38f) ? 32.0f : 16.0f);
+    const float rollScaled = bar01 * rollCycles;
+    const float rollSubFrac = rollScaled - static_cast<float>(static_cast<uint32_t>(rollScaled));
 
     // Optional CHASE step index (16th-note chase below 55% pressure, 32nd-note chase above 55%)
     const float chaseScaled = bar01 * ((chase >= 0.55f) ? 32.0f : 16.0f);
@@ -212,6 +226,9 @@ stepRhythmSubBlock(RhythmClockState& rs, std::array<uint32_t, kNumOscillators>& 
             hasGate = true;
             stepActive = true;
             subFrac = step16Frac;
+        }
+        if (hasRoll && hasGate) {
+            subFrac = rollSubFrac;
         }
 
         float voiceGate = 1.0f;

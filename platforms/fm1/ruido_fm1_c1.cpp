@@ -18,6 +18,9 @@ static_assert(__builtin_offsetof(ruido::fm1::Fm1InterCoreControl, c1FaultAux) ==
               "fm1_cpu1.S expects c1FaultAux at offset 20");
 static_assert(__builtin_offsetof(ruido::fm1::Fm1InterCoreControl, engineReady) == 64u,
               "Core 0 control atomics isolated on cache line 1");
+static_assert(__builtin_offsetof(ruido::fm1::Fm1InterCoreControl, c1FlashAck) + sizeof(uint32_t) <=
+                  96u,
+              "Control atomics must fit within single 32-byte q32DSP cache line [64..95]");
 
 inline void* operator new(size_t, void* p) noexcept {
     return p;
@@ -26,16 +29,7 @@ inline void* operator new(size_t, void* p) noexcept {
 namespace {
 
 constexpr float kSampleRateHz = 44100.0f;
-constexpr float kMasterPotSmoothSec = 0.015f; // 15 ms clickless analog MASTER pot slew
 volatile uint32_t* const kTimer4CntReg = reinterpret_cast<volatile uint32_t*>(0x00010804u);
-
-inline float bitsToFloat(uint32_t bits) noexcept {
-    union {
-        uint32_t u;
-        float f;
-    } conv{bits};
-    return conv.f;
-}
 
 RUIDO_ALWAYS_INLINE bool pollSramCanaryFault(uint32_t pairs) noexcept {
     volatile const uint32_t* canaries = g_ruido_ic_ctrl.sramCanaries;
@@ -89,10 +83,6 @@ inline void renderQuantizedBlock64(ruido::Fm1AudioBlock& outBlk) noexcept {
     auto* core = ruidoDspCore();
     auto* rt = ruidoC1Runtime();
 
-    const float targetGain = ruido::clampf(
-        bitsToFloat(g_ruido_ic_ctrl.masterGainBits.load(std::memory_order_relaxed)), 0.0f, 1.0f);
-    rt->masterGainSmoother.setTarget(targetGain);
-
     float left[ruido::kBlockFrames];
     float right[ruido::kBlockFrames];
     if (rt->soloHalfRateActive != 0u) {
@@ -106,43 +96,48 @@ inline void renderQuantizedBlock64(ruido::Fm1AudioBlock& outBlk) noexcept {
         core->processBlock(*buses, left, right, ruido::kBlockFrames);
     }
 
-    int32_t blockPeak = 0;
-    const bool gainSettled = (rt->masterGainSmoother.current() == rt->masterGainSmoother.target());
-    const float staticGain = rt->masterGainSmoother.current();
-    auto* packedOut = reinterpret_cast<uint32_t*>(outBlk.lr.data());
-    if (gainSettled && staticGain == 1.0f) {
-        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
-            const int16_t sL = rt->quantizer.quantizeLeftUnity(left[i]);
-            const int16_t sR = rt->quantizer.quantizeRightUnity(right[i]);
-            packedOut[i] = static_cast<uint32_t>(static_cast<uint16_t>(sL)) |
-                           (static_cast<uint32_t>(static_cast<uint16_t>(sR)) << 16u);
-            const int32_t aL = (sL < 0) ? -static_cast<int32_t>(sL) : static_cast<int32_t>(sL);
-            const int32_t aR = (sR < 0) ? -static_cast<int32_t>(sR) : static_cast<int32_t>(sR);
-            if (aL > blockPeak) {
-                blockPeak = aL;
-            }
-            if (aR > blockPeak) {
-                blockPeak = aR;
-            }
+    bool blockSilent = true;
+    for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+        if (left[i] != 0.0f || right[i] != 0.0f) {
+            blockSilent = false;
+            break;
         }
-    } else {
+    }
+    if (blockSilent) {
+        constexpr uint32_t kZeroPacked = 0u;
         for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
-            const float g = gainSettled ? staticGain : rt->masterGainSmoother.next();
-            const int16_t sL = rt->quantizer.quantizeLeft(left[i], g);
-            const int16_t sR = rt->quantizer.quantizeRight(right[i], g);
-            packedOut[i] = static_cast<uint32_t>(static_cast<uint16_t>(sL)) |
-                           (static_cast<uint32_t>(static_cast<uint16_t>(sR)) << 16u);
-            const int32_t aL = (sL < 0) ? -static_cast<int32_t>(sL) : static_cast<int32_t>(sL);
-            const int32_t aR = (sR < 0) ? -static_cast<int32_t>(sR) : static_cast<int32_t>(sR);
-            if (aL > blockPeak) {
-                blockPeak = aL;
-            }
-            if (aR > blockPeak) {
-                blockPeak = aR;
-            }
+            __builtin_memcpy(&outBlk.lr[2u * i], &kZeroPacked, sizeof(kZeroPacked));
+        }
+        outBlk.peakAbsQ15 = 0;
+        return;
+    }
+
+    int32_t blockPeak = 0;
+    for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+        const int16_t sL = rt->quantizer.quantizeLeftUnity(left[i]);
+        const int16_t sR = rt->quantizer.quantizeRightUnity(right[i]);
+        const uint32_t packed = static_cast<uint32_t>(static_cast<uint16_t>(sL)) |
+                                (static_cast<uint32_t>(static_cast<uint16_t>(sR)) << 16u);
+        __builtin_memcpy(&outBlk.lr[2u * i], &packed, sizeof(packed));
+        const int32_t aL = (sL < 0) ? -static_cast<int32_t>(sL) : static_cast<int32_t>(sL);
+        const int32_t aR = (sR < 0) ? -static_cast<int32_t>(sR) : static_cast<int32_t>(sR);
+        if (aL > blockPeak) {
+            blockPeak = aL;
+        }
+        if (aR > blockPeak) {
+            blockPeak = aR;
         }
     }
     outBlk.peakAbsQ15 = blockPeak;
+}
+
+[[gnu::noinline]] uint32_t runCore1Bench64(ruido::DroneEngineCore* core,
+                                           ruido::EngineSharedBuses* buses) noexcept {
+    float left[ruido::kBlockFrames];
+    float right[ruido::kBlockFrames];
+    const uint32_t t0 = *kTimer4CntReg;
+    core->processBlock(*buses, left, right, ruido::kBlockFrames);
+    return *kTimer4CntReg - t0;
 }
 
 } // namespace
@@ -215,6 +210,7 @@ void* ruido_c1_memcpy(void* dst, const void* src, unsigned n) {
 }
 
 void ruido_fm1_c1_construct(float initial_master_gain) {
+    (void)initial_master_gain;
     auto* buses = new (g_ruido_shared_buses_arena) ruido::EngineSharedBuses();
     auto* ring = new (g_ruido_audio_ring_arena) ruido::Fm1AudioBlockRing();
     auto* coproc = new (g_ruido_coproc_arena) ruido::VoiceFilterCoProcessor();
@@ -224,8 +220,6 @@ void ruido_fm1_c1_construct(float initial_master_gain) {
     ring->reset();
     coproc->reset();
     core->init(*buses, kSampleRateHz);
-    rt->masterGainSmoother.init(ruido::clampf(initial_master_gain, 0.0f, 1.0f), kMasterPotSmoothSec,
-                                kSampleRateHz);
     rt->quantizer.reset();
 }
 
@@ -382,11 +376,7 @@ void ruido_fm1_cpu1_loop(void) {
         }
 
         if (g_ruido_ic_ctrl.c1BenchReq.load(std::memory_order_acquire) != 0u) {
-            float left[ruido::kBlockFrames];
-            float right[ruido::kBlockFrames];
-            const uint32_t t0 = *kTimer4CntReg;
-            core->processBlock(*buses, left, right, ruido::kBlockFrames);
-            const uint32_t dt = *kTimer4CntReg - t0;
+            const uint32_t dt = runCore1Bench64(core, buses);
             if (pollSramCanaryFault(16u)) {
                 parkOnCore1SelfFault();
             }

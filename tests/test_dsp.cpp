@@ -129,8 +129,10 @@ void testMemoryFootprintAndLockFreeBus() {
     // Verify ScopeRingBuffer FIFO order & overflow resilience
     ruido::ScopeRingBuffer ring;
     for (size_t i = 0; i < ruido::kScopeRingCapacity + 64u; ++i) {
-        const bool ok = ring.push(
-            {static_cast<float>(i), -static_cast<float>(i), static_cast<uint8_t>(i & 1u)});
+        const bool ok = ring.push({static_cast<int16_t>(i),
+                                   static_cast<int16_t>(-static_cast<int>(i)),
+                                   {0, 0, 0, 0},
+                                   static_cast<uint8_t>(i & 1u)});
         if (i < ruido::kScopeRingCapacity) {
             EXPECT_TRUE(ok, "ScopeRingBuffer failed push before full at %zu", i);
         } else {
@@ -139,7 +141,7 @@ void testMemoryFootprintAndLockFreeBus() {
     }
     std::array<ruido::ScopeFrame, 128> popped{};
     const size_t nPop = ring.popBatch(popped.data(), popped.size());
-    EXPECT_TRUE(nPop == 128u && popped[0].left == 0.0f && popped[127].left == 127.0f,
+    EXPECT_TRUE(nPop == 128u && popped[0].leftQ13 == 0 && popped[127].leftQ13 == 127,
                 "ScopeRingBuffer FIFO ordering mismatch");
 
     // Multi-threaded Core 0 (UI writer / scope reader) <-> Core 1 (Audio DSP) stress test
@@ -2052,7 +2054,8 @@ void testUnbrokenExtremesSubBassOverdriveSyncAndAudioLfo() {
             for (size_t s = 0u; s < 4u; ++s) {
                 const float x = static_cast<float>(
                     0.85 * std::sin(2.0 * 3.14159265358979323846 * kTestHz *
-                                    static_cast<double>(osStep++) * ruido::kInvOversampledRate));
+                                    static_cast<double>(osStep++) *
+                                    static_cast<double>(ruido::kInvOversampledRate)));
                 const float y = filter.processPrepared(x, driveCoeffs);
                 in4x[s] = {y, y};
             }
@@ -2064,7 +2067,8 @@ void testUnbrokenExtremesSubBassOverdriveSyncAndAudioLfo() {
             for (size_t s = 0u; s < 4u; ++s) {
                 const float x = static_cast<float>(
                     0.85 * std::sin(2.0 * 3.14159265358979323846 * kTestHz *
-                                    static_cast<double>(osStep++) * ruido::kInvOversampledRate));
+                                    static_cast<double>(osStep++) *
+                                    static_cast<double>(ruido::kInvOversampledRate)));
                 const float y = filter.processPrepared(x, driveCoeffs);
                 in4x[s] = {y, y};
             }
@@ -2893,12 +2897,37 @@ void testRhythmLabClockDividersEuclidPumpPluckAndSwingDsp() {
                 "TEMPO 4x failed expected bar phase advance (%.4f)",
                 static_cast<double>(fastPhase));
 
-    // 5. Combined Euclid + MS-20 PLUCK (GLO) + SHORT (MONO) + Stereo SWING (POLY) stress
+    // 5. Combined Euclid + MS-20 PLUCK + SHORT + pure SHUFFLE timing + Stereo PING-PONG & ROLL:
+    //    First verify SHUFFLE (`rhythmSwing`) alone keeps centered pans strictly centered (0 stereo
+    //    ping-pong side effect), then verify `rhythmPingPong` + `rhythmRoll` bounce L/R cleanly!
+    ruido::EngineControlState shuffleSt = eucSt;
+    shuffleSt.global.clockResetSeq = static_cast<uint8_t>(baseSt.global.clockResetSeq + 1u);
+    for (auto& vp : shuffleSt.voices) {
+        vp.pan = 0.0f;
+    }
+    shuffleSt.keyMod.rhythmSwing = 1.0f;
+    shuffleSt.keyMod.rhythmPingPong = 0.0f;
+    engine.controlBus().publish(shuffleSt);
+    engine.snapParametersToLatest();
+    double diffShuffleOnly = 0.0;
+    for (int b = 0; b < 64; ++b) {
+        engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+        engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            diffShuffleOnly += std::fabs(static_cast<double>(outL[i] - outR[i]));
+        }
+    }
+    EXPECT_TRUE(diffShuffleOnly < 1.0e-3,
+                "SHUFFLE (rhythmSwing) leaked stereo ping-pong bounce (diff=%.5f)",
+                diffShuffleOnly);
+
     ruido::EngineControlState grooveSt = eucSt;
-    grooveSt.global.clockResetSeq = static_cast<uint8_t>(baseSt.global.clockResetSeq + 1u);
+    grooveSt.global.clockResetSeq = static_cast<uint8_t>(shuffleSt.global.clockResetSeq + 1u);
     grooveSt.keyMod.rhythmPluck = 1.0f;
     grooveSt.keyMod.rhythmShort = 0.35f;
     grooveSt.keyMod.rhythmSwing = 1.0f;
+    grooveSt.keyMod.rhythmPingPong = 1.0f;
+    grooveSt.keyMod.rhythmRoll = 0.50f;
     engine.controlBus().publish(grooveSt);
 
     float peakGroove = 0.0f;
@@ -2915,7 +2944,7 @@ void testRhythmLabClockDividersEuclidPumpPluckAndSwingDsp() {
     }
     EXPECT_TRUE(peakGroove > 0.08f && peakGroove <= 1.25f,
                 "Rhythm Lab groove peak out of bounds (%.4f)", static_cast<double>(peakGroove));
-    EXPECT_TRUE(diffStereo > 5.0, "SWING failed to create stereo ping-pong bounce (diff=%.3f)",
+    EXPECT_TRUE(diffStereo > 5.0, "PING-PONG failed to create stereo bounce (diff=%.3f)",
                 diffStereo);
 
     // 6. Subharmonicon-class 3,000 BPM internal (+ 4x PIT = 6,000 BPM effective) audio-rate gating:
@@ -3304,6 +3333,69 @@ void testFm1TpdfDitherSpscRingAndUsbDriftResampler() {
                     "Helper thread failed to assist any 2-voice ZDF filter spans");
         std::printf("  Dual-core 2+2 VoiceFilterCoProcessor: assisted=%u spans, maxDiff=%.1e\n",
                     coProc.assistedSpans(), static_cast<double>(maxDiff));
+    }
+
+    // 5. True-zero silence verification: once MASTER = 0%, all 4 voices LEVEL = 0%, or PLAY/STOP
+    //    = false settles (~150 ms), DroneEngine output must be bit-exact 0.0f with clickless fade.
+    {
+        static ruido::DroneEngine zeroEngine;
+        zeroEngine.init(ruido::kBaseSampleRate);
+        auto zSt = ruido::EngineControlState::makeDefault();
+        zeroEngine.controlBus().publish(zSt);
+        zeroEngine.snapParametersToLatest();
+
+        std::array<float, ruido::kBlockFrames> zL{};
+        std::array<float, ruido::kBlockFrames> zR{};
+        float prevSample = 0.0f;
+        float steadyStep = 0.0f;
+        for (int b = 0; b < 8; ++b) {
+            zeroEngine.processBlock(zL.data(), zR.data(), ruido::kBlockFrames);
+            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                if (b > 0 || i > 0u) {
+                    steadyStep = std::max(steadyStep, std::fabs(zL[i] - prevSample));
+                }
+                prevSample = zL[i];
+            }
+        }
+
+        // (a) MASTER volume -> 0%
+        float maxFadeStep = 0.0f;
+        zSt.global.masterTrim = 0.0f;
+        zeroEngine.controlBus().publish(zSt);
+        for (int b = 0; b < 140; ++b) {
+            zeroEngine.processBlock(zL.data(), zR.data(), ruido::kBlockFrames);
+            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                maxFadeStep = std::max(maxFadeStep, std::fabs(zL[i] - prevSample));
+                prevSample = zL[i];
+            }
+        }
+        float maxTailMaster = 0.0f;
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            maxTailMaster = std::max(maxTailMaster, std::max(std::fabs(zL[i]), std::fabs(zR[i])));
+        }
+        EXPECT_TRUE(maxFadeStep <= steadyStep * 1.05f,
+                    "Click detected fading MASTER to 0%% (fadeStep=%.4f > steadyStep=%.4f)",
+                    static_cast<double>(maxFadeStep), static_cast<double>(steadyStep));
+        EXPECT_TRUE(maxTailMaster == 0.0f, "MASTER = 0%% left non-zero residual output (max=%.3e)",
+                    static_cast<double>(maxTailMaster));
+
+        // (b) Restore MASTER = 85%, set all 4 voices amplitude = 0% (unmuted & muted)
+        zSt.global.masterTrim = 0.85f;
+        for (auto& vp : zSt.voices) {
+            vp.amplitude = 0.0f;
+            vp.muted = false;
+        }
+        zeroEngine.controlBus().publish(zSt);
+        for (int b = 0; b < 140; ++b) {
+            zeroEngine.processBlock(zL.data(), zR.data(), ruido::kBlockFrames);
+        }
+        float maxTailVoices = 0.0f;
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            maxTailVoices = std::max(maxTailVoices, std::max(std::fabs(zL[i]), std::fabs(zR[i])));
+        }
+        EXPECT_TRUE(maxTailVoices == 0.0f,
+                    "All voices LEVEL = 0%% left non-zero residual output (max=%.3e)",
+                    static_cast<double>(maxTailVoices));
     }
 
     std::printf("  TPDF var=%.4f LSB^2 (corr=%+.4f), sub-LSB mag=%.3f, +-50 ppm 44.1k/48k clean!\n",

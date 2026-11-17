@@ -39,16 +39,16 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
         out.hasHeaderBar = true;
         break;
     }
-    case HudMode::SnapshotSlot: {
-        const uint8_t s = hud.snapshotSlot & 3u;
-        if (hud.snapshotGliding && ((hud.snapshotOccupiedMask & (1u << s)) != 0u)) {
-            out.headerBarNorm = clampf(hud.morphPosition, 0.0f, 1.0f);
-            out.hasHeaderBar = true;
-        }
-        break;
-    }
     case HudMode::KeyboardPlay:
         out.hasHeaderBar = evalKeyPunchHeaderBar(hud, out.headerBarNorm);
+        break;
+    case HudMode::ShiftMap:
+        if (hud.shiftFocus == ShiftFocus::Tempo) {
+            out.headerBarNorm = normalizeClockBpmLog01(hud.effectiveClockBpm);
+            out.hasHeaderBar = true;
+        } else {
+            out.hasHeaderBar = evalKeyPunchHeaderBar(hud, out.headerBarNorm);
+        }
         break;
     case HudMode::GlobalConfig:
         if (hud.configSubView == ConfigSubView::FactoryResetConfirm) {
@@ -61,7 +61,7 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
         break;
     }
 
-    if (hud.knobBank == KnobBankMode::None) {
+    if (hud.knobBank == KnobBankMode::None || HudGlobalViews::isRailCouplingActive(hud)) {
         return out;
     }
 
@@ -69,14 +69,10 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
     ModulatedFilterParams voiceFlt{};
     if (hud.knobBank == KnobBankMode::VoiceFilter) {
         const uint8_t refV = resolveFilterViewVoice(hud);
-        const FilterMacroContext fltMacros{
-            control.keyMod.dubLpfDrop,
-            control.keyMod.overloadSurge,
-            control.keyMod.filterScream,
-        };
         voiceFlt = computeLiveVoiceFilter(control.voices[refV], control.voicePressure[refV],
                                           pitchMode, lfoOutput[lfoBankIndex(refV, 0u)],
-                                          lfoOutput[lfoBankIndex(refV, 1u)], fltMacros);
+                                          lfoOutput[lfoBankIndex(refV, 1u)],
+                                          FilterMacroContext::fromKeyMod(control.keyMod));
     }
 
     for (uint8_t k = 0u; k < 4u; ++k) {
@@ -179,21 +175,6 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
             tgtSigned = 2.0f * norm - 1.0f;
             break;
         }
-        case KnobBankMode::Snapshot: {
-            const bool occ = (hud.snapshotOccupiedMask & (1u << k)) != 0u;
-            if (!occ) {
-                out.posSigned[k] = -1.0f;
-                out.focused[k] = false;
-                out.dimAmount[k] = (hud.saveArmed && !hud.saveDeleteMode) ? 0.35f : 0.85f;
-                continue;
-            }
-            const float w = clampf(hud.snapshotWeights[k], 0.0f, 1.0f);
-            out.posSigned[k] = 2.0f * w - 1.0f;
-            out.focused[k] = !hud.saveDeleteMode && (k == (hud.snapshotSlot & 3u)) &&
-                             (hud.saveArmed || !hud.snapshotDirty || w > 0.01f);
-            out.dimAmount[k] = hud.saveArmed ? 0.20f : (0.72f * (1.0f - w));
-            continue;
-        }
         default:
             break;
         }
@@ -205,13 +186,132 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
     return out;
 }
 
-void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlState& control,
-                              const HudState& hud, const LfoSignalArray& lfoOutput,
-                              uint8_t stutterGateMask,
+namespace {
+
+constexpr bool shouldShowOscModRow(const HudState& hud) noexcept {
+    return (hud.freqPageOpen || hud.editPageOpen || hud.panPageOpen) &&
+           isPerOscKnobBank(hud.knobBank) && hud.mode != HudMode::KeyboardPlay;
+}
+
+constexpr bool doesLfoTargetKnobBank(LfoTarget tgt, KnobBankMode bank) noexcept {
+    switch (bank) {
+    case KnobBankMode::Frequency:
+        return tgt == LfoTarget::Pitch;
+    case KnobBankMode::PulseWidth:
+        return tgt == LfoTarget::PulseWidth;
+    case KnobBankMode::Amplitude:
+        return tgt == LfoTarget::Amplitude;
+    case KnobBankMode::Panning:
+        return tgt == LfoTarget::Pan;
+    default:
+        return false;
+    }
+}
+
+} // namespace
+
+void prepareHudChrome(PreparedHudChrome& out, const EngineControlState& control,
+                      const HudState& hud, const LfoSignalArray& lfoOutput,
+                      uint8_t stutterGateMask) noexcept {
+    if (hud.knobBank == KnobBankMode::None || HudGlobalViews::isRailCouplingActive(hud)) {
+        return;
+    }
+    if (hud.knobBank == KnobBankMode::Panning && control.global.monoCollapse &&
+        control.keyMod.spatialFocus <= 0.001f) {
+        return;
+    }
+    const bool showOscModRow = shouldShowOscModRow(hud);
+    const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
+    const FilterMacroContext fltMacros = FilterMacroContext::fromKeyMod(control.keyMod);
+
+    for (uint8_t k = 0u; k < 4u; ++k) {
+        PreparedHudColumn& col = out.cols[k];
+        col = PreparedHudColumn{};
+        GlobalColumnSummary gs{};
+        formatColumnRoleAndValue(control, hud, lfoOutput, stutterGateMask, k, col.roleLbl,
+                                 sizeof(col.roleLbl), col.valStr, sizeof(col.valStr), gs);
+        col.voiceSigned = gs.voiceSigned;
+        col.bipolar = gs.bipolar;
+        col.disabled = gs.disabled;
+        col.hasVoiceSpread = gs.hasVoiceSpread;
+        if (!col.disabled) {
+            col.valTrk = (measureSansText(kFontSansMedium, col.valStr, 0) > 58) ? -1 : 0;
+            if (showOscModRow) {
+                const VoiceParams& vp = control.voices[k];
+                const float lfoARaw = lfoOutput[lfoBankIndex(k, 0u)];
+                const float lfoBRaw = lfoOutput[lfoBankIndex(k, 1u)];
+                const float p = clampf(control.voicePressure[k], 0.0f, 1.0f);
+                const ModulatedFilterParams flt =
+                    computeLiveVoiceFilter(vp, p, pitchMode, lfoARaw, lfoBRaw, fltMacros);
+                constexpr float kHpMinOct = cxLog2Pos(kFilterCutoffMinHz);
+                constexpr float kLpMaxOct = cxLog2Pos(kFilterCutoffMaxHz);
+                const float hpEng =
+                    (flt.hpCutoffHz > 2.05f)
+                        ? clampf((fastLog2(flt.hpCutoffHz) - kHpMinOct) * (1.0f / 11.0f), 0.0f,
+                                 1.0f)
+                        : 0.0f;
+                const float lpEng =
+                    (flt.lpCutoffHz < 27900.0f)
+                        ? clampf((kLpMaxOct - fastLog2(flt.lpCutoffHz)) * (1.0f / 11.0f), 0.0f,
+                                 1.0f)
+                        : 0.0f;
+                const float cutEng = (hpEng > lpEng) ? hpEng : lpEng;
+                const float resEng =
+                    clampf((flt.hpResonance > flt.lpResonance) ? flt.hpResonance : flt.lpResonance,
+                           0.0f, 1.0f);
+                const float fltEng = clampf((cutEng > resEng) ? (cutEng + 0.35f * resEng)
+                                                              : (resEng + 0.35f * cutEng),
+                                            0.0f, 1.0f);
+                col.fxOn = isVoiceFilterActive(vp, p, pitchMode) || (fltEng > 1.0e-3f);
+                col.fxLevel01 = col.fxOn ? clampf(0.28f + 0.72f * fltEng, 0.0f, 1.0f) : 0.0f;
+
+                const float liveDepthA = computeLiveLfoADepth(vp, lfoBRaw);
+                col.lfoAOn = doesLfoTargetKnobBank(vp.lfoTarget, hud.knobBank) &&
+                             ((vp.lfoDepth > 0.002f) || (liveDepthA > 0.002f));
+                if (col.lfoAOn) {
+                    const float waveA01 = 0.5f * (clampf(lfoARaw, -1.0f, 1.0f) + 1.0f);
+                    col.lfoALevel01 = waveA01 * (0.35f + 0.65f * clampf(liveDepthA, 0.0f, 1.0f));
+                }
+                col.lfoBOn =
+                    doesLfoTargetKnobBank(vp.lfoBTarget, hud.knobBank) && (vp.lfoBDepth > 0.002f);
+                if (col.lfoBOn) {
+                    const float waveB01 = 0.5f * (clampf(lfoBRaw, -1.0f, 1.0f) + 1.0f);
+                    col.lfoBLevel01 = waveB01 * (0.35f + 0.65f * clampf(vp.lfoBDepth, 0.0f, 1.0f));
+                }
+            }
+        }
+    }
+}
+
+void compositeBottomKnobStrip(const MonoStripCanvas& cv, const PreparedHudChrome& prep,
+                              const EngineControlState& control, const HudState& hud,
                               const std::array<float, kNumOscillators>& knobPosSignedSmooth,
                               const std::array<float, kNumOscillators>& knobDimSmooth,
                               const std::array<float, kNumOscillators>& knobFocusSmooth) noexcept {
-    if (cv.y1 <= 188 || hud.knobBank == KnobBankMode::None) {
+    if (cv.y1 <= 188) {
+        return;
+    }
+    if (HudGlobalViews::isRailCouplingActive(hud)) {
+        const float effCoupling =
+            clampf(control.global.circuitCoupling + control.keyMod.overloadSurge, 0.0f, 1.0f);
+        const char* leftPart = (effCoupling <= 0.005f)  ? "ISOLATED"
+                               : (effCoupling <= 0.45f) ? "SHARED POWER"
+                                                        : "STARVED POWER";
+        const char* rightPart = (effCoupling <= 0.005f)  ? "FREE RUNNING"
+                                : (effCoupling <= 0.45f) ? "SOFT PULL"
+                                                         : "HARD SYNC";
+        const int leftW = measureSansText(kFontSansSmall, leftPart, 1);
+        const int rightW = measureSansText(kFontSansSmall, rightPart, 1);
+        constexpr int kDotGapPx = 14;
+        const int totalW = leftW + kDotGapPx + rightW;
+        const int startX = 120 - (totalW / 2);
+        cv.drawSans(kFontSansSmall, startX, 206, leftPart, 152u, 1);
+        cv.drawOpticalBead(static_cast<float>(startX + leftW + (kDotGapPx / 2)), 211.2f, 0.48f,
+                           0.92f);
+        cv.drawSans(kFontSansSmall, startX + leftW + kDotGapPx, 206, rightPart, 152u, 1);
+        return;
+    }
+    if (hud.knobBank == KnobBankMode::None) {
         return;
     }
     if (hud.knobBank == KnobBankMode::Panning && control.global.monoCollapse &&
@@ -220,24 +320,22 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
         return;
     }
 
+    const bool showOscModRow = shouldShowOscModRow(hud);
+
     for (uint8_t k = 0u; k < 4u; ++k) {
         const int cx = hudColumnCenterX(k);
-        char roleLbl[12]{};
-        char valStr[16]{};
-        GlobalColumnSummary gs{};
-        formatColumnRoleAndValue(control, hud, lfoOutput, stutterGateMask, k, roleLbl,
-                                 sizeof(roleLbl), valStr, sizeof(valStr), gs);
-        const bool bipolar = gs.bipolar;
+        const PreparedHudColumn& col = prep.cols[k];
+        const bool bipolar = col.bipolar;
 
         const float dim = clampf(knobDimSmooth[k], 0.0f, 1.0f);
-        if (gs.disabled) {
+        if (col.disabled) {
             const auto disLbl = static_cast<uint8_t>(88.0f + (64.0f - 88.0f) * dim + 0.5f);
             const auto disVal = static_cast<uint8_t>(104.0f + (76.0f - 104.0f) * dim + 0.5f);
-            cv.drawSansCentered(kFontSansSmall, cx, kHudBotLabelY, roleLbl, disLbl, 1);
+            cv.drawSansCentered(kFontSansSmall, cx, kHudBotLabelY, col.roleLbl, disLbl, 1);
             cv.drawHorizontalFilament(static_cast<float>(cx) - 20.0f,
                                       static_cast<float>(cx) + 20.0f, kHudBotTrackY, 22.0f, 0.58f,
                                       true);
-            cv.drawSansCentered(kFontSansSmall, cx, kHudBotDisabledValueY, valStr, disVal, 0);
+            cv.drawSansCentered(kFontSansSmall, cx, kHudBotDisabledValueY, col.valStr, disVal, 0);
             continue;
         }
         const float foc = clampf(knobFocusSmooth[k], 0.0f, 1.0f);
@@ -246,7 +344,7 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
 
         const float baseLbl = 154.0f + (72.0f - 154.0f) * dim;
         const auto lblGray = static_cast<uint8_t>(baseLbl + (255.0f - baseLbl) * effFoc + 0.5f);
-        cv.drawSansCentered(kFontSansSmall, cx, kHudBotLabelY, roleLbl, lblGray, 1);
+        cv.drawSansCentered(kFontSansSmall, cx, kHudBotLabelY, col.roleLbl, lblGray, 1);
 
         const float cxF = static_cast<float>(cx);
         const float bxf = cxF - 20.0f;
@@ -258,9 +356,9 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
         const float targetX = cxF + posSigned * 20.0f;
 
         cv.drawHorizontalFilament(bxf, bxf + bwf, byf, trackLum, 0.58f, true);
-        if (gs.hasVoiceSpread) {
+        if (col.hasVoiceSpread) {
             for (size_t vi = 0u; vi < kNumOscillators; ++vi) {
-                const float vx = cxF + clampf(gs.voiceSigned[vi], -1.0f, 1.0f) * 20.0f;
+                const float vx = cxF + clampf(col.voiceSigned[vi], -1.0f, 1.0f) * 20.0f;
                 cv.drawOpticalBead(vx, byf, 0.44f, 1.15f);
             }
         }
@@ -285,22 +383,16 @@ void compositeBottomKnobStrip(const MonoStripCanvas& cv, const EngineControlStat
 
         const float baseVal = 224.0f + (96.0f - 224.0f) * dim;
         const auto valGray = static_cast<uint8_t>(baseVal + (255.0f - baseVal) * effFoc + 0.5f);
-        cv.drawSansCentered(kFontSansMedium, cx, kHudBotValueY, valStr, valGray, 0);
+        cv.drawSansCentered(kFontSansMedium, cx, kHudBotValueY, col.valStr, valGray, col.valTrk);
 
-        if (hud.freqPageOpen && hud.mode == HudMode::VoiceFrequency &&
-            hud.knobBank == KnobBankMode::Frequency) {
+        if (showOscModRow) {
             constexpr int kTotalSpan = kHudHomeFxLfoGapPx + kHudHomeLfoPairGapPx;
             const int fxX = cx - (kTotalSpan / 2);
             const int lfoAX = fxX + kHudHomeFxLfoGapPx;
             const int lfoBX = lfoAX + kHudHomeLfoPairGapPx;
-            const VoiceParams& vp = control.voices[k];
-            const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
-            const bool fxOn = isVoiceFilterActive(vp, control.voicePressure[k], pitchMode);
-            cv.drawModulatorSlot(fxX, kHudHomeModRowY, fxOn, hud.fxLedSync01, dim);
-            cv.drawModulatorSlot(lfoAX, kHudHomeModRowY, vp.lfoDepth > 0.002f, hud.lfoLedSync01,
-                                 dim);
-            cv.drawModulatorSlot(lfoBX, kHudHomeModRowY, vp.lfoBDepth > 0.002f, hud.lfoLedSync01,
-                                 dim);
+            cv.drawModulatorSlot(fxX, kHudHomeModRowY, col.fxOn, col.fxLevel01, dim);
+            cv.drawModulatorSlot(lfoAX, kHudHomeModRowY, col.lfoAOn, col.lfoALevel01, dim);
+            cv.drawModulatorSlot(lfoBX, kHudHomeModRowY, col.lfoBOn, col.lfoBLevel01, dim);
         }
     }
 }

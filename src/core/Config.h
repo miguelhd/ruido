@@ -26,6 +26,7 @@ inline constexpr float kPulseWidthMin = 0.05f;
 inline constexpr float kPulseWidthMax = 0.95f;
 inline constexpr float kDefaultVoiceDrift = 0.10f;
 inline constexpr float kDefaultVoiceAmp = 0.65f;
+inline constexpr float kSilentAmpThreshold = 1.0e-4f;
 inline constexpr float kLfoFreqMinHz = 0.01f;
 inline constexpr float kLfoFreqMaxHz = 2000.0f;
 

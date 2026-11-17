@@ -127,6 +127,21 @@ constexpr int32_t encoderStepsToTicks(int32_t detentSteps) noexcept {
     return detentSteps * 4;
 }
 
+inline constexpr uint32_t kMaxPlatformMasterQ12 = 4088u; // (1023 * 1023) >> 8 in platform.c
+// Physical PB6 MASTER pot CCW mechanical stop + ground-return deadzone (`k10 <= 96`, ~9.4% raw
+// wiper range / < 0.88% quadratic taper) so full CCW always reaches true 0.0f silence while
+// rescaling (36..4088] continuously across (0.0, 1.0].
+inline constexpr uint32_t kMinPlatformMasterQ12 = 36u;
+
+inline constexpr float masterQ12ToGain(uint32_t masterQ12) noexcept {
+    if (masterQ12 <= kMinPlatformMasterQ12) {
+        return 0.0f;
+    }
+    return clampf(static_cast<float>(masterQ12 - kMinPlatformMasterQ12) *
+                      (1.0f / static_cast<float>(kMaxPlatformMasterQ12 - kMinPlatformMasterQ12)),
+                  0.0f, 1.0f);
+}
+
 // Round-robin carbon-pill SARADC pressure scanner & full FM-1 panel input dispatcher.
 class Fm1PanelState {
   public:
@@ -144,7 +159,8 @@ class Fm1PanelState {
         scanCursor_ = 0u;
         inputEventCount_ = 0u;
         masterInitialized_ = false;
-        lastMasterNorm_ = clampf(initialMasterGain01, 0.0f, 1.0f);
+        const float raw = clampf(initialMasterGain01, 0.0f, 1.0f);
+        lastMasterNorm_ = (raw <= kSilentAmpThreshold) ? 0.0f : raw;
         analogRowProven_[0] = false;
         analogRowProven_[1] = false;
         for (size_t i = 0u; i < kFm1NumNoteKeys; ++i) {
@@ -157,9 +173,11 @@ class Fm1PanelState {
     }
 
     // Sync `MASTER` pot (`0..4088` quadratic Q12) into `RuidoController::onMasterPot` with a small
-    // ADC noise deadband so thermal LSB jitter never pops up `HudMode::MasterLevel` at idle.
+    // ADC noise deadband so thermal LSB jitter never pops up `HudMode::MasterLevel` at idle, while
+    // always passing exact `0.0` / `1.0` endpoints as `knob_avg` settles exponentially.
     void syncMasterPot(RuidoController& ctrl, float gain01) noexcept {
-        const float clamped = clampf(gain01, 0.0f, 1.0f);
+        const float raw = clampf(gain01, 0.0f, 1.0f);
+        const float clamped = (raw <= kSilentAmpThreshold) ? 0.0f : raw;
         if (!masterInitialized_) {
             masterInitialized_ = true;
             lastMasterNorm_ = clamped;
@@ -171,7 +189,9 @@ class Fm1PanelState {
             }
             return;
         }
-        if (absf(clamped - lastMasterNorm_) >= 0.0025f) {
+        const bool hitEndpoint = (clamped == 0.0f && lastMasterNorm_ > 0.0f) ||
+                                 (clamped == 1.0f && lastMasterNorm_ < 1.0f);
+        if (hitEndpoint || absf(clamped - lastMasterNorm_) >= 0.0025f) {
             lastMasterNorm_ = clamped;
             ctrl.onMasterPot(clamped);
             ++inputEventCount_;

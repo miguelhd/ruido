@@ -96,7 +96,11 @@ inline size_t appendPrecisionHz(char* buf, size_t pos, size_t cap, float hz) noe
 }
 
 inline void formatPercent(char* buf, size_t cap, float norm01) noexcept {
-    const uint32_t pct = static_cast<uint32_t>(clampf(norm01, 0.0f, 1.0f) * 100.0f + 0.5f);
+    const float clamped = clampf(norm01, 0.0f, 1.0f);
+    uint32_t pct = static_cast<uint32_t>(clamped * 100.0f + 0.5f);
+    if (pct == 0u && clamped > kSilentAmpThreshold) {
+        pct = 1u;
+    }
     size_t p = appendUInt(buf, 0u, cap, pct);
     appendStr(buf, p, cap, "%");
 }

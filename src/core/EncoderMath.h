@@ -124,35 +124,38 @@ inline int32_t stepClampedDetent(int32_t currentVal, int32_t maxVal, int32_t tic
     return next;
 }
 
-inline void applyEditKnobDelta(EditTarget target, VoiceParams& vp, int32_t ticks,
+inline void applyHomeKnobDelta(HomeTarget target, VoiceParams& vp, int32_t ticks,
                                KnobRate rate) noexcept {
     switch (target) {
-    case EditTarget::Width:
+    case HomeTarget::Width:
         vp.pulseWidth = adjustLinear01(vp.pulseWidth, ticks, rate, kPulseWidthMin, kPulseWidthMax);
         break;
-    case EditTarget::Drift:
+    case HomeTarget::Drift:
         vp.drift = adjustLinear01(vp.drift, ticks, rate, 0.0f, 1.0f);
         break;
-    case EditTarget::Level:
-    case EditTarget::Count:
-        if (vp.muted) {
-            if (ticks > 0) {
-                vp.muted = false;
-                vp.amplitude = adjustLinear01(0.0f, ticks, rate, 0.0f, 1.0f);
-            }
-        } else {
-            const float nextAmp = adjustLinear01(vp.amplitude, ticks, rate, 0.0f, 1.0f);
-            const bool lfoAmpActive =
-                (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > 1.0e-4f) ||
-                (vp.lfoBTarget == LfoTarget::Amplitude && vp.lfoBDepth > 1.0e-4f);
-            if (nextAmp <= 1.0e-4f && !lfoAmpActive) {
-                vp.amplitude = 0.0f;
-                vp.muted = true;
-            } else {
-                vp.amplitude = nextAmp;
-            }
-        }
+    case HomeTarget::Frequency:
+    case HomeTarget::Count:
+        adjustVoiceFrequency(vp, ticks, rate);
         break;
+    }
+}
+
+inline void applyVoiceLevelKnobDelta(VoiceParams& vp, int32_t ticks, KnobRate rate) noexcept {
+    if (vp.muted) {
+        if (ticks > 0) {
+            vp.muted = false;
+            vp.amplitude = adjustLinear01(0.0f, ticks, rate, 0.0f, 1.0f);
+        }
+    } else {
+        const float nextAmp = adjustLinear01(vp.amplitude, ticks, rate, 0.0f, 1.0f);
+        const bool lfoAmpActive = (vp.lfoTarget == LfoTarget::Amplitude && vp.lfoDepth > 1.0e-4f) ||
+                                  (vp.lfoBTarget == LfoTarget::Amplitude && vp.lfoBDepth > 1.0e-4f);
+        if (nextAmp <= 1.0e-4f && !lfoAmpActive) {
+            vp.amplitude = 0.0f;
+            vp.muted = true;
+        } else {
+            vp.amplitude = nextAmp;
+        }
     }
 }
 

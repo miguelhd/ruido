@@ -51,9 +51,27 @@ class ScopeTraceEngine {
 
     void buildWaveformTrace(float dtSec, const EngineControlState& control, bool scopeFrozen,
                             uint8_t stutterGateMask = 0x0Fu,
-                            ScopeTimebase timebase = ScopeTimebase::Auto) noexcept;
+                            ScopeTimebase timebase = ScopeTimebase::Auto,
+                            bool skipRasterAndBloom = false,
+                            void (*coProcYield)() noexcept = nullptr) noexcept;
 
     void refreshOverdriveHair(const EngineControlState& control, bool scopeFrozen) noexcept;
+
+    bool hasLiveAudioHistory() const noexcept { return historyCount_ >= 540u; }
+    size_t historyWritePos() const noexcept { return historyWrite_; }
+    size_t historySampleCount() const noexcept { return historyCount_; }
+    const std::array<CompactScopeSample, kHistorySize>& rawHistory() const noexcept {
+        return history_;
+    }
+    float busPresence() const noexcept { return busPresenceSmooth_; }
+    const std::array<float, kNumOscillators>& voicePresence() const noexcept {
+        return voicePresenceSmooth_;
+    }
+    const std::array<std::array<float, kTracePoints>, kNumOscillators>& voiceCur() const noexcept {
+        return scratch_.voiceCur;
+    }
+    std::array<float, kTracePoints>& scratchA() noexcept { return scratch_.scratchA; }
+    std::array<float, kTracePoints>& scratchB() noexcept { return scratch_.scratchB; }
 
     void notifyScopeHidden(bool scopeFrozen) noexcept {
         if (!scopeFrozen) {

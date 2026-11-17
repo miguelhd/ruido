@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../../src/core/Version.h"
+
 #ifdef __cplusplus
 #include <cstddef>
 #include <cstdint>
@@ -289,7 +291,7 @@ inline void renderOpsScreenStripFullImpl(const RuidoOpsState& st, uint16_t y0, u
         break;
     case RUIDO_OPS_SYSTEM_FAULT:
         hdrLeft = "SYSTEM FAULT";
-        hdrRight = "v0.1.0";
+        hdrRight = "v" RUIDO_VERSION_STR;
         line1 = "Restarting...";
         foot2 = "Rescue: Hold OCT- at power-on";
         break;

@@ -5,22 +5,13 @@
 
 namespace ruido {
 
-void onRhythmLabKeyPress(bool isBlack, uint8_t keyIdx, const GlobalConfigState& config,
-                         KeyboardLatchState& latch) noexcept {
-    onConsoleSoloMuteKeyPress(isBlack, keyIdx, config, latch);
-}
-
 void evaluateRhythmLabModel(const KeyboardInputView& in, EngineControlState& state,
                             HudState& hud) noexcept {
     KeyboardModState mod{};
     PunchTracker punch{};
 
-    // 1. Shared Console SOLO 1-4 (PIT-POLY) & MUTE 1-4 (Keys 13-16) + 11th Tall Key TAP TEMPO
+    // 1. Right-hand Console MUTE 1-4 (Keys 13-16) & SHIFT + SOLO 1-4
     evaluateConsoleSoloMute(in, mod, punch);
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)]) {
-        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)],
-                   KeyPunchKind::TapTempo, 0u, 1.0f);
-    }
 
     // 2. Top Raised Black Keys (OP1-OP6): Global Rhythm & Clock Modifiers
     // OP1: PUMP -> 4-on-the-floor sidechain ducking swell (double-time above 72% pressure)
@@ -65,13 +56,29 @@ void evaluateRhythmLabModel(const KeyboardInputView& in, EngineControlState& sta
                    KeyPunchKind::RhythmShort, 0u, p);
     }
 
-    // OP6: SWING -> 50% -> 72% MPC shuffle swing + wide stereo bounce
+    // OP6: SHUFFLE -> 0-100% pure 16th-note timing groove delay (decoupled from stereo pan!)
     if (in.blackHeld[static_cast<size_t>(BlackKeyId::Op6)]) {
         const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Op6)], 0.0f, 1.0f);
         mod.rhythmSwing = p;
-        mod.spatialFocus = clampf(mod.spatialFocus + 0.65f * p, -1.0f, 1.0f);
         punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Op6)],
                    KeyPunchKind::RhythmSwing, 0u, p);
+    }
+
+    // PIT: PING-PONG -> 0-100% alternating L/R stereo gate bounce
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Pit)]) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Pit)], 0.0f, 1.0f);
+        mod.rhythmPingPong = p;
+        mod.spatialFocus = clampf(mod.spatialFocus + 0.65f * p, -1.0f, 1.0f);
+        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Pit)],
+                   KeyPunchKind::RhythmPingPong, 0u, p);
+    }
+
+    // GLO: ROLL -> 0-100% momentary fast x2..x8 ratchet burst fill
+    if (in.blackHeld[static_cast<size_t>(BlackKeyId::Glo)]) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Glo)], 0.0f, 1.0f);
+        mod.rhythmRoll = p;
+        punch.note(in.blackPressSeq[static_cast<size_t>(BlackKeyId::Glo)], KeyPunchKind::RhythmRoll,
+                   0u, p);
     }
 
     // 3. Bottom White Keys: Per-Oscillator Rhythm Engines (STUTTER 1-4 | DIVIDE 5-8 | EUCLID 9-12)
@@ -139,9 +146,10 @@ void evaluateRhythmLabModel(const KeyboardInputView& in, EngineControlState& sta
     // CHASE/PUMP, gently tuck un-gated drone voices to 34% so rhythmic patterns punch cleanly.
     const bool hasChase = (mod.rhythmChase > 0.001f);
     const bool hasPump = (mod.rhythmPump > 0.001f);
-    const bool hasSoloTopPulse = !anyVoiceRhythm && !hasChase && !hasPump &&
-                                 ((mod.rhythmTempo > 0.001f) || (mod.rhythmPluck > 0.001f) ||
-                                  (mod.rhythmShort > 0.001f) || (mod.rhythmSwing > 0.001f));
+    const bool hasSoloTopPulse =
+        !anyVoiceRhythm && !hasChase && !hasPump &&
+        ((mod.rhythmTempo > 0.001f) || (mod.rhythmPluck > 0.001f) || (mod.rhythmShort > 0.001f) ||
+         (mod.rhythmSwing > 0.001f) || (mod.rhythmPingPong > 0.001f) || (mod.rhythmRoll > 0.001f));
 
     if (anyVoiceRhythm && mod.soloMask == 0u && !hasChase && !hasPump) {
         for (uint8_t v = 0u; v < kNumOscillators; ++v) {
@@ -166,11 +174,10 @@ void evaluateRhythmLabModel(const KeyboardInputView& in, EngineControlState& sta
     state.keyMod = mod;
 }
 
-void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, float subBreathWave01,
+void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase,
                               const EngineControlState& state, const HudState& hud,
                               uint8_t stutMask, float rhythmPhase01, LedState& outLeds) noexcept {
     (void)animPhase;
-    (void)subBreathWave01;
     const float barPhase = wrapLfoPhase01(rhythmPhase01);
     const auto step16 = static_cast<size_t>(barPhase * 16.0f) & 15u;
     const float step16Frac = barPhase * 16.0f - static_cast<float>(step16);
@@ -336,6 +343,35 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
         }
     }
 
+    // 6b. PIT PING-PONG: Stereo L/R bounce alternating cleanly between left 6 and right 6 keys
+    if (topBlackShow == static_cast<int>(BlackKeyId::Pit)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Pit)], 0.0f, 1.0f);
+        const bool rightSide = ((step16 & 1u) != 0u);
+        const float bounce = clampf(0.42f + 0.58f * fastExpNeg(step16Frac * 2.2f) * p, 0.0f, 1.0f);
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
+            const bool isRight = (i >= 6u);
+            outLeds.whiteKeyLeds[i] = (isRight == rightSide) ? bounce : 0.04f;
+        }
+        scalePanelGrid(outLeds, 0.14f);
+        setPanelBtnLed(outLeds, ButtonId::OctMinus, rightSide ? 0.06f : bounce);
+        setPanelBtnLed(outLeds, ButtonId::OctPlus, rightSide ? bounce : 0.06f);
+    }
+
+    // 6c. GLO ROLL: High-speed x2-x8 ratchet burst strobing across all 12 expressive keys
+    if (topBlackShow == static_cast<int>(BlackKeyId::Glo)) {
+        const float p = clampf(in.blackPressure[static_cast<size_t>(BlackKeyId::Glo)], 0.0f, 1.0f);
+        const float mult = (p < 0.38f) ? 16.0f : ((p < 0.74f) ? 32.0f : 64.0f);
+        const float rollFrac = wrapLfoPhase01(barPhase * mult);
+        const float rawFlash = (rollFrac < 0.48f) ? (0.45f + 0.55f * p) : 0.05f;
+        const float flash = rawFlash + ((0.35f + 0.40f * p) - rawFlash) * stepSmooth;
+        for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
+            outLeds.whiteKeyLeds[i] = flash;
+        }
+        scalePanelGrid(outLeds, 0.16f);
+        maxPanelBtnLed(outLeds, ButtonId::Arp, flash);
+        maxPanelBtnLed(outLeds, ButtonId::Seq, flash);
+    }
+
     // 7. Bottom Rhythm Shows across all 42 LEDs (when no top-row show leads):
     //    STUTTER (Keys 1-4) | DIVIDE (Keys 5-8) | EUCLID (Keys 9-12)
     int botKey = -1;
@@ -466,11 +502,8 @@ void choreographRhythmLabLeds(const KeyboardInputView& in, float animPhase, floa
         }
     }
 
-    // 8. 11th Key Tap Tempo flash + Authoritative binary Console SOLO (OP1-4) & MUTE (Keys 1-4)
-    if (in.blackHeld[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)]) {
-        outLeds.blackKeyLeds[static_cast<size_t>(BlackKeyId::ScopeFreezeKey)] = 1.0f;
-    }
-    applyAuthoritativeConsoleLeds(state, outLeds);
+    // 8. Authoritative Console switch state
+    applyAuthoritativeConsoleLeds(state, hud, outLeds);
 }
 
 } // namespace ruido

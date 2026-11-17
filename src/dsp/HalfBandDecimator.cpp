@@ -90,11 +90,9 @@ RUIDO_ALWAYS_INLINE void decimateStage1Inline(float s0L, float s0R, float s1L, f
     oddR[ow] = s1R;
     oddR[ow + kOddPeriod] = s1R;
 
-    size_t base = (ow - (kPairs - 1u)) & kOddMask;
-    if (base < kPairs) {
-        base += kOddPeriod;
-    }
-    ow1 = (ow + 1u) & kOddMask;
+    const size_t nextOw = (ow + 1u) & kOddMask;
+    const size_t base = nextOw + kPairs;
+    ow1 = nextOw;
 
     const float* rL = oddL + base;
     const float* lL = rL - 1;
@@ -154,11 +152,9 @@ RUIDO_ALWAYS_INLINE StereoFrame decimateStage2Inline(float s0L, float s0R, float
     oddR[ow] = s1R;
     oddR[ow + kOddPeriod] = s1R;
 
-    size_t base = (ow - (kPairs - 1u)) & kOddMask;
-    if (base < kPairs) {
-        base += kOddPeriod;
-    }
-    ow2 = (ow + 1u) & kOddMask;
+    const size_t nextOw = (ow + 1u) & kOddMask;
+    const size_t base = nextOw + kPairs;
+    ow2 = nextOw;
 
     const float* rL = oddL + base;
     const float* lL = rL - 1;
@@ -230,23 +226,6 @@ RUIDO_ALWAYS_INLINE StereoFrame decimateStage2Inline(float s0L, float s0R, float
 }
 
 } // namespace
-
-StereoFrame StereoHalfBandDecimator4x::decimate2xStage1Stereo(StereoFrame s0,
-                                                              StereoFrame s1) noexcept {
-    float outL = 0.0f;
-    float outR = 0.0f;
-    decimateStage1Inline(s0.left, s0.right, s1.left, s1.right, left_.even1.data(),
-                         right_.even1.data(), left_.odd1.data(), right_.odd1.data(), ew1_, ow1_,
-                         outL, outR);
-    return {outL, outR};
-}
-
-StereoFrame StereoHalfBandDecimator4x::decimate2xStage2Stereo(StereoFrame s0,
-                                                              StereoFrame s1) noexcept {
-    return decimateStage2Inline(s0.left, s0.right, s1.left, s1.right, left_.even2.data(),
-                                right_.even2.data(), left_.odd2.data(), right_.odd2.data(), ew2_,
-                                ow2_);
-}
 
 RUIDO_NOINLINE void StereoHalfBandDecimator4x::processSpan4x(const std::array<StereoFrame, 4>* in4x,
                                                              StereoFrame* out,

@@ -23,11 +23,11 @@ inline constexpr int kGraphStripMaxY0 = 198;
 // Canonical 4-column HUD layout aligned 1-to-1 with physical KNOB 1-4 / OSC 1-4 columns
 inline constexpr int kHudColStartX = 30;
 inline constexpr int kHudColStrideX = 60;
-inline constexpr int kHudBotLabelY = 191;
-inline constexpr float kHudBotTrackY = 207.5f;
-inline constexpr int kHudBotValueY = 214;
-inline constexpr int kHudBotDisabledValueY = 216;
-inline constexpr int kHudHomeModRowY = 234;
+inline constexpr int kHudBotLabelY = 190;
+inline constexpr float kHudBotTrackY = 205.5f;
+inline constexpr int kHudBotValueY = 211;
+inline constexpr int kHudBotDisabledValueY = 213;
+inline constexpr int kHudHomeModRowY = 230;
 inline constexpr int kHudHomeFxLfoGapPx = 10;
 inline constexpr int kHudHomeLfoPairGapPx = 6;
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Parameters.h"
+#include "core/Version.h"
 
 #include <array>
 #include <cstddef>
@@ -44,8 +45,8 @@ inline constexpr std::array<const char*, kNumPressureTouchLevels> kPressureTouch
 };
 
 // Canonical Ruido firmware release version & FM-1 OTA package identity (`FM-1_96N`).
-inline constexpr char kRuidoVersionStr[] = "0.1.0";
-inline constexpr char kRuidoPackageIdStr[] = "FM-1_960";
+inline constexpr char kRuidoVersionStr[] = RUIDO_VERSION_STR;
+inline constexpr char kRuidoPackageIdStr[] = RUIDO_PACKAGE_ID_STR;
 
 // Active sub-screen inside the right-panel GLO `GLOBAL CONFIG` overlay.
 enum class ConfigSubView : uint8_t {
@@ -58,16 +59,15 @@ enum class ConfigSubView : uint8_t {
 // Scalable descriptor IDs for the right-panel GLO vertical GLOBAL CONFIG list menu.
 enum class ConfigItemId : uint8_t {
     OutputRouting = 0,
-    MuteMode = 1,
-    SoloMode = 2,
+    PressureTouch = 1,
+    MuteMode = 2,
     SnapMode = 3,
     ClockSync = 4,
     MidiTransport = 5,
     MidiChannel = 6,
-    PressureTouch = 7,
-    FactoryReset = 8,
-    Credits = 9,
-    Count = 10
+    FactoryReset = 7,
+    Credits = 8,
+    Count = 9
 };
 
 inline constexpr size_t kNumGlobalConfigItems = static_cast<size_t>(ConfigItemId::Count);
@@ -83,7 +83,6 @@ inline constexpr std::array<const char*, 17> kMidiChannelLabels = {
 
 struct GlobalConfigState {
     KeySwitchMode muteMode = KeySwitchMode::Momentary;
-    KeySwitchMode soloMode = KeySwitchMode::Momentary;
     KeySwitchMode snapMode = KeySwitchMode::Latching;
     ClockSyncMode clockSync = ClockSyncMode::Auto;
     MidiTransportMode midiTransport = MidiTransportMode::Off;
@@ -109,8 +108,6 @@ constexpr const char* globalConfigItemLabel(ConfigItemId id) noexcept {
         return "Output Routing";
     case ConfigItemId::MuteMode:
         return "Mute Mode";
-    case ConfigItemId::SoloMode:
-        return "Solo Mode";
     case ConfigItemId::SnapMode:
         return "Scene Mode";
     case ConfigItemId::ClockSync:
@@ -124,7 +121,7 @@ constexpr const char* globalConfigItemLabel(ConfigItemId id) noexcept {
     case ConfigItemId::FactoryReset:
         return "Factory Reset";
     case ConfigItemId::Credits:
-        return "Ruido";
+        return "About";
     case ConfigItemId::Count:
         break;
     }
@@ -135,7 +132,6 @@ constexpr int32_t globalConfigMaxIndex(ConfigItemId id) noexcept {
     switch (id) {
     case ConfigItemId::OutputRouting:
     case ConfigItemId::MuteMode:
-    case ConfigItemId::SoloMode:
     case ConfigItemId::SnapMode:
     case ConfigItemId::ClockSync:
         return 1;
@@ -160,8 +156,6 @@ constexpr int32_t globalConfigGetIndex(ConfigItemId id, const GlobalConfigState&
         return global.monoCollapse ? 1 : 0;
     case ConfigItemId::MuteMode:
         return (config.muteMode == KeySwitchMode::Latching) ? 1 : 0;
-    case ConfigItemId::SoloMode:
-        return (config.soloMode == KeySwitchMode::Latching) ? 1 : 0;
     case ConfigItemId::SnapMode:
         return (config.snapMode == KeySwitchMode::Latching) ? 1 : 0;
     case ConfigItemId::ClockSync:
@@ -198,12 +192,6 @@ inline bool globalConfigSetIndex(ConfigItemId id, int32_t idx, GlobalConfigState
         const KeySwitchMode next = (idx > 0) ? KeySwitchMode::Latching : KeySwitchMode::Momentary;
         const bool changed = (config.muteMode != next);
         config.muteMode = next;
-        return changed;
-    }
-    case ConfigItemId::SoloMode: {
-        const KeySwitchMode next = (idx > 0) ? KeySwitchMode::Latching : KeySwitchMode::Momentary;
-        const bool changed = (config.soloMode != next);
-        config.soloMode = next;
         return changed;
     }
     case ConfigItemId::SnapMode: {
@@ -254,8 +242,6 @@ constexpr const char* globalConfigValueLabel(ConfigItemId id, const GlobalConfig
         return global.monoCollapse ? "MONO" : "STEREO";
     case ConfigItemId::MuteMode:
         return (config.muteMode == KeySwitchMode::Latching) ? "LATCHING" : "MOMENTARY";
-    case ConfigItemId::SoloMode:
-        return (config.soloMode == KeySwitchMode::Latching) ? "LATCHING" : "MOMENTARY";
     case ConfigItemId::SnapMode:
         return (config.snapMode == KeySwitchMode::Latching) ? "LATCHING" : "MOMENTARY";
     case ConfigItemId::ClockSync:
@@ -281,7 +267,7 @@ constexpr const char* globalConfigValueLabel(ConfigItemId id, const GlobalConfig
     case ConfigItemId::FactoryReset:
         return "RESET >";
     case ConfigItemId::Credits:
-        return "v0.1.0 >";
+        return "v" RUIDO_VERSION_STR " >";
     case ConfigItemId::Count:
         break;
     }
@@ -339,9 +325,6 @@ inline DeviceSettingsBlob encodeDeviceSettings(const GlobalConfigState& config,
     if (config.muteMode == KeySwitchMode::Latching) {
         flags |= (1u << 2u);
     }
-    if (config.soloMode == KeySwitchMode::Latching) {
-        flags |= (1u << 3u);
-    }
     if (config.snapMode == KeySwitchMode::Latching) {
         flags |= (1u << 4u);
     }
@@ -389,8 +372,6 @@ inline bool decodeDeviceSettings(const DeviceSettingsBlob& blob, GlobalConfigSta
     inOutGlobal.monoCollapse = (blob.configFlags & (1u << 0u)) != 0u;
     inOutGlobal.pitchPressureMode = (blob.configFlags & (1u << 1u)) != 0u;
     outConfig.muteMode = ((blob.configFlags & (1u << 2u)) != 0u) ? KeySwitchMode::Latching
-                                                                 : KeySwitchMode::Momentary;
-    outConfig.soloMode = ((blob.configFlags & (1u << 3u)) != 0u) ? KeySwitchMode::Latching
                                                                  : KeySwitchMode::Momentary;
     outConfig.snapMode = ((blob.configFlags & (1u << 4u)) != 0u) ? KeySwitchMode::Latching
                                                                  : KeySwitchMode::Momentary;

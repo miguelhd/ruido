@@ -40,6 +40,9 @@ inline std::array<int8_t, 5> unpackDriftKnots(uint32_t packed) noexcept {
 
 inline float wrapLfoPhase01(float phase) noexcept {
     float w = sanitizeState(phase);
+    if (!(w > -4194304.0f && w < 4194304.0f)) {
+        return 0.0f;
+    }
     w -= static_cast<float>(static_cast<int32_t>(w));
     if (w < 0.0f) {
         w += 1.0f;
@@ -364,7 +367,6 @@ inline float applySpatialFocusPan(float pan, size_t voiceIdx, bool monoCollapse,
 
 inline constexpr float kSubAudioLoOct = cxLog2Pos(15.0f);
 inline constexpr float kInvSubAudioSpanOct = 1.0f / (cxLog2Pos(25.0f) - cxLog2Pos(15.0f));
-inline constexpr float kSilentAmpThreshold = 1.0e-4f;
 
 inline constexpr const char* lfoTargetName(LfoTarget target) noexcept {
     switch (target) {

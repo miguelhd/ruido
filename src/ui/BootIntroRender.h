@@ -15,7 +15,7 @@ class BootIntroRenderer {
 
     void reset() noexcept;
 
-    // Arm the 3.34 s CRT power-on sequence on cold boot (`ruido_fm1_construct` / `wasm_ui_init`).
+    // Arm the 2.00 s CRT power-on sequence on cold boot (`ruido_fm1_construct` / `wasm_ui_init`).
     void arm() noexcept;
 
     // Smoothly fast-dissolve (or skip if 0 frames rendered) when any hardware control is touched.

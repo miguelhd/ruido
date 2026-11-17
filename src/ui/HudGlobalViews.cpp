@@ -7,8 +7,10 @@
 #include "core/VoiceCircuit.h"
 #include "ui/FontSansAA.h"
 #include "ui/GraphStyle.h"
+#include "ui/HudCouplingView.h"
 #include "ui/HudFormat.h"
 #include "ui/MonoCanvas.h"
+#include "ui/ScopeTraceMath.h"
 
 #include <cstring>
 
@@ -46,8 +48,8 @@ inline void shadePanoramaCurveSkirt(int y0, int y1, uint8_t* lumBuf, float cx, f
     }
 }
 
-// Analog carbon-pill keys only (`OP1..OP6`, `Keys 1-12`); binary SOLO/MUTE/FREEZE keys excluded.
-constexpr uint16_t kAnalogBlackMask = 0x003Fu;
+// Analog carbon-pill keys only (`OP1..GLO`, `Keys 1-12`); binary right-bay switches excluded.
+constexpr uint16_t kAnalogBlackMask = 0x00FFu;
 constexpr uint16_t kAnalogWhiteMask = 0x0FFFu;
 constexpr float kNoPressureNoticeSec = 0.9f;
 constexpr float kPressMeterX0 = 16.0f;
@@ -58,26 +60,40 @@ constexpr float kPressPeakHoldSec = 1.2f;
 
 void HudGlobalViews::reset() noexcept {
     panX_ = {83.0f, 157.0f, 51.0f, 189.0f};
-    panBaseX_ = panX_;
-    orbitXMin_ = panX_;
-    orbitXMax_ = panX_;
     panLfoDepth_.fill(0.0f);
     apexH_.fill(88.0f);
     invWidth2_ = {0.0029f, 0.0035f, 0.0041f, 0.0049f};
     focusWeight_.fill(0.0f);
     muteDim_.fill(0.0f);
+    voicePhase01_ = {0.0f, 0.21f, 0.42f, 0.73f};
+    capAct_.fill(0.72f);
+    couplingFullSpanSmooth_ = {800.0f, 534.0f, 400.0f, 267.0f};
+    couplingSagQ8_.fill(0u);
+    for (auto& r : couplingRampQ8_) {
+        r.fill(0u);
+    }
+    for (auto& w : couplingWrapPacked_) {
+        w.fill(0u);
+    }
+    couplingSyncMask_.fill(0u);
     hasFocusSmooth_ = 0.0f;
+    couplingSmooth_ = 0.0f;
+    couplingChaos_ = 0.0f;
+    couplingWinSamplesSmooth_ = 1800.0f;
     monoCollapse_ = false;
     primed_ = false;
+    couplingPrimed_ = false;
     clearImmediate();
 }
 
 void HudGlobalViews::clearImmediate() noexcept {
     panPhase_ = 0.0f;
+    couplingPhase_ = 0.0f;
     configPhase_ = 0.0f;
     pressLive01_ = pressPeak01_ = pressPeakHoldSec_ = pressMeterPhase_ = 0.0f;
     noPressureHoldSec_ = 0.0f;
     primed_ = false;
+    couplingPrimed_ = false;
 }
 
 void HudGlobalViews::updatePressureMeter(float dtClamped, const HudState& rawHud,
@@ -126,28 +142,99 @@ bool HudGlobalViews::anyActiveTarget(const HudState& rawHud) const noexcept {
     if (rawHud.opacity <= 0.004f || rawHud.mode == HudMode::None) {
         return false;
     }
-    return isPanStageActive(rawHud) || rawHud.configPageOpen;
+    return isPanStageActive(rawHud) || isRailCouplingActive(rawHud) || rawHud.configPageOpen;
 }
 
 bool HudGlobalViews::hasResidualPhase() const noexcept {
-    return panPhase_ > 0.002f || configPhase_ > 0.002f || pressMeterPhase_ > 0.002f ||
-           noPressureHoldSec_ > 0.0f;
+    return panPhase_ > 0.002f || couplingPhase_ > 0.002f || configPhase_ > 0.002f ||
+           pressMeterPhase_ > 0.002f || noPressureHoldSec_ > 0.0f;
 }
 
 void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
                             const HudState& rawHud, const LfoSignalArray& lfoOutput,
                             const std::array<float, kNumOscillators>& voicePeak,
-                            uint8_t stutterGateMask) noexcept {
-    const bool hudVisible = (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None);
+                            const std::array<float, kNumOscillators>& voiceDriftNorm,
+                            uint8_t stutterGateMask, const ScopeTraceEngine& traceEngine) noexcept {
+    const bool hudVisible =
+        (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None) && !rawHud.shiftHeld;
     const bool panActive = isPanStageActive(rawHud);
+    const bool couplingActive = isRailCouplingActive(rawHud);
     const bool cfgActive =
         hudVisible && (rawHud.configPageOpen ||
                        (rawHud.mode == HudMode::GlobalConfig && rawHud.opacity >= 0.99f));
     const bool wasPanInvisible = (panPhase_ <= 0.002f);
+    const bool wasCouplingInvisible = (couplingPhase_ <= 0.002f);
 
     panPhase_ = stepHudFadeLinear(panPhase_, panActive, dtClamped);
+    couplingPhase_ = stepHudFadeLinear(couplingPhase_, couplingActive, dtClamped);
     configPhase_ = stepHudFadeLinear(configPhase_, cfgActive, dtClamped);
     updatePressureMeter(dtClamped, rawHud, cfgActive);
+
+    if (couplingActive || couplingPhase_ > 0.002f) {
+        const bool snapCoupling = !couplingPrimed_ || (couplingActive && wasCouplingInvisible);
+        couplingPrimed_ = true;
+        const float alphaCpl =
+            snapCoupling ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.028f)));
+        const float alphaGate =
+            snapCoupling ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.004f)));
+        const float effCoupling =
+            clampf(control.global.circuitCoupling + control.keyMod.overloadSurge, 0.0f, 1.0f);
+        const float effChaos =
+            (effCoupling > 0.45f) ? smoothstep01((effCoupling - 0.45f) * (1.0f / 0.55f)) : 0.0f;
+        couplingSmooth_ = slewScalar(couplingSmooth_, effCoupling, alphaCpl, 0.002f);
+        couplingChaos_ = slewScalar(couplingChaos_, effChaos, alphaCpl, 0.002f);
+
+        const float pitchMode = control.global.pitchPressureMode ? 1.0f : 0.0f;
+        std::array<float, kNumOscillators> liveHz{};
+        std::array<bool, kNumOscillators> voiceMuted{};
+        for (size_t v = 0u; v < kNumOscillators; ++v) {
+            const VoiceParams& vp = control.voices[v];
+            const float lfoA = lfoOutput[lfoBankIndex(v, 0u)];
+            const float lfoB = lfoOutput[lfoBankIndex(v, 1u)];
+            const float pMul = computeVoicePitchRatio(control.voicePressure[v], pitchMode) *
+                               control.keyMod.voicePitchMul[v];
+            const float dAmt = clampf(vp.drift, 0.0f, 1.0f);
+            const float maxDriftOct = dAmt * (0.018f + 0.082f * dAmt * dAmt);
+            const float driftMul = fastExp2(clampf(voiceDriftNorm[v], -1.0f, 1.0f) * maxDriftOct);
+            liveHz[v] =
+                clampf(computeLiveVoicePitchHz(vp, lfoA, lfoB) * pMul * driftMul, 0.5f, 20000.0f);
+
+            const VoiceCircuitState vc = evaluateVoiceCircuit(control, v, stutterGateMask);
+            voiceMuted[v] = vc.isMuted || !control.global.masterRun;
+            const float aGate = (control.keyMod.stutterDepth[v] > 1.0e-4f) ? alphaGate : alphaCpl;
+            if (!panActive) {
+                muteDim_[v] = slewScalar(muteDim_[v], vc.inaudibleDim, aGate, 0.005f);
+            }
+        }
+
+        if (traceEngine.hasLiveAudioHistory() && !traceEngine.isStreamStalled(rawHud.scopeFrozen)) {
+            if (!rawHud.scopeFrozen || snapCoupling) {
+                buildCouplingFromLiveHistory(
+                    dtClamped, snapCoupling, couplingSmooth_, couplingChaos_, liveHz, voiceMuted,
+                    traceEngine, couplingWinSamplesSmooth_, couplingFullSpanSmooth_, capAct_,
+                    couplingSagQ8_, couplingRampQ8_, couplingWrapPacked_, couplingSyncMask_);
+            }
+        } else {
+            for (size_t v = 0u; v < kNumOscillators; ++v) {
+                const float lfoA = lfoOutput[lfoBankIndex(v, 0u)];
+                const float lfoB = lfoOutput[lfoBankIndex(v, 1u)];
+                const float effAmp =
+                    evaluateLiveOscAmplitude(control, v, lfoA, lfoB, stutterGateMask);
+                const float tgtAct =
+                    voiceMuted[v] ? 0.0f : clampf(0.35f + 0.65f * effAmp, 0.0f, 1.0f);
+                capAct_[v] = slewScalar(capAct_[v], tgtAct, alphaCpl, 0.004f);
+                if (v > 0u && !rawHud.scopeFrozen && control.global.masterRun && dtClamped > 0.0f) {
+                    voicePhase01_[v] = wrapLfoPhase01(
+                        voicePhase01_[v] + (0.22f + 0.14f * static_cast<float>(v)) * dtClamped);
+                }
+            }
+            buildCouplingFallback(couplingSmooth_, couplingChaos_, liveHz, voicePhase01_, capAct_,
+                                  couplingSagQ8_, couplingRampQ8_, couplingWrapPacked_,
+                                  couplingSyncMask_);
+        }
+    } else {
+        couplingPrimed_ = false;
+    }
 
     if (!panActive) {
         if (panPhase_ <= 0.002f) {
@@ -180,23 +267,11 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         const float effAmp = evaluateLiveOscAmplitude(control, v, lfoA, lfoB, stutterGateMask);
         const float livePan = applySpatialFocusPan(computeLiveVoicePan(vp, lfoA, lfoB), v,
                                                    control.global.monoCollapse, sf);
-        const float basePan = applySpatialFocusPan(vp.pan, v, control.global.monoCollapse, sf);
 
         const float dA = computeLiveLfoADepth(vp, lfoB);
-        float pLo = (vp.lfoTarget == LfoTarget::Pan) ? applyLfoPan(vp.pan, dA, -1.0f) : vp.pan;
-        float pHi = (vp.lfoTarget == LfoTarget::Pan) ? applyLfoPan(vp.pan, dA, +1.0f) : vp.pan;
         float modDepth = (vp.lfoTarget == LfoTarget::Pan) ? dA : 0.0f;
         if (vp.lfoBTarget == LfoTarget::Pan) {
-            pLo = applyLfoPan(pLo, vp.lfoBDepth, -1.0f);
-            pHi = applyLfoPan(pHi, vp.lfoBDepth, +1.0f);
             modDepth = clampf(modDepth + vp.lfoBDepth, 0.0f, 1.0f);
-        }
-        pLo = applySpatialFocusPan(pLo, v, control.global.monoCollapse, sf);
-        pHi = applySpatialFocusPan(pHi, v, control.global.monoCollapse, sf);
-        if (pLo > pHi) {
-            const float tmp = pLo;
-            pLo = pHi;
-            pHi = tmp;
         }
         modDepth *= panScale;
 
@@ -215,12 +290,6 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         const float aGate = (control.keyMod.stutterDepth[v] > 1.0e-4f) ? alphaChop : alphaPos;
 
         panX_[v] = slewScalar(panX_[v], kPanCenterX + livePan * kPanHalfSpanX, alphaPos, 0.02f);
-        panBaseX_[v] =
-            slewScalar(panBaseX_[v], kPanCenterX + basePan * kPanHalfSpanX, alphaPos, 0.02f);
-        orbitXMin_[v] =
-            slewScalar(orbitXMin_[v], kPanCenterX + pLo * kPanHalfSpanX, alphaPos, 0.02f);
-        orbitXMax_[v] =
-            slewScalar(orbitXMax_[v], kPanCenterX + pHi * kPanHalfSpanX, alphaPos, 0.02f);
         panLfoDepth_[v] = slewScalar(panLfoDepth_[v], modDepth, alphaPos, 0.002f);
         apexH_[v] = slewScalar(apexH_[v], tgtApexH, aGate, 0.02f);
         invWidth2_[v] = slewScalar(invWidth2_[v], tgtInvW2, alphaPos, 0.00002f);
@@ -291,7 +360,7 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
         screenBlendLinearStrip(stripHeight, 0u, kDisplayWidth, linScratch, lumBuf);
     }
 
-    // 4. Layer 3: LFO -> PAN horizontal excursion bracket + Phase Beacons / Optical Crest Beads
+    // 4. Layer 3: Phase Beacons / Optical Crest Beads on live curve apexes
     for (int pass = 0; pass < 2; ++pass) {
         for (size_t v = 0u; v < kNumOscillators; ++v) {
             const float fW = clampf(focusWeight_[v], 0.0f, 1.0f);
@@ -303,17 +372,8 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
             const float cx = panX_[v];
             const float apexY = evalPanBellY(cx, cx, apexH_[v], invWidth2_[v]);
             const float modD = panLfoDepth_[v];
-            const float orbitSpan = orbitXMax_[v] - orbitXMin_[v];
 
-            if (modD > 0.01f && orbitSpan > 1.2f && dim < 0.90f) {
-                const float brkVis = (0.55f + 0.45f * fW) * (1.0f - 0.65f * dim);
-                cv.drawHorizontalFilament(orbitXMin_[v], orbitXMax_[v], apexY, 96.0f * brkVis,
-                                          0.54f, true);
-                cv.drawVerticalSlit(orbitXMin_[v], apexY - 3.5f, apexY + 3.5f, 132.0f * brkVis);
-                cv.drawVerticalSlit(orbitXMax_[v], apexY - 3.5f, apexY + 3.5f, 132.0f * brkVis);
-                if (absf(cx - panBaseX_[v]) > 2.5f) {
-                    cv.drawOpticalBead(panBaseX_[v], apexY, 0.34f * brkVis, 1.35f);
-                }
+            if (modD > 0.01f && dim < 0.90f) {
                 const float spotBeacon = 0.52f + 0.48f * fW;
                 const float beaconInt = (0.84f + hF * (spotBeacon - 0.84f)) * (1.0f - 0.58f * dim);
                 cv.drawLfoPhaseBeacon(cx, apexY, beaconInt, 0.35f + 0.65f * modD);
@@ -327,6 +387,15 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
             }
         }
     }
+}
+
+void HudGlobalViews::compositeRailCouplingStrip(int y0, int y1, uint16_t stripHeight,
+                                                uint8_t* lumBuf, uint16_t* linScratch,
+                                                float effCouplingAlpha01,
+                                                uint8_t alpha8) const noexcept {
+    renderCouplingStrip(y0, y1, stripHeight, lumBuf, linScratch, effCouplingAlpha01, alpha8,
+                        couplingSmooth_, couplingChaos_, couplingSagQ8_, couplingRampQ8_,
+                        couplingWrapPacked_, couplingSyncMask_, capAct_, muteDim_);
 }
 
 namespace {
@@ -371,13 +440,15 @@ void compositeConfigSubViewStrip(const MonoStripCanvas& cv, const HudState& hud)
         return;
     }
 
-    // ConfigSubView::Credits ("RUIDO")
-    cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 46, "4-Oscillator Drone Synthesizer",
+    // ConfigSubView::Credits ("ABOUT" — aligned to kConfigMenuLeftX = 16 matching menu options)
+    constexpr int kAboutLeftX = 16;
+    cv.drawSansFlushLeft(kFontSansMedium, kAboutLeftX, 46, "4-Oscillator Drone Synthesizer",
                          kSubtitleLum);
-    cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 78, "By Miguel Hern\xC3\xA1ndez Domenech",
+    cv.drawSansFlushLeft(kFontSansMedium, kAboutLeftX, 78, "By Miguel Hern\xC3\xA1ndez Domenech",
                          kBodyLum);
-    cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 102, "GPL-3.0  /  2026  /  Dinghy HAL", kBodyLum);
-    cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 126, "github.com/miguelhd/ruido", kBodyLum);
+    cv.drawSansFlushLeft(kFontSansMedium, kAboutLeftX, 102, "GPL-3.0  /  2026  /  Dinghy HAL",
+                         kBodyLum);
+    cv.drawSansFlushLeft(kFontSansMedium, kAboutLeftX, 126, "github.com/miguelhd/ruido", kBodyLum);
 }
 
 } // namespace
@@ -439,12 +510,15 @@ void HudGlobalViews::compositeGlobalConfigStrip(int y0, int y1, uint8_t* lumBuf,
         const char* itemLbl = globalConfigItemLabel(itemId);
         const char* valLbl = globalConfigValueLabel(itemId, hud.config, control.global);
         const uint8_t rowLum = selected ? 255u : 174u;
+        const bool transportGatedOff = (itemId == ConfigItemId::MidiTransport) &&
+                                       (hud.config.clockSync == ClockSyncMode::Internal);
+        const uint8_t valLum = transportGatedOff ? (selected ? 148u : 96u) : rowLum;
         if (selected && itemId == ConfigItemId::PressureTouch && noPressureHoldSec_ > 0.0f) {
             // An on/off key (SOLO/MUTE/FREEZE) was touched: say so plainly across the whole row.
             cv.drawSansFlushLeft(kFontSansMedium, 16, ry + 5, "Not pressure sensitive", rowLum, 0);
         } else {
             cv.drawSansFlushLeft(kFontSansMedium, 16, ry + 5, itemLbl, rowLum, 0);
-            cv.drawSansRight(kFontSansMedium, 224, ry + 5, valLbl, rowLum, 0);
+            cv.drawSansRight(kFontSansMedium, 224, ry + 5, valLbl, valLum, 0);
         }
 
         if (selected && itemId == ConfigItemId::PressureTouch && pressMeterPhase_ > 0.002f) {

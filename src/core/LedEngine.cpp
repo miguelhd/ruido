@@ -2,6 +2,7 @@
 
 #include "core/DspMath.h"
 #include "core/FilterModMath.h"
+#include "core/KeyboardModelSpec.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
 
@@ -22,7 +23,10 @@ void LedSmoothState::reset(const EngineControlState& state) noexcept {
     fxSync01 = 0.0f;
     lfoSync01 = 0.0f;
     subBreathWave01 = 0.5f;
-    phantomGlint.fill(0.0f);
+    savePulse01 = 0.5f;
+    glintChannels.fill(0xFFu);
+    glintPhaseQ8.fill(0u);
+    nextGlintSlot = 0u;
     lastPhantomSeq = 0u;
 }
 
@@ -45,6 +49,9 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
 
     smooth.subBreathWave01 =
         0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(smooth.animPhase * kSubAudioBreathHz)));
+    const float savePulseHz = saveArmedPulseHz(ctx.hud.saveArmed && ctx.hud.saveDeleteMode);
+    smooth.savePulse01 =
+        0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(smooth.animPhase * savePulseHz)));
 
     const float pitchMode = ctx.state.global.pitchPressureMode ? 1.0f : 0.0f;
     const uint8_t stutMask = ctx.telemetry.stutterGateMask.load(std::memory_order_relaxed);
@@ -68,11 +75,7 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
             dominantLfoBankIdx = 4u + i;
         }
         if (!vc.isMuted) {
-            const FilterMacroContext fltMacros{
-                ctx.state.keyMod.dubLpfDrop,
-                ctx.state.keyMod.overloadSurge,
-                ctx.state.keyMod.filterScream,
-            };
+            const FilterMacroContext fltMacros = FilterMacroContext::fromKeyMod(ctx.state.keyMod);
             const ModulatedFilterParams flt =
                 computeLiveVoiceFilter(vp, p, pitchMode, lfoARaw, lfoBRaw, fltMacros);
             constexpr float kHpMinOct = cxLog2Pos(kFilterCutoffMinHz);
@@ -101,43 +104,64 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     if (ctx.state.keyMod.dubLpfDrop > maxFilterEngagement) {
         maxFilterEngagement = ctx.state.keyMod.dubLpfDrop;
     }
+    if (ctx.state.keyMod.masterHpfSweep > maxFilterEngagement) {
+        maxFilterEngagement = ctx.state.keyMod.masterHpfSweep;
+    }
     if (ctx.state.keyMod.filterScream > maxFilterEngagement) {
         maxFilterEngagement = ctx.state.keyMod.filterScream;
     }
 
-    // Panel Tactile Buttons (unconnected switches ENV/ARP/SEQ/REC rest at 0% dark; tapping one
-    // brings its LED up to the exact 15% steady glow of assigned buttons, then fades dark in 120
-    // ms)
+    // Unassigned controls rest at 0% dark; tapping any unassigned button or key brings its LED up
+    // to the exact 15% steady glow of assigned controls, then fades dark in 120 ms.
     constexpr float kPhantomGlintDurationSec = 0.120f;
-    constexpr float kAssignedRestGlow = 0.15f;
     if (dt > 0.0f) {
-        const float step = dt * (1.0f / kPhantomGlintDurationSec);
-        for (float& g : smooth.phantomGlint) {
-            g = (g > step) ? (g - step) : 0.0f;
+        const uint32_t decQ8 = static_cast<uint32_t>(
+            clampf(dt * (1.0f / kPhantomGlintDurationSec), 0.0f, 1.0f) * 255.0f + 0.99f);
+        for (uint8_t& ph : smooth.glintPhaseQ8) {
+            ph = (ph > decQ8) ? static_cast<uint8_t>(ph - decQ8) : 0u;
         }
     }
     if (ctx.hud.phantomPinSeq != smooth.lastPhantomSeq) {
         smooth.lastPhantomSeq = ctx.hud.phantomPinSeq;
-        smooth.phantomGlint[ctx.hud.phantomPinIndex & 3u] = 1.0f;
+        const uint8_t ch = ctx.hud.phantomPinIndex;
+        if (ch < kNumPhantomChannels) {
+            size_t slotIdx = smooth.nextGlintSlot & 3u;
+            bool reused = false;
+            for (size_t i = 0u; i < smooth.glintChannels.size(); ++i) {
+                if (smooth.glintChannels[i] == ch) {
+                    slotIdx = i;
+                    reused = true;
+                    break;
+                }
+            }
+            smooth.glintChannels[slotIdx] = ch;
+            smooth.glintPhaseQ8[slotIdx] = 255u;
+            if (!reused) {
+                smooth.nextGlintSlot = static_cast<uint8_t>((smooth.nextGlintSlot + 1u) & 3u);
+            }
+        }
     }
 
     outLeds.buttonLeds.fill(0.0f);
     outLeds.stopLed = 0.0f;
-    for (size_t i = 0u; i < kPhantomPinButtons.size(); ++i) {
-        outLeds.buttonLeds[static_cast<size_t>(kPhantomPinButtons[i])] =
-            kAssignedRestGlow * smoothstep01(smooth.phantomGlint[i]);
-    }
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctMinus)] =
         (ctx.hud.knobRate == KnobRate::Fine) ? 1.0f : 0.15f;
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::OctPlus)] =
         (ctx.hud.knobRate == KnobRate::Coarse) ? 1.0f : 0.15f;
 
-    const bool homeFreqActive = ctx.hud.freqPageOpen &&
-                                (ctx.hud.knobBank != KnobBankMode::GlobalFilter) &&
-                                !ctx.hud.scopeFrozen;
-    outLeds.buttonLeds[static_cast<size_t>(ButtonId::Home)] =
-        homeFreqActive ? 1.0f : (0.12f + 0.23f * ctx.hud.opacity);
-    outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] = ctx.hud.saveArmed ? 1.0f : 0.15f;
+    const bool nonHomePageOpen = ctx.hud.fxPageOpen || ctx.hud.selPageOpen || ctx.hud.lfoPageOpen ||
+                                 ctx.hud.editPageOpen || ctx.hud.panPageOpen ||
+                                 ctx.hud.configPageOpen || ctx.hud.saveArmed;
+    outLeds.buttonLeds[static_cast<size_t>(ButtonId::Home)] = nonHomePageOpen ? 0.15f : 1.0f;
+    if (ctx.hud.saveArmed) {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] =
+            0.25f + 0.75f * smooth.savePulse01;
+    } else if (ctx.hud.snapshotDirty) {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] =
+            0.12f + 0.16f * smooth.subBreathWave01;
+    } else {
+        outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] = 0.0f;
+    }
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::GloRight)] =
         ctx.hud.configPageOpen ? 1.0f : 0.15f;
 
@@ -203,6 +227,35 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     const float runSmooth = clampf(smooth.playStopRunSmooth, 0.0f, 1.0f);
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::PlayStop)] = 1.0f - runSmooth;
     outLeds.stopLed = runSmooth;
+}
+
+void applyUnassignedLedGlints(const LedSmoothState& smooth, LedState& ioLeds) noexcept {
+    for (size_t i = 0u; i < smooth.glintChannels.size(); ++i) {
+        const uint8_t phQ8 = smooth.glintPhaseQ8[i];
+        const uint8_t ch = smooth.glintChannels[i];
+        if (phQ8 == 0u || ch >= kNumPhantomChannels) {
+            continue;
+        }
+        const float glint =
+            kLedAssignedRest * smoothstep01(static_cast<float>(phQ8) * (1.0f / 255.0f));
+        if (ch < kPhantomBlackKeyBase) {
+            const ButtonId btn = kPhantomButtonOrder[ch];
+            float& dst = ioLeds.buttonLeds[static_cast<size_t>(btn)];
+            if (glint > dst) {
+                dst = glint;
+            }
+        } else if (ch < kPhantomWhiteKeyBase) {
+            float& dst = ioLeds.blackKeyLeds[static_cast<size_t>(ch - kPhantomBlackKeyBase)];
+            if (glint > dst) {
+                dst = glint;
+            }
+        } else {
+            float& dst = ioLeds.whiteKeyLeds[static_cast<size_t>(ch - kPhantomWhiteKeyBase)];
+            if (glint > dst) {
+                dst = glint;
+            }
+        }
+    }
 }
 
 } // namespace ruido

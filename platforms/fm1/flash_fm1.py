@@ -11,8 +11,10 @@ pre-flight verification before opening any MIDI port.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import os
 import pathlib
+import resource
 import subprocess
 import sys
 
@@ -61,11 +63,15 @@ def ensure_install_script() -> None:
 
 
 def ensure_midi_python() -> pathlib.Path:
+    probe = (
+        "import importlib.util, sys; "
+        "sys.exit(0 if importlib.util.find_spec('mido') and importlib.util.find_spec('rtmidi') else 1)"
+    )
     for candidate in (pathlib.Path(sys.executable), VENV_DIR / "bin" / "python3"):
         if not candidate.is_file():
             continue
         chk = subprocess.run(
-            [str(candidate), "-c", "import mido, rtmidi"],
+            [str(candidate), "-c", probe],
             capture_output=True,
             check=False,
         )
@@ -80,6 +86,46 @@ def ensure_midi_python() -> pathlib.Path:
         check=True,
     )
     return venv_py
+
+
+def check_macos_coremidi_access() -> int:
+    """Probe CoreMIDI in pure C so Seatbelt blocks exit cleanly without RtMidiError SIGABRT."""
+    if sys.platform != "darwin":
+        return 0
+    try:
+        cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        cm = ctypes.CDLL("/System/Library/Frameworks/CoreMIDI.framework/CoreMIDI")
+        cf.CFStringCreateWithCString.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_uint32,
+        ]
+        cf.CFStringCreateWithCString.restype = ctypes.c_void_p
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+        cf.CFRelease.restype = None
+        cm.MIDIClientCreate.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint32),
+        ]
+        cm.MIDIClientCreate.restype = ctypes.c_int32
+        cm.MIDIClientDispose.argtypes = [ctypes.c_uint32]
+        cm.MIDIClientDispose.restype = ctypes.c_int32
+
+        name = cf.CFStringCreateWithCString(None, b"ruido-preflight", 0x08000100)
+        if not name:
+            return 0
+        try:
+            client = ctypes.c_uint32(0)
+            status = int(cm.MIDIClientCreate(name, None, None, ctypes.byref(client)))
+            if status == 0 and client.value:
+                cm.MIDIClientDispose(client.value)
+            return status
+        finally:
+            cf.CFRelease(name)
+    except OSError:
+        return 0
 
 
 def audit_local_artifacts(fwsc_file: pathlib.Path) -> None:
@@ -139,8 +185,35 @@ def main(argv: list[str]) -> int:
     if not args.info:
         audit_local_artifacts(args.fwsc)
 
+    midi_status = check_macos_coremidi_access()
+    if midi_status != 0:
+        print(
+            f"[FM-1 FLASH] macOS CoreMIDI server unavailable in sandbox (OSStatus {midi_status}); "
+            "re-run with host MIDI access enabled.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    except (OSError, ValueError):
+        pass
+
     py = ensure_midi_python()
-    cmd = [str(py), str(INSTALL_SCRIPT)]
+    runner = (
+        "import os, resource, sys\n"
+        "try:\n"
+        "    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n"
+        "except (OSError, ValueError):\n"
+        "    pass\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "import fm1_install\n"
+        "rc = fm1_install.main(sys.argv[2:])\n"
+        "sys.stdout.flush()\n"
+        "sys.stderr.flush()\n"
+        "os._exit(rc if isinstance(rc, int) else 0)\n"
+    )
+    cmd = [str(py), "-c", runner, str(OUT_DIR)]
     if args.info:
         cmd.append("--info")
     else:

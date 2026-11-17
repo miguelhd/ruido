@@ -3,8 +3,10 @@
  * while constructing all C++17 engine objects and launching Core 1 strictly AFTER `recovery_key()`
  * clears. */
 
+#include "core/Version.h"
+
 #define APP_NAME "RUIDO"
-#define APP_VER "0.1.0"
+#define APP_VER RUIDO_VERSION_STR
 #define STORE_MAGIC 0x52554944u /* "RUID": distinct NVS magic from stock dinghy forks */
 #define CV_MAX (240u * 16u)     /* Unused gfx.c canvas shrunk (GC'd by --gc-sections) */
 #define LCD_BAUD 1u /* Fast ~30 MHz SPI1 ST7789 scanline DMA (vs default BAUD 4 = 12 MHz) */
@@ -345,51 +347,7 @@ static void poll_panel_inputs(uint32_t now_ms) {
                          note_edges);
 }
 
-static void prepare_for_nvs_erase(void) {
-    /* Finish any in-flight SPI1 LCD DMA strip and silence ALNK0 DMA halves so the ~35 ms IRQ-masked
-     * 4 KiB sector erase outputs clean silence instead of looping an 11.6 ms (86 Hz) grain. */
-    lcd_sync();
-    memset(abuf, 0, sizeof(abuf));
-}
-
-static int blob_save_c1_safe(uint32_t i, const void* p, uint32_t n) {
-    ruido_fm1_flash_hold_begin();
-    const int rc = blob_save(i, p, n);
-    ruido_fm1_flash_hold_end();
-    return rc;
-}
-
-static int settings_tail_read_boot(uint32_t off_in_sector, void* dst, uint32_t n) {
-    if (!flash_ok || off_in_sector < 0x20u || n == 0u || off_in_sector + n > 0x1000u) {
-        return -1;
-    }
-    return st_read(BLOBS_AT + 4u * 0x1000u + off_in_sector, dst, n);
-}
-
-static int settings_tail_write_c1_safe(uint32_t off_in_sector, const void* src, uint32_t n) {
-    if (!flash_ok || off_in_sector < 0x20u || n != 16u || (off_in_sector & 0x0Fu) != 0u ||
-        off_in_sector + n > 0x1000u) {
-        return -1;
-    }
-    ruido_fm1_flash_hold_begin();
-    const int rc = fl_write(BLOBS_AT + 4u * 0x1000u + off_in_sector, src, n);
-    ruido_fm1_flash_hold_end();
-    if (rc == 0) {
-        uint32_t words[4];
-        memcpy(words, src, sizeof(words));
-        for (uint32_t w = 0u; w < 4u; ++w) {
-            g_ruido_fm1_status.nvs_flash_readback[38u + w] = words[w];
-        }
-    }
-    return rc;
-}
-
-static int st_read_c1_safe(uint32_t off, void* dst, uint32_t n) {
-    ruido_fm1_flash_hold_begin();
-    const int rc = st_read(off, dst, n);
-    ruido_fm1_flash_hold_end();
-    return rc;
-}
+#include "fm1_nvs_glue.h"
 
 static void app_idle(void) {
     if (g_idle_assist_ok && !g_in_app_idle) {
@@ -523,11 +481,11 @@ static void app_main(void) {
     mark_boot_stage(0x0030u);
     ruido_fm1_construct(init_mq);
 
-    /* 3. Restore CRC-verified Scenes (0xF4000..0xF7FFF) & DeviceSettings (0xF8000) BEFORE
-     *    starting Core 1 (`SYS_CON` bit 3 == 0) so `fl_cache_idle()` (`0x01EEE008`) has zero
+    /* 3. Restore CRC-verified Scenes (0xF4000..0xF7FFF), Settings (0xF8000), & LIVE (0xF9000)
+     * BEFORE starting Core 1 (`SYS_CON` bit 3 == 0) so `fl_cache_idle()` (`0x01EEE008`) has zero
      *    cross-core bus contention — identical to single-core `ota_boot_cleanup()`! */
     mark_boot_stage(0x0040u);
-    (void)ruido_fm1_nvs_load_boot(blob_load, settings_tail_read_boot, blob_save);
+    (void)ruido_fm1_nvs_load_boot(blob_load, nvs_tail_read_boot, blob_save);
 
     /* 4. Snapshot AC791N clock dividers, check silicon-lottery early-crash flag, and boot Core 1 */
     mark_boot_stage(0x0050u);
@@ -595,8 +553,8 @@ static void app_main(void) {
                 g_last_ota_kind = 0xFFu;
                 fm1_crash.magic = 0u;
                 fm1_crash.early = 0u;
-                (void)ruido_fm1_nvs_poll_save(now_ms, 1u, blob_save_c1_safe,
-                                              settings_tail_write_c1_safe, prepare_for_nvs_erase);
+                (void)ruido_fm1_nvs_poll_save(now_ms, 1u, nvs_save_c1_safe, nvs_tail_write_c1_safe,
+                                              prepare_for_nvs_erase);
                 ruido_fm1_quiesce_for_ota();
                 prepare_for_nvs_erase();
             }
@@ -609,24 +567,8 @@ static void app_main(void) {
             }
             sync_master_pot_target();
             g_idle_assist_ok = 0u;
-            if (ruido_fm1_nvs_poll_save(now_ms, 0u, blob_save_c1_safe, settings_tail_write_c1_safe,
-                                        prepare_for_nvs_erase) > 0u &&
-                ruido_fm1_nvs_take_base_written() != 0u) {
-                uint32_t rb_slot1[35];
-                uint32_t rb_settings[7];
-                uint32_t w = 0u;
-                if (st_read_c1_safe(BLOBS_AT + 1u * 0x1000u, rb_slot1, sizeof(rb_slot1)) == 0) {
-                    for (w = 0u; w < 35u; ++w) {
-                        g_ruido_fm1_status.nvs_flash_readback[w] = rb_slot1[w];
-                    }
-                }
-                if (st_read_c1_safe(BLOBS_AT + 4u * 0x1000u, rb_settings, sizeof(rb_settings)) ==
-                    0) {
-                    for (w = 0u; w < 7u; ++w) {
-                        g_ruido_fm1_status.nvs_flash_readback[35u + w] = rb_settings[w];
-                    }
-                }
-            }
+            (void)ruido_fm1_nvs_poll_save(now_ms, 0u, nvs_save_c1_safe, nvs_tail_write_c1_safe,
+                                          prepare_for_nvs_erase);
             g_idle_assist_ok = 1u;
             ruido_fm1_assist_dsp();
         }
