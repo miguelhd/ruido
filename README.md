@@ -1,12 +1,12 @@
 # Ruido
 
-**Ruido** is a custom, audiophile-grade **4-oscillator Schmitt-trigger drone synthesizer firmware** for the **M-VAVE FM-1** (`JieLi AC791N / pi32v2`), engineered specifically as a raw, harmonically rich stereo sound source for external guitar pedals and Eurorack modular systems.
+**Ruido** is a custom, **4-oscillator Schmitt-trigger drone synthesizer firmware** for the **M-VAVE FM-1** (`JieLi AC791N / pi32v2`), engineered specifically as a raw, harmonically rich stereo sound source for external guitar pedals and Eurorack modular systems.
 
 ## Core Pillars
 
 1. **Uncompromising Sound Quality:** Unified `4x` oversampled (`176.47 kHz`) signal path modeling CMOS Schmitt-trigger physics (PolyBLEP edges, RC capacitor tilt, thermal drift, and shared power-rail threshold coupling) feeding four dedicated per-oscillator **Dual Series Sallen-Key (`12 dB/oct HPF -> 12 dB/oct LPF`, `OTA -> Silicon-Clamped`) Zero-Delay Feedback filters** and a nonlinear master summing stage.
 2. **Stateless "Zero-Menu" UX + 3-Model Pressure Keybed:** 1:1 encoder-to-oscillator mapping (`Knobs 1-4 = Oscillators 1-4`) paired with 3 swappable 27-key carbon-pill pressure performance keyboards (**`1/3 LIVE MIXER`**, **`2/3 CIRCUIT LAB`**, and **`3/3 RHYTHM LAB`** via `SEL` + `SELECT`) and 42-channel varibright LED modulation.
-3. **Always-On Acoustic Visuals:** Tear-free `240x240` CRT-style rising-edge-triggered oscilloscope rendered continuously via scanline strip compositing, with translucent parameter overlays that gently bloom on touch and dissolve away when idle.
+3. **Always-On Acoustic Visuals:** `240x240` CRT-style rising-edge-triggered oscilloscope rendered continuously via scanline strip compositing, with translucent parameter overlays.
 
 ## Repository Layout
 
