@@ -1902,21 +1902,9 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
         // Load clean unmodulated baseline to isolate 1x1 placeholder -> single FX/LFO promotion:
         RTEST_CHECK(ctrl.loadLivePatch(
             ruido::encodePatchSnapshot(ruido::EngineControlState::makeDefault())));
-        // Silence audio trace so background behind bottom HUD strip is pure pitch-black (#000000)
-        ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
-        ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
-        for (int f = 0; f < 30; ++f) {
-            ctrl.tick(0.02f, modTel);
-            renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
-        }
-        // Dismiss the latched AUDIO OUTPUT · OFF banner, let 150 ms dissolve finish, then latch
-        // HOME (`FREQUENCY`) HUD open and settle its 150 ms S-curve fade-in
-        ctrl.onButtonEvent(ruido::ButtonId::Home, true);
-        ctrl.onButtonEvent(ruido::ButtonId::Home, false);
-        for (int f = 0; f < 12; ++f) {
-            ctrl.tick(0.02f, modTel);
-            renderer.prepareFrame(0.02f, ctrl.state(), ctrl.hud(), modTel);
-        }
+        // Reset scope history so background behind bottom HUD strip is pure pitch-black (#000000)
+        // while keeping masterRun = true so live FX/LFO modulator LEDs & dots animate!
+        renderer.reset();
         ctrl.onButtonEvent(ruido::ButtonId::Home, true);
         ctrl.onButtonEvent(ruido::ButtonId::Home, false);
         RTEST_CHECK(ctrl.hud().freqPageOpen);
@@ -2917,8 +2905,9 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     ctrl.onButtonEvent(ruido::ButtonId::Home, true);
     ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     ctrl.tick(0.160f, tel);
+    renderer.reset();
     quietSt = ctrl.state();
-    quietSt.global.masterRun = false;
+    quietSt.global.masterRun = true;
     quietSt.global.masterTrim = 0.0f;
     quietSt.keyMod.stutterDepth[1] = 1.0f;
     tel.stutterGateMask.store(static_cast<uint8_t>(~(1u << 1u) & 0x0Fu), std::memory_order_relaxed);

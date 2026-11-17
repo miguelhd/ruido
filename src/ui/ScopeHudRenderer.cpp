@@ -151,8 +151,14 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         bootIntro_.step(dtClamped, hudActive);
     }
     traceEngine_.advanceWatchdog(dtClamped, hud.scopeFrozen);
-    const bool streamStalled = traceEngine_.isStreamStalled(hud.scopeFrozen);
-    if (!hud.scopeFrozen) {
+    const bool streamStalled =
+        traceEngine_.isStreamStalled(hud.scopeFrozen) || !control.global.masterRun;
+    if (!control.global.masterRun) {
+        frameStutterGateMask_ = 0x0Fu;
+        frameLfoOutput_.fill(0.0f);
+        frameVoicePeak_.fill(0.0f);
+        frameVoiceDrift_.fill(0.0f);
+    } else if (!hud.scopeFrozen) {
         frameStutterGateMask_ = telemetry.stutterGateMask.load(std::memory_order_relaxed);
         frameRhythmPhase_ = telemetry.rhythmPhase.load(std::memory_order_relaxed);
         for (size_t i = 0u; i < kNumVoiceLfos; ++i) {

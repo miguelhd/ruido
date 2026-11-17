@@ -250,8 +250,8 @@ inline void updateOverdriveHair(const std::array<CompactScopeSample, HistorySize
                    20.0f, kAudioFreqMaxHz);
         const float period = clampf(44100.0f / effHz, 16.0f, 1200.0f);
         const float maxSpan = (historyCount > 160u) ? static_cast<float>(historyCount - 96u) : 0.0f;
-        const bool canReadHistory =
-            (!streamStalled) && (historyCount >= 256u) && (maxSpan >= 160.0f);
+        const bool canReadHistory = control.global.masterRun && (!streamStalled) &&
+                                    (historyCount >= 256u) && (maxSpan >= 160.0f);
 
         OverdriveHairArray raw{};
         float maxAbsRaw = 0.0f;
@@ -333,9 +333,11 @@ inline void updateOverdriveHair(const std::array<CompactScopeSample, HistorySize
         for (size_t i = 0u; i < kOverdriveHairPoints; ++i) {
             const float norm = (raw[i] >= 0.0f) ? (raw[i] * invPos) : (raw[i] * invNeg);
             const float clamped = clampf(norm, -1.0f, 1.0f);
-            persistedHair[v][i] =
-                snapImmediate ? clamped
-                              : (persistedHair[v][i] + 0.74f * (clamped - persistedHair[v][i]));
+            if (snapImmediate || absf(clamped - persistedHair[v][i]) < 1.0e-4f) {
+                persistedHair[v][i] = clamped;
+            } else {
+                persistedHair[v][i] += 0.74f * (clamped - persistedHair[v][i]);
+            }
         }
     }
 }

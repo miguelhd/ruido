@@ -1900,7 +1900,7 @@ void testPerVoiceLfoPageAndHudGraph() {
     // to verify full-screen LFO geometry (x = 0..239, y = 26..188) and radiant Phase Beacon!
     ruido::ScopeHudRenderer beadRenderer;
     ruido::EngineControlState beadCtrl = ctrl.state();
-    beadCtrl.global.masterRun = false;
+    beadCtrl.global.masterRun = true;
     beadCtrl.global.masterTrim = 0.0f;
     beadCtrl.voices[0].lfoDepth = 1.0f;
     beadCtrl.voices[0].lfoShape = 0.0f;  // Full-amplitude Sine spanning upper & lower viewport
@@ -2369,6 +2369,191 @@ void testRailCouplingHudAnalyzer() {
     CHECK(starvedVsZeroBotDiffs > 10u);
 }
 
+void testPlayStopFreezesAllVisualsAndLeds() {
+    std::printf("[Test 8c] PLAY/STOP Visual & 42-LED Freeze Across All Screens...\n");
+    static ruido::DroneEngine engine;
+    static ruido::RuidoController ctrl;
+    static ruido::ScopeHudRenderer renderer;
+    static std::array<float, 128> outL{};
+    static std::array<float, 128> outR{};
+    static std::array<uint16_t, 240u * 240u> frameA{};
+    static std::array<uint16_t, 240u * 240u> frameB{};
+
+    engine.init(44100.0f);
+    ctrl.reset();
+    renderer.reset();
+
+    // Switch to 3/3 RHYTHM LAB so TAP (`POLY`) beat-glow is also exercised
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8);
+    CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::RhythmLab);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+
+    // Patch heavy live modulation across all 4 voices (Pitch, Duty, Level+Overdrive, Pan, LPF,
+    // Drift, Rail Coupling, and snapshotDirty) so every screen has active motion while running.
+    ruido::EngineControlState modPatch = ctrl.state();
+    modPatch.global.circuitCoupling = 0.65f;
+    modPatch.voices[0].amplitude = 1.00f;
+    modPatch.voices[0].drift = 0.85f;
+    modPatch.voices[0].lpCutoffHz = 1400.0f;
+    modPatch.voices[0].lpResonance = 0.55f;
+    modPatch.voices[0].lfoTarget = ruido::LfoTarget::Pan;
+    modPatch.voices[0].lfoRateHz = 3.2f;
+    modPatch.voices[0].lfoDepth = 0.85f;
+    modPatch.voices[0].lfoBTarget = ruido::LfoTarget::Amplitude;
+    modPatch.voices[0].lfoBRateHz = 2.4f;
+    modPatch.voices[0].lfoBDepth = 0.75f;
+
+    modPatch.voices[1].drift = 0.75f;
+    modPatch.voices[1].lfoTarget = ruido::LfoTarget::Pitch;
+    modPatch.voices[1].lfoRateHz = 4.1f;
+    modPatch.voices[1].lfoDepth = 0.80f;
+    modPatch.voices[1].lfoBTarget = ruido::LfoTarget::PulseWidth;
+    modPatch.voices[1].lfoBRateHz = 2.9f;
+    modPatch.voices[1].lfoBDepth = 0.70f;
+
+    modPatch.voices[2].lfoTarget = ruido::LfoTarget::LpCutoff;
+    modPatch.voices[2].lfoRateHz = 3.7f;
+    modPatch.voices[2].lfoDepth = 0.85f;
+    modPatch.voices[2].lfoShape = 0.95f; // S&H / Drift knots
+
+    CHECK(ctrl.loadLivePatch(ruido::encodePatchSnapshot(modPatch)));
+    ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 4); // Mark snapshotDirty = true
+
+    const auto stepLive = [&](int frames60Hz) {
+        for (int f = 0; f < frames60Hz; ++f) {
+            engine.controlBus().publish(ctrl.state());
+            for (int b = 0; b < 6; ++b) {
+                engine.processBlock(outL.data(), outR.data(), outL.size());
+                renderer.ingestScopeRing(engine.scopeBuffer());
+            }
+            ctrl.tick(0.016f, engine.telemetry());
+            renderer.prepareFrame(0.016f, ctrl.state(), ctrl.hud(), engine.telemetry());
+        }
+    };
+
+    stepLive(18);
+    CHECK(ctrl.state().global.masterRun);
+
+    // Stop sound via PLAY/STOP button!
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    CHECK(!ctrl.state().global.masterRun);
+
+    // Let 8 ms audio ramp + scope phosphor decay + LED smoothers settle completely (~900 ms)
+    stepLive(60);
+
+    const float frozenLfoPhase0 = engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed);
+    const float frozenRhythmPhase = engine.telemetry().rhythmPhase.load(std::memory_order_relaxed);
+    stepLive(12);
+    CHECK(near(engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed), frozenLfoPhase0));
+    CHECK(near(engine.telemetry().rhythmPhase.load(std::memory_order_relaxed), frozenRhythmPhase));
+    CHECK(near(engine.telemetry().lfoOutput[0].load(std::memory_order_relaxed), 0.0f));
+    CHECK(near(engine.telemetry().voicePeak[0].load(std::memory_order_relaxed), 0.0f));
+    CHECK(engine.telemetry().stutterGateMask.load(std::memory_order_relaxed) == 0x0Fu);
+
+    const auto assertScreenAndLedsMotionless = [&](const char* label) {
+        (void)label;
+        stepLive(24);
+        renderer.renderFullScreenStrips(frameA.data());
+        const ruido::LedState ledsA = ctrl.leds();
+
+        stepLive(10);
+        renderer.renderFullScreenStrips(frameB.data());
+        const ruido::LedState ledsB = ctrl.leds();
+
+        bool pixelsIdentical = true;
+        for (size_t i = 0u; i < frameA.size(); ++i) {
+            if (frameA[i] != frameB[i]) {
+                pixelsIdentical = false;
+                break;
+            }
+        }
+        bool ledsIdentical = near(ledsA.stopLed, ledsB.stopLed);
+        for (size_t i = 0u; i < ledsA.buttonLeds.size(); ++i) {
+            if (!near(ledsA.buttonLeds[i], ledsB.buttonLeds[i])) {
+                ledsIdentical = false;
+            }
+        }
+        for (size_t i = 0u; i < ledsA.blackKeyLeds.size(); ++i) {
+            if (!near(ledsA.blackKeyLeds[i], ledsB.blackKeyLeds[i])) {
+                ledsIdentical = false;
+            }
+        }
+        for (size_t i = 0u; i < ledsA.whiteKeyLeds.size(); ++i) {
+            if (!near(ledsA.whiteKeyLeds[i], ledsB.whiteKeyLeds[i])) {
+                ledsIdentical = false;
+            }
+        }
+        CHECK(pixelsIdentical);
+        CHECK(ledsIdentical);
+    };
+
+    // 1. Dismiss AUDIO OUTPUT OFF banner -> Idle Scope + Closed Panel LEDs (FX, LFO, SAVE, TAP)
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    assertScreenAndLedsMotionless("IdleScope");
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Fx)], 0.15f));
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Lfo)], 0.15f));
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Save)], 0.15f));
+    CHECK(near(ctrl.leds().blackKeyLeds[ruido::kTapBlackKeyIdx], 0.15f));
+
+    // 2. LFO Screen (header reads "STOPPED" and curve has zero moving phase beacon)
+    ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
+    assertScreenAndLedsMotionless("LFO");
+    {
+        ruido::LfoSignalArray zeroLfo{};
+        ruido::PreparedHudHeader hdr{};
+        ruido::prepareHudHeader(hdr, ctrl.state(), ctrl.hud(), zeroLfo, 0x0Fu, 0.0f, 0.0f);
+        CHECK(std::strcmp(hdr.rightText, "STOPPED") == 0);
+    }
+
+    // 3. EDIT -> LEVEL (100% overdrive stem settled & motionless) and EDIT -> PAN
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    assertScreenAndLedsMotionless("LEVEL");
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Edit, false);
+    assertScreenAndLedsMotionless("PAN");
+
+    // 4. HOME -> FREQUENCY, DUTY, DRIFT
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false); // Dismiss PAN
+    stepLive(12);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false); // 1st -> FREQUENCY
+    assertScreenAndLedsMotionless("FREQUENCY");
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false); // 2nd -> DUTY
+    assertScreenAndLedsMotionless("DUTY");
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false); // 3rd -> DRIFT
+    assertScreenAndLedsMotionless("DRIFT");
+
+    // 5. FX Filter Screen & RAIL COUPLING Analyzer & SEL Guidance
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
+    assertScreenAndLedsMotionless("FX");
+
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
+    assertScreenAndLedsMotionless("RAIL_COUPLING");
+
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Sel, false);
+    assertScreenAndLedsMotionless("SEL");
+
+    // 6. Resume via PLAY/STOP -> LFO phase & audio peaks immediately resume!
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    CHECK(ctrl.state().global.masterRun);
+    stepLive(8);
+    CHECK(!near(engine.telemetry().lfoPhase[0].load(std::memory_order_relaxed), frozenLfoPhase0));
+    CHECK(engine.telemetry().peakLeft.load(std::memory_order_relaxed) > 0.05f);
+}
+
 } // namespace
 
 int main() {
@@ -2382,6 +2567,7 @@ int main() {
     testPerVoiceLfoPageAndHudGraph();
     testBootIntroCrtSequence();
     testRailCouplingHudAnalyzer();
+    testPlayStopFreezesAllVisualsAndLeds();
     ruido_test::runUnified150msFadesAndRateSplitHeaderTests(check);
     ruido_test::runGlobalFiveModesAndConfigMenuTests(check);
     ruido_test::runEditChannelDrivePageAndAmpGraphTests(check);

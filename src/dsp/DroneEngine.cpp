@@ -291,7 +291,11 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         const bool isLastChunk = ((baseFrame + chunk) == numFrames);
 
         // Step smoothers, 8x dual voice LFOs & prepare filter/pan coeffs per sub-block
-        lfoBank_.stepSubBlock(lfoFrames, stride, stasisFreeze_, isLastChunk);
+        const float runScale = masterRunSmoother_.nextN(stride);
+        const bool stoppedSilent =
+            !latestState.global.masterRun && (runScale <= 1.0e-4f) && (prevRunScale_ <= 1.0e-4f);
+        const bool effFreeze = stasisFreeze_ || stoppedSilent;
+        lfoBank_.stepSubBlock(lfoFrames, stride, effFreeze, isLastChunk);
 
         const float surge = punchBusSmoothers_.nextN(0u, stride);
         const float surgeDrive = surge * (0.62f + 0.38f * surge);
@@ -310,7 +314,6 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
                                    ? (basePanScale * (1.0f + spatialFocus))
                                    : (basePanScale + (1.0f - basePanScale) * spatialFocus);
         const bool exactMono = (panScale <= 0.0f);
-        const float runScale = masterRunSmoother_.nextN(stride);
         const float pitchMode = pitchModeSmoother_.nextN(stride);
 
         std::array<float, kNumOscillators> oscFreqs, oscPulseWidths, oscDrifts, stutDepths;
@@ -321,7 +324,7 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         }
         const RhythmFrameResult rhythmFrame =
             stepRhythmSubBlock(rhythmState_, stutterPhases_, stutterRatesHz_, stutDepths,
-                               hzToBasePhaseU32_, stasisFreeze_, stride);
+                               hzToBasePhaseU32_, effFreeze, stride);
         lastStutterMask = rhythmFrame.gateMask;
         const bool anyFilterMacro = (surge > 0.22f) || (dubDrop > 1.0e-4f) ||
                                     (hpfSweep > 1.0e-4f) || (filterScream > 1.0e-4f) ||
@@ -456,7 +459,7 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
             std::array<uint8_t, kNumOscillators> risingCounts;
             oscBank_.processSpan4x(spanSub.data(), spanRising.data(), risingCounts, chunk,
                                    prevOscFreqHz_, oscFreqs, prevPulseWidth_, oscPulseWidths,
-                                   oscDrifts, coupling, stasisFreeze_, hardSync, prevOscSamples_,
+                                   oscDrifts, coupling, effFreeze, hardSync, prevOscSamples_,
                                    prevCapRamp_, isLastChunk ? &lastGateHigh : nullptr,
                                    isLastChunk ? &lastDriftNorm : nullptr);
             for (size_t v = 0u; v < kNumOscillators; ++v) {
@@ -491,14 +494,17 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
             }
         } else {
             const PatchedSpanContext patchCtx{
-                chunk,   invChunk,      isLastChunk, anyXmod,  anyFold,    anyCrush,
-                anyRing, stasisFreeze_, coupling,    hardSync, ringModMix, hzToOversampledPhaseU32_,
+                chunk,   invChunk,  isLastChunk, anyXmod,  anyFold,    anyCrush,
+                anyRing, effFreeze, coupling,    hardSync, ringModMix, hzToOversampledPhaseU32_,
             };
             renderPatchedOscFilterSpan4x(patchCtx, oscBank_, filters_, filterCoeffs_,
                                          spanSub.data(), spanRising.data(), prevOscFreqHz_,
                                          oscFreqs, prevPulseWidth_, oscPulseWidths, oscDrifts,
                                          xmodDepths, foldDepths, crushDepths, prevOscSamples_,
                                          prevCapRamp_, crushStates_, lastGateHigh, lastDriftNorm);
+        }
+        if (stoppedSilent) {
+            spanRising.fill(0u);
         }
 
         // Stereo VCA mix at unity, batch 4x -> 1x linear-phase FIR decimation, unity scope tap,
@@ -622,7 +628,7 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
             }
         }
         for (size_t i = 0u; i < kNumOscillators; ++i) {
-            const float scaledPeak = chunkRawPeak[i] * 0.25f * vcaGates[i];
+            const float scaledPeak = chunkRawPeak[i] * 0.25f * vcaGates[i] * runScale;
             blockVoicePeak[i] = (scaledPeak > blockVoicePeak[i]) ? scaledPeak : blockVoicePeak[i];
         }
         if (scopeAvail > 0u) {
@@ -640,17 +646,23 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         baseFrame += chunk;
     }
 
+    const bool blockStopped = !latestState.global.masterRun && (prevRunScale_ <= 1.0e-4f);
     buses.telemetry.peakLeft.store(blockPeakL, std::memory_order_relaxed);
     buses.telemetry.peakRight.store(blockPeakR, std::memory_order_relaxed);
     for (size_t i = 0u; i < kNumOscillators; ++i) {
-        buses.telemetry.oscGateHigh[i].store(lastGateHigh[i], std::memory_order_relaxed);
-        buses.telemetry.voicePeak[i].store(blockVoicePeak[i], std::memory_order_relaxed);
-        buses.telemetry.voiceDriftNorm[i].store(lastDriftNorm[i], std::memory_order_relaxed);
+        buses.telemetry.oscGateHigh[i].store(blockStopped ? 0.0f : lastGateHigh[i],
+                                             std::memory_order_relaxed);
+        buses.telemetry.voicePeak[i].store(blockStopped ? 0.0f : blockVoicePeak[i],
+                                           std::memory_order_relaxed);
+        buses.telemetry.voiceDriftNorm[i].store(blockStopped ? 0.0f : lastDriftNorm[i],
+                                                std::memory_order_relaxed);
     }
-    buses.telemetry.stutterGateMask.store(lastStutterMask, std::memory_order_relaxed);
+    buses.telemetry.stutterGateMask.store(blockStopped ? 0x0Fu : lastStutterMask,
+                                          std::memory_order_relaxed);
     buses.telemetry.rhythmPhase.store(rhythmState_.warpedBar01, std::memory_order_relaxed);
     for (size_t s = 0u; s < kNumVoiceLfos; ++s) {
-        buses.telemetry.lfoOutput[s].store(lfoFrames[s].raw, std::memory_order_relaxed);
+        buses.telemetry.lfoOutput[s].store(blockStopped ? 0.0f : lfoFrames[s].raw,
+                                           std::memory_order_relaxed);
         buses.telemetry.lfoPhase[s].store(lfoFrames[s].phase01, std::memory_order_relaxed);
         buses.telemetry.lfoDriftPacked[s].store(lfoFrames[s].driftPacked,
                                                 std::memory_order_relaxed);

@@ -49,7 +49,8 @@ Each milestone has a strict verification gate before advancing to the next phase
 
 ---
 
-## Post-Launch (v1.x+): Full MIDI & Wireless Expansion
+## Post-Launch (v1.x+): Performance Looper, Full MIDI & Wireless Expansion
+- [ ] **27-Key Performance Gesture Looper (`REC`):** Record and loop raw 27-key gate and carbon-pill pressure gestures on `Core 0`, with independent stackable loops across `LIVE MIXER`, `CIRCUIT LAB`, and `RHYTHM LAB`.
 - [ ] **Onboard `AC791N` BLE-MIDI Peripheral GATT (`03B80E5A-...`) & Radio Control:** Integrate wireless Bluetooth LE MIDI peripheral service (`13-bit` ms packet timestamp unpacking into the existing `24 PPQN` PLL, kept out of `v1.0` to preserve a 100% bare-metal, blob-free launch firmware) paired with a `BLE MIDI` (`ON` / `OFF`) radio toggle in `GLOBAL CONFIG` for battery and RF hygiene.
 - [ ] **External MIDI Note In & Voice / Envelope Architecture:** Design dedicated MIDI note articulation, envelope/LPG behavior, velocity/aftertouch expression, and tonal/paraphonic vs 27-key performance routing across TRS MIDI IN, USB-C, and BLE-MIDI (`ADR-039`) without compromising continuous drone sound quality or Core 1 CPU headroom.
 - [ ] **MIDI CC & Program Change In (`ON` / `OFF`):** Hands-free `SCENE 1–4` morph recall via Program Change (`0–3`) and a curated fixed CC map across oscillator pitches, MS-20 filters, dual LFOs, overdrive, and rail coupling.

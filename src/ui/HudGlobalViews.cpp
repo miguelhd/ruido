@@ -207,7 +207,8 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
             }
         }
 
-        if (traceEngine.hasLiveAudioHistory() && !traceEngine.isStreamStalled(rawHud.scopeFrozen)) {
+        if (control.global.masterRun && traceEngine.hasLiveAudioHistory() &&
+            !traceEngine.isStreamStalled(rawHud.scopeFrozen)) {
             if (!rawHud.scopeFrozen || snapCoupling) {
                 buildCouplingFromLiveHistory(
                     dtClamped, snapCoupling, couplingSmooth_, couplingChaos_, liveHz, voiceMuted,
@@ -273,7 +274,7 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         if (vp.lfoBTarget == LfoTarget::Pan) {
             modDepth = clampf(modDepth + vp.lfoBDepth, 0.0f, 1.0f);
         }
-        modDepth *= panScale;
+        modDepth *= control.global.masterRun ? panScale : 0.0f;
 
         const float peakNorm =
             silentMute ? 0.0f : clampf(voicePeak[v] * (1.0f / 1.15f), 0.0f, 1.0f);

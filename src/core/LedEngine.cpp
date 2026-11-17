@@ -158,7 +158,7 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
             0.25f + 0.75f * smooth.savePulse01;
     } else if (ctx.hud.snapshotDirty) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] =
-            0.12f + 0.16f * smooth.subBreathWave01;
+            ctx.state.global.masterRun ? (0.12f + 0.16f * smooth.subBreathWave01) : 0.15f;
     } else {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] = 0.0f;
     }
@@ -169,12 +169,12 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     // when closed (matched 1-to-1 with HOME per-osc FX modulator dots)
     const float fxBreath01 =
         0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(smooth.animPhase * kFxBreathHz)));
-    smooth.fxSync01 = (maxFilterEngagement > 1.0e-3f)
+    smooth.fxSync01 = (ctx.state.global.masterRun && maxFilterEngagement > 1.0e-3f)
                           ? clampf(0.70f * fxBreath01 + 0.30f * maxFilterEngagement, 0.0f, 1.0f)
                           : 0.0f;
     if (ctx.hud.fxPageOpen) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Fx)] = 1.0f;
-    } else if (maxFilterEngagement > 1.0e-3f) {
+    } else if (ctx.state.global.masterRun && maxFilterEngagement > 1.0e-3f) {
         const float engGate = clampf(maxFilterEngagement * 50.0f, 0.0f, 1.0f);
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Fx)] =
             0.15f + engGate * (0.06f + 0.16f * smooth.fxSync01);
@@ -186,7 +186,7 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     // 100% while SEL guidance page is open, live flare during keyboard punch-ins, 15% at rest
     if (ctx.hud.selPageOpen) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Sel)] = 1.0f;
-    } else if (ctx.keyPunchEnergy01 > 1.0e-3f) {
+    } else if (ctx.state.global.masterRun && ctx.keyPunchEnergy01 > 1.0e-3f) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Sel)] =
             clampf(0.15f + 0.75f * ctx.keyPunchEnergy01, 0.15f, 0.90f);
     } else {
@@ -200,7 +200,7 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::Edit)] = editActive ? 1.0f : 0.15f;
 
     float lfoWave01 = 0.0f;
-    if (maxLfoDepth > 1.0e-4f) {
+    if (ctx.state.global.masterRun && maxLfoDepth > 1.0e-4f) {
         const uint8_t slotFocus = static_cast<uint8_t>(ctx.hud.lfoVoiceFocus & 7u);
         const size_t focV = lfoFocusVoice(slotFocus);
         const size_t focSub = lfoFocusSub(slotFocus);
@@ -215,7 +215,7 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     smooth.lfoSync01 = lfoWave01;
     if (ctx.hud.lfoPageOpen) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] = 1.0f;
-    } else if (maxLfoDepth > 1.0e-4f) {
+    } else if (ctx.state.global.masterRun && maxLfoDepth > 1.0e-4f) {
         const float depthGate = clampf(maxLfoDepth * 20.0f, 0.0f, 1.0f);
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Lfo)] =
             0.15f + depthGate * (0.06f + 0.16f * smooth.lfoSync01);

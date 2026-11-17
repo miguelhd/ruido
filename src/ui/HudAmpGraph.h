@@ -85,6 +85,7 @@ class HudAmpGraph {
     float phase_ = 0.0f;
     float widthPhase_ = 0.0f;
     float driftPhase_ = 0.0f;
+    bool masterRun_ = true;
     bool primed_ = false;
 };
 

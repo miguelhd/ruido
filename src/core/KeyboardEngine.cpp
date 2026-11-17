@@ -624,7 +624,7 @@ void KeyboardEngine::stepAndComputeKeyLeds(float dtSec, float animPhase,
         uint8_t soloHeldMask = 0u;
         buildEffectiveInput(effBlackHeld, effWhiteHeld, effBlackPress, effWhitePress, effBlackSeq,
                             effWhiteSeq, effBlackMask, effWhiteMask, muteHeldMask, soloHeldMask);
-        if (effBlackMask != 0u || effWhiteMask != 0u) {
+        if (state.global.masterRun && (effBlackMask | effWhiteMask) != 0u) {
             const KeyboardInputView view{effBlackHeld, effWhiteHeld, effBlackPress, effWhitePress,
                                          effBlackSeq,  effWhiteSeq,  effBlackMask,  effWhiteMask,
                                          muteHeldMask, soloHeldMask, latch_,        config_};

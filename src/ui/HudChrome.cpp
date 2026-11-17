@@ -261,13 +261,13 @@ void prepareHudChrome(PreparedHudChrome& out, const EngineControlState& control,
                 const float liveDepthA = computeLiveLfoADepth(vp, lfoBRaw);
                 col.lfoAOn = doesLfoTargetKnobBank(vp.lfoTarget, hud.knobBank) &&
                              ((vp.lfoDepth > 0.002f) || (liveDepthA > 0.002f));
-                if (col.lfoAOn) {
+                if (col.lfoAOn && control.global.masterRun) {
                     const float waveA01 = 0.5f * (clampf(lfoARaw, -1.0f, 1.0f) + 1.0f);
                     col.lfoALevel01 = waveA01 * (0.35f + 0.65f * clampf(liveDepthA, 0.0f, 1.0f));
                 }
                 col.lfoBOn =
                     doesLfoTargetKnobBank(vp.lfoBTarget, hud.knobBank) && (vp.lfoBDepth > 0.002f);
-                if (col.lfoBOn) {
+                if (col.lfoBOn && control.global.masterRun) {
                     const float waveB01 = 0.5f * (clampf(lfoBRaw, -1.0f, 1.0f) + 1.0f);
                     col.lfoBLevel01 = waveB01 * (0.35f + 0.65f * clampf(vp.lfoBDepth, 0.0f, 1.0f));
                 }

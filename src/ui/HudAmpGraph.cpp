@@ -20,6 +20,7 @@ void HudAmpGraph::reset() noexcept {
     phase_ = 0.0f;
     widthPhase_ = 0.0f;
     driftPhase_ = 0.0f;
+    masterRun_ = true;
     primed_ = false;
 }
 
@@ -27,6 +28,7 @@ void HudAmpGraph::clearImmediate() noexcept {
     phase_ = 0.0f;
     widthPhase_ = 0.0f;
     driftPhase_ = 0.0f;
+    masterRun_ = true;
     primed_ = false;
 }
 
@@ -65,6 +67,7 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
 
     const bool snap = !primed_ || (anyAct && wasInvisible);
     primed_ = true;
+    masterRun_ = control.global.masterRun;
 
     const float alphaFader = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.036f)));
     const float alphaChop = snap ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.004f)));
@@ -560,7 +563,7 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
             cv.drawHorizontalFilament(cx - 10.0f, cx + 10.0f, kYZero - spanPx, brkLum, 0.58f, true);
             cv.drawHorizontalFilament(cx - 10.0f, cx + 10.0f, kYZero + spanPx, brkLum, 0.58f, true);
         }
-        if (dAmt > 0.02f && dim < 0.85f) {
+        if (masterRun_ && dAmt > 0.02f && dim < 0.85f) {
             const float beaconInt = (0.82f + 0.18f * effFoc) * (1.0f - 0.60f * dim);
             cv.drawLfoPhaseBeacon(cx, beaconY, beaconInt, 0.30f + 0.70f * dAmt);
         } else {

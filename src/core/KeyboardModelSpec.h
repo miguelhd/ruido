@@ -168,14 +168,16 @@ inline void computeKeyboardModelRestLeds(KeyboardModel model, const EngineContro
         outWhite[kSceneWhiteKeyBase + v] = kLedZone3Rest;
     }
 
-    // Highlight any expressive pads currently latched hands-free by LATCH (`MONO`) at 100%
+    // Highlight any expressive pads currently held or latched hands-free by LATCH (`MONO`) at 100%
+    const uint16_t litBlack = static_cast<uint16_t>(hud.latchedBlackMask | hud.heldBlackMask);
+    const uint16_t litWhite = static_cast<uint16_t>(hud.latchedWhiteMask | hud.heldWhiteMask);
     for (size_t i = 0u; i < kNumTopMacroKeys; ++i) {
-        if (((hud.latchedBlackMask >> i) & 1u) != 0u) {
+        if (((litBlack >> i) & 1u) != 0u) {
             outBlack[i] = 1.0f;
         }
     }
     for (size_t i = 0u; i < kMuteWhiteKeyBase; ++i) {
-        if (((hud.latchedWhiteMask >> i) & 1u) != 0u) {
+        if (((litWhite >> i) & 1u) != 0u) {
             outWhite[i] = 1.0f;
         }
     }
@@ -191,6 +193,9 @@ inline void computeKeyboardModelRestLeds(KeyboardModel model, const EngineContro
 }
 
 inline float computeTapTempoBeatGlow(const EngineControlState& state, float rhythmPhase) noexcept {
+    if (!state.global.masterRun) {
+        return kLedAssignedRest;
+    }
     const float effBpm = state.global.clockBpm * computeTempoMultiplier(state.keyMod.rhythmTempo);
     const float beatScaled = wrapLfoPhase01(rhythmPhase) * 4.0f;
     const float beatFrac = beatScaled - static_cast<float>(static_cast<uint32_t>(beatScaled));

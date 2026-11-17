@@ -366,8 +366,10 @@ void prepareHudHeader(PreparedHudHeader& out, const EngineControlState& control,
         appendUInt(out.leftMain, p, sizeof(out.leftMain), static_cast<uint32_t>(lv + 1u));
         size_t sp = appendStr(out.leftSuffix, 0u, sizeof(out.leftSuffix), " OSC ");
         appendUInt(out.leftSuffix, sp, sizeof(out.leftSuffix), static_cast<uint32_t>(lv + 1u));
-        appendStr(out.rightText, 0u, sizeof(out.rightText),
-                  (lfoSlotDepth(lvp, sub) > 0.002f) ? "ACTIVE" : "BYPASSED");
+        const char* lfoRight = (lfoSlotDepth(lvp, sub) <= 0.002f) ? "BYPASSED"
+                               : control.global.masterRun         ? "ACTIVE"
+                                                                  : "STOPPED";
+        appendStr(out.rightText, 0u, sizeof(out.rightText), lfoRight);
         break;
     }
     case HudMode::GlobalConfig: {

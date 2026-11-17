@@ -190,7 +190,7 @@ void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate,
 
     lfoBeadBankIdx_[0] = static_cast<uint8_t>(lfoBankIndex(v, sub));
     lfoBeadBankIdx_[1] = static_cast<uint8_t>(lfoBankIndex(v, sibSub));
-    tgtBeadInt = 0.88f + 0.12f * smoothstep01(dMain * 3.0f);
+    tgtBeadInt = control.global.masterRun ? (0.88f + 0.12f * smoothstep01(dMain * 3.0f)) : 0.0f;
     tgtSibWeight = (lfoSlotDepth(control.voices[v], sibSub) > 0.002f) ? 0.34f : 0.0f;
 
     lfoSiblingWeight_ = snapImmediate
@@ -233,9 +233,12 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
                     : (effectiveHud.fxVoiceFocus & 3u);
             const VoiceParams& vp = control.voices[v];
             const float pluckEnv =
-                evalVoicePluckPreviewEnv01(control.keyMod.rhythmPluck, control.keyMod.rhythmMode[v],
-                                           control.keyMod.rhythmParam[v], v, rhythmPhase01,
-                                           ((stutterGateMask >> v) & 1u) != 0u);
+                control.global.masterRun
+                    ? evalVoicePluckPreviewEnv01(control.keyMod.rhythmPluck,
+                                                 control.keyMod.rhythmMode[v],
+                                                 control.keyMod.rhythmParam[v], v, rhythmPhase01,
+                                                 ((stutterGateMask >> v) & 1u) != 0u)
+                    : 0.0f;
             const ModulatedFilterParams mod = computeLiveVoiceFilter(
                 vp, control.voicePressure[v], pitchMode, lfoOutput[lfoBankIndex(v, 0u)],
                 lfoOutput[lfoBankIndex(v, 1u)],
@@ -245,10 +248,13 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
         } else {
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 const VoiceParams& vp = control.voices[i];
-                const float pluckEnv = evalVoicePluckPreviewEnv01(
-                    control.keyMod.rhythmPluck, control.keyMod.rhythmMode[i],
-                    control.keyMod.rhythmParam[i], static_cast<uint8_t>(i), rhythmPhase01,
-                    ((stutterGateMask >> i) & 1u) != 0u);
+                const float pluckEnv =
+                    control.global.masterRun
+                        ? evalVoicePluckPreviewEnv01(
+                              control.keyMod.rhythmPluck, control.keyMod.rhythmMode[i],
+                              control.keyMod.rhythmParam[i], static_cast<uint8_t>(i), rhythmPhase01,
+                              ((stutterGateMask >> i) & 1u) != 0u)
+                        : 0.0f;
                 mods[i] = computeLiveVoiceFilter(
                     vp, control.voicePressure[i], pitchMode, lfoOutput[lfoBankIndex(i, 0u)],
                     lfoOutput[lfoBankIndex(i, 1u)],
@@ -440,7 +446,7 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
         outY = y0Px + frac * (y1Px - y0Px);
     };
 
-    if (lfoSiblingWeight_ > 0.005f) {
+    if (control.global.masterRun && lfoSiblingWeight_ > 0.005f) {
         float sibX = 0.0f;
         float sibY = 0.0f;
         evalCurveBeadPos(1u, lfoPhase[lfoBeadBankIdx_[1] & 7u], sibX, sibY);

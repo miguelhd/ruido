@@ -282,9 +282,11 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
             coProcYield();
         }
 
-        thermalPhase_ += clampf(dtSec, 0.0f, 0.10f) * 0.065f;
-        while (thermalPhase_ >= 1.0f) {
-            thermalPhase_ -= 1.0f;
+        if (control.global.masterRun) {
+            thermalPhase_ += clampf(dtSec, 0.0f, 0.10f) * 0.065f;
+            while (thermalPhase_ >= 1.0f) {
+                thermalPhase_ -= 1.0f;
+            }
         }
         const float slowBreathSamples =
             0.52f *
