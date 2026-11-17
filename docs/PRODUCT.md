@@ -8,7 +8,7 @@
 - **Primary Studio Role:** A pristine-to-feral, harmonically rich, zero-aliasing stereo sound source designed specifically to feed **external guitar/synth effects pedals** (fuzz, wavefolders, BBD delays, reverbs, granular) and **Eurorack modular rigs**.
 
 ### Core Design Values (In Priority Order)
-1. **Great Sound & Unclamped Extremes:** Spend every spare CPU cycle on analog-faithful oscillator physics, `4x` oversampling, nonlinear Zero-Delay Feedback filtering, and clickless slewing—imposing safety limits strictly for numerical/hardware protection (anti-aliasing, zero `NaN`/DC runaway, DAC rail safety), never to domesticate musical range.
+1. **Clean Sound & Unclamped Extremes:** Spend every spare CPU cycle on analog-faithful oscillator physics, `4x` oversampling, nonlinear Zero-Delay Feedback filtering, and clickless slewing—imposing safety limits strictly for numerical/hardware protection (anti-aliasing, zero `NaN`/DC runaway, DAC rail safety), never to domesticate musical range.
 2. **Immediate, Ergonomic UX:** Pressure sensitive keys acting as momentary performance modifiers, a stateless non-modal keyboard model selector, and judicious single-level pages.
 3. **Useful Waveform Visuals:** An always-on oscilloscope that serves as an actual acoustic tuning and gain-staging instrument, with minimal controls gently fading in over the wave only while touched or viewing a focused page.
 
