@@ -2,14 +2,14 @@
 
 ## 1. Vision & Musical Identity
 
-**Ruido** transforms the pocket **M-VAVE FM-1** hardware into a dedicated, boutique **4-oscillator CMOS Schmitt-trigger stereo drone instrument**.
+**Ruido** transforms the pocket **M-VAVE FM-1** hardware into a dedicated, **4-oscillator CMOS Schmitt-trigger stereo drone instrument**.
 
 - **Primary Acoustic Reference:** Classic DIY analog Schmitt-trigger relaxation oscillator synths (`CD40106` / `74HC14` style)—organic capacitor tilt, micro-thermal drift, shared power-rail phase pulling, and starved-rail hard-sync tearing—paired with feral **Korg MS-20 `Rev 2 -> Korg35` dual `HPF -> LPF` silicon-limited resonant filters** and **ESP-style asymmetric pre-filter transistor overdrive**.
-- **Primary Studio Role:** A pristine-to-feral, harmonically rich, zero-aliasing stereo sound source with **zero artificial musical clamps**, designed specifically to feed **external guitar/synth effects pedals** (fuzz, wavefolders, BBD delays, reverbs, granular) and **Eurorack modular rigs**.
+- **Primary Studio Role:** A pristine-to-feral, harmonically rich, zero-aliasing stereo sound source designed specifically to feed **external guitar/synth effects pedals** (fuzz, wavefolders, BBD delays, reverbs, granular) and **Eurorack modular rigs**.
 
 ### Core Design Values (In Priority Order)
 1. **Great Sound & Unclamped Extremes:** Spend every spare CPU cycle on analog-faithful oscillator physics, `4x` oversampling, nonlinear Zero-Delay Feedback filtering, and clickless slewing—imposing safety limits strictly for numerical/hardware protection (anti-aliasing, zero `NaN`/DC runaway, DAC rail safety), never to domesticate musical range.
-2. **Immediate, Ergonomic UX with Judicious Pages:** Default idle state is always live waveform + `KNOB1-4 = Osc 1-4 Frequency`, with momentary encoder rate holds on the left (`OCT-/OCT+`), all 27 silicone keys acting as non-destructive momentary performance punch-ins so forearms never cross over the display, a stateless non-modal keyboard model selector on `SEL` + `SELECT`, and judicious single-level pages on the right-side `2x6` button grid (`FX` MS-20 Filters, 4-step `HOME` `FREQUENCY -> DUTY -> DRIFT -> Clean Scope`, 2-mode `EDIT` `LEVEL <-> PAN`, `LFO` modulation, and `GLO` `GLOBAL CONFIG`, always one tap from `HOME`).
+2. **Immediate, Ergonomic UX:** Pressure sensitive keys acting as momentary performance modifiers, a stateless non-modal keyboard model selector, and judicious single-level pages.
 3. **Useful Waveform Visuals:** An always-on oscilloscope that serves as an actual acoustic tuning and gain-staging instrument, with minimal controls gently fading in over the wave only while touched or viewing a focused page.
 
 ---
