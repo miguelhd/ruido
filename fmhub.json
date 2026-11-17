@@ -1,0 +1,7 @@
+{
+  "what": "4-oscillator drone synthesizer with coupled Schmitt-trigger oscillators, per-voice dual Sallen-Key resonant HPF-to-LPF filters, 8 audio-rate LFOs, circular scene morphing, and 3 pressure-sensitive keyboards (Live Mixer, Circuit Lab, Rhythm Lab) with a live CRT oscilloscope.",
+  "author": "Miguel Hernández Domenech",
+  "kinds": ["synth"],
+  "image": "docs/assets/screens/240x240/01-idle-caustic-scope.png",
+  "color": "#E6EDF3"
+}

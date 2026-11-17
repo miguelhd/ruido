@@ -32,7 +32,7 @@ POOL_MAX_BYTES = 0x50000
 LOADER_LOAD = 0x01C0A800
 LOADER_NAME = b"usb_hid_ota.bin"
 OTA_MAX_BYTES = 0x4F00  # 0xE0000..0xE4EFF below OTA_RES @ 0xE4F00
-PRODUCT_DEV = "FM-1_960"  # Dedicated Ruido package identity (`FM-1_96N`)
+PRODUCT_DEV = "FM-1_312"  # Dedicated Ruido package identity (`FM-1_312`)
 MAX_FWSC_BYTES = 600 * 1024
 
 SDK_SHA256 = {

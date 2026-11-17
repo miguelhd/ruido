@@ -44,7 +44,7 @@ inline constexpr std::array<const char*, kNumPressureTouchLevels> kPressureTouch
     "VERY HIGH", "HIGH", "MEDIUM", "LOW", "VERY LOW",
 };
 
-// Canonical Ruido firmware release version & FM-1 OTA package identity (`FM-1_96N`).
+// Canonical Ruido firmware release version & FM-1 OTA package identity (`FM-1_312`).
 inline constexpr char kRuidoVersionStr[] = RUIDO_VERSION_STR;
 inline constexpr char kRuidoPackageIdStr[] = RUIDO_PACKAGE_ID_STR;
 

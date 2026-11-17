@@ -40,8 +40,8 @@ constexpr uint8_t packLfoTargets(LfoTarget a, LfoTarget b) noexcept {
 
 inline constexpr std::array<FactorySceneSpec, kNumSnapshots> kFactoryScenes = {{
     // SCENE 1 (First Load): "Luminous Horizon" — Fast, liquid 1:2:3:5 Cmaj overtone cinema
-    // (C2 65.41 · C3 131.06 · G3 196.52 · E4 327.36 Hz). Smooth 0.52..1.92 Hz Sine/Triangle LFOs
-    // sweep warm MS-20 Rev2 resonant LPFs, CS-80 PWM, stereo orbit, and shimmer swells.
+    // (C2 65.41 · C3 131.06 · G3 196.52 · E4 327.36 Hz). Smooth 0.38..1.88 Hz Sine/Triangle LFOs
+    // sweep warm dual Sallen-Key resonant LPFs, deep PWM, stereo orbit, and shimmer swells.
     {20u,
      {{
          {65.41f, 2u, 1060u, 780u, 380u, 40u, 10u, 0u, 46u, 68u, -20, 0u, 32u, 0u, 20u,
@@ -54,7 +54,7 @@ inline constexpr std::array<FactorySceneSpec, kNumSnapshots> kFactoryScenes = {{
           packLfoTargets(LfoTarget::PulseWidth, LfoTarget::Amplitude), 0u},
      }}},
 
-    // SCENE 2 (1/3 LIVE MIXER Showcase): "Velvet Poly-Brass" — Warm Fmaj9 CS-80 pad
+    // SCENE 2 (1/3 LIVE MIXER Showcase): "Velvet Poly-Brass" — Warm Fmaj9 analog pad
     // (F2 87.31 · C3 131.35 · G3 196.60 · A3 220.65 Hz). Tucked LPFs bloom under FILTER 1-4,
     // mid-register roots roar under SUB OCTAVE + DRIVE, and 44-56% duties pinch sharply on DUTY.
     {24u,
@@ -84,7 +84,7 @@ inline constexpr std::array<FactorySceneSpec, kNumSnapshots> kFactoryScenes = {{
           packLfoTargets(LfoTarget::Pitch, LfoTarget::PulseWidth), 0u},
      }}},
 
-    // SCENE 4 (3/3 RHYTHM LAB Showcase): "Analog Drum + 303 Acid Kit" (Steady levels)
+    // SCENE 4 (3/3 RHYTHM LAB Showcase): "Analog Drum + Resonant Acid Kit" (Steady levels)
     // OSC 1 = 49 Hz G1 Sub Kick (115 Hz LPF) | OSC 2 = 196 Hz Electro Snare (185 Hz HPF + FM
     // rattle)
     // OSC 3 = 2350 Hz Metallic Hi-Hat (4.6 kHz HPF + cross-FM) | OSC 4 = 98 Hz G2 Squelchy Acid

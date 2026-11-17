@@ -1,6 +1,6 @@
 # Licensing & Third-Party Notices
 
-**Ruido** (`v0.1.0`, FM-1 package identity `FM-1_960`)
+**Ruido** (`v0.7.0`, FM-1 package identity `FM-1_312`)
 Copyright (C) 2026 Miguel Hernández Domenech (<https://github.com/miguelhd/ruido>)
 
 Ruido firmware images built for the M-VAVE FM-1 (`build/fm1/ruido.fwsc`) link against the open-source FM-1 platform layer (`GPL-3.0-only`) and are distributed under the **GNU General Public License, version 3 only (`GPL-3.0-only`)**. See [`LICENSE`](LICENSE) for the full license text.

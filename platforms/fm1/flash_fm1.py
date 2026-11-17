@@ -26,7 +26,7 @@ FWSC_PATH = OUT_DIR / "ruido.fwsc"
 APP_BIN_PATH = OUT_DIR / "ruido.bin"
 LDR_BIN_PATH = OUT_DIR / "loader" / "loader.bin"
 DOCKER_IMAGE = os.environ.get("RUIDO_FM1_DOCKER_IMAGE", "ruido-fm1-toolchain:latest")
-EXPECTED_PRODUCT = "FM-1_960"
+EXPECTED_PRODUCT = "FM-1_312"
 MAX_FWSC_BYTES = 600 * 1024
 
 REQUIRED_JEDEC_IDS = (
