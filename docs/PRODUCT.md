@@ -1,244 +1,180 @@
-# Ruido — Product & UX Specification
+# Ruido: Product & UX Specification
 
-## 1. Vision & Musical Identity
+## 1. Overview
 
-**Ruido** transforms the pocket **M-VAVE FM-1** hardware into a dedicated, **4-oscillator CMOS Schmitt-trigger stereo drone instrument**.
+**Ruido** is a 4-oscillator drone and noise synthesizer firmware for the **M-VAVE FM-1** with coupled voices, dual resonant filters, scene morphing, and pressure-sensitive performance effects. It is engineered as a dry stereo sound source for external pedals and modular setups.
 
-- **Primary Acoustic Reference:** Classic DIY analog Schmitt-trigger relaxation oscillator synths (`CD40106` / `74HC14` style)—organic capacitor tilt, micro-thermal drift, shared power-rail phase pulling, and starved-rail hard-sync tearing—paired with feral **Korg MS-20 `Rev 2 -> Korg35` dual `HPF -> LPF` silicon-limited resonant filters** and **ESP-style asymmetric pre-filter transistor overdrive**.
-- **Primary Studio Role:** A pristine-to-feral, harmonically rich, zero-aliasing stereo sound source designed specifically to feed **external guitar/synth effects pedals** (fuzz, wavefolders, BBD delays, reverbs, granular) and **Eurorack modular rigs**.
+- **Signal Path:** Four free-running Schmitt-trigger oscillators share power-rail coupling and thermal pitch drift. Each voice feeds a pre-filter overdrive stage and its own dual Sallen-Key resonant filter (`12 dB/oct HPF -> 12 dB/oct LPF`) at `4x` oversampling (`176.47 kHz` internal rate) into a stereo summing bus.
+- **Audio Output:** Dry stereo output for external effects pedals and modular systems over the 3.5 mm TRS analog jack, alongside class-compliant `44.1 / 48 kHz` USB-C digital stereo audio.
 
-### Core Design Values (In Priority Order)
-1. **Clean Sound & Unclamped Extremes:** Spend every spare CPU cycle on analog-faithful oscillator physics, `4x` oversampling, nonlinear Zero-Delay Feedback filtering, and clickless slewing—imposing safety limits strictly for numerical/hardware protection (anti-aliasing, zero `NaN`/DC runaway, DAC rail safety), never to domesticate musical range.
-2. **Immediate, Ergonomic UX:** Pressure sensitive keys acting as momentary performance modifiers, a stateless non-modal keyboard model selector, and judicious single-level pages.
-3. **Useful Waveform Visuals:** An always-on oscilloscope that serves as an actual acoustic tuning and gain-staging instrument, with minimal controls gently fading in over the wave only while touched or viewing a focused page.
+### Core Design Values
+1. **Sound Quality First:** CPU headroom goes to `4x` oversampling, anti-aliasing, nonlinear zero-delay feedback filters, and smooth parameter transitions. Safety limits protect against numerical errors and hardware clipping and leave the musical range open.
+2. **Immediate, Ergonomic UX:** Flat, single-level pages with a direct return to the main scope. Performance modifiers are momentary and reset on release, while active modes stay visible on the LEDs and header. Controls respond linearly and sit around the display for clear two-handed play. Off-page changes appear in the top bar while the current view stays open.
+3. **Acoustic Visuals:** The `240x240` monochrome display and all 42 hardware LEDs show live audio and circuit state. Parameter overlays stay minimal and fade back to the waveform at rest.
 
 ---
 
-## 2. Voice & Signal Architecture (User-Facing)
+## 2. Voice & Signal Architecture
 
-Ruido consists of **4 identical mono voices** (`Osc 1..4`) mixed in stereo through a subtle nonlinear master bus:
+Ruido runs **4 identical mono voices** (`Osc 1-4`) mixed in stereo through a nonlinear master bus:
 
 ```text
-[Schmitt Pulse/Square Osc 1..4 (DUTY + 1/f DRIFT)] ──> [Pre-Filter Drive 1.0x..4.5x] ──> [MS-20 Dual HPF -> LPF 1..4] ──> (VCA + Gate + Pan) ──> [Master Sag] ──> L/R Out
-                       ▲                                                                                                                             │
-                       └────────────────────────── Shared Power-Rail Coupling & Starved-Rail Sync (`ALGORITHM`: 0-100%) ─────────────────────────────┘
+[Schmitt Pulse Osc 1..4 (Duty + Drift)] ──> [Pre-Filter Drive] ──> [Dual Sallen-Key HPF -> LPF 1..4] ──> [VCA + Gate + Pan] ──> [Master Bus] ──> L/R Out
+                   ▲                                                                                                                   │
+                   └──────────────────────────── Shared Power-Rail Coupling & Sync (ALGORITHM: 0-100%) ────────────────────────────────┘
 ```
 
-### Per-Oscillator Controls (`Osc 1..4`)
-- **Frequency:** Unbroken continuous stepless sweep from **Sub-Cycle Pulses to Ultrasonic Edge (`0.05 Hz - 20,000 Hz`)** (`1.5 Hz` RC coupling corner preserving `-0.04 dB` seismic `10–30 Hz` sub-bass weight), using **strictly linear 1:1 X4 quadrature scaling (`96 steps/turn`, zero velocity acceleration)** + **`C^1` critically-damped log-octave smoothing**:
-  - *`FINE` (`Hold OCT-`):* Surgical `~0.66 cents/step` (`~63 cents/turn`) precision for locking slow phase beating and harmonic intervals.
-  - *`STANDARD` (Released Default):* Predictable linear `0.0387 oct/step` (`~3.7 oct/turn`) sweep regardless of hand speed.
-  - *`COARSE` (`Hold OCT+`):* Rapid end-to-end `0.05 Hz - 20,000 Hz` (`18.6`-octave) sweep in **`~2.0` turns** (`0.096 oct/step`).
-- **Pulse Duty (`HOME -> DUTY`, `5-95%`):** Continuous piecewise-slope PolyBLEP CMOS Schmitt comparator duty-cycle control (`50%` square default, sweeping from `5%` razor-thin nasal pulse through `50%` hollow square to `95%` wide pulse with exact fundamental pitch invariance and `< -109 dBc` alias suppression).
-- **Thermal Pitch Drift (`HOME -> DRIFT`, `0-100%`):** Per-oscillator `1/f` analog RC thermal pitch instability (`10%` / `~±2.2 cents` organic default; `0%` = **`LOCKED`** `0.00 cents` crystal phase-lock up to `100%` = `~±120 cents` tape-warble / unstable transistor swarm).
-- **Dual MS-20 `Rev 2 -> Korg35` Filter (`HPF -> LPF` in series across `2.0 Hz - 28,000 Hz`, Zero Smart-Park Muting):**
-  - **HP Cutoff (`KNOB1`):** `2.0 Hz` (`0%` RES parked flat/transparent) up to `28,000 Hz`, engaging warm `LM13600` OTA saturation across all 4 filter poles even at `0%` resonance.
-  - **HP Resonance (`KNOB2`):** Unmuted full-range High-Pass Peak (`0-100%`)—`0-60%` models creamy **`Rev 2`** (`LM13600` OTA + `1S1588`, `k <= 3.60`), while `60-100%` morphs continuously into feral early **`Korg35`** (`k` up to `6.80`, tighter diode knees, asymmetric Stage-2 BJT/OTA rails), self-oscillating all the way down to `2 Hz` infrasonic throb with exact `0 Hz` capacitive DC rejection.
-  - **LP Cutoff (`KNOB3`):** `2.0 Hz` up to `28,000 Hz` (`0%` RES parked flat/wide-open), rounding square edges with creamy `LM13600` OTA 2nd/3rd harmonic warmth and extending self-oscillation past `20 kHz`.
-  - **LP Resonance (`KNOB4`):** Unmuted full-range Low-Pass Peak (`0-100%`, `Rev 2` `0-60%` -> `Korg35` `60-100%` up to `k = 6.80`), unpadding `HPF -> LPF` inter-stage gain above `60%` so dual-resonant formants slam `IC6` into raw intermodulation screaming without bass-quenching.
-- **Channel Level & MS-20 Pre-Filter Overdrive (`EDIT` Page 1 -> `LEVEL`, `0-100%`, Boot Default on `EDIT`):** Two-zone analog console/ESP gain law: `0-70%` = clean post-filter VCA attenuation (`1.0x` pre-drive; `65%` default); **`70-100%` = `1.0x -> 4.5x` asymmetric pre-filter MS-20 transistor overdrive** slamming `HPF -> LPF` into heavy 2nd/3rd harmonic saturation + `+4.1 dB` post-filter trim.
-- **Stereo Pan (`EDIT` Page 2 -> `PAN`):** Equal-power (`sin`/`cos`) stereo placement from hard Left (`L100`) through Center (`C`) to hard Right (`R100`), or collapsed to Mono (`L == R`) when `MONO` output routing is active.
+### Per-Oscillator Parameters (`Osc 1-4`)
+- **Frequency (`0.05 Hz - 20,000 Hz`):** Continuous range from sub-audio pulses (`20 s` cycles) to `20 kHz` with linear, non-accelerated encoder scaling:
+  - *`FINE` (`Hold OCT-`):* `~0.66 cents/step` (`~63 cents/turn`) for fine pitch and interval tuning.
+  - *`STANDARD` (Default):* `~3.7 octaves/turn`.
+  - *`COARSE` (`Hold OCT+`):* Full `0.05 Hz - 20 kHz` range in `~2` turns.
+- **Pulse Duty (`HOME -> DUTY`, `5-95%`):** Continuous pulse-width control (`50%` square default) with constant fundamental pitch across the range.
+- **Thermal Pitch Drift (`HOME -> DRIFT`, `0-100%`):** Per-oscillator `1/f` pitch drift (`0%` = `LOCKED`, `10%` default, `100%` = `~±120 cents`).
+- **Dual Sallen-Key Filter (`FX`, `2.0 Hz - 28,000 Hz`):** Series `12 dB/oct` High-Pass into `12 dB/oct` Low-Pass per voice:
+  - **HP Cutoff (`KNOB 1`) & LP Cutoff (`KNOB 3`):** `2.0 Hz` to `28,000 Hz` (`2.0 Hz` HP and `28 kHz` LP sit flat at `0%` resonance).
+  - **HP Resonance (`KNOB 2`) & LP Resonance (`KNOB 4`):** `0-100%`. `0-60%` applies diode-limited resonance, and `60-100%` drives feedback clipping and self-oscillation across the frequency range.
+- **Level & Pre-Filter Overdrive (`EDIT -> LEVEL`, `0-100%`):** Two-range gain curve (`65%` default). `0-70%` sets clean post-filter level (`0%` mutes the voice unless a `LEVEL` LFO is active). `70-100%` applies `1.0x` to `4.5x` asymmetric pre-filter drive into the filter input.
+- **Stereo Pan (`EDIT -> PAN`):** Equal-power stereo pan from `L100` through `C` to `R100` (summed to `L == R` when `Output Routing` is `MONO`).
 
 ---
 
-## 3. Physical Front-Panel Map & Two-Hand Ergonomics
+## 3. Front-Panel Controls & Layout
 
 Reference faceplate photo: [`docs/assets/fm1-front-panel.png`](assets/fm1-front-panel.png).
 
 ```text
-       LEFT HAND ZONE                  CENTER                 RIGHT HAND ZONE
- (Holds & Global Circuit)         (100% Unobstructed)      (Turns Knobs & Single-Taps)
-┌───────────────────────────┐    ┌──────────────────┐    ┌────────────────────────┐
-│ MASTER          SELECT    │    │                  │    │ KNOB1 KNOB2 KNOB3 KNOB4│
-│ PRESETS         ALGORITHM │    │   240x240 TFT    │    │ [FX] [SEL][ENV][LFO]...│
-│ [OCT-] [OCT+]             │    │      SCREEN      │    │ [HOME][SAVE]...[PLAY]  │
-│                           │    │                  │    │  (Single-tap only—     │
-│ [OP1][OP2][OP3] [OP4][OP5]│    │   [OP6][PIT][GLO]│    │   NEVER left-hand hold)│
-│ [White Keys 1-8]          │    └──────────────────┘    │ [MONO][POLY] [Keys 9-16│
-└───────────────────────────┘                            └────────────────────────┘
+          LEFT ZONE                       CENTER                      RIGHT ZONE
+┌───────────────────────────┐      ┌──────────────────┐      ┌──────────────────────────┐
+│ MASTER          SELECT    │      │                  │      │ KNOB1  KNOB2  KNOB3 KNOB4│
+│ PRESETS         ALGORITHM │      │   240x240 IPS    │      │ [FX] [SEL][ENV][LFO][EDIT│
+│ [OCT-] [OCT+]             │      │     DISPLAY      │      │ [HOME][SAVE][ARP]...[PLAY│
+├───────────────────────────┴──────┴──────────────────┴──────┼──────────────────────────┤
+│ Left 20 Analog Pressure Keys (OP1-GLO + White Keys 1-12)   │ Right 7 Utility Switches │
+│ Swappable: 1/3 LIVE MIXER · 2/3 CIRCUIT LAB · 3/3 RHYTHM   │ LATCH · TAP · SHIFT      │
+│                                                            │ MUTE / SOLO 1-4          │
+└────────────────────────────────────────────────────────────┴──────────────────────────┘
 ```
 
-### Ergonomic Rules
-1. **Unobstructed Screen & Two-Hand Split:** Left-hand encoder rate modifiers (`OCT-` / `OCT+`) live top-left, the entire 27-key silicone bed below operates as non-destructive momentary performance punch-ins, the right hand stays top-right on `KNOB1-4` and the `2x6` button grid, and the center `240x240` screen is never occluded by a crossed forearm.
-2. **Right-Side `2x6` Button Grid = Non-Momentary Toggles, Stateless `SEL` Screen & Judicious Pages:** None of the `2x6` buttons directly below `KNOB1-4` are momentary holds; they act as latching toggles (`PLAY/STOP`, `SAVE`), a 4-step Oscillator Core & clean-scope button (`HOME` `FREQUENCY -> DUTY -> DRIFT -> Clean Scope`), a keyboard model guidance screen (`SEL`), or standardized pages (`FX` MS-20 Filters, 2-mode `EDIT` Console Mixer `LEVEL <-> PAN`, `LFO` modulation `LFO A1..B4`, and `GLO` `GLOBAL CONFIG`, leaving `ENV` reserved for future envelopes).
+### 3.1 Top-Right Encoders (`KNOB 1-4`)
+At idle, on `HOME (FREQUENCY)`, on `SEL`, on `GLOBAL CONFIG`, and during keybed play, `KNOB 1-4` control **`Osc 1-4 Frequency`**. Opening `HOME (DUTY / DRIFT)`, `FX`, `EDIT`, or `LFO` maps `KNOB 1-4` to that page's parameters while open.
 
-### 3.1 Top-Right Encoders: `KNOB1` – `KNOB4` (Idle & Performance Default)
+### 3.2 Top-Left Controls & Rate Modifiers
+- **`MASTER` (Pot):** Hardware master output volume.
+- **`ALGORITHM` (Encoder):**
+  - **Unshifted (Power-Rail Coupling, `0-100%`, `25%` default):** `0-45%` applies shared-rail phase pulling between voices, and `45-100%` adds rail sag, duty skew, and subharmonic hard sync. Turning it from `HOME` opens the `RAIL COUPLING` view for `2.2 s`; on other open pages it updates the top bar.
+  - **`SHIFT + ALGORITHM` (Master Tempo, `20-3,000 BPM`, `120 BPM` default):** Adjusts the logarithmic internal clock (`OCT-` for `0.1 BPM` steps, `OCT+` for fast turns; displays `BPM EXT` when locked to external MIDI Clock).
+  - **Inside `GLOBAL CONFIG`:** Steps the selected row's value (`1` step/detent) or enters sub-screens clockwise.
+- **`SELECT` (Encoder):** Stepped selector (`1` item/detent):
+  - **Idle Scope:** Adjusts horizontal timebase zoom (`4X`, `2X`, `AUTO`, `1/2X`, `1/4X`, `1/8X`).
+  - **`HOME` (latched):** Steps across `FREQUENCY`, `DUTY`, and `DRIFT`.
+  - **`FX`:** Selects `OSC 1-4`.
+  - **`LFO`:** Selects `LFO A1-B4` (`8` slots).
+  - **`EDIT (PAN)`:** Toggles `STEREO` and `MONO` output routing.
+  - **`SEL`:** Steps across `1/3 LIVE MIXER`, `2/3 CIRCUIT LAB`, and `3/3 RHYTHM LAB`.
+  - **`SAVE`:** Switches between `STORE SCENE` and `DELETE SCENE`.
+  - **`GLOBAL CONFIG`:** Moves the row highlight up and down.
+- **`PRESETS` (Encoder):** Continuous `360°` circular morph across `Scene 1-4` (`1 -> 2 -> 3 -> 4 -> 1`). Empty slots are skipped, and manual knob edits crossfade onto the loop without jumps (`OCT-` for fine morphs, `OCT+` for whole-scene steps).
+- **`OCT-` / `OCT+` (Momentary Rate Modifiers):** Hold `OCT-` for `FINE` resolution or `OCT+` for `COARSE` range on any continuous encoder. Releasing the button returns to `STANDARD` rate.
 
-*(Focused right-grid pages `HOME` `DUTY`/`DRIFT`, `FX`, `EDIT`, and `LFO` remap `KNOB1-4` while latched open; see §3.4. During idle scope viewing, `HOME` `FREQUENCY`, `SEL` keyboard model inspection, `GLOBAL CONFIG`, and 27-key performance play, `KNOB1-4` always remain bound directly to `Osc 1-4 Frequency`.)*
-
-| Surface State | `KNOB1` | `KNOB2` | `KNOB3` | `KNOB4` | Monochrome HUD Header + Unified Center View + Bottom 4-Knob Strip |
-| :--- | :---: | :---: | :---: | :---: | :--- |
-| **Idle / `HOME` / `SEL` / Keybed Play** | **Osc 1 Freq** | **Osc 2 Freq** | **Osc 3 Freq** | **Osc 4 Freq** | `FREQUENCY OSC 1..4` (`XX.XX Hz` exact counter) + pure undimmed live 4-voice waveform scope + 4 `Hz` filaments (shared per-oscillator `FX` + `LFO A/B` status dots shown across latched `HOME`, `EDIT -> LEVEL`, and stereo `EDIT -> PAN`) |
-
-### 3.2 Top-Left Knobs & `OCT-` / `OCT+` (Zero-Modifier Global Controls)
-- **`MASTER` (Analog Pot):** Hardware master output level (`MASTER LEVEL` + `%` bar on HUD, anchored with `> 0.2%` cumulative deadband so slow analog sweeps wake the HUD reliably without ADC chatter).
-- **`ALGORITHM` (Encoder):** Consistent left-hand circuit & tempo encoder across all 3 keyboard models:
-  - **Unshifted (Across All 3 Keyboards):** **Rail Coupling & Starved-Rail Chaos** (`0-45%` smooth `CD40106` shared-rail threshold pulling around the `25%` default <-> `45-100%` starved-CMOS voltage collapse: `[0.12x..4.5x]` phase pull, neighbor gate-load PWM duty warp, and band-limited PolyBLEP subharmonic hard-sync locking). Turning `ALGORITHM` from **any `HOME` screen** (`Clean Scope`, `FREQUENCY`, `DUTY`, or `DRIFT`) momentarily opens the full `RAIL COUPLING` circuit analyzer screen (`2.2 s`) before returning cleanly to that `HOME` view (while non-Home pages `FX`, `LFO`, `EDIT`, `SEL`, and `GLOBAL CONFIG` stay pinned with a Top-Bar toast).
-  - **`Hold SHIFT` (`11th` Key) + `ALGORITHM` (Across All 3 Keyboards):** **Logarithmic Master Tempo (`20–3,000 BPM`, `120 BPM` default)** — sweeps the internal master bar clock along a musical 3-gear logarithmic curve from slow `20 BPM` hypnotic pulse through audio-rate formant gating (`2.0` octaves/turn = `1` semitone/detent in `STANDARD` across `~3.6` one-handed turns, surgical `0.1 BPM` beat-matching while holding `OCT-` `FINE`, and `6.0` octaves/turn = `~1.2` turns full sweep while holding `OCT+` `COARSE`), highlighting `TEMPO` on the Full-Chassis `SHIFT` Map (`BPM EXT` when locked to incoming external `24 PPQN` MIDI Clock) and persisting your internal tempo in non-volatile device settings.
-  - **When `GLOBAL CONFIG` (right-grid `GLO`) is open:** Steps (`1` option/detent) the highlighted menu row's option value so both menu navigation (`SELECT`) and option editing (`ALGORITHM`) stay paired on the left-hand encoder column while `KNOB 1–4` remain `Osc 1–4 Frequency`.
-- **`SELECT` (Encoder):** Context-sensitive discrete left-hand mode/voice/row selector (`1` item per `4`-tick detent across all 3 gears):
-  - While the **`SEL` Keyboard Model Guidance Screen** is open: steps across **`1/3 LIVE MIXER` · `2/3 CIRCUIT LAB` · `3/3 RHYTHM LAB`**, updating the on-screen rounded-capsule FM-1 keybed map and sweeping a kinetic varibright LED wave across all 27 keys.
-  - When **`HOME` (Oscillator Core)** is latched open: steps strictly in signal-flow order across **`FREQUENCY` · `DUTY` · `DRIFT`**.
-  - When **`EDIT` (`PAN` Sub-Page)** is open: switches **`OUTPUT ROUTING`** between **`STEREO`** and **`MONO`** right on the `PAN` page while keeping the live soundstage curve on screen.
-  - When the **Per-Voice MS-20 Dual Filter Page** (`FX`) is open: steps strictly across **`OSC 1` · `OSC 2` · `OSC 3` · `OSC 4`**.
-  - When the **Dual Per-Oscillator LFO Page** (`LFO`) is open: steps strictly across all 8 modulation slots **`LFO A1` · `LFO B1` · `LFO A2` · `LFO B2` · `LFO A3` · `LFO B3` · `LFO A4` · `LFO B4`**.
-  - When **`GLOBAL CONFIG`** (right-grid `GLO`) is open: moves (`1` row/detent) the row cursor up/down the configuration list.
-  - When **`SAVE`** is open: toggles between **`SCENE 1/2`** (`STORE SCENE >`) and **`SCENE 2/2`** (`< DELETE SCENE`) in parallel with repeated `SAVE` presses before tapping `Scene Key 9–12`.
-  - **At Idle / Live Scope (`OSCILLOSCOPE`):** Steps the oscilloscope horizontal scale across **6 notched stops (`4X` · `2X` · `AUTO` *(boot default)* · `1/2X` · `1/4X` · `1/8X`)**, zooming smoothly in on narrow `5%` PWM pulses, Serge wavefolder creases, and `CD4013` S&H steps (`2X / 4X`) or pulling out (`1/4X / 1/8X`) to inspect sub-bass cycles, multi-voice beating envelopes, and `RHYTHM LAB` chops while keeping the bottom of the screen `100%` unobstructed.
-- **`PRESETS` (Encoder):** **Endless `360°` Circular Scene Performance Morph (`1 ── 2 ── 3 ── 4 ── 1`)** accessible across **all 3** keyboard models (`LIVE MIXER`, `CIRCUIT LAB`, and `RHYTHM LAB`, automatically skipping deleted `EMPTY` slots). Continuously morphs all 4 oscillators, MS-20 filters, dual LFOs, and rail coupling in log-octave space around an endless circular loop (`4 -> 1` CW and `1 -> 4` CCW with zero hard end-stops), hitting **`100%` pure Scene** cleanly at every node (`12` detents / `0.5` turn per scene span in `STANDARD`, `48` detents / `2` turns per span while holding `OCT-` `FINE`, and discrete `1`-detent circular scene steps while holding `OCT+` `COARSE`). Turning `PRESETS` after manual knob tweaks smoothly crossfades onto the circular loop over `6` detents without parameter jumps, displaying a compact number-only **Horizontal Spinning Scene Disk** (`SCENE 1..4` rotating smoothly with cylindrical foreshortening) alongside the **4-Dot Graphical Scene Strip** in the Top Bar, and—when turned from Clean Scope—momentarily showing **only the 4 Scene Keys (`1–4`)** with uniform full-height LED diffuser slits and 2-line `SHIFT` guidance (`HOLD SHIFT FOR SCENE KEYS` / `SHIFT = LIT TOP-RIGHT KEY`), while keeping open parameter graphs (`HOME`, `FX`, `LEVEL`, `PAN`, `LFO`) unobstructed so curves morph live and leaving unshifted physical `Keys 9–12` LEDs undisturbed on their active keyboard.
-- **`OCT-` / `OCT+` (Momentary Rate Modifiers — Top-Right Status Badge & `150 ms` Transition):** **Strictly momentary left-hand encoder rate modifiers** governing continuous endless rotary sweeps with **zero velocity acceleration** (100% deterministic 1:1 angle-to-parameter response at `96` X4 quadrature transitions per `360°` turn), freely chordable alongside any open right-grid page (discrete notched selectors like `SELECT` on `SEL`/`FX`/`EDIT`/`LFO`/`GLO`, `LFO TARGET`, and `GLOBAL CONFIG` rows remain `1` item per detent across all 3 gears):
-  - *Released (Idle Default = `STANDARD`):* Both `OCT-` and `OCT+` rest at `15%` dim glow; full continuous parameter sweeps take an exact linear **`2.5-2.8` turns**.
-  - *Hold `OCT-` -> **`FINE`** (`OCT-` LED `100%`):* Surgical fine-tuning while held (`0.66 cents/step` audio frequency, `3.0 cents/step` filter cutoff, `0.09%/step` linear controls).
-  - *Hold `OCT+` -> **`COARSE`** (`OCT+` LED `100%`):* Rapid performance sweep while held—covering the **entire `0-100%` / `0.05 Hz-20 kHz` / `2 Hz-28 kHz` sweep in `~1.3-2.0` turns**.
-  - *Anchored Left Title + Top-Right `FINE` / `COARSE` Transition:* Holding `OCT-` or `OCT+` **never moves or replaces the active page/tool title on the top-left** (`FREQUENCY` when held from idle). Instead, the **top-right status slot** smoothly crossfades over **`150 ms`** into **`FINE`** or **`COARSE`** (with zero underline or divider rules)—preserving live precision values alongside the badge (`FINE · 110.04 Hz` on `FREQUENCY`, `FINE · 25%` on `RAIL COUPLING`)—and smoothly dissolves back on release.
-  - *Release:* Immediately returns to `STANDARD` rate (`15%` rest glow); if a knob was turned during the hold, its remaining `1.5 s` readout toast completes before dissolving in `150 ms` (or fades out immediately in `150 ms` if `OCT-/+` was tapped alone).
-
-### 3.3 Right-Panel `2x6` Function Buttons (Latching Toggles & Focused Pages)
-- **`PLAY/STOP`:** **Audio Output** toggle (`ON` / `OFF`, clickless fade to silence and back for safe cable patching). Drives the hardware's dual-channel `PLAY/STOP` LEDs by action affordance: steady **Green** (`PLAY` LED) when quiet (`OFF`), steady **Red** (`STOP` LED) when sound is `ON`, crossfading smoothly between them.
-- **`HOME`:** **1-Tap Clean-Scope Escape & 4-Step Oscillator Core (`Clean Scope -> FREQUENCY -> DUTY -> DRIFT -> Clean Scope`)** — when any other page (`FX`, `SEL`, `EDIT`, `LFO`, `GLO`, armed `SAVE`), modifier, or transient toast is active, pressing `HOME` immediately dismisses it over **`150 ms`** to the pure edge-to-edge waveform. Its hardware LED stays at **`100%` across all Home states**—including **Clean Scope with zero UI** as well as `FREQUENCY`, `DUTY`, and `DRIFT`—dimming to **`15%`** only while another page (`FX`, `SEL`, `EDIT`, `LFO`, `GLOBAL CONFIG`, or armed `SAVE`) is open. From the clean scope, pressing `HOME` steps through all three core oscillator parameters (`SELECT` also steps `FREQUENCY <-> DUTY <-> DRIFT` in parallel): **`1st press` = `FREQUENCY`** (`KNOB 1–4 = Osc 1–4 Hz`, `100%` undimmed live scope + bottom `Hz` gauges + per-oscillator `FX` + `LFO A/B` status dots), **`2nd press` = `DUTY`** (`KNOB 1–4 = 5–95%` CMOS Schmitt pulse duty + 4-column pulse cells composited translucently over the dimmed live waveform), **`3rd press` = `DRIFT`** (`KNOB 1–4 = 0–100%` `1/f` thermal pitch wander + 4-column excursion brackets composited translucently over the dimmed live waveform), and **`4th press` = Clean Scope** (`150 ms` dissolve).
-- **`SAVE`:** **Self-Discoverable 2-Step Scene Manager (`STORE` -> `DELETE` -> Exit)** across any keyboard model (`0%` off when sitting on a pure Scene, **`12%–28%` slow breath** when your live drone has unsaved knob tweaks, and `25%–100%` pulsing brightly while open):
-  - **`1st press` (`SCENE 1/2` · `STORE SCENE >`):** Displays the `SEL`-matched mode carousel, open container-free 4-slot status columns (**`ACTIVE`**, **`STORED`**, **`EMPTY`**), the shared 27-key FM-1 diagram highlighting `Keys 9–12` above a `"SCENE"` bracket, and calm 2-line guidance (`TAP SCENE KEY TO STORE` / `TAP SAVE OR SELECT TO DELETE`). While `SAVE` or `DELETE` is open, **all 23 non-scene keys go `0%` dark** so the keyboard performs strictly the blinking target function—flashing **all 4** saveable scene keys (`25%–95%` at `2.5 Hz`) in sync with `SAVE`.
-  - **`2nd press` (`SCENE 2/2` · `< DELETE SCENE`, or turn `SELECT`):** Flashes **occupied** deletable scene keys and `SAVE` **twice as fast (`5.0 Hz`)** while keeping `EMPTY` slots and all other keys `0%` dark (tapping any `0%` dark key fires the non-disruptive unassigned CRT ripple + `120 ms` `15%` glint; tapping an occupied key clears it into a persistent `EMPTY` state without interrupting live audio).
-  - **`3rd press` (or `HOME`, or turning synthesis knobs `KNOB 1–4` / `ALGORITHM`):** Exits cleanly (`150 ms` fade-out) back to the live waveform.
-- **`FX`:** Opens and cycles the **Per-Voice MS-20 Dual Filter Page** (`1st tap` opens remembered voice, subsequent taps cycle **`OSC 1 -> OSC 2 -> OSC 3 -> OSC 4 -> OSC 1`**, `HOME` closes; see §3.4 below); LED glows at **`15%` rest** when all active voices' filters are parked flat (`HPF = 2.0 Hz`, `LPF = 28 kHz`, `0%` resonance), breathes subtly in the tertiary range (**`21%–37%`**) whenever any unmuted or active voice has filter cutoff or resonance engaged while closed, and lights to **`100%`** while the page is open.
-- **`SEL`:** Opens and cycles the **Keyboard Model Status & Guidance Screen** (`1st tap` opens active model, subsequent taps cycle **`1/3 LIVE MIXER -> 2/3 CIRCUIT LAB -> 3/3 RHYTHM LAB -> 1/3 LIVE MIXER`**, `HOME` closes; see §3.4 below) while keeping `KNOB 1–4` directly bound to `OSC 1–4` Frequency; LED glows steadily at **`15%` rest** and lights to **`100%`** while the `SEL` screen is open.
-- **`EDIT`:** Opens and cycles the **2-Mode Console Mixer (`LEVEL <-> PAN`)** (`1st tap` opens remembered sub-page, `LEVEL` on boot; subsequent taps toggle **`LEVEL <-> PAN`**, `HOME` closes; see §3.4 below); LED glows steadily at **`15%` rest** when closed and lights to **`100%`** while either `EDIT` sub-page is open.
-- **`LFO`:** Opens and cycles the **Dual Per-Oscillator LFO Page** (`1st tap` opens remembered slot, subsequent taps cycle **`LFO A1 -> LFO B1 -> LFO A2 -> LFO B2 -> LFO A3 -> LFO B3 -> LFO A4 -> LFO B4 -> LFO A1`**, `HOME` closes; see §3.4 below); LED glows at **`15%` rest** when all 8 LFOs (`LFO A1..B4`) are at `0%` depth, breathes subtly in the tertiary range (**`21%–37%`**) with active LFO modulation when closed, and lights to **`100%`** while the page is open.
-- **`GLO` (Right Grid under `KNOB 1–4`):** Opens/closes the scalable **`GLOBAL CONFIG`** menu (`15%` steady rest LED, `100%` while open; see §3.4 below).
-- **Unconnected Tactile Switches (`ENV`, `ARP`, `SEQ`, `REC`):** LEDs stay **`0%` completely unlit** at rest (`REC` is physically a single-color **Red** LED on the FM-1 PCB). Tapping any of the 4 switches **never** closes open pages, disarms `SAVE`, alters audio, or puts placeholder text on screen—instead kicking the `240x240` CRT scanline raster sideways (`±10–13 px` damped horizontal sync recoil + scanline shear over `~180 ms` with black-blanked edges, like tapping the side of a small CRT monitor) while bringing that switch's LED up to the `15%` steady glow of assigned buttons before fading back to `0%` dark in `120 ms`.
-
-### 3.4 Right-Grid Pages & Keyboard Model Guidance (`FX`, `SEL`, `EDIT`, `LFO`, `GLOBAL CONFIG`)
-
-#### Per-Voice MS-20 Dual Filter Page (`FX` — `ADR-029`, `ADR-053`)
-- **Enter / Cycle / Exit:** Tap **`FX`** (top-left switch of the `2x6` grid below `KNOB 1`) to open the latching MS-20 Dual Filter page on the remembered voice (`FILTER OSC 1..4` with `12 dB HP -> LP` right header); tapping **`FX`** again while open cycles continuously across **`OSC 1 -> OSC 2 -> OSC 3 -> OSC 4 -> OSC 1`**, and pressing **`HOME`** (or switching to another page) dissolves in `150 ms` (momentary 27-key punch-ins temporarily override and return seamlessly on release).
-- **`SELECT` Encoder (Left Hand):** Also steps (`1` item/detent, clamped `0..3` with zero windup) across **`OSC 1` · `OSC 2` · `OSC 3` · `OSC 4`**, remembering the last focused voice across page re-opens.
-- **`KNOB 1–4` (`HPF | HP RES | LPF | LP RES`):** Adjust High-Pass Cutoff (`2 Hz–28 kHz`), High-Pass Resonance (`0–100%`), Low-Pass Cutoff (`2 Hz–28 kHz`), and Low-Pass Resonance (`0–100%`) for the selected voice.
-- **Live Full-Screen MS-20 Passband Visualization:** Spans edge-to-edge across the display (`2 Hz–28 kHz`, anchored to the shared unipolar graph baseline) over a solid pitch-black backdrop, rendering the `0 dB` passband reference, dual `Korg35` resonant peaks, and real-time Filter LFO + Keyboard Formant modulation for the focused voice.
-
-#### Keyboard Model Explorer & Live Key Guidance (`SEL` + `SELECT` — `ADR-036`, `ADR-037`, `ADR-038`, `ADR-039`, `ADR-053`, `ADR-055`, `ADR-056`)
-- **Two-Bay Stadium Keybed, Top-Bar Readout, Full-Width Pressure Bar & Bottom Effect Descriptions (`SEL` Button):** Tapping **`SEL`** closes any other page and pins the **Keyboard Model Explorer** on the currently active keyboard model (`KEYBOARD 1/3..3/3`, `SEL` LED `100%`). All active keys share crisp, uniform rounded-capsule outlines inside **Two Separate Stadium Enclosures**: the **Left `20`-Pad Expressive Bay** (`OP1–GLO` + `Keys 1–12` in 3 separated 4-key banks, rendering **vertical diffuser lines** that fill upward with live finger pressure across `< LIVE MIXER >`, `< CIRCUIT LAB >`, `< RHYTHM LAB >`) and the **Right `7`-Switch Utility Bay** (`LATCH · TAP · SHIFT` + `MUTE 1–4`, rendering **centered optical dots** inside the capsules, with top-row **`LATCH`** callout on all 3 keyboards and **`TAP`** callout on `RHYTHM LAB`). Holding any active key while `SEL` is open keeps the diagram pinned on screen, displays the held key's **parameter name (`+ OSC 1..4`) and live value** in the **Top Bar**, and replaces the static bottom hint line with a **full-width horizontal pressure bar** (for analog pressure pads) directly above a concise **1-line effect description** explaining what that key does. Tapping **`SEL`** again cycles **`1/3 -> 2/3 -> 3/3 -> 1/3`** (sweeping a kinetic varibright LED wave across the chassis), and pressing **`HOME`** (or switching to another page) dissolves `SEL` in `150 ms`. After `5 s` idle, the illustration dims to `50%` so the live waveform shines through, waking smoothly on `SEL`, `SELECT`, `ALGORITHM`, or any active key hold, while **`KNOB 1–4` remain bound to `OSC 1–4` Frequency** (toasting only the top header for `1.5 s`).
-- **Swap Model (`SELECT` Encoder, `SHIFT + SELECT`, or `SHIFT + OP1–OP3`):** Turning the left-hand **`SELECT`** encoder while the `SEL` screen is open steps across the 3 keyboard models in parallel with `SEL` clicks. Holding **`SHIFT`** + turning **`SELECT`** or tapping **`SHIFT + OP1` / `OP2` / `OP3`** switches keyboard models directly inside the **`SHIFT` screen** (never leaving `SHIFT`) while firing the same `220 ms` kinetic LED wave across the physical and on-screen keybed.
-
-#### 2-Mode Console Mixer (`EDIT` — `ADR-028`, `ADR-030`, `ADR-032`, `ADR-033`, `ADR-036`, `ADR-053`)
-- **Oscillator Core Moved to `HOME` (`FREQUENCY -> DUTY -> DRIFT -> Clean Scope`):** Raw `CD40106` oscillator voice parameters live together on **`HOME`** (`5–95%` piecewise-slope PolyBLEP CMOS Schmitt pulse **`DUTY`**, `50%` `SQUARE` default; and `0–100%` `1/f` analog thermal pitch **`DRIFT`**, `10%` `~±2.2c` default, `0%` = `LOCKED` `0.00c` -> `100%` = `~±120c`, with `SELECT` stepping `FREQUENCY <-> DUTY <-> DRIFT` in parallel while `HOME` is open).
-- **Continuous 2-Sub-Page Mixer Toggle (`LEVEL <-> PAN`):**
-  1. **`1st Tap` (`EDIT`):** Opens at your last-viewed `EDIT` sub-page (**`LEVEL`** on boot, or **`PAN`** if dismissed from `PAN`).
-  2. **Subsequent `EDIT` Taps:** Toggles directly between **`LEVEL`** (`0–70%` clean post-filter VCA -> **`70–100%` `1.0x..4.5x` MS-20 pre-filter input overdrive**; turning CCW to the `0%` rail without active `LEVEL` LFO engages `MUTED`, while turning CW fades in smoothly from `0%` and clears mute) and **`PAN`** (per-oscillator equal-power Stereo Panning `L100..C..R100`, where **`SELECT`** switches **`OUTPUT ROUTING`** between **`STEREO`** and **`MONO`** right on the `PAN` page while keeping the live soundstage curve on screen; in `MONO`, `KNOB 1–4` lock cleanly and the bottom bay displays **`OUTPUT ROUTING SET TO MONO`**).
-  3. **`HOME` (or Switching Pages):** Closes `EDIT` and dissolves in `150 ms` back to the pure live waveform (`EDIT` LED stays `100%` across both `EDIT` sub-pages).
-- **Live Full-Screen Visualizations:** `HOME` (`DUTY` / `DRIFT`) and `EDIT` (`LEVEL`) align 4 vertical optical columns directly above `KNOB 1–4` (`DUTY` single-cycle CMOS pulse cells, `DRIFT` thermal excursion brackets + wander beacons, and `LEVEL` clean VCA phosphor stems topped above `70%` by live-audio triangular overdrive flare); `PAN` renders the edge-to-edge Stereo Panorama Curve (`4` Cauchy-Lorentzian acoustic localization bells with psychoacoustic bass-to-treble width, live Phase Beacons / crest beads, and automatic centered convergence in `MONO`).
-
-#### Dual Per-Oscillator LFO Page (`LFO A1/B1 .. A4/B4` — `ADR-022`, `ADR-027`, `ADR-028`, `ADR-031`, `ADR-032`, `ADR-053`)
-Each of the 4 voices (`Osc 1..4`) owns **2 dedicated LFOs (`LFO A1/B1, A2/B2, A3/B3, A4/B4` = `8` total)** matching its dedicated MS-20 filter, VCA/overdrive, and panner:
-- **Enter / Cycle / Exit:** Tap **`LFO`** (right-grid switch) to open the LFO Page on the remembered slot (`LFO A1` .. `LFO B4` showing `ACTIVE` / `BYPASSED`); tapping **`LFO`** again while open cycles continuously across all 8 modulation slots (**`LFO A1 -> LFO B1 -> LFO A2 -> LFO B2 -> LFO A3 -> LFO B3 -> LFO A4 -> LFO B4 -> LFO A1`**), and pressing **`HOME`** returns to the pure scope in `150 ms` while active LFOs continue running.
-- **`SELECT` Encoder (Left Hand):** Also steps (`1` slot/detent, clamped `0..7` with zero windup) across all 8 modulation slots **`LFO A1` · `LFO B1` · `LFO A2` · `LFO B2` · `LFO A3` · `LFO B3` · `LFO A4` · `LFO B4`**, remembering the last focused slot across page re-opens.
-- **`KNOB 1–4` (`TARGET | SHAPE | RATE | DEPTH` — Setup Left, Perform Right):**
-  - **`KNOB 1` (`TARGET`):** Stepped per-slot parameter selector (`1` item/detent):
-    - **Shared on `LFO A1..A4` & `LFO B1..B4` (`0..7`):** **`FREQ`** · **`DUTY`** (`5–95%` band-limited Schmitt PWM) · **`LPF`** *(default)* · **`LP RES`** · **`HPF`** · **`HP RES`** · **`LEVEL`** · **`PAN`**. Pointing both `A` and `B` at the same destination stacks both modulations sequentially/additively.
-    - **Exclusive Cross-Modulation on `LFO B1..B4` (`8..9`):** **`A1..A4 RATE`** (`LFO Bn` warps `LFO An`'s speed `±6 oct` across `0.01 Hz–2,000 Hz` with zero 1-sample delay) · **`A1..A4 DEPTH`** (`LFO Bn` swells and fades `LFO An`'s intensity from stillness up to crest).
-  - **`KNOB 2` (`SHAPE`):** Continuous `0–100%` seamless wave morph across **`Sine` (`0%`) -> `Triangle` (`25%`) -> `Sawtooth` (`50%`) -> `Slewed Square` (`75%`) -> `Random` (`100%`, non-repeating organic `C^2` B-spline drift)**.
-  - **`KNOB 3` (`RATE`):** Unclamped continuous **`0.01 Hz` (`100 s` glacial cycle) to `2,000 Hz` audio-rate FM / PWM / Filter-FM / AM** log-octave sweep.
-  - **`KNOB 4` (`DEPTH`):** Unipolar `0–100%` modulation amount (`±5 oct` pitch FM, `±45%` pulse duty, `±7.5 oct` filter cutoff, `0–100%` resonance, `0–100%` AM into pre-filter overdrive, `±6 oct` `A RATE`) with a hard stop at `0%` CCW so any LFO zeros cleanly by feel.
-- **Live Full-Screen LFO + Companion Sibling Visualization:** Spans edge-to-edge across the display over a solid pitch-black backdrop, rendering the focused slot (`A` or `B`) in high-contrast foreground with gradient shading and a live Phase Beacon while showing the same oscillator's active sibling (`B` or `A`, when `depth > 0%`) as a silver companion trace.
-
-#### Scalable `GLOBAL CONFIG` Menu (Right-Grid `GLO` — `ADR-027`, `ADR-029`, `ADR-030`, `ADR-036`, `ADR-049`)
-- **Enter / Exit:** Tap right-grid **`GLO`** to open/close **`GLOBAL CONFIG`** (`1/N` row counter in top-right; divider-free row list with subtle selected-row tint, zero row-separator lines, and bottom 4-knob strip cleanly hidden over a solid pitch-black backdrop; `HOME` or 2nd `GLO` tap dissolves in `150 ms`).
-- **Navigation & Editing (Paired Left-Hand Encoders):** Turn **`SELECT`** (`1` row/detent) to move the highlighted row cursor; turn **`ALGORITHM`** (`1` option/detent, directly below `SELECT`) to scroll through the highlighted row's options or enter an operational sub-screen clockwise (leaving `KNOB 1–4` dedicated to `Osc 1–4 Frequency`):
-  1. **`OUTPUT ROUTING`:** **`STEREO`** / **`MONO`** (synced bidirectionally with `EDIT -> PAN`).
-  2. **`KEY SENSITIVITY`:** `VERY HIGH` / `HIGH` / **`MEDIUM`** *(default)* / `LOW` / `VERY LOW` — sets how sensitive the 20 analog carbon-pill keys are to finger force: higher sensitivity reaches `100%` pressure with a lighter squeeze. `MEDIUM` is the curve calibrated on real FM-1 hardware; higher sensitivity reaches full pressure sooner, while lower sensitivity spreads the range across a deeper squeeze. While this row is highlighted, any of the 20 analog pressure keys (`OP1–GLO` + `Keys 1–12`) can be squeezed as a touch test: the menu stays on screen (no punch-in takeover, sound still responds) and a hairline meter along the row shows live pressure, turning full white at `100%`, with a brief peak-hold tick after release. Touching any of the 7 right-hand digital switches (`LATCH`, `TAP`, `SHIFT`, `MUTE 1–4`) during the test briefly replaces the row with **`Not pressure sensitive`**.
-  3. **`MUTE MODE`:** **`MOMENTARY`** *(default)* / **`LATCHING`** — governs single-state `Keys 13–16` `MUTE` and `SHIFT + Keys 13–16` `SOLO` across all 3 keyboards (switching back to `MOMENTARY` clears any latched mutes/solos).
-  4. **`SCENE MODE`:** **`LATCHING`** *(default)* / **`MOMENTARY`** (sets `SHIFT + Keys 9–12` `SCENE 1–4` action across all 3 keyboards between latching pressure-accelerated recall/hybrid blend and non-destructive momentary pressure morph).
-  5. **`MIDI CLOCK IN`:** **`AUTO`** *(default)* / **`OFF`** — in **`AUTO`**, Ruido locks its master rhythm clock automatically to incoming `24 PPQN` MIDI System Real-Time clock (`0xF8` Timing Clock, `0xFA` Start, `0xFB` Continue, `0xFC` Stop) across **3.5mm TRS MIDI IN**, **USB-C MIDI**, and **Bluetooth BLE-MIDI** (`30–300 BPM`, falling back cleanly to internal tempo on `0xFC` Stop or after `1.5 s` without clock pulses); **`OFF`** ignores external MIDI clock/transport and runs strictly on the internal `20–3,000 BPM` master clock.
-  6. **`MIDI TRANSPORT IN`:** **`OFF`** *(default)* / **`PHASE`** / **`RUN/STOP`** — in **`OFF`**, incoming MIDI `0xFA` Start / `0xFB` Continue / `0xFC` Stop transport commands are ignored completely so neither continuous drone output nor Beat-1 bar phase is disrupted when an external DAW or groovebox hits Play/Stop (while `0xF8` Timing Clock still syncs BPM when `MIDI CLOCK IN` is `AUTO`); in **`PHASE`**, incoming MIDI `0xFA` Start resets Beat-1 bar phase while `PLAY/STOP` audio output stays independent; in **`RUN/STOP`** (when `MIDI CLOCK IN` is `AUTO`), incoming MIDI `0xFA` Start / `0xFB` Continue automatically starts audio output (`ON`) and `0xFC` Stop mutes audio output (`OFF`) in lockstep with external gear.
-  7. **`MIDI CHANNEL IN`:** **`OMNI`** *(default)* / **`CH 1` – `CH 16`** — selects whether incoming channelized MIDI messages are accepted across all 16 channels (`OMNI`) or filtered strictly to a single MIDI channel (`CH 1–16`) in multi-synth setups (while channel-less `24 PPQN` System Real-Time clock continues following `MIDI CLOCK IN`).
-  8. **`FACTORY RESET` (`RESET >`):** Opens a guarded two-row reset menu (**`1 / 2 Factory Presets`** vs **`2 / 2 Clean Init`**, selected vertically with `SELECT` and showing a scannable `SOUND / SCENES 1-4 / GLOBAL CONFIG` summary below) requiring **2 full clockwise detents** on `ALGORITHM` (filling an inline hairline along the selected row; turning `ALGORITHM` CCW returns safely): **`Factory Presets`** restores the live patch, `GLOBAL CONFIG`, and all 4 `USR` flash Scene slots (`1–4`) to `v0.7.0` factory defaults, while **`Clean Init`** loads the original unmodulated startup sound (`INIT NO FX`: `55 / 82.41 / 110.15 / 164.81 Hz`, `50%` duty, wide-open filters, `0%` LFO depths), clears all 4 Scene slots (`1–4`) to `EMPTY`, and keeps `GLOBAL CONFIG` intact.
-  9. **`ABOUT` (`v0.7.0 >`):** Displays the `RUIDO` mark, `4-Oscillator Drone Synthesizer` subtitle, author (`By Miguel Hernández Domenech`), license & HAL attribution (`GPL-3.0  /  2026  /  Dinghy HAL`), and repository URL (`github.com/miguelhd/ruido`), left-aligned to the exact same margin as the `GLOBAL CONFIG` menu rows.
-
-### 3.5 Hardware-Exact `20 + 7` Keybed Architecture & Universal `SHIFT` Layer (`SARADC` — `ADR-036`, `ADR-050`, `ADR-055`, `ADR-056`)
-
-All **27 silicone keys (`11` top black keys + `16` bottom white keys)** align 1-to-1 with the FM-1's physical `SARADC` carbon-pill matrix and follow a strict **`0%` / `15%` / `40%` / `50%` / `80%` / `100%`** functional LED grammar (`0%` reserved exclusively for unassigned controls and silent/muted voices) plus a calibrated 3-group expressive pad gradient:
-
-1. **Left `20` Expressive Analog Pressure Keys (`PA8` + `PA7` 10-bit `SARADC`):**
-   - **Top `8` Raised Keys (`OP1–OP3` · `OP4–OP5` · `OP6–PIT–GLO`)** + **Bottom `12` White Keys (`Keys 1–4` · `Keys 5–8` · `Keys 9–12` = `3 × 4` per-oscillator banks)** swap across the `3` Keyboard Models (`LIVE MIXER`, `CIRCUIT LAB`, `RHYTHM LAB`), stepping left-to-right across **three calibrated physical lumen groups (`65% → 40% → 15%` at rest; `100%` when squeezed or latched by `LATCH`)**.
-2. **Right `7` Permanent Digital Utility Switches (`PA6` GPIO):**
-   - **`MONO` (`LATCH`):** Latches or releases any currently held pressure pads from the Left `20`-Pad Bay hands-free (**`15%`** ready at rest, **`100%`** while physically held, and **`2.5 Hz` blinking** while active; switching keyboard models clears `LATCH`).
-   - **`POLY` (`TAP`):** **`0%` completely dark and unassigned** in `1/3 LIVE MIXER` and `2/3 CIRCUIT LAB` (where no clock exists; tapping triggers the unified unassigned CRT scanline ripple + `120 ms` `15%` local LED glint); active strictly in **`3/3 RHYTHM LAB`**, pulsing on the quarter-note beat and performing live Beat-1 sync & rolling 3-interval tap tempo (`20–3,000 BPM`, `100%` on tap; when externally MIDI-synced, tapping re-aligns Beat 1 without breaking external clock lock).
-   - **`Keys 13–16` (`MUTE 1..4` / `SHIFT + SOLO 1..4`):** Single-state photoconductive vactrol console mute/isolate (`MOMENTARY` default / `LATCHING` via `MUTE MODE`). Their LEDs always display **steady oscillator output status** (never dancing with LFOs, rhythm gates, or audio peaks), capped at **`80%` max** so `SHIFT` (`100%`) remains the brightest beacon on the right bay: **`80%`** when audible (`>= 20 Hz`, unmuted, `LEVEL > 0%`, `PLAY/STOP = ON`), **`50%`** when sub-audio (`< 20 Hz`, unmuted, `LEVEL > 0%`, `PLAY/STOP = ON`), and **`0%`** when silent/muted (`MUTE`, cut by `SOLO`, `LEVEL == 0%`, or `PLAY/STOP = OFF`). In `LATCHING` mode, unshifted taps toggle individual voice mutes (`1` tap, including direct unmuting after Solo), while `SHIFT + Keys 13–16` performs **Exclusive Isolate** (saving the 4-bit pre-Solo mix on entry, walking across voices or multi-voice chords cleanly, and restoring the saved pre-Solo mix when tapping the already-isolated voice under `SHIFT`, with release-order protection if `SHIFT` lifts first).
-   - **`11th` Corner Key (Universal `SHIFT`):** **`100%` permanently lit** corner beacon at all times. Holding **`SHIFT`** from any screen keeps the hardware-accurate **Full-Chassis `SHIFT` Map** on screen `100%` of the time while `SHIFT` is held, ghosting non-`SHIFT` hardware (`MASTER`, `PRESETS`, `KNOB 1–4`, `2×6` buttons, unassigned keys) dark and lighting/labeling strictly controls with dedicated `SHIFT` functions directly over the dim ghosted chassis (zero pill/knockout backgrounds):
-     1. **`TEMPO`** — `ALGORITHM` encoder (`20–3,000 BPM` logarithmic internal clock, labeled directly beside `ALGORITHM` with live rotating pointer slit).
-     2. **`KEYBOARD 1..3`** — **`SELECT` encoder** (labeled directly beside `SELECT`) & **`OP1` / `OP2` / `OP3`** (labeled directly above `OP1–OP3` with downward bracket alongside **`SHIFT`** above the `11th` corner key; `15%` steady on inactive models, slow `0.50 Hz` `SAVE`-style pulse on the active model, firing the `220 ms` keyboard-change LED wave on every switch).
-     3. **`SCENE 1..4`** — **`Keys 9–12`** (`128-byte` CRC-32 scene recall, 1-tap Home Base Snap-Back, multi-finger chord blend, and continuous `PA7` carbon-pill pressure morphing across **all 3** keyboards using the **`15%` `EMPTY` / `40%` `STORED` / `80%` `ACTIVE`** LED ladder; turning `PRESETS` while holding `SHIFT` also stays on the `SHIFT` map with the Top-Bar spinning Scene number disk + 4-dot strip).
-     4. **`SOLO 1..4`** — `Keys 13–16` (`MOMENTARY` default / `LATCHING` Exclusive Isolate via `MUTE MODE`).
-     *(Holding or turning any active `SHIFT` control replaces the static bottom hint line with its 1-line effect description, adding the full-width horizontal pressure bar directly above the description when squeezing `Keys 9–12` `SCENE`; touching any `0%` unassigned key or switch while holding `SHIFT` fires the unified unassigned CRT scanline ripple + `120 ms` `15%` local LED glint; releasing `SHIFT` dissolves smoothly back to the previous screen.)*
-
-#### Mode 1 (`1/3`): `LIVE MIXER` *(Active Default)*
-The core performance mixer and synthesis macro desk for live drone sculpting:
-- **Top `8` Pressure Macros (`TONE` · `FILTER` · `WIDTH`):**
-  - **`OP1` (`DRIVE`):** **Overload Surge** — progressively slams all 4 voices toward full `4.5x` MS-20 pre-filter transistor overdrive, drives shared-rail CMOS coupling toward `100%` starved-rail sync chaos, and introduces upper-throw resonant filter scream.
-  - **`OP2` (`SUB OCTAVE`):** **Ensemble Octave Drop** — sweeps all 4 oscillators continuously from **`0` down through `-1` Octave (`50%` pressure) to `-2` Octaves (`100%` pressure)** with zero flat dead-zones.
-  - **`OP3` (`RATIO LOCK`):** **Just-Intonation Ratio Magnet** — pulls `OSC 2–4` smoothly from free microtonal beating into pure harmonic frequency ratios (`1:2`, `1:1`, `5:4`, `4:3`, `3:2`, `5:3`, `2:1`, `3:1`, `4:1`) anchored to `OSC 1` while damping `1/f` thermal drift.
-  - **`OP4` (`LOW PASS`) · `OP5` (`HIGH PASS`):** **Global Resonant MS-20 Filter Curtains** — hold `OP4` to sweep a global resonant MS-20 low-pass curtain from `28 kHz` down to `31 Hz` sub-bass weight; hold `OP5` to sweep a global resonant MS-20 high-pass curtain from `2 Hz` up to `4.2 kHz` razor-thin tension.
-  - **`OP6` (`UNISON`) · `PIT` (`DETUNE`) · `GLO` (`SPREAD`):** **Spatial & Pitch Ensemble Macros** — hold `OP6` to pull `OSC 2–4` pitches onto `OSC 1`'s anchor frequency (with tight `~±2 cent` analog VCO offsets), damp `1/f` drift, and center pan; hold `PIT` to thicken all 4 voices into a warm `±55 cent` chorus swarm with PWM shimmer at current stereo pan; hold `GLO` to fan `OSC 1–4` across wide `±100 cent` detune, Schmitt PWM offset, and full `L/R` stereo panorama.
-- **Bottom `12` Pressure Pads (`3 × 4` Per-Oscillator Banks):**
-  - **Zone 1 (`Keys 1–4` — `FILTER 1..4`):** **MS-20 Vocal Formant** — sweeps twin resonant `HPF -> LPF` `Korg35` peaks (`22–520 Hz` HPF and `28–2.0 kHz` LPF) and pre-filter bite smoothly across `0–100%` pressure on `OSC 1–4` (or swells a silent oscillator up through a warm Buchla-style Low-Pass Gate).
-  - **Zone 2 (`Keys 5–8` — `OCTAVE 1..4`):** **Harmonic `+2 OCT` Rise** — sweeps `OSC 1–4` continuously upward through **`+1` Octave (`50%`) to `+2` Octaves (`100%`)** with rising resonant MS-20 filter bloom that glides smoothly back home on release.
-  - **Zone 3 (`Keys 9–12` — `DUTY 1..4`):** **Schmitt Pulse Pinch** — pinches Oscillator `1–4`'s CMOS comparator duty cycle continuously toward razor-thin `6%` nasal pulse harmonics (while `SHIFT + Keys 9–12` recalls/morphs `SCENE 1–4` and `SAVE + Keys 9–12` stores/deletes scenes).
-
-#### Mode 2 (`2/3`): `CIRCUIT LAB` (`CMOS PATCH BAY`)
-Turns the Left `20`-Pad Bay into an analog CMOS circuit-bending patch bay where every squeeze shorts IC pins, folds timing-capacitor ramps, crushes sample-and-hold clocks, starves the power rail, locks hard sync, or drives self-feedback—while restoring your underlying drone `100%` intact on release:
-- **Top `8` Pressure Macros (`MOD` · `LOCK` · `BENDS`):**
-  - **`OP1` (`STARVE`):** **Dying-9V CMOS Rail Starve** — collapses shared power-rail coupling toward `100%`, sags pitch across all 4 oscillators, squeezes Schmitt duties into asymmetrical needles, and browns out the 42-LED panel with organic voltage sputter.
-  - **`OP2` (`RING MOD`):** **Paired Ring / XOR Matrix** — crossfades all 4 oscillators into balanced `4x`-oversampled ring/XOR sidebands (`1×2`, `2×3`, `3×4`, `4×1`) for metallic bell and clangorous CMOS logic timbres, flipping the 42 LEDs in a binary checkerboard.
-  - **`OP3` (`TURBO LFO`):** **Audio-Rate LFO Overclock (`1x -> 32x`)** — accelerates all 8 per-voice LFOs up to `32x` speed into FM/AM growl (temporarily waking a musical modulation floor even on a dry default patch) with an accelerating cyclotron LED loop.
-  - **`OP4` (`SCREAM`) · `OP5` (`HARD SYNC`):** **Twin `Korg35` Self-Oscillation vs. Master-Slave Hard Sync** — hold `OP4` to drive both `HPF` and `LPF` resonance toward self-oscillation while sweeping their cutoffs inward across the harmonic spectrum; hold `OP5` to lock `OSC 2–4` phase resets to `OSC 1` with band-limited hard sync while sweeping slave harmonics upward.
-  - **`OP6` (`SCATTER`) · `PIT` (`SUB-XOR`) · `GLO` (`FEEDBACK`):** **CMOS Logic & Bus Feedback Bends** — hold `OP6` to scramble pitch, Schmitt duty, filter bite, and wide stereo spread with Geiger-counter LED sparks; hold `PIT` to cascade `/2, /4, /8` `CD4040` sub-octave logic XOR across all 4 oscillators simultaneously; hold `GLO` to route master bus output back into `4.5x` MS-20 pre-filter overdrive, rail coupling, and resonant howl.
-- **Bottom `12` Pressure Pads (`3 × 4` Per-Oscillator CMOS Bends):**
-  - **Zone 1 (`Keys 1–4` — `CROSS-PIN 1..4`):** **Shorted-Pin Neighbor FM & Comparator XOR** — taps neighbor `(v+1)%4`'s raw pre-mute `CD40106` timing-capacitor ramp + chaotic self-feedback directly into **Oscillator `v`'s** frequency (`±3.2 OCT`), comparator XOR, duty, and `Korg35` filter resonance, shooting high-voltage arc lightning across all 42 LEDs.
-  - **Zone 2 (`Keys 5–8` — `FOLD 1..4`):** **West-Coast Capacitor Wavefolder (`1.0x -> 6.2x`)** — taps Oscillator `v`'s internal `CD40106` capacitor triangle ramp into a `4x`-oversampled sinusoidal Serge wavefolder, buckling flat squares into vocal, multi-crested waveforms at locked pitch.
-  - **Zone 3 (`Keys 9–12` — `CRUSH 1..4`):** **`CD4040` Binary Sub-XOR + `CD4013` S&H Clock Crush (`16 kHz -> 165 Hz`)** — cascades `/2, /4, /8` sub-octave logic XOR into Oscillator `v`'s resonant `Korg35` filter followed by a `4x` zero-order sample-and-hold latch and R-2R DAC rung quantizer.
-
-#### Mode 3 (`3/3`): `RHYTHM LAB` (`CLOCK, DIVIDE & EUCLID`)
-Turns the Left `20`-Pad Bay into an immediate rhythmic gate, clock-divider, and Euclidean groove instrument driven by Core 1's sample-accurate master bar clock (**`20–3,000 BPM`** via **`SHIFT + ALGORITHM`**, tapped live at any time on **`POLY` (`TAP TEMPO`)**, or synced to external `24 PPQN` MIDI Clock across TRS, USB-C, and BLE-MIDI)—restoring your unbroken drone cleanly on release:
-- **Top `8` Pressure Macros (`PULSE` · `GATE` · `FX`):**
-  - **`OP1` (`PUMP`):** **Sidechain Ducking Pump** — ducks and swells all 4 oscillators on every quarter-note beat (`4/bar`, shifting into double-time `8/bar` above `72%` pressure) with breathing chassis-wide LED swells.
-  - **`OP2` (`CHASE`):** **4-Voice Round-Robin Loop (`1 -> 2 -> 3 -> 4`)** — steps exclusively across `OSC 1 -> 2 -> 3 -> 4` one oscillator at a time (`16th`-note chase below `55%` pressure, `32nd`-note chase above `55%`) with a running LED chaser across the keybed.
-  - **`OP3` (`SPEED`):** **Master Clock Multiplier (`1.0x -> 4.0x`)** — accelerates the master rhythm clock up to `4x` speed (up to `6,000 BPM` audio-rate formant gating) while displaying live effective BPM (`120 BPM .. 6000 BPM`, or `EXT` when locked to external MIDI Clock; pulses 16th-note gates across all 4 voices if held alone).
-  - **`OP4` (`PLUCK`) · `OP5` (`SHORT`):** **Percussive MS-20 Filter Pluck vs. Pinpoint Gate Length** — hold `OP4` to reshape active rhythm gates into snappy, resonant MS-20 low-pass filter plucks; hold `OP5` to tighten gate length from `50%` down to `6%` pinpoint clicks while centering stereo focus.
-  - **`OP6` (`SHUFFLE`) · `PIT` (`PING-PONG`) · `GLO` (`ROLL`):** **Decoupled Timing Groove, Stereo Bounce & Ratchet Fill** — hold `OP6` to warp off-beat `16th` timing smoothly across **`0–100%` pure timing shuffle** (with zero unintended stereo shift); hold `PIT` for **`0–100%` alternating Left/Right stereo gate bounce**; hold `GLO` to subdivide active gates into fast **`x2 -> x4 -> x8` ratchet drum rolls**.
-- **Bottom `12` Pressure Pads (`3 × 4` Per-Oscillator Rhythm Generators):**
-  - **Zone 1 (`Keys 1–4` — `STUTTER 1..4`):** **Free-Speed Chopper (`1.5 -> 24 Hz`)** — independent continuous-speed vactrol gate chopper per oscillator that ignores the master clock so holding multiple keys at different pressures drifts organically in and out of phase.
-  - **Zone 2 (`Keys 5–8` — `DIVIDE 1..4`):** **Musical Clock Dividers (`/2, X1, X2, X3, X4, X8`)** — locks Oscillator `v` to exact whole-bar divisions/multiples of the master clock (`OSC 1–4` start at `/2, X1, X2, X3` on light touch so a 4-finger chord immediately forms a layered polyrhythm, stepping up toward `X8` with firmer pressure).
-  - **Zone 3 (`Keys 9–12` — `EUCLID 1..4`):** **16-Step Euclidean Groove Generator (`2/16, 3/16, 5/16, 7/16, 11/16, 16/16`)** — distributes `K` pulses as evenly as possible across 16 steps (`pressure` scales density from sparse `2/16` up to `16/16`), rotating phases `{0, 2, 1, 3}` across `OSC 1–4` so chording multiple keys interlocks instead of firing in unison.
+### 3.3 Right `2x6` Function Buttons
+- **`PLAY/STOP`:** Toggles audio output on and off with a short fade (`Green` LED when off, `Red` LED when on).
+- **`HOME`:** Returns to the clean scope in one tap from any open page, modifier, or toast. From the clean scope, repeated taps cycle `FREQUENCY -> DUTY -> DRIFT -> Clean Scope` (`LED` is `100%` on all Home states and `15%` when another page is open).
+- **`SAVE`:** Two-step scene manager (`LED` is off on an unmodified scene, pulses slowly when live edits exist, and blinks while open):
+  - `1st tap` (`STORE SCENE`): Blinks all 4 scene keys (`Keys 9-12`); tap one to store.
+  - `2nd tap` or `SELECT` (`DELETE SCENE`): Blinks occupied scene keys at double speed; tap one to clear it to `EMPTY`.
+  - `3rd tap` or `HOME`: Exits without changes.
+- **`FX`:** Opens the **Dual Filter** page; repeated taps cycle `OSC 1 -> 2 -> 3 -> 4`.
+- **`SEL`:** Opens the **Keyboard Explorer**; repeated taps cycle `1/3 LIVE MIXER -> 2/3 CIRCUIT LAB -> 3/3 RHYTHM LAB`. Holding an active key while `SEL` is open shows its parameter name, live pressure bar, and a 1-line description.
+- **`EDIT`:** Opens the **Mixer** page; repeated taps toggle `LEVEL <-> PAN`.
+- **`LFO`:** Opens the **LFO** page (`KNOB 1 = TARGET`, `KNOB 2 = SHAPE`, `KNOB 3 = RATE`, `KNOB 4 = DEPTH`); repeated taps cycle `LFO A1 -> B1 -> A2 -> B2 -> A3 -> B3 -> A4 -> B4`:
+  - **Shared Destinations (`A` & `B`):** `FREQ`, `DUTY`, `LPF`, `LP RES`, `HPF`, `HP RES`, `LEVEL`, `PAN` (summed when `A` and `B` share a target).
+  - **Cross-Modulation (`B` only):** `A RATE` (`±6 oct`) and `A DEPTH`.
+  - **Shape (`0-100%`):** Continuous morph across `Sine -> Triangle -> Sawtooth -> Square -> Smooth Random`.
+  - **Rate:** `0.01 Hz` to `2,000 Hz`.
+- **`GLO`:** Opens and closes **`GLOBAL CONFIG`**:
+  1. **`Output Routing`:** `STEREO` / `MONO`.
+  2. **`Key Sensitivity`:** `VERY HIGH` / `HIGH` / `MEDIUM` *(default)* / `LOW` / `VERY LOW`. Pressing any of the 20 pressure keys while this row is selected shows a live pressure meter on the row.
+  3. **`Mute Mode`:** `MOMENTARY` *(default)* / `LATCHING` (applies to `MUTE 1-4` and `SOLO 1-4`).
+  4. **`Scene Mode`:** `LATCHING` *(default)* / `MOMENTARY` (`LATCHING` stays on the recalled scene; `MOMENTARY` morphs back on key release).
+  5. **`MIDI Clock In`:** `AUTO` *(default, syncs `30-300 BPM` `24 PPQN` clock over TRS, USB-C, and BLE-MIDI)* / `OFF`.
+  6. **`MIDI Transport In`:** `OFF` *(default)* / `PHASE` *(resets bar phase on Start)* / `RUN/STOP` *(starts and mutes audio with MIDI Start/Continue/Stop)*.
+  7. **`MIDI Channel In`:** `OMNI` *(default)* / `CH 1-16`.
+  8. **`Factory Reset`:** Two-detent confirmation on `ALGORITHM` (`CCW` cancels) for **`Factory Presets`** (restores default sound, all 4 scenes, and config) or **`Clean Init`** (loads an unmodulated startup sound, clears scenes to `EMPTY`, and keeps config).
+  9. **`About`:** Displays version, instrument summary, author, license, and repository URL.
+- **`ENV`, `ARP`, `SEQ`, `REC`:** Unassigned (`0%` LED at rest). A press nudges the scope horizontally and flashes the button LED with no change to audio or open pages.
 
 ---
 
-## 4. Coupled 4-Voice Monochrome Caustic Ribbon Scope + Divider-Free Sans-Serif HUD
+## 4. `20 + 7` Keybed & `SHIFT` Layer
 
-- **Pure Monochromatic B&W Aesthetic:** Pitch-black (`#000000`) background, strictly neutral achromatic white/silver shades (`R == G == B`), anti-aliased sans-serif typography (`Helvetica Neue`), and **zero divider lines, boxes, or grid clutter**.
-- **Open Edge-to-Edge Coupled 4-Voice Caustic Ribbon (`100%` of the time, constant vertical scale):**
-  - Sample-accurately aligned post-MS-20 per-voice taps (`Osc 1..4`) + stereo master bus (`L/R`) locked with sub-sample Catmull-Rom zero-crossing interpolation, HF-rejected composite fundamental trigger sway, and subtle `1/f` analog thermal breath so no strand ever freezes into a static stencil.
-  - **14 Coupled Circuit-State Strands (`4 voices × 3 + 2 stereo ribs`):** Each active oscillator renders its `240 Hz` TPT leaky-capacitor trajectory, a 3-frame historical dispersive shell, and its live post-MS-20 filtered trace (with ~`24%` sympathetic summing-node deflection when multiple voices play, and clean vactrol fade-out to `0` weight when muted), paired with 2 master stereo harmonic ribs.
-  - **Additive Caustic Envelope + `25%` Quarter-Res Separable Bloom:** Overlapping strands accumulate in linear photon space where envelope crossings flare naturally to incandescent `#FFFFFF` white, backed by a `60x60` 2-pass separable `[1, 3, 4, 3, 1]` optical bloom (`25%` calibrated intensity), soft-knee Reinhard + `0.82` CRT gamma tonemapping, and `4x4` ordered Bayer neutral `RGB565` dithering.
-  - **Open Full-Span Geometry (`x = 0..239`, constant `y = 120` center & `112 px` linear CRT deflection) & Zero Hard-Cut Transitions:** Zero artificial edge pinching to `0 V` at the left/right bezels, **zero vertical compression or shift** when the HUD fades in (resonant peaks deflect linearly past `y = 0` and `y = 239` without soft-clip squashing), and **zero 1-frame visual snaps** anywhere on the instrument—stopping audio (`PLAY/STOP`, `MASTER = 0%`, muting all voices, or pausing audio) smoothly relaxes all 14 strands + bloom into a poised `y = 120` horizon flatline and blooms back out on resume, while per-voice mutes, `1x <-> 2x` bass timebase zoom, filter curves, optical beads, and HUD overlays all transition continuously.
-- **Strict 3-Zone Screen Architecture & Unified Optical-Filament HUD (`150 ms` S-Curve Envelope & Unified `1.5 s` Header Toasts — `ADR-055`, `ADR-056`):**
-  - **Zone 1 — Top Bar (Sole Parameter Readout Authority):** Reserved top strip that serves as the **single authority** for active parameter titles in full-white Bold `Helvetica Neue`, dimmed trailing target/step/morph qualifiers (`OSC 1..4`, `1..4`, `MORPH`, `1/2`..`2/2`, `1/3`..`3/3`, crossfading smoothly over `150 ms` between pure `SCENE 1..4` and interim `SCENE MORPH`), right-aligned live values (`120.0 BPM`, `SAVED`, `DELETED`, `%` + tapered optical-filament gauges), `150 ms`-transitioning `FINE` / `COARSE` rate badges, and the slewed **4-Dot Graphical Scene Strip** during Scene recall/morph (never ASCII numbers and arrows). Whenever any pinned page (`SEL`, `FX`, `LFO`, `EDIT`, `GLOBAL CONFIG`, or latched `HOME`) is open, off-page knobs (`MASTER`, `ALGORITHM`, `PRESETS`, `KNOB 1–4` on `SEL`/`GLOBAL CONFIG`) and keybed holds keep the active center page steady and toast **only** the Top Bar for `1.5 s`; full-screen punch-in visualizations appear strictly on **Clean Scope**.
-  - **Zone 2 & Zone 3 — Center Stage & Dedicated `KNOB 1–4` / Guidance Bottom Strip (`ADR-032`, `ADR-036`, `ADR-037`, `ADR-054`, `ADR-055`, `ADR-056`):** The Center Stage belongs exclusively to the live waveform, active parameter graph, configuration menu, or spatial hardware diagram, while the Bottom Strip belongs strictly to `KNOB 1–4` optical filaments, focal beads, tabular readouts (`55.0 Hz`, `2.4 kHz`, `65%`, `L35`), and the shared per-oscillator modulator dots—or calm static hints / 1-line effect descriptions on `SEL`, `SHIFT`, and `SAVE` (**never** duplicate parameter readouts). Every acoustic domain uses one cohesive visual language across both knob editing and Clean-Scope keybed performance:
-    - **Pure Live Waveform Scope (`FREQUENCY`, `MUTE`, `SOLO`, `STUTTER`, `OCTAVE`, `SUB OCTAVE`, `RATIO LOCK`, `UNISON`, `DETUNE`, `SPREAD`, `LATCH`, `TAP`):** `100%` undimmed 14-strand coupled caustic ribbon mesh with zero artificial overlays.
-    - **Shared Per-Oscillator `FX + LFO A/B` 3-Dot Modulator Row (`HOME` `FREQUENCY`/`DUTY`/`DRIFT`, `EDIT -> LEVEL`, and stereo `EDIT -> PAN`):** Beneath each oscillator's bottom value readout sits the shared 3-circle status trio (`FX` on the left, `LFO A` + `LFO B` on the right)—showing clearly legible `~14%` circular dots when inactive, a steady live filter-engagement dot on `FX` across the voice strip, and **target-matched** real-time waveform × depth animation on `LFO A` and `LFO B` **strictly on the parameter screen that LFO directly modifies** (`FREQ` on `FREQUENCY`, `DUTY` on `DUTY`, none on `DRIFT`, `LEVEL` on `LEVEL`, `PAN` on `PAN`).
-    - **Graphical Scene UX (`Top-Bar 4-Dot Strip`, Smooth `SCENE MORPH` Crossfade, Clean-Scope Spatial `SCENE` Diagram & 2-Step `SAVE` Manager):** Turning `PRESETS` or pressing `SHIFT + SCENE 1–4` renders the slewed **4-Dot Graphical Scene Strip** in the Top Bar (`EMPTY` pinpoint, `STORED` dim dot, and `ACTIVE`/morphing proportional bright dot + glowing bridge filament, smoothly crossfading the left qualifier between `SCENE 1..4` and `SCENE MORPH`) while mirroring `15%` (`EMPTY`), `40%` (`STORED`), and `80%` (`ACTIVE`) weights onto physical `Keys 9–12` LEDs. On **Clean Scope**, turning `PRESETS` momentarily displays the **27-Key Spatial `SCENE` Diagram** (`Keys 9–12` bracketed `"SCENE"`) so players immediately locate the Scene keys, while on any open parameter graph (`HOME`, `FX`, `LFO`, `LEVEL`, `PAN`) the center graph stays visible so filter curves, mixer stems, and stereo bells physically morph live between scenes. Pressing `SAVE` opens the full-screen 2-step manager (`SCENE 1/2` `STORE SCENE >` <-> `SCENE 2/2` `< DELETE SCENE`) with open container-free 4-slot status columns (**`ACTIVE`**, **`STORED`**, **`EMPTY`**) and pure-blinking `Keys 9–12` (`0%` dark across all other 23 keys).
-    - **`LEVEL` + Live-Audio Overdrive (`EDIT -> LEVEL`, `OP1` `DRIVE`, `GLO` `FEEDBACK`):** Full-screen `4`-column vertical circuit view with razor-clean Gaussian phosphor stems + optical beads up to the `70%` / `1.0x` Drive Knee, topped above `70%` by a live-audio triangular overdrive flare up to `100%` `4.5x` overdrive. On `HOME` (`2nd`/`3rd` press) and Clean-Scope `DUTY 1–4`, `DUTY` (`5–95%` CMOS pulse duty cells) and `DRIFT` (`1/f` thermal excursion brackets + live wander beacons) composite translucently directly over the dimmed live waveform.
-    - **MS-20 Passband (`FX` Page, `FILTER 1–4` Keys & `LOW PASS` / `HIGH PASS` / `SCREAM` Keys):** Full-screen edge-to-edge (`2 Hz–28 kHz`) dual-peak MS-20 transfer curve with steep horn silhouette shading, crest glow, `0 dB` / `-30 dB` reference filaments, and `HP`/`LP` focal beads (single focused voice on `FX` / `FILTER 1–4`, or 4-voice global sweep on `LOW PASS` / `HIGH PASS` / `SCREAM`).
-    - **Full-Screen LFO Wave (`LFO` Page):** Edge-to-edge morphed LFO wave and high-radiance Phase Beacon (focused `A`/`B` slot + silver active sibling companion trace).
-    - **`PAN` Edge-to-Edge Stereo Panorama Curve (`EDIT -> PAN`):** Spatial-domain sister to `FX` rendering 4 Cauchy-Lorentzian acoustic localization bells with exponential vertical-decay skirts, additive linear-photon spines, live Phase Beacons / crest beads, and centered convergence + centered **`OUTPUT ROUTING SET TO MONO`** bottom caption in `MONO`.
-    - **Two-Bay `SEL` Keyboard Explorer & Hardware-Accurate Full-Chassis `SHIFT` Map (`SEL` & `SHIFT`):** `SEL` renders the swappable model carousel, Two-Bay Stadium Keybed (`Left 20-Pad Expressive Bay` with vertical squeeze lines + `Right 7-Switch Utility Bay` with centered optical dots, tightened group headers `TONE · FILTER · WIDTH` / `MOD · LOCK · BENDS` / `PULSE · GATE · FX`, top-row **`LATCH`** callout on all 3 keyboards, and **`TAP`** callout on `RHYTHM LAB`), Top-Bar-only live parameter + value readouts, and 1-line bottom effect descriptions on key hold. Holding `SHIFT` (`11th` key) keeps the unmodified `1.75:1` FM-1 front-panel silhouette on screen `100%` of the time, lighting and labeling strictly dedicated `SHIFT` controls via container-free `#000000` feathered glyph knockout (`SELECT` → **`KEYBOARD`**, `ALGORITHM` → **`TEMPO`**, **`KEYBOARD`** centered directly above `OP1–OP3`, and **`SCENE`** / **`SOLO`** below `Keys 9–12` / `Keys 13–16`) plus live 1-line bottom effect descriptions.
-  - **Centralized `150 ms` S-Curve Envelope & Latched Pages:** Every HUD fade-in and fade-out across the entire instrument runs on a single centralized **`150 ms` S-curve** (`1.5 s` hold on transient knob/button toasts). Right `2x6` pages (`PLAY/STOP`, `SAVE` while armed, `HOME` sub-modes, `FX`, `SEL`, `EDIT`, `LFO`, `GLOBAL CONFIG`) stay pinned until `HOME` (or toggle/cycle close), keeping their center view steady under `1.5 s` top-header toasts and returning cleanly on release after `SHIFT`.
-  - **Hardware Operational Lifecycle Screens (`FIRMWARE UPDATE`, `USB RESCUE`, `SYSTEM FAULT` — `ADR-049`):** Appearing strictly when hardware lifecycle events occur—live USB-MIDI OTA package staging and the standalone SRAM flash writer (`0%–100%` progress bar with `Scenes 1–4 preserved` assurance), power-on `Hold OCT-` / `bootguard` `USB RESCUE`, and `SYSTEM FAULT` diagnostics—rendered in the same left-aligned, pitch-black monochrome `Helvetica Neue` hierarchy with zero menu clutter, zero color chrome, and zero third-party web URLs.
+### 4.1 Hardware Split
+1. **Left `20` Analog Pressure Keys (`OP1-GLO` + `Keys 1-12`):** Respond continuously to finger force across the 3 keyboard layouts (`LIVE MIXER`, `CIRCUIT LAB`, `RHYTHM LAB`) and return to the resting patch on release.
+2. **Right `7` Utility Switches:**
+   - **`MONO` (`LATCH`):** Holds or releases pressed left-bay pressure pads hands-free (blinks while active; clears on keyboard change).
+   - **`POLY` (`TAP`):** Active in `RHYTHM LAB` for beat pulse indication, tap tempo (`20-3,000 BPM`), and Beat-1 phase alignment.
+   - **`Keys 13-16` (`MUTE 1-4`):** Momentary or latching voice mutes (`LED` indicates steady voice state: `80%` audible, `50%` sub-audio, `0%` silent or muted).
+   - **Top-Right Corner Key (`SHIFT`):** Lit at `100%` at all times. Holding `SHIFT` displays the full-chassis `SHIFT` map and enables:
+     - `SHIFT + ALGORITHM`: Master Tempo (`20-3,000 BPM`)
+     - `SHIFT + SELECT` or `SHIFT + OP1-OP3`: Switch keyboard layout (`1-3`)
+     - `SHIFT + Keys 9-12`: Recall or pressure-morph `Scene 1-4` (holding multiple scene keys blends them by finger pressure)
+     - `SHIFT + Keys 13-16`: Momentary or latching `SOLO 1-4`
+
+### 4.2 Mode 1 (`1/3`): `LIVE MIXER` *(Default)*
+- **Top `8` Global Macros:**
+  - `OP1` (`DRIVE`): Increases pre-filter overdrive, power-rail coupling, and filter resonance across all 4 voices.
+  - `OP2` (`SUB OCTAVE`): Lowers all 4 voices continuously down through `-1` to `-2` octaves.
+  - `OP3` (`RATIO LOCK`): Pulls `OSC 2-4` into harmonic frequency ratios relative to `OSC 1` and damps pitch drift.
+  - `OP4` (`LOW PASS`) / `OP5` (`HIGH PASS`): Global resonant low-pass (`28 kHz -> 31 Hz`) and high-pass (`2 Hz -> 4.2 kHz`) filter sweeps.
+  - `OP6` (`UNISON`) / `PIT` (`DETUNE`) / `GLO` (`SPREAD`): Pulls voices to `OSC 1` unison (`OP6`), adds chorus detune (`PIT`), or spreads detune, pulse width, and stereo pan (`GLO`).
+- **Bottom `12` Per-Voice Pads (`Osc 1-4` per zone):**
+  - `Keys 1-4` (`FILTER 1-4`): Sweeps dual resonant formant peaks on active voices, or brings in silent/muted voices through a low-pass gate.
+  - `Keys 5-8` (`OCTAVE 1-4`): Raises individual voices continuously through `+1` to `+2` octaves.
+  - `Keys 9-12` (`DUTY 1-4`): Narrows pulse width toward `6%`.
+
+### 4.3 Mode 2 (`2/3`): `CIRCUIT LAB`
+- **Top `8` Global Macros:**
+  - `OP1` (`STARVE`): Increases shared-rail coupling, sags pitch, and skews pulse widths.
+  - `OP2` (`RING MOD`): Multiplies adjacent voice pairs (`1x2`, `2x3`, `3x4`, `4x1`) for ring and XOR sidebands.
+  - `OP3` (`TURBO LFO`): Multiplies all 8 LFO rates up to `32x` into the audio range.
+  - `OP4` (`SCREAM`) / `OP5` (`HARD SYNC`): Drives dual filters into self-oscillation (`OP4`) or phase-locks `OSC 2-4` to `OSC 1` (`OP5`).
+  - `OP6` (`SCATTER`) / `PIT` (`SUB-XOR`) / `GLO` (`FEEDBACK`): Offsets pitch, duty, and pan (`OP6`), applies `/2, /4, /8` sub-octave XOR (`PIT`), or routes the master bus back into overdrive and rail coupling (`GLO`).
+- **Bottom `12` Per-Voice Pads (`Osc 1-4` per zone):**
+  - `Keys 1-4` (`CROSS-PIN 1-4`): Routes the neighboring voice's capacitor ramp into pitch FM, comparator XOR, and filter resonance.
+  - `Keys 5-8` (`FOLD 1-4`): Routes the voice's internal triangle ramp through a `1.0x-6.2x` sinusoidal wavefolder.
+  - `Keys 9-12` (`CRUSH 1-4`): Applies sub-octave XOR and sample-and-hold clock reduction (`16 kHz -> 165 Hz`).
+
+### 4.4 Mode 3 (`3/3`): `RHYTHM LAB`
+Uses the internal `20-3,000 BPM` clock (`SHIFT + ALGORITHM`), live `TAP` (`POLY`), or external `24 PPQN` MIDI Clock:
+- **Top `8` Global Macros:**
+  - `OP1` (`PUMP`): Quarter-note ducking envelope (`8/bar` at high pressure).
+  - `OP2` (`CHASE`): Round-robin `1 -> 2 -> 3 -> 4` voice gate (`16th` or `32nd` notes).
+  - `OP3` (`SPEED`): Multiplies master clock rate `1.0x -> 4.0x`.
+  - `OP4` (`PLUCK`) / `OP5` (`SHORT`): Shapes active gates into resonant low-pass filter plucks (`OP4`) or short clicks (`OP5`).
+  - `OP6` (`SHUFFLE`) / `PIT` (`PING-PONG`) / `GLO` (`ROLL`): Adds off-beat timing shuffle (`OP6`), L/R stereo gate alternation (`PIT`), or `x2/x4/x8` gate subdivisions (`GLO`).
+- **Bottom `12` Per-Voice Pads (`Osc 1-4` per zone):**
+  - `Keys 1-4` (`STUTTER 1-4`): Unsynced per-voice gate (`1.5-24 Hz`).
+  - `Keys 5-8` (`DIVIDE 1-4`): Synced clock divisions and multiples (`/2, X1, X2, X3, X4, X8`), offset across voices for polyrhythms.
+  - `Keys 9-12` (`EUCLID 1-4`): 16-step Euclidean gate patterns (`2/16` to `16/16`), phase-offset across voices.
 
 ---
 
-## 5. Explicit Non-Goals (v1 Scope Guardrails)
+## 5. Display, HUD & LED Feedback
 
-To keep Ruido focused, reliable, and sonically uncompromising, **v1 explicitly excludes**:
+- **Monochrome Oscilloscope:** Black-and-white waveform display of all four voices and the stereo mix at a constant vertical scale. When audio stops, the trace settles to a flat center line.
+- **Three-Zone Screen Layout:**
+  - **Top Bar:** Displays active parameter titles, voice/slot qualifiers, `FINE` / `COARSE` badges, 4-dot scene morph indicators, and live values. Off-page adjustments on a pinned page appear as `1.5 s` top-bar toasts and leave the open view in place.
+  - **Center View:** Displays the live waveform, the active parameter graph (`FX` filter response, `LFO` waveform, `LEVEL` bars and overdrive cap, `PAN` stereo field, `DUTY` / `DRIFT` overlays, `RAIL COUPLING`), the `GLOBAL CONFIG` list, or the `SEL` / `SHIFT` / `SAVE` keybed diagrams.
+  - **Bottom Strip:** Displays `KNOB 1-4` gauges, numerical values, and per-voice `FX` / `LFO A` / `LFO B` status dots on parameter pages, or 1-line control descriptions on keybed views.
+- **Transitions & System Screens:** All overlays fade in and out over `150 ms`. System screens handle USB firmware updates (`Scenes 1-4` preserved), `Hold OCT-` USB rescue mode, and fault diagnostics.
+- **42-LED Brightness Levels:** LEDs turn off (`0%`) on unassigned controls and muted voices, sit at `15%` on available controls at rest, pulse slowly when `FX`, `LFO`, or unsaved `SAVE` state is active in the background, use three brightness groups across the 20 pressure keys, and light to `100%` on the active page or held control.
+
+---
+
+## 6. Explicit Non-Goals
+
+Ruido excludes:
 - Multi-track step sequencers, piano rolls, or arpeggiators.
-- Chromatic MIDI polyphony / voice-stealing envelopes.
-- Onboard time-based FX (reverb, delay, chorus)—Ruido is the **dry analog-style source** feeding your external pedals and Eurorack modules.
-- Deep nested sub-menus or file browsers (focused single-level pages on right-grid buttons—`FX`, `SEL`, `EDIT`, `LFO`, and `GLO` Config—are used judiciously, always instant-exit via `HOME`).
+- Chromatic MIDI note polyphony or voice-stealing envelopes.
+- Built-in time-based effects (reverb, delay, chorus): Ruido is a dry sound source for external pedals and modular gear.
+- Nested menus or file browsers.

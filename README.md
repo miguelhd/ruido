@@ -4,7 +4,7 @@
 
 ## Core Pillars
 
-1. **Uncompromising Sound Quality:** Unified `4x` oversampled (`176.47 kHz`) signal path modeling CMOS Schmitt-trigger physics (PolyBLEP edges, RC capacitor tilt, thermal drift, and shared power-rail threshold coupling) feeding four dedicated per-oscillator **Dual Series Sallen-Key (`12 dB/oct HPF -> 12 dB/oct LPF`, `OTA -> Silicon-Clamped`) Zero-Delay Feedback filters** and a nonlinear master summing stage.
+1. **Uncompromising Sound Quality:** Unified `4x` oversampled (`176.47 kHz` -> `~44.1 kHz` base rate) signal path modeling CMOS Schmitt-trigger physics (PolyBLEP edges, RC capacitor tilt, thermal drift, and shared power-rail threshold coupling) feeding four dedicated per-oscillator **Dual Series Sallen-Key (`12 dB/oct HPF -> 12 dB/oct LPF`, `OTA -> Silicon-Clamped`) Zero-Delay Feedback filters** and a nonlinear master summing stage across 3.5 mm TRS analog and **`44.1 / 48 kHz` USB-C digital stereo audio**.
 2. **Stateless UX + 3-Model Pressure Keybed:** 1:1 encoder-to-oscillator mapping paired with 3 swappable pressure sensitive keyboards (**`1/3 LIVE MIXER`**, **`2/3 CIRCUIT LAB`**, and **`3/3 RHYTHM LAB`**) and 42-channel varibright LED modulation.
 3. **Always-On Acoustic Visuals:** `240x240` CRT-style rising-edge-triggered oscilloscope rendered continuously via scanline strip compositing, with translucent parameter overlays.
 
