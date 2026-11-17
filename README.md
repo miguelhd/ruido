@@ -58,7 +58,7 @@ make fm1-flash
 
 ## Documentation Index
 
-- **[Product Specification](docs/PRODUCT.md)** — Sound references, stateless UX, LED zoning, and non-goals.
+- **[Product Specification](docs/PRODUCT.md)** — Sound references, UX, LED zoning, and non-goals.
 - **[Technical Architecture](docs/ARCHITECTURE.md)** — Hardware specs, `176.47 kHz` DSP graph, scanline UI renderer, and SRAM/Flash budgets.
 - **[Decision Log (ADRs)](docs/DECISIONS.md)** — Why key engineering and UX choices were made.
 - **[Development Roadmap](docs/ROADMAP.md)** — Step-by-step build and hardware bring-up plan.
