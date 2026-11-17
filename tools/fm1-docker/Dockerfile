@@ -20,6 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && strip /src/fm1-emu/target/release/fm1-emu
 
 FROM debian:bookworm-slim
+ARG JIELI_TOOLCHAIN_URL=https://jl-update.oss-cn-shenzhen.aliyuncs.com/jieli-linux-toolchains-20260730.1.tar.xz
+ARG JIELI_TOOLCHAIN_SHA256=a1545cddbc451a06bac43eb5cd96d831470c42a97c5c0b1f98879a20fc7647bd
 ARG DINGHY_COMMIT=f77bf03283bbb2c05294b01cdad68a30b410f93d
 ARG AC79_SDK_BRANCH=AC79NN_SDK_V1.2.1_2023-12-13
 
@@ -33,9 +35,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# 1. Official JieLi Linux pi32v2 toolchain
+# 1. Official JieLi Linux pi32v2 toolchain (pinned archive + SHA-256 verified before extraction)
 RUN mkdir -p /opt/jieli \
-    && curl -fL --retry 4 https://pkgman.jieliapp.com/s/linux-toolchain | tar -xJ -C /opt/jieli \
+    && curl -fL --proto '=https' --tlsv1.2 --retry 4 \
+        -o /tmp/jieli-toolchain.tar.xz "${JIELI_TOOLCHAIN_URL}" \
+    && printf '%s  %s\n' "${JIELI_TOOLCHAIN_SHA256}" '/tmp/jieli-toolchain.tar.xz' | sha256sum -c - \
+    && tar -xJf /tmp/jieli-toolchain.tar.xz -C /opt/jieli \
+    && rm -f /tmp/jieli-toolchain.tar.xz \
     && TC_DIR="$(ls -d /opt/jieli/jieli-linux-toolchains-* | sort | tail -1)" \
     && ln -sfn "${TC_DIR}" /opt/jieli/toolchain \
     && ln -sfn "${TC_DIR}/pi32v2" /opt/jieli/pi32v2 \

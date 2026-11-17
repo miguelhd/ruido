@@ -401,42 +401,92 @@ void HudGlobalViews::compositeRailCouplingStrip(int y0, int y1, uint16_t stripHe
 namespace {
 
 void compositeConfigSubViewStrip(const MonoStripCanvas& cv, const HudState& hud) noexcept {
-    constexpr int kBodyX = 10;
-    constexpr uint8_t kPrimaryLum = 255u;
     constexpr uint8_t kSubtitleLum = 220u;
     constexpr uint8_t kBodyLum = 174u;
 
-    if (hud.configSubView == ConfigSubView::FactoryResetConfirm) {
-        cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 46, "Turn ALGORITHM CW to reset",
-                             kPrimaryLum);
-        cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 70, "Resets Scenes 1-4 and Config", kBodyLum);
+    if (isResetConfirmSubView(hud.configSubView) || isResetDoneSubView(hud.configSubView)) {
+        const size_t selIdx = (hud.configSubView == ConfigSubView::CleanInitConfirm ||
+                               hud.configSubView == ConfigSubView::CleanInitDone)
+                                  ? 1u
+                                  : 0u;
+        const bool isDone = isResetDoneSubView(hud.configSubView);
+        const uint32_t clampedTicks =
+            isDone ? 8u : ((hud.configResetTicks > 8u) ? 8u : hud.configResetTicks);
+        const float norm = static_cast<float>(clampedTicks) * (1.0f / 8.0f);
 
-        constexpr int kBarY = 112;
-        constexpr int kBarH = 4;
-        constexpr int kBarW = 220;
-        const int barTop = (cv.y0 > kBarY) ? cv.y0 : kBarY;
-        const int barBot = (cv.y1 < kBarY + kBarH) ? cv.y1 : (kBarY + kBarH);
-        if (barTop < barBot) {
-            const auto trackLum =
-                static_cast<uint8_t>((48u * static_cast<uint32_t>(cv.masterAlpha8) + 127u) / 255u);
-            const uint8_t fillLum = cv.masterAlpha8;
-            const uint32_t ticks = (hud.configResetTicks > 8u) ? 8u : hud.configResetTicks;
-            const int fillW = static_cast<int>((ticks * static_cast<uint32_t>(kBarW) + 4u) / 8u);
-            for (int py = barTop; py < barBot; ++py) {
-                uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
-                for (int x = 0; x < kBarW; ++x) {
-                    row[kBodyX + x] = (x < fillW) ? fillLum : trackLum;
+        // 1. Native 2-Row GLOBAL CONFIG List (`y = 44, 72`, `h = 24`, inline bottom hairline)
+        for (size_t r = 0u; r < 2u; ++r) {
+            const int ry = 44 + static_cast<int>(r) * 28;
+            const bool sel = (r == selIdx);
+            if (ry + 28 >= cv.y0 - 2 && ry <= cv.y1 + 2) {
+                if (sel) {
+                    const int fillTop = (ry < cv.y0) ? cv.y0 : ry;
+                    const int fillBot = (ry + 24 > cv.y1) ? cv.y1 : (ry + 24);
+                    const auto fillAlpha = static_cast<uint8_t>(
+                        (28u * static_cast<uint32_t>(cv.masterAlpha8) + 127u) / 255u);
+                    if (fillAlpha > 0u && fillTop < fillBot) {
+                        for (int py = fillTop; py < fillBot; ++py) {
+                            uint8_t* row = cv.lum + static_cast<size_t>(py - cv.y0) * kDisplayWidth;
+                            for (int px = 10; px <= 230; ++px) {
+                                row[px] = blendLum8(row[px], 255u, fillAlpha);
+                            }
+                        }
+                    }
+                }
+                cv.drawSansFlushLeft(kFontSansMedium, 16, ry + 5,
+                                     (r == 0u) ? "Factory Presets" : "Clean Init",
+                                     sel ? 255u : 174u, 0);
+
+                char pctBuf[12]{};
+                const char* rightStr = (r == 0u) ? "RESET >" : "INIT >";
+                uint8_t rightLum = sel ? 196u : 120u;
+                if (sel && isDone) {
+                    rightStr = "DONE";
+                    rightLum = 255u;
+                } else if (sel && clampedTicks > 0u) {
+                    formatPercent(pctBuf, sizeof(pctBuf), norm);
+                    rightStr = pctBuf;
+                    rightLum = 255u;
+                }
+                cv.drawSansRight(kFontSansMedium, 224, ry + 5, rightStr, rightLum, 0);
+
+                if (sel) {
+                    const float yLine = static_cast<float>(ry) + 22.0f;
+                    const float span = kPressMeterX1 - kPressMeterX0;
+                    cv.drawHorizontalFilament(kPressMeterX0, kPressMeterX1, yLine, 40.0f, 0.5f,
+                                              false);
+                    if (norm > 0.001f) {
+                        const float fillEnd = kPressMeterX0 + span * norm;
+                        cv.drawHorizontalFilament(kPressMeterX0, fillEnd, yLine,
+                                                  isDone ? 255.0f : 225.0f, 0.65f, false);
+                        if (!isDone) {
+                            cv.drawOpticalBead(fillEnd, yLine, 0.95f, 1.85f);
+                        }
+                    }
                 }
             }
         }
 
-        cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 158, "SELECT or CCW to cancel", kBodyLum);
-        return;
-    }
+        // 2. Quiet 3-Line Scope Summary (`SOUND`, `SCENES 1-4`, `GLOBAL CONFIG`)
+        cv.drawHorizontalFilament(16.0f, 224.0f, 112.5f, 28.0f, 0.5f, false);
+        if (cv.y1 > 120 && cv.y0 < 182) {
+            constexpr std::array<const char*, 3> kKeys = {"SOUND", "SCENES 1-4", "GLOBAL CONFIG"};
+            const std::array<const char*, 3> vals =
+                (selIdx == 0u) ? std::array<const char*, 3>{"FACTORY", "FACTORY", "RESET"}
+                               : std::array<const char*, 3>{"INIT NO FX", "EMPTY", "KEEP"};
+            for (size_t i = 0u; i < 3u; ++i) {
+                const int sy = 124 + static_cast<int>(i) * 20;
+                cv.drawSansFlushLeft(kFontSansSmall, 16, sy, kKeys[i], 116u, 0);
+                cv.drawSansRight(kFontSansSmall, 224, sy, vals[i], 196u, 0);
+            }
+        }
 
-    if (hud.configSubView == ConfigSubView::FactoryResetDone) {
-        cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 46, "Factory defaults restored", kPrimaryLum);
-        cv.drawSansFlushLeft(kFontSansMedium, kBodyX, 70, "Scenes 1-4 and Config reset", kBodyLum);
+        // 3. Calm Single-Line Footer (`y = 196`, strictly above y = 210 bottom bezel band)
+        if (cv.y1 > 192 && cv.y0 < 210) {
+            cv.drawSansCentered(kFontSansSmall, 120, 196,
+                                isDone ? "APPLIED  /  CCW BACK" : "TURN ALGORITHM CW  /  CCW BACK",
+                                122u, 0);
+        }
         return;
     }
 

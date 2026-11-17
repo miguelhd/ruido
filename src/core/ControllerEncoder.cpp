@@ -8,31 +8,70 @@ namespace ruido {
 void RuidoController::handleConfigEncoder(EncoderId encoder, int32_t ticks,
                                           KnobRate rate) noexcept {
     if (hud_.configSubView != ConfigSubView::List) {
-        if (encoder == EncoderId::Select) {
+        if (isResetConfirmSubView(hud_.configSubView)) {
+            if (encoder == EncoderId::Select) {
+                const int32_t curMode =
+                    (hud_.configSubView == ConfigSubView::CleanInitConfirm) ? 1 : 0;
+                const int32_t nextMode =
+                    stepClampedDetent(curMode, 1, ticks, rate, selectTickAccum_);
+                const ConfigSubView nextView = (nextMode > 0) ? ConfigSubView::CleanInitConfirm
+                                                              : ConfigSubView::FactoryResetConfirm;
+                if (nextView != hud_.configSubView) {
+                    hud_.configSubView = nextView;
+                    hud_.configResetTicks = 0u;
+                    configTickAccum_ = 0;
+                }
+            } else {
+                const int32_t nextAcc = static_cast<int32_t>(configTickAccum_) + ticks;
+                if (nextAcc <= -4) {
+                    exitConfigSubView();
+                } else if (nextAcc >= 8) {
+                    const bool cleanInit = (hud_.configSubView == ConfigSubView::CleanInitConfirm);
+                    if (cleanInit) {
+                        performCleanInit();
+                        hud_.configSubView = ConfigSubView::CleanInitDone;
+                    } else {
+                        performFactoryReset();
+                        hud_.configSubView = ConfigSubView::FactoryResetDone;
+                    }
+                    hud_.configResetTicks = 8u;
+                } else {
+                    configTickAccum_ = static_cast<int8_t>(nextAcc);
+                    hud_.configResetTicks = (nextAcc > 0) ? static_cast<uint8_t>(nextAcc) : 0u;
+                }
+            }
+        } else if (isResetDoneSubView(hud_.configSubView)) {
+            if (encoder == EncoderId::Select) {
+                const int32_t nextSel = static_cast<int32_t>(selectTickAccum_) + ticks;
+                if (hud_.configSubView == ConfigSubView::FactoryResetDone && nextSel >= 4) {
+                    hud_.configSubView = ConfigSubView::CleanInitConfirm;
+                    hud_.configResetTicks = 0u;
+                    configTickAccum_ = 0;
+                    selectTickAccum_ = 0;
+                } else if (hud_.configSubView == ConfigSubView::CleanInitDone && nextSel <= -4) {
+                    hud_.configSubView = ConfigSubView::FactoryResetConfirm;
+                    hud_.configResetTicks = 0u;
+                    configTickAccum_ = 0;
+                    selectTickAccum_ = 0;
+                } else if (nextSel >= 4 || nextSel <= -4) {
+                    exitConfigSubView();
+                } else {
+                    selectTickAccum_ = static_cast<int8_t>(nextSel);
+                }
+            } else {
+                const int32_t nextAcc = static_cast<int32_t>(configTickAccum_) + ticks;
+                if (nextAcc <= -4) {
+                    exitConfigSubView();
+                } else {
+                    configTickAccum_ = static_cast<int8_t>((nextAcc > 0) ? 0 : nextAcc);
+                }
+            }
+        } else if (encoder == EncoderId::Select) {
             const int32_t nextSel = static_cast<int32_t>(selectTickAccum_) + ticks;
             if (nextSel >= 4 || nextSel <= -4) {
                 exitConfigSubView();
             } else {
                 selectTickAccum_ = static_cast<int8_t>(nextSel);
-            }
-        } else if (hud_.configSubView == ConfigSubView::FactoryResetConfirm) {
-            const int32_t nextAcc = static_cast<int32_t>(configTickAccum_) + ticks;
-            if (nextAcc <= -4) {
-                exitConfigSubView();
-            } else if (nextAcc >= 8) {
-                performFactoryReset();
-                hud_.configSubView = ConfigSubView::FactoryResetDone;
-                hud_.configResetTicks = 8u;
-            } else {
-                configTickAccum_ = static_cast<int8_t>(nextAcc);
-                hud_.configResetTicks = (nextAcc > 0) ? static_cast<uint8_t>(nextAcc) : 0u;
-            }
-        } else if (hud_.configSubView == ConfigSubView::FactoryResetDone) {
-            const int32_t nextAcc = static_cast<int32_t>(configTickAccum_) + ticks;
-            if (nextAcc >= 4 || nextAcc <= -4) {
-                exitConfigSubView();
-            } else {
-                configTickAccum_ = static_cast<int8_t>(nextAcc);
             }
         } else {
             const int32_t nextAcc = static_cast<int32_t>(configTickAccum_) + ticks;

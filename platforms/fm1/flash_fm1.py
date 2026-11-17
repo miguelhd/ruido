@@ -82,7 +82,16 @@ def ensure_midi_python() -> pathlib.Path:
     subprocess.run([sys.executable, "-m", "venv", str(VENV_DIR)], check=True)
     venv_py = VENV_DIR / "bin" / "python3"
     subprocess.run(
-        [str(venv_py), "-m", "pip", "install", "--quiet", "mido", "python-rtmidi"],
+        [
+            str(venv_py),
+            "-m",
+            "pip",
+            "install",
+            "--quiet",
+            "--disable-pip-version-check",
+            "mido==1.3.3",
+            "python-rtmidi==1.5.8",
+        ],
         check=True,
     )
     return venv_py

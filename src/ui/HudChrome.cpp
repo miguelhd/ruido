@@ -50,13 +50,6 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
             out.hasHeaderBar = evalKeyPunchHeaderBar(hud, out.headerBarNorm);
         }
         break;
-    case HudMode::GlobalConfig:
-        if (hud.configSubView == ConfigSubView::FactoryResetConfirm) {
-            out.headerBarNorm =
-                clampf(static_cast<float>(hud.configResetTicks) * (1.0f / 8.0f), 0.0f, 1.0f);
-            out.hasHeaderBar = true;
-        }
-        break;
     default:
         break;
     }

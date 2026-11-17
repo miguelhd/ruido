@@ -38,4 +38,4 @@ At `.fwsc` container packaging time (`platforms/fm1/build_fm1.py`), three unmodi
 
 ## 4. Trademarks
 
-"M-VAVE" and "FM-1" are trademarks of their respective owners. "Felucca" and "Hügelton Instruments" are trademarks of Hügelton Instruments. Ruido is an independent open-source firmware project and is not affiliated with, sponsored by, or endorsed by M-VAVE or any third-party trademark holder.
+"M-VAVE" and "FM-1" are trademarks of their respective owners. "Felucca" and "Hügelton Instruments" are trademarks of Hügelton Instruments. All other product, instrument, and integrated-circuit names mentioned in documentation or source comments (including "Korg", "MS-20", "Korg35", "Yamaha", "CS-80", "Roland", "TB-303", "Buchla", and "Soma" / "Lyra-8") are trademarks of their respective owners and are referenced strictly for nominative technical description of analog circuit topologies. Ruido is an independent open-source firmware project and is not affiliated with, sponsored by, or endorsed by M-VAVE or any third-party trademark holder.

@@ -34,3 +34,9 @@ __pycache__/
 *.pyc
 .venv/
 node_modules/
+
+# Local AI agent skills & scratch notes
+.agents/skills/*
+!.agents/skills/.gitkeep
+skills-lock.json
+docs/WEBSITE.md

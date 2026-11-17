@@ -103,6 +103,7 @@ class RuidoController {
     }
     void exitConfigSubView() noexcept;
     void performFactoryReset() noexcept;
+    void performCleanInit() noexcept;
     void handleConfigEncoder(EncoderId encoder, int32_t ticks, KnobRate rate) noexcept;
     void closeAllPages() noexcept;
     void resetPageNav() noexcept;

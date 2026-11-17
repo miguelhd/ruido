@@ -44,6 +44,28 @@ void RuidoController::performFactoryReset() noexcept {
     publishState();
 }
 
+void RuidoController::performCleanInit() noexcept {
+    const bool keepMono = state_.global.monoCollapse;
+    exitConfigSubView();
+    state_ = EngineControlState::makeDefault();
+    state_.global.masterTrim = masterPot_;
+    state_.global.monoCollapse = keepMono;
+    hud_.keyboardModel = KeyboardModel::LiveMixer;
+    hud_.homeTarget = HomeTarget::Frequency;
+    editRememberPan_ = false;
+    keyboard_.reset();
+    keyboard_.syncConfig(hud_.config);
+    snapshots_.resetEmpty(state_);
+    snapshots_.syncHud(hud_);
+    ledSmooth_.reset(state_);
+    savedSlotMask_ = 0x0Fu;
+    settingsDirty_ = true;
+    livePatchDirty_ = true;
+    (void)syncClockState();
+    keyboard_.evaluate(state_, hud_);
+    publishState();
+}
+
 void RuidoController::closeAllPages() noexcept {
     exitConfigSubView();
     hud_.homeTarget = HomeTarget::Frequency;

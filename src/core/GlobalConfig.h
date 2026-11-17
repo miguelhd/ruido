@@ -52,9 +52,19 @@ inline constexpr char kRuidoPackageIdStr[] = RUIDO_PACKAGE_ID_STR;
 enum class ConfigSubView : uint8_t {
     List = 0,
     FactoryResetConfirm = 1,
-    FactoryResetDone = 2,
-    Credits = 3,
+    CleanInitConfirm = 2,
+    FactoryResetDone = 3,
+    CleanInitDone = 4,
+    Credits = 5,
 };
+
+constexpr bool isResetConfirmSubView(ConfigSubView v) noexcept {
+    return v == ConfigSubView::FactoryResetConfirm || v == ConfigSubView::CleanInitConfirm;
+}
+
+constexpr bool isResetDoneSubView(ConfigSubView v) noexcept {
+    return v == ConfigSubView::FactoryResetDone || v == ConfigSubView::CleanInitDone;
+}
 
 // Scalable descriptor IDs for the right-panel GLO vertical GLOBAL CONFIG list menu.
 enum class ConfigItemId : uint8_t {

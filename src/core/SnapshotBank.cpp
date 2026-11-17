@@ -104,6 +104,17 @@ void SnapshotBank::reset() noexcept {
     knobMorphActive_ = false;
 }
 
+void SnapshotBank::resetEmpty(EngineControlState& state) noexcept {
+    const PatchSnapshot emptySnap = makeEmptyPatchSnapshot();
+    for (size_t s = 0u; s < kNumSnapshots; ++s) {
+        slots_[s] = emptySnap;
+    }
+    prevHeld_ = {false, false, false, false};
+    presetsCoarseAccum_ = 0;
+    glideArcDir_ = 0;
+    selectActiveSlotImmediate(0u, state);
+}
+
 uint8_t SnapshotBank::occupiedMask() const noexcept {
     uint8_t mask = 0u;
     for (size_t s = 0u; s < kNumSnapshots; ++s) {

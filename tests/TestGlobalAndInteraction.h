@@ -770,18 +770,16 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
     verifyViewStripsAndCenter(false);
     {
-        uint32_t resetWhiteCols = 0u;
-        uint32_t resetTrackCols = 0u;
-        for (size_t x = 10u; x < 230u; ++x) {
-            const uint16_t px = s16[113u * 240u + x];
-            if (px == 0xFFFFu) {
-                ++resetWhiteCols;
-            } else if (px != 0u) {
-                ++resetTrackCols;
-            }
+        // Inline row hairline at y = 66 (44 + 22) is lit on left half (50%) and dim on right half
+        uint32_t leftLumSum = 0u;
+        uint32_t rightLumSum = 0u;
+        for (size_t x = 20u; x < 112u; ++x) {
+            leftLumSum += (s16[66u * 240u + x] & 0x1Fu);
         }
-        RTEST_CHECK(resetWhiteCols == 110u);
-        RTEST_CHECK(resetWhiteCols + resetTrackCols == 220u);
+        for (size_t x = 128u; x < 220u; ++x) {
+            rightLumSum += (s16[66u * 240u + x] & 0x1Fu);
+        }
+        RTEST_CHECK(leftLumSum > rightLumSum * 3u);
         RTEST_CHECK(s16[120u * 240u + 4u] == 0u); // Zero background scope flatline bleed
     }
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -8); // CCW cancels back to list safely
@@ -813,6 +811,84 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(ctrl.consumeSettingsDirty());
     renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
     verifyViewStripsAndCenter(false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::List);
+
+    // 7a-bis. CLEAN INIT selector inside Factory Reset: SELECT switches mode (resetting progress),
+    //         restores original startup sound (55/82.41/110.15/164.81 Hz, 50% duty, open filters,
+    //         0% LFOs), clears Scenes 1-4 to EMPTY, and preserves GLOBAL CONFIG (Output Routing,
+    //         MIDI Channel, Key Sensitivity)!
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, -28); // Row 0: Output Routing
+    RTEST_CHECK(ctrl.hud().configCursor == 0u);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // Set Output Routing = MONO
+    RTEST_CHECK(ctrl.state().global.monoCollapse);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 24); // Row 6: MIDI Channel In
+    RTEST_CHECK(ctrl.hud().configCursor == 6u);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 12); // Set MIDI Channel = CH 3
+    RTEST_CHECK(ctrl.hud().config.midiChannel == 3u);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // Row 7: Factory Reset
+    RTEST_CHECK(ctrl.hud().configCursor == 7u);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // Enter Factory Reset
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetConfirm);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // Half-arm (4 ticks = 50%)
+    RTEST_CHECK(ctrl.hud().configResetTicks == 4u);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // Switch to CLEAN INIT -> resets progress!
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::CleanInitConfirm);
+    RTEST_CHECK(ctrl.hud().configResetTicks == 0u);
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+    verifyViewStripsAndCenter(false);
+    (void)ctrl.consumeSavedSlotMask();
+    (void)ctrl.consumeSettingsDirty();
+    (void)ctrl.consumeLivePatchDirty();
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8); // 2 CW detents -> confirm CLEAN INIT!
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::CleanInitDone);
+    RTEST_CHECK(ctrl.snapshots().occupiedMask() == 0x00u);
+    RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == 0x00u);
+    RTEST_CHECK(ctrl.consumeSavedSlotMask() == 0x0Fu);
+    RTEST_CHECK(ctrl.consumeSettingsDirty());
+    RTEST_CHECK(ctrl.consumeLivePatchDirty());
+    RTEST_CHECK(ctrl.state().global.monoCollapse);
+    RTEST_CHECK(ctrl.hud().config.midiChannel == 3u);
+    RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, 55.0f, 0.05f));
+    RTEST_CHECK(nearF(ctrl.state().voices[1].frequencyHz, 82.41f, 0.08f));
+    RTEST_CHECK(nearF(ctrl.state().voices[2].frequencyHz, 110.15f, 0.08f));
+    RTEST_CHECK(nearF(ctrl.state().voices[3].frequencyHz, 164.81f, 0.12f));
+    for (size_t v = 0u; v < 4u; ++v) {
+        RTEST_CHECK(nearF(ctrl.state().voices[v].pulseWidth, 0.50f, 1.0e-3f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].hpCutoffHz, ruido::kFilterCutoffMinHz, 0.05f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].lpCutoffHz, ruido::kFilterCutoffMaxHz, 10.0f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].hpResonance, 0.0f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].lpResonance, 0.0f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].lfoDepth, 0.0f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].lfoBDepth, 0.0f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].amplitude, 0.65f, 1.0e-3f));
+    }
+    RTEST_CHECK(nearF(ctrl.state().global.circuitCoupling, 0.25f, 1.0e-3f));
+    renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
+    verifyViewStripsAndCenter(false);
+    // Verify NVS cold-reboot round-trip preserves empty Scenes 1-4 + startup sound + Global Config!
+    {
+        ruido::RuidoController rebootCtrl;
+        for (uint8_t s = 0u; s < 4u; ++s) {
+            RTEST_CHECK(rebootCtrl.loadSnapshotSlot(s, ctrl.snapshots().slotBinary(s)));
+        }
+        RTEST_CHECK(rebootCtrl.loadSettings(ctrl.exportSettings()));
+        RTEST_CHECK(rebootCtrl.loadLivePatch(ctrl.exportLivePatch()));
+        RTEST_CHECK(rebootCtrl.snapshots().occupiedMask() == 0x00u);
+        RTEST_CHECK(rebootCtrl.state().global.monoCollapse);
+        RTEST_CHECK(rebootCtrl.hud().config.midiChannel == 3u);
+        RTEST_CHECK(nearF(rebootCtrl.state().voices[0].frequencyHz, 55.0f, 0.05f));
+        RTEST_CHECK(nearF(rebootCtrl.state().voices[3].frequencyHz, 164.81f, 0.12f));
+    }
+    // Restore Factory Defaults cleanly before proceeding to Credits test
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -4); // CCW BACK: Exit CleanInitDone -> List
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::List);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // Enter Factory Reset
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8); // Confirm Factory Presets
+    RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetDone);
+    RTEST_CHECK(ctrl.snapshots().occupiedMask() == 0x0Fu);
+    RTEST_CHECK(!ctrl.state().global.monoCollapse);
+    RTEST_CHECK(ctrl.hud().config.midiChannel == 0u);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::List);
 

@@ -39,8 +39,6 @@ constexpr int minHeaderBarSlotWidth(const HudState& hud) noexcept {
     case HudMode::RailCoupling:
     case HudMode::VoicePressure:
         return kPctSlotW;
-    case HudMode::GlobalConfig:
-        return (hud.configSubView == ConfigSubView::FactoryResetConfirm) ? kPctSlotW : 0;
     case HudMode::MasterTempo:
         return hud.midiClockSynced ? kBpmExtSlotW : kBpmSlotW;
     case HudMode::ScopeTimebase:
@@ -375,15 +373,15 @@ void prepareHudHeader(PreparedHudHeader& out, const EngineControlState& control,
     case HudMode::GlobalConfig: {
         switch (hud.configSubView) {
         case ConfigSubView::FactoryResetConfirm:
-            appendStr(out.leftMain, 0u, sizeof(out.leftMain), "FACTORY RESET");
-            headerBarNorm =
-                clampf(static_cast<float>(hud.configResetTicks) * (1.0f / 8.0f), 0.0f, 1.0f);
-            formatPercent(out.rightText, sizeof(out.rightText), headerBarNorm);
-            break;
+        case ConfigSubView::CleanInitConfirm:
         case ConfigSubView::FactoryResetDone:
+        case ConfigSubView::CleanInitDone: {
             appendStr(out.leftMain, 0u, sizeof(out.leftMain), "FACTORY RESET");
-            appendStr(out.rightText, 0u, sizeof(out.rightText), "DONE");
+            const bool secondRow = (hud.configSubView == ConfigSubView::CleanInitConfirm ||
+                                    hud.configSubView == ConfigSubView::CleanInitDone);
+            appendStr(out.rightText, 0u, sizeof(out.rightText), secondRow ? "2 / 2" : "1 / 2");
             break;
+        }
         case ConfigSubView::Credits: {
             appendStr(out.leftMain, 0u, sizeof(out.leftMain), "CREDITS");
             size_t p = appendStr(out.rightText, 0u, sizeof(out.rightText), "v");
@@ -583,11 +581,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const PreparedHudHeader&
             dstCv.drawOpticalBead(barXf + barNorm * barWf, 13.5f, 0.95f, 2.1f);
         } else if (prep.rightText[0] != '\0') {
             if (prep.isStepBadgeText) {
-                const uint8_t rightLum = (hud.mode == HudMode::GlobalConfig &&
-                                          hud.configSubView == ConfigSubView::FactoryResetConfirm)
-                                             ? 255u
-                                             : 174u;
-                dstCv.drawSansRight(kFontSansMedium, 230, 6, prep.rightText, rightLum, 0);
+                dstCv.drawSansRight(kFontSansMedium, 230, 6, prep.rightText, 174u, 0);
             } else {
                 dstCv.drawSansRight(kFontSansSmall, 230, 6, prep.rightText, 168u, 1);
             }

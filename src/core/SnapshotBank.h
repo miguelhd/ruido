@@ -77,6 +77,10 @@ class SnapshotBank {
 
     void reset() noexcept;
 
+    // Clear all 4 Scene slots to CRC-valid `EMPTY` markers and apply
+    // `EngineControlState::makeDefault()`.
+    void resetEmpty(EngineControlState& state) noexcept;
+
     uint8_t activeSlot() const noexcept { return activeSlot_; }
     bool isSlotOccupied(size_t idx) const noexcept {
         return isPatchSnapshotOccupied(slots_[idx & 3u]);
