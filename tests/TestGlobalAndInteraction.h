@@ -898,7 +898,7 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(ctrl.hud().configCursor == 8u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::Credits), "About") ==
                 0);
-    RTEST_CHECK(std::strcmp(ruido::kRuidoVersionStr, "0.7.0") == 0);
+    RTEST_CHECK(std::strcmp(ruido::kRuidoVersionStr, "0.7.1") == 0);
     RTEST_CHECK(ruido::measureSansText(ruido::kFontSansMedium, "Hern\xC3\xA1ndez", 0) ==
                 ruido::measureSansText(ruido::kFontSansMedium, "Hernandez", 0));
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
