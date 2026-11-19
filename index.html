@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=17">
+  <link rel="stylesheet" href="styles.css?v=18">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -918,7 +918,6 @@
         let virtualX = 0;
         let tailX = 0;
         let smoothSpeed = 0;
-        let lastDir = 1;
         let isSweeping = false;
         let rafId = 0;
         let lastTime = 0;
@@ -953,9 +952,6 @@
           // 1 screen height scrolled = 280 desktop-equivalent beam units on every screen width
           const dEquiv = (dy / viewportH) * 280;
           virtualX += dEquiv;
-          if (Math.abs(dEquiv) > 0.04) {
-            lastDir = dEquiv >= 0 ? 1 : -1;
-          }
 
           const instSpeed = (Math.abs(dEquiv) * 1000) / dt;
           smoothSpeed += (instSpeed - smoothSpeed) * (1 - Math.exp(-dt / 32));
@@ -970,18 +966,14 @@
             stopSweeping();
           }
 
-          // Direct 1-pole RC wake (zero deadzone & zero double-filter lag so dot never moves without its tail)
+          // 1-pole RC wake with C1 quadratic soft-knee at zero (zero slope at 0 = never dances or snaps on reversal)
           const tau = isSweeping ? 150 : 240;
           const alpha = 1 - Math.exp(-dt / tau);
           tailX += (virtualX - tailX) * alpha;
           const wake = virtualX - tailX;
           const wakeMag = Math.abs(wake);
-          const dir = wakeMag > 0.08 ? Math.sign(wake) : lastDir;
-
-          // Concave response curve so even gentle scrolls immediately show a visible tapered tail
-          const minActiveMag = isSweeping ? 0.14 : 0;
-          const curvedMag = Math.tanh(Math.pow(wakeMag / 14, 0.68) * 1.35);
-          const tearScale = dir * Math.max(minActiveMag, curvedMag);
+          const softWake = (wake * wakeMag) / (wakeMag + 1.4);
+          const tearScale = Math.tanh(softWake * 0.14);
           if (tear) {
             tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
           }
@@ -1009,12 +1001,10 @@
             lastScrollTime = now;
             syncFallbackPosition();
             if (Math.abs(delta) >= 0.5) {
-              lastDir = delta >= 0 ? 1 : -1;
               lastActiveScrollY = scrollY;
               lastMoveTime = now;
               if (!isSweeping) {
                 isSweeping = true;
-                if (tear) tear.style.transform = `scaleX(${(lastDir * 0.16).toFixed(4)})`;
                 sweep.classList.add("is-sweeping");
               }
             }
@@ -1200,18 +1190,31 @@
         return;
       }
 
-      // Scale duration smoothly with distance (~600ms short hops up to ~1180ms full-page glides)
-      const duration = Math.min(1180, Math.max(600, 460 + Math.sqrt(distance) * 8.8));
+      // Safari trackpad inertial coast curve: cubic-bezier(0.25, 0.95, 0.32, 1)
+      const duration = Math.min(1300, Math.max(700, 480 + Math.sqrt(distance) * 9.5));
       const startTime = performance.now();
       root.style.scrollBehavior = "auto";
 
-      // Gentle ease-in from rest + long, cushioned deceleration landing
-      const easeGlide = (t) => 0.5 - 0.5 * Math.cos(Math.PI * Math.pow(t, 0.82));
+      const easeSafariCoast = (t) => {
+        const cx = 0.75;
+        const bx = -0.54;
+        const ax = 0.79;
+        const cy = 2.85;
+        const by = -2.64;
+        const ay = 0.79;
+        let s = t;
+        for (let i = 0; i < 6; i++) {
+          const xs = ((ax * s + bx) * s + cx) * s - t;
+          const dx = (3 * ax * s + 2 * bx) * s + cx;
+          s -= xs / dx;
+        }
+        return ((ay * s + by) * s + cy) * s;
+      };
 
       const step = (now) => {
         if (token !== activeScrollToken) return;
         const t = Math.min(1, (now - startTime) / duration);
-        const eased = easeGlide(t);
+        const eased = easeSafariCoast(t);
         window.scrollTo(0, startY + deltaY * eased);
 
         if (t < 1) {
