@@ -157,21 +157,19 @@
     min-block-size: 28px;
     flex-shrink: 0;
     translate: 0 0;
-    transition: color 0.14s ease-out, text-shadow 0.14s ease-out, translate 0.12s ease-out;
+    transition: color 0.14s ease-out, translate 0.08s ease-out;
   }
 
-  @media (hover: hover) {
-    .brand-mark:hover {
-      color: var(--white);
-      text-shadow: 0 0 10px rgba(255, 255, 255, 0.28);
-    }
+  .brand-mark:hover {
+    color: var(--white);
+    text-decoration: underline;
+    text-underline-offset: 4px;
   }
 
-  .brand-mark:active {
-    transition-duration: 35ms;
-
-    @media (prefers-reduced-motion: no-preference) {
+  @media (prefers-reduced-motion: no-preference) {
+    .brand-mark:active {
       translate: 0 1px;
+      transition-duration: 26ms;
     }
   }
 
@@ -184,7 +182,7 @@
   .header-links {
     display: inline-flex;
     align-items: center;
-    gap: clamp(0.2rem, 1vw, 0.35rem);
+    gap: clamp(0.3rem, 1.2vw, 0.5rem);
     font-family: var(--font-mono);
     font-size: 0.625rem;
     letter-spacing: 0.06em;
@@ -195,37 +193,22 @@
   .header-links a {
     display: inline-flex;
     align-items: center;
-    min-block-size: 26px;
-    padding-inline: 0.18rem;
-    border: 1px solid transparent;
+    min-block-size: 28px;
+    padding-inline: 0.15rem;
     translate: 0 0;
-    transition:
-      color 0.14s ease-out,
-      background-color 0.14s ease-out,
-      border-color 0.14s ease-out,
-      translate 0.12s ease-out;
-
-    @media (min-width: 520px) {
-      padding-inline: 0.35rem;
-    }
+    transition: color 0.14s ease-out, translate 0.08s ease-out;
   }
 
-  @media (hover: hover) {
-    .header-links a:hover {
-      color: var(--white);
-      background-color: var(--subpanel);
-      border-color: var(--border);
-    }
-  }
-
-  .header-links a:active {
+  .header-links a:hover {
     color: var(--white);
-    background-color: var(--panel);
-    border-color: var(--border-active);
-    transition-duration: 35ms;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
 
-    @media (prefers-reduced-motion: no-preference) {
+  @media (prefers-reduced-motion: no-preference) {
+    .header-links a:active {
       translate: 0 1px;
+      transition-duration: 26ms;
     }
   }
 
@@ -235,45 +218,49 @@
     justify-content: center;
     min-block-size: 26px;
     padding: 0.25rem 0.625rem;
-    background-color: #e4e4e4;
+    background-color: var(--fg);
     color: var(--ground);
     border: 1px solid var(--fg);
-    box-shadow: 0 2px 0 #4a4a4a;
     font-family: var(--font-mono);
     font-size: 0.625rem;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+    text-decoration: none;
     flex-shrink: 0;
     translate: 0 0;
     transition:
-      background-color 0.13s ease-out,
-      border-color 0.13s ease-out,
-      box-shadow 0.13s ease-out,
-      translate 0.13s ease-out;
+      background-color 140ms cubic-bezier(0, 0, 0.2, 1),
+      color 140ms cubic-bezier(0, 0, 0.2, 1),
+      border-color 140ms cubic-bezier(0, 0, 0.2, 1),
+      box-shadow 140ms cubic-bezier(0, 0, 0.2, 1),
+      text-shadow 140ms cubic-bezier(0, 0, 0.2, 1),
+      translate 80ms ease-out;
   }
 
-  @media (hover: hover) {
-    .btn-flash-sm:hover {
-      background-color: var(--white);
-      border-color: var(--white);
-      box-shadow:
-        0 3px 0 #737373,
-        0 0 14px rgba(255, 255, 255, 0.26);
-
-      @media (prefers-reduced-motion: no-preference) {
-        translate: 0 -1px;
-      }
-    }
+  .btn-flash-sm:hover {
+    background-color: var(--panel);
+    color: var(--white);
+    border-color: var(--white);
+    text-decoration: none;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
+    box-shadow:
+      0 2px 0 var(--white),
+      0 0 14px rgba(255, 255, 255, 0.22);
   }
 
   .btn-flash-sm:active {
-    background-color: #cfcfcf;
-    border-color: #cfcfcf;
-    box-shadow: 0 0 0 #4a4a4a;
-    transition-duration: 35ms;
+    background-color: #1f1f1f;
+    color: var(--white);
+    border-color: var(--white);
+    box-shadow:
+      0 0 0 var(--white),
+      0 0 20px rgba(255, 255, 255, 0.35);
+    transition-duration: 26ms;
+  }
 
-    @media (prefers-reduced-motion: no-preference) {
+  @media (prefers-reduced-motion: no-preference) {
+    .btn-flash-sm:active {
       translate: 0 2px;
     }
   }
@@ -367,40 +354,23 @@
   }
 
   .index-list a {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    min-block-size: 28px;
-    padding-inline: 0.45rem;
-    margin-inline: -0.45rem;
-    border: 1px solid transparent;
+    min-block-size: 26px;
     translate: 0 0;
-    transition:
-      color 0.14s ease-out,
-      background-color 0.14s ease-out,
-      border-color 0.14s ease-out,
-      translate 0.12s ease-out;
+    transition: color 0.14s ease-out, translate 0.08s ease-out;
   }
 
-  @media (hover: hover) {
-    .index-list a:hover {
-      color: var(--white);
-      background-color: var(--subpanel);
-      border-color: var(--border);
-
-      @media (prefers-reduced-motion: no-preference) {
-        translate: 2px 0;
-      }
-    }
-  }
-
-  .index-list a:active {
+  .index-list a:hover {
     color: var(--white);
-    background-color: var(--ground);
-    border-color: var(--border-active);
-    transition-duration: 35ms;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 
-    @media (prefers-reduced-motion: no-preference) {
-      translate: 2px 1px;
+  @media (prefers-reduced-motion: no-preference) {
+    .index-list a:active {
+      translate: 0 1px;
+      transition-duration: 26ms;
     }
   }
 
@@ -432,38 +402,25 @@
     display: inline-flex;
     align-items: center;
     min-block-size: 24px;
-    padding-inline: 0.4rem;
-    margin-inline-end: -0.4rem;
-    border: 1px solid transparent;
     font-family: var(--font-mono);
     font-size: 0.625rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--muted);
     translate: 0 0;
-    transition:
-      color 0.14s ease-out,
-      background-color 0.14s ease-out,
-      border-color 0.14s ease-out,
-      translate 0.12s ease-out;
+    transition: color 0.14s ease-out, translate 0.08s ease-out;
   }
 
-  @media (hover: hover) {
-    .return-link:hover {
-      color: var(--white);
-      background-color: var(--subpanel);
-      border-color: var(--border);
-    }
-  }
-
-  .return-link:active {
+  .return-link:hover {
     color: var(--white);
-    background-color: var(--panel);
-    border-color: var(--border-active);
-    transition-duration: 35ms;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 
-    @media (prefers-reduced-motion: no-preference) {
+  @media (prefers-reduced-motion: no-preference) {
+    .return-link:active {
       translate: 0 1px;
+      transition-duration: 26ms;
     }
   }
 
@@ -510,17 +467,15 @@
       background-color 0.12s ease-out;
   }
 
-  @media (hover: hover) {
-    .inline-link:hover {
-      color: var(--white);
-      text-decoration-color: var(--white);
-      text-decoration-thickness: 2px;
-    }
+  .inline-link:hover {
+    color: var(--white);
+    text-decoration: underline;
+    text-decoration-color: var(--white);
   }
 
   .inline-link:active {
     background-color: rgba(255, 255, 255, 0.14);
-    transition-duration: 35ms;
+    transition-duration: 26ms;
   }
 
   /* Stacked Cards & Lists */
@@ -958,44 +913,48 @@
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    background-color: #e4e4e4;
+    background-color: var(--fg);
     color: var(--ground);
     border: 1px solid var(--fg);
-    box-shadow: 0 3px 0 #4a4a4a;
     font-family: var(--font-mono);
     font-size: 0.75rem;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
+    text-decoration: none;
     translate: 0 0;
     transition:
-      background-color 0.13s ease-out,
-      border-color 0.13s ease-out,
-      box-shadow 0.13s ease-out,
-      translate 0.13s ease-out;
+      background-color 140ms cubic-bezier(0, 0, 0.2, 1),
+      color 140ms cubic-bezier(0, 0, 0.2, 1),
+      border-color 140ms cubic-bezier(0, 0, 0.2, 1),
+      box-shadow 140ms cubic-bezier(0, 0, 0.2, 1),
+      text-shadow 140ms cubic-bezier(0, 0, 0.2, 1),
+      translate 80ms ease-out;
   }
 
-  @media (hover: hover) {
-    .btn-block-primary:hover {
-      background-color: var(--white);
-      border-color: var(--white);
-      box-shadow:
-        0 4px 0 #737373,
-        0 0 18px rgba(255, 255, 255, 0.24);
-
-      @media (prefers-reduced-motion: no-preference) {
-        translate: 0 -1px;
-      }
-    }
+  .btn-block-primary:hover {
+    background-color: var(--panel);
+    color: var(--white);
+    border-color: var(--white);
+    text-decoration: none;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
+    box-shadow:
+      0 3px 0 var(--white),
+      0 0 18px rgba(255, 255, 255, 0.24);
   }
 
   .btn-block-primary:active {
-    background-color: #cfcfcf;
-    border-color: #cfcfcf;
-    box-shadow: 0 0 0 #4a4a4a;
-    transition-duration: 35ms;
+    background-color: #1f1f1f;
+    color: var(--white);
+    border-color: var(--white);
+    box-shadow:
+      0 0 0 var(--white),
+      0 0 22px rgba(255, 255, 255, 0.36);
+    transition-duration: 26ms;
+  }
 
-    @media (prefers-reduced-motion: no-preference) {
+  @media (prefers-reduced-motion: no-preference) {
+    .btn-block-primary:active {
       translate: 0 3px;
     }
   }
@@ -1126,32 +1085,21 @@
     display: inline-flex;
     align-items: center;
     min-block-size: 24px;
-    padding-inline: 0.3rem;
-    border: 1px solid transparent;
+    padding-inline: 0.15rem;
     translate: 0 0;
-    transition:
-      color 0.14s ease-out,
-      background-color 0.14s ease-out,
-      border-color 0.14s ease-out,
-      translate 0.12s ease-out;
+    transition: color 0.14s ease-out, translate 0.08s ease-out;
   }
 
-  @media (hover: hover) {
-    .footer-nav a:hover {
-      color: var(--white);
-      background-color: var(--subpanel);
-      border-color: var(--border);
-    }
-  }
-
-  .footer-nav a:active {
+  .footer-nav a:hover {
     color: var(--white);
-    background-color: var(--panel);
-    border-color: var(--border-active);
-    transition-duration: 35ms;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 
-    @media (prefers-reduced-motion: no-preference) {
+  @media (prefers-reduced-motion: no-preference) {
+    .footer-nav a:active {
       translate: 0 1px;
+      transition-duration: 26ms;
     }
   }
 
