@@ -11,7 +11,7 @@
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://miguelhd.github.io/ruido/">
   <meta property="og:title" content="Ruido User Guide | M-VAVE FM-1 Field Manual">
-  <meta property="og:description" content="Practical field manual for playing, shaping, and patching Ruido on your unmodified M-VAVE FM-1 synthesizer.">
+  <meta property="og:description" content="Practical field manual for playing, shaping, and patching Ruido on your M-VAVE FM-1 synthesizer.">
   <meta property="og:image" content="https://miguelhd.github.io/ruido/assets/images/Ruido-FM-1.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://miguelhd.github.io/ruido/assets/images/Ruido-FM-1.png">
@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -55,7 +55,7 @@
           <li><a class="nav-link" href="#ch-11">FAQ</a></li>
           <li class="nav-sep" aria-hidden="true">·</li>
           <li><a class="nav-link" href="#credits">CREDITS</a></li>
-          <li class="nav-cta"><a class="btn-flash-sm" href="#flasher">[ INSTALL ]</a></li>
+          <li class="nav-cta"><a class="btn-flash-sm" href="#flasher">[ INSTALL FIRMWARE ]</a></li>
         </ul>
       </nav>
     </div>
@@ -720,9 +720,9 @@
     <!-- BOTTOM INSTALL CTA BLOCK -->
     <section class="cta-section" id="flasher">
       <div class="eyebrow eyebrow--muted">FIRMWARE INSTALLATION</div>
-      <h2 class="cta-heading">READY TO PLAY RUIDO ON YOUR FM-1?</h2>
+      <h2 class="cta-heading">READY TO PLAY RUIDO?</h2>
       <p class="cta-copy">
-        Install Ruido directly onto your unmodified M-VAVE FM-1 from your browser over USB-C via The Firmware Hub. No command-line tools required.
+        Install Ruido directly onto your M-VAVE FM-1 from your browser over USB-C via The Firmware Hub. No command-line tools required.
       </p>
       <div class="cta-actions">
         <a class="btn-block-primary" href="https://thefirmwarehub.com/firmware/ruido/" target="_blank" rel="noopener noreferrer">
@@ -733,56 +733,58 @@
     </section>
 
     <!-- PRODUCTION CREDITS, OPEN-SOURCE LINEAGE & SAFETY -->
-    <section class="credits-section" id="credits">
-      <div class="chapter-bar">
-        <h2 class="chapter-heading">CREDITS &amp; OPEN SOURCE</h2>
-        <a class="return-link" href="#top">↑ TOP</a>
-      </div>
+    <section class="credits-section" id="credits" aria-label="Credits and Open Source">
+      <details class="faq-item credits-accordion" id="credits-details">
+        <summary class="faq-summary">
+          <span>CREDITS &amp; OPEN SOURCE</span>
+          <span class="faq-icon" aria-hidden="true">+</span>
+        </summary>
 
-      <div class="credits-card">
-        <!-- Author -->
-        <div class="credits-block">
-          <span class="credits-label">AUTHOR &amp; LICENSE</span>
-          <p class="prose">
-            Ruido v0.7.2 (package ID <code>FM-1_312</code>) is created by
-            <a class="inline-link" href="https://miguelhd.com" target="_blank" rel="noopener noreferrer">Miguel Hernández Domenech</a>
-            and released as open-source software under the
-            <a class="inline-link" href="https://github.com/miguelhd/ruido" target="_blank" rel="noopener noreferrer">GNU General Public License v3.0 (GPL-3.0-only)</a>.
-          </p>
-        </div>
+        <div class="faq-answer credits-body">
+          <!-- Author -->
+          <div class="credits-block">
+            <span class="credits-label">AUTHOR &amp; LICENSE</span>
+            <p class="prose">
+              Ruido v0.7.2 (package ID <code>FM-1_312</code>) is created by
+              <a class="inline-link" href="https://miguelhd.com" target="_blank" rel="noopener noreferrer">Miguel Hernández Domenech</a>
+              and released as open-source software under the
+              <a class="inline-link" href="https://github.com/miguelhd/ruido" target="_blank" rel="noopener noreferrer">GNU General Public License v3.0 (GPL-3.0-only)</a>.
+            </p>
+          </div>
 
-        <!-- Open-Source Lineage -->
-        <div class="credits-block">
-          <span class="credits-label">OPEN-SOURCE FOUNDATIONS</span>
-          <ul class="credits-list" role="list">
-            <li class="credits-item">
-              <div class="credits-item-head">
-                <span><strong>Felucca &amp; Dinghy FM-1 Platform</strong></span>
-                <span class="license-chip">GPL-3.0-ONLY</span>
-              </div>
-              <span>Hardware HAL, Hold <kbd class="keycap">[OCT-]</kbd> USB rescue, <code>FELUCCA-LOADER-1</code> updater, USB audio/MIDI, and <code>.fwsc</code> packaging by Leo Kuroshita (<a class="inline-link" href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener noreferrer">Felucca</a> / Hügelton Instruments), packaged in <a class="inline-link" href="https://github.com/zvenson/dinghy" target="_blank" rel="noopener noreferrer">Dinghy</a> by zvenson (<code>platform.c</code>, <code>store.h</code>) with USB audio &amp; TRS MIDI fixes from SLOOP (isod89) and Felucca [Salt] (ChanceTheMaker).</span>
-            </li>
-            <li class="credits-item">
-              <div class="credits-item-head">
-                <span><strong>JieLi AC79NN Boot &amp; EQ Blobs</strong></span>
-                <span class="license-chip">APACHE-2.0</span>
-              </div>
-              <span>Unmodified <code>uboot.boot</code>, <code>cfg_tool.bin</code>, and <code>eq_cfg_hw.bin</code> container blobs from <code>fw-AC79_AIoT_SDK</code> (Copyright © JieLi Tech).</span>
-            </li>
-          </ul>
-        </div>
+          <!-- Open-Source Lineage -->
+          <div class="credits-block">
+            <span class="credits-label">OPEN-SOURCE FOUNDATIONS</span>
+            <ul class="credits-list" role="list">
+              <li class="credits-item">
+                <div class="credits-item-head">
+                  <span><strong>Felucca &amp; Dinghy FM-1 Platform</strong></span>
+                  <span class="license-chip">GPL-3.0-ONLY</span>
+                </div>
+                <span>Hardware HAL, Hold <kbd class="keycap">[OCT-]</kbd> USB rescue, <code>FELUCCA-LOADER-1</code> updater, USB audio/MIDI, and <code>.fwsc</code> packaging by Leo Kuroshita (<a class="inline-link" href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener noreferrer">Felucca</a> / Hügelton Instruments), packaged in <a class="inline-link" href="https://github.com/zvenson/dinghy" target="_blank" rel="noopener noreferrer">Dinghy</a> by zvenson (<code>platform.c</code>, <code>store.h</code>) with USB audio &amp; TRS MIDI fixes from SLOOP (isod89) and Felucca [Salt] (ChanceTheMaker).</span>
+              </li>
+              <li class="credits-item">
+                <div class="credits-item-head">
+                  <span><strong>JieLi AC79NN Boot &amp; EQ Blobs</strong></span>
+                  <span class="license-chip">APACHE-2.0</span>
+                </div>
+                <span>Unmodified <code>uboot.boot</code>, <code>cfg_tool.bin</code>, and <code>eq_cfg_hw.bin</code> container blobs from <code>fw-AC79_AIoT_SDK</code> (Copyright © JieLi Tech).</span>
+              </li>
+            </ul>
+          </div>
 
-        <!-- Hearing Safety & Trademarks -->
-        <div class="credits-block">
-          <span class="credits-label">SAFETY &amp; TRADEMARK NOTICE</span>
-          <p class="legal-fineprint">
-            Start with <kbd class="keycap-knob">(MASTER)</kbd> turned low before connecting headphones or studio monitors. Provided "as is" without warranty under GPL-3.0-only.
-          </p>
-          <p class="legal-fineprint">
-            "M-VAVE" and "FM-1" are trademarks of their respective owners. Ruido is an independent open-source project and is not affiliated with, sponsored by, or endorsed by M-VAVE or any third-party trademark holder.
-          </p>
+          <!-- Hearing Safety & Trademarks -->
+          <div class="credits-block">
+            <span class="credits-label">SAFETY &amp; TRADEMARK NOTICE</span>
+            <p class="legal-fineprint">
+              Start with <kbd class="keycap-knob">(MASTER)</kbd> turned low before connecting headphones or studio monitors. Provided "as is" without warranty under GPL-3.0-only.
+            </p>
+            <p class="legal-fineprint">
+              "M-VAVE" and "FM-1" are trademarks of their respective owners. Ruido is an independent open-source project and is not affiliated with, sponsored by, or endorsed by M-VAVE or any third-party trademark holder.
+            </p>
+          </div>
         </div>
-      </div>
+      </details>
     </section>
   </main>
 
@@ -1139,6 +1141,11 @@
       }
     });
 
+    const creditsDetails = document.getElementById("credits-details");
+    if (window.location.hash === "#credits" && creditsDetails) {
+      creditsDetails.open = true;
+    }
+
     document.addEventListener("click", (event) => {
       const link = event.target.closest('a[href^="#"]');
       if (!link) return;
@@ -1156,6 +1163,16 @@
         }
       }
 
+      // Auto-expand Credits accordion when navigating directly to #credits via header/footer links
+      if (hash === "#credits" && creditsDetails && !creditsDetails.open) {
+        if (creditsDetails._faqAnim) {
+          creditsDetails._faqAnim.cancel();
+          creditsDetails._faqAnim = null;
+        }
+        creditsDetails.classList.remove("is-closing");
+        creditsDetails.open = true;
+      }
+
       cancelActiveScroll();
       const token = ++activeScrollToken;
       history.pushState(null, "", hash);
@@ -1164,7 +1181,7 @@
         if (token !== activeScrollToken) return;
         const focusTarget = isTop
           ? document.getElementById("main-title")
-          : target.querySelector("h1, h2, .index-title") || target;
+          : target.querySelector("h1, h2, .index-title, summary") || target;
         if (focusTarget) {
           if (!focusTarget.hasAttribute("tabindex")) {
             focusTarget.setAttribute("tabindex", "-1");
