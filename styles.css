@@ -1353,10 +1353,11 @@
 
   /* Unified spot wrapper: scales dot + tail together from 1px line thickness with one shared glow */
   .crt-sweep-spot {
+    --spot-rest-scale: 0.3333;
     position: absolute;
     inset: 0;
     transform-origin: 0 50%;
-    transform: scale(0.3333);
+    transform: scale(var(--spot-rest-scale));
     opacity: 0;
     filter: drop-shadow(0 0 2.5px rgba(255, 255, 255, 0.78));
     will-change: transform, opacity;
@@ -1422,16 +1423,56 @@
     }
   }
 
-  @media (prefers-reduced-motion: no-preference) {
+  /* Match physical millimeter size on lower-PPI desktop displays (2x2px = 4x4 Retina px, 0.5 rest scale = 1px line) */
+  @media (min-width: 40.0625rem) {
     .crt-sweep-spot {
-      transition:
-        opacity 150ms cubic-bezier(0.4, 0, 0.2, 1),
-        transform 160ms cubic-bezier(0.4, 0, 0.2, 1);
+      --spot-rest-scale: 0.5;
+      filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.76));
+    }
+
+    .crt-sweep-tear {
+      inset-block-start: -0.5px;
+      inline-size: 22px;
+      block-size: 2px;
+      clip-path: polygon(0 25%, 86% 0, 100% 0, 100% 100%, 86% 100%, 0 75%);
+    }
+
+    .crt-sweep-dot {
+      inset-inline-start: -1px;
+      inset-block-start: -0.5px;
+      inline-size: 2px;
+      block-size: 2px;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes crt-spot-extinguish {
+      0% {
+        opacity: 1;
+        transform: scale(1);
+      }
+      24% {
+        opacity: 0.24;
+        transform: scale(0.76);
+      }
+      44% {
+        opacity: 0.86;
+        transform: scale(0.88);
+      }
+      100% {
+        opacity: 0;
+        transform: scale(var(--spot-rest-scale));
+      }
+    }
+
+    .crt-sweep.is-extinguishing .crt-sweep-spot {
+      animation: crt-spot-extinguish 210ms cubic-bezier(0.33, 0, 0.2, 1) forwards;
     }
 
     .crt-sweep.is-sweeping .crt-sweep-spot {
       opacity: 1;
       transform: scale(1);
+      animation: none;
       transition:
         opacity 110ms cubic-bezier(0.2, 0.8, 0.2, 1),
         transform 140ms cubic-bezier(0.22, 1, 0.36, 1);

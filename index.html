@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20">
+  <link rel="stylesheet" href="styles.css?v=21">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -916,7 +916,6 @@
         let scrollableH = Math.max(1, root.scrollHeight - root.clientHeight);
         let prevScrollY = window.scrollY;
         let virtualX = 0;
-        let lastActiveX = 0;
         let tailX = 0;
         let smoothSpeed = 0;
         let isSweeping = false;
@@ -925,6 +924,7 @@
         let lastTime = 0;
         let lastMoveTime = 0;
         let lastScrollTime = 0;
+        let extinguishTimer = 0;
 
         const enableSweep = () => {
           allowSweep = true;
@@ -944,10 +944,24 @@
 
         syncFallbackPosition();
 
+        const startSweeping = (now) => {
+          lastMoveTime = now;
+          if (isSweeping) return;
+          isSweeping = true;
+          clearTimeout(extinguishTimer);
+          sweep.classList.remove("is-extinguishing");
+          sweep.classList.add("is-sweeping");
+        };
+
         const stopSweeping = () => {
           if (!isSweeping) return;
           isSweeping = false;
           sweep.classList.remove("is-sweeping");
+          sweep.classList.add("is-extinguishing");
+          clearTimeout(extinguishTimer);
+          extinguishTimer = setTimeout(() => {
+            sweep.classList.remove("is-extinguishing");
+          }, 230);
         };
 
         const tick = (now) => {
@@ -971,13 +985,10 @@
           const instSpeed = (Math.abs(dx) * 1000) / dt;
           smoothSpeed += (instSpeed - smoothSpeed) * (1 - Math.exp(-dt / 24));
 
-          if (smoothSpeed >= 8) {
-            lastMoveTime = now;
-            if (!isSweeping) {
-              isSweeping = true;
-              sweep.classList.add("is-sweeping");
-            }
-          } else if (isSweeping && now - lastMoveTime > 32) {
+          const threshold = isSweeping ? 7 : 11;
+          if (smoothSpeed >= threshold) {
+            startSweeping(now);
+          } else if (isSweeping && now - lastMoveTime > 35) {
             stopSweeping();
           }
 
@@ -989,12 +1000,16 @@
             tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
           }
 
-          if (isSweeping || Math.abs(wakePx) > 0.1 || now - lastScrollTime < 60) {
+          if (
+            isSweeping ||
+            sweep.classList.contains("is-extinguishing") ||
+            Math.abs(wakePx) > 0.1 ||
+            now - lastScrollTime < 60
+          ) {
             rafId = requestAnimationFrame(tick);
           } else {
             prevScrollY = scrollY;
             virtualX = 0;
-            lastActiveX = 0;
             tailX = 0;
             smoothSpeed = 0;
             if (tear) tear.style.transform = "scaleX(0)";
@@ -1017,16 +1032,10 @@
 
             const now = performance.now();
             lastScrollTime = now;
-            const estX = virtualX + ((scrollY - prevScrollY) / viewportH) * 280;
-            if (Math.abs(estX - lastActiveX) >= 0.45) {
-              lastActiveX = estX;
-              lastMoveTime = now;
-              if (!isSweeping) {
-                isSweeping = true;
-                sweep.classList.add("is-sweeping");
-              }
-            }
             if (!rafId) {
+              if (Math.abs(scrollY - prevScrollY) >= 0.5) {
+                startSweeping(now);
+              }
               lastTime = now - 16;
               rafId = requestAnimationFrame(tick);
             }
