@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=14">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -731,17 +731,31 @@
       </div>
       <div class="cta-meta">BOOTLOADER PROTECTED • SCENES PRESERVED • REVERSIBLE TO STOCK FIRMWARE</div>
     </section>
+  </main>
 
-    <!-- PRODUCTION CREDITS, OPEN-SOURCE LINEAGE & SAFETY -->
-    <section class="credits-section" id="credits" aria-label="Credits and Open Source">
-      <details class="faq-item credits-accordion" id="credits-details">
-        <summary class="faq-summary">
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div>RUIDO v0.7.2 // PACKAGE FM-1_312 • GPL-3.0-ONLY • © MIGUEL HERNÁNDEZ DOMENECH</div>
+      <nav class="footer-nav" aria-label="Footer">
+        <a href="#top">TOP ↑</a>
+        <span aria-hidden="true">·</span>
+        <a href="#index">INDEX</a>
+        <span aria-hidden="true">·</span>
+        <a href="#ch-11">FAQ</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://thefirmwarehub.com/firmware/ruido/" target="_blank" rel="noopener noreferrer">FIRMWARE HUB ↗</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://github.com/miguelhd/ruido" target="_blank" rel="noopener noreferrer">GITHUB ↗</a>
+      </nav>
+
+      <!-- Quiet Colophon Disclosure -->
+      <details class="footer-credits" id="credits">
+        <summary class="footer-credits-summary">
           <span>CREDITS &amp; OPEN SOURCE</span>
           <span class="faq-icon" aria-hidden="true">+</span>
         </summary>
 
-        <div class="faq-answer credits-body">
-          <!-- Author -->
+        <div class="footer-credits-body">
           <div class="credits-block">
             <span class="credits-label">AUTHOR &amp; LICENSE</span>
             <p class="prose">
@@ -752,7 +766,6 @@
             </p>
           </div>
 
-          <!-- Open-Source Lineage -->
           <div class="credits-block">
             <span class="credits-label">OPEN-SOURCE FOUNDATIONS</span>
             <ul class="credits-list" role="list">
@@ -773,7 +786,6 @@
             </ul>
           </div>
 
-          <!-- Hearing Safety & Trademarks -->
           <div class="credits-block">
             <span class="credits-label">SAFETY &amp; TRADEMARK NOTICE</span>
             <p class="legal-fineprint">
@@ -785,25 +797,6 @@
           </div>
         </div>
       </details>
-    </section>
-  </main>
-
-  <footer class="site-footer">
-    <div class="footer-inner">
-      <div>RUIDO v0.7.2 // PACKAGE FM-1_312 • GPL-3.0-ONLY • © MIGUEL HERNÁNDEZ DOMENECH</div>
-      <nav class="footer-nav" aria-label="Footer">
-        <a href="#top">TOP ↑</a>
-        <span aria-hidden="true">·</span>
-        <a href="#index">INDEX</a>
-        <span aria-hidden="true">·</span>
-        <a href="#ch-11">FAQ</a>
-        <span aria-hidden="true">·</span>
-        <a href="#credits">CREDITS</a>
-        <span aria-hidden="true">·</span>
-        <a href="https://thefirmwarehub.com/firmware/ruido/" target="_blank" rel="noopener noreferrer">FIRMWARE HUB ↗</a>
-        <span aria-hidden="true">·</span>
-        <a href="https://github.com/miguelhd/ruido" target="_blank" rel="noopener noreferrer">GITHUB ↗</a>
-      </nav>
     </div>
   </footer>
 
@@ -1058,13 +1051,13 @@
       }
     }
 
-    // Cross-browser smooth slide animation for <details class="faq-item"> (works in Safari/WebKit, Chrome, Firefox)
+    // Cross-browser smooth slide animation for FAQ and footer Credits accordions
     document.addEventListener("click", (event) => {
-      const summary = event.target.closest(".faq-summary");
+      const summary = event.target.closest(".faq-summary, .footer-credits-summary");
       if (!summary || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
       const details = summary.parentElement;
-      const answer = details?.querySelector(".faq-answer");
+      const answer = details?.querySelector(".faq-answer, .footer-credits-body");
       if (!details || !answer) return;
 
       event.preventDefault();
@@ -1072,6 +1065,7 @@
       const styles = getComputedStyle(answer);
       const padTop = styles.paddingTop;
       const padBottom = styles.paddingBottom;
+      const marginTop = styles.marginTop;
 
       if (details._faqAnim) {
         details._faqAnim.cancel();
@@ -1086,8 +1080,8 @@
         details.classList.add("is-closing");
         const anim = answer.animate(
           [
-            { height: startHeight, paddingTop: padTop, paddingBottom: padBottom, borderTopWidth: "1px", opacity: 1 },
-            { height: "0px", paddingTop: "0px", paddingBottom: "0px", borderTopWidth: "0px", opacity: 0 }
+            { height: startHeight, marginTop, paddingTop: padTop, paddingBottom: padBottom, borderTopWidth: "1px", opacity: 1 },
+            { height: "0px", marginTop: "0px", paddingTop: "0px", paddingBottom: "0px", borderTopWidth: "0px", opacity: 0 }
           ],
           { duration: 250, easing: "cubic-bezier(0.25, 0.8, 0.25, 1)" }
         );
@@ -1103,17 +1097,22 @@
         const startHeight = wasMidClose ? `${answer.getBoundingClientRect().height}px` : "0px";
         details.classList.remove("is-closing");
         details.open = true;
+        const endStyles = getComputedStyle(answer);
+        const endPadTop = endStyles.paddingTop;
+        const endPadBottom = endStyles.paddingBottom;
+        const endMarginTop = endStyles.marginTop;
         const endHeight = `${answer.offsetHeight}px`;
         const anim = answer.animate(
           [
             {
               height: startHeight,
-              paddingTop: wasMidClose ? padTop : "0px",
-              paddingBottom: wasMidClose ? padBottom : "0px",
+              marginTop: wasMidClose ? endMarginTop : "0px",
+              paddingTop: wasMidClose ? endPadTop : "0px",
+              paddingBottom: wasMidClose ? endPadBottom : "0px",
               borderTopWidth: "1px",
               opacity: wasMidClose ? 1 : 0
             },
-            { height: endHeight, paddingTop: padTop, paddingBottom: padBottom, borderTopWidth: "1px", opacity: 1 }
+            { height: endHeight, marginTop: endMarginTop, paddingTop: endPadTop, paddingBottom: endPadBottom, borderTopWidth: "1px", opacity: 1 }
           ],
           { duration: 250, easing: "cubic-bezier(0.25, 0.8, 0.25, 1)" }
         );
@@ -1142,7 +1141,7 @@
       }
     });
 
-    const creditsDetails = document.getElementById("credits-details");
+    const creditsDetails = document.getElementById("credits");
     if (window.location.hash === "#credits" && creditsDetails) {
       creditsDetails.open = true;
     }

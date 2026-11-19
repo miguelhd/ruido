@@ -1127,21 +1127,62 @@
     color: var(--muted);
   }
 
-  /* Production Credits, Attributions & Safety Colophon */
-  .credits-section {
-    padding-block-start: 1.5rem;
-    border-block-start: 1px solid var(--border);
+  /* Quiet Footer Colophon & Attributions */
+  .footer-credits {
+    inline-size: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
   }
 
-  .credits-body {
-    background-color: var(--panel);
-    padding: 0.875rem 1rem;
+  .footer-credits-summary {
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-block-size: 24px;
+    padding-inline: 0.2rem;
+    cursor: pointer;
+    user-select: none;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    transition: color 0.12s ease;
+  }
+
+  .footer-credits-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .footer-credits-summary:hover {
+    color: var(--white);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .footer-credits-summary .faq-icon {
+    font-size: 0.75rem;
+    color: inherit;
+  }
+
+  .footer-credits[open]:not(.is-closing) > .footer-credits-summary .faq-icon {
+    rotate: 45deg;
+    color: var(--fg);
+  }
+
+  .footer-credits-body {
+    inline-size: 100%;
+    margin-block-start: 0.75rem;
+    padding-block-start: 1rem;
+    border-block-start: 1px solid var(--border);
+    text-align: start;
     display: flex;
     flex-direction: column;
     gap: 0.875rem;
     font-family: var(--font-sans);
-    font-size: inherit;
+    font-size: clamp(0.75rem, 0.7rem + 0.25vw, 0.84375rem);
     line-height: 1.6;
+    color: var(--dim);
   }
 
   .credits-block {
@@ -1455,8 +1496,12 @@
       font-size: 1rem;
     }
 
-    .credits-body {
-      font-size: inherit;
+    .footer-credits-body {
+      font-size: 0.9375rem;
+    }
+
+    .footer-credits-summary .faq-icon {
+      font-size: 0.875rem;
     }
 
     .btn-block-primary,
