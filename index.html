@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=22">
+  <link rel="stylesheet" href="styles.css?v=23">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -898,14 +898,28 @@
         const root = document.documentElement;
         let viewportH = Math.max(1, window.innerHeight);
         let clientW = root.clientWidth;
-        let scrollableH = Math.max(1, root.scrollHeight - root.clientHeight);
-        let prevScrollY = window.scrollY;
+        let scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
+
+        const getClampedScrollY = () => {
+          const rawY = window.scrollY;
+          if (rawY <= 0) return 0;
+          if (rawY > scrollableH) {
+            scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
+            if (rawY > scrollableH) return scrollableH;
+          }
+          return rawY;
+        };
+
+        let prevScrollY = getClampedScrollY();
         let restScrollY = prevScrollY;
         let moveAnchorY = prevScrollY;
+        let catchScrollY = prevScrollY;
         let virtualX = 0;
         let tailX = 0;
         let isSweeping = false;
         let allowSweep = false;
+        let isTouching = false;
+        let caughtInMotion = false;
         let rafId = 0;
         let lastTime = 0;
         let lastMoveTime = 0;
@@ -915,14 +929,31 @@
           allowSweep = true;
         };
         window.addEventListener("wheel", enableSweep, { passive: true, once: true });
-        window.addEventListener("touchstart", enableSweep, { passive: true, once: true });
-        window.addEventListener("touchmove", enableSweep, { passive: true, once: true });
         window.addEventListener("pointerdown", enableSweep, { passive: true, once: true });
         window.addEventListener("keydown", enableSweep, { passive: true, once: true });
 
+        window.addEventListener(
+          "touchstart",
+          () => {
+            allowSweep = true;
+            isTouching = true;
+            caughtInMotion = isSweeping;
+            catchScrollY = getClampedScrollY();
+          },
+          { passive: true }
+        );
+        window.addEventListener("touchmove", enableSweep, { passive: true, once: true });
+
+        const onTouchEnd = () => {
+          isTouching = false;
+          caughtInMotion = false;
+        };
+        window.addEventListener("touchend", onTouchEnd, { passive: true });
+        window.addEventListener("touchcancel", onTouchEnd, { passive: true });
+
         const syncFallbackPosition = () => {
           if (supportsScrollTimeline) return;
-          const progress = Math.min(1, Math.max(0, window.scrollY / scrollableH));
+          const progress = Math.min(1, Math.max(0, getClampedScrollY() / scrollableH));
           head.style.transform = `translate3d(${(progress * clientW).toFixed(2)}px, 0, 0)`;
           if (line) line.style.transform = `scaleX(${progress.toFixed(5)})`;
         };
@@ -948,13 +979,17 @@
           const dt = lastTime > 0 ? Math.max(1, Math.min(48, now - lastTime)) : 16;
           lastTime = now;
 
-          const scrollY = window.scrollY;
+          const scrollY = getClampedScrollY();
           const dy = scrollY - prevScrollY;
           prevScrollY = scrollY;
           syncFallbackPosition();
 
+          if (caughtInMotion && Math.abs(scrollY - catchScrollY) >= 5) {
+            caughtInMotion = false;
+          }
+
           if (!isSweeping) {
-            if (Math.abs(scrollY - restScrollY) >= 2.5) {
+            if (Math.abs(scrollY - restScrollY) >= 4) {
               startSweeping(now, scrollY);
             }
           } else if (Math.abs(scrollY - moveAnchorY) >= 0.3) {
@@ -962,8 +997,9 @@
             moveAnchorY = scrollY;
           }
 
-          // 1 screen height scrolled = 280 desktop-equivalent units (identical physics on desktop & mobile)
-          const dx = isSweeping ? (dy / viewportH) * 280 : 0;
+          // Higher normalized gain on mobile so comfortable thumb drags draw a full phosphor tail
+          const gain = clientW <= 640 ? 360 : 260;
+          const dx = isSweeping ? (dy / viewportH) * gain : 0;
 
           // Anchor tail at turnaround point on direction reversal so it never points ahead or whips
           if ((dx > 0.04 && tailX > virtualX) || (dx < -0.04 && tailX < virtualX)) {
@@ -979,24 +1015,28 @@
             tailX = virtualX + maxWake;
           }
 
-          // Lush phosphor persistence while moving (175ms); rapid zip-into-dot retraction on stop (20ms)
+          // Absorb iOS async IPC scroll gaps & thumb micro-pauses without blinking; zip tail into dot on real stop
+          const activeThumbDrag = isTouching && !caughtInMotion;
+          const fastRetractDelay = activeThumbDrag ? 115 : 68;
+          const stopDelay = activeThumbDrag ? 175 : 100;
           const idleMs = now - lastMoveTime;
-          const tau = idleMs >= 20 ? 20 : 175;
+          const tau = idleMs >= fastRetractDelay ? 26 : 185;
           const alpha = 1 - Math.exp(-dt / tau);
           tailX += (virtualX - tailX) * alpha;
 
           const wakePx = virtualX - tailX;
           const tearScale = Math.tanh(wakePx / 30);
           if (tear) {
-            tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
+            tear.style.transform =
+              Math.abs(tearScale) < 0.02 ? "scaleX(0)" : `scaleX(${tearScale.toFixed(4)})`;
           }
 
-          // Collapse stationary dot into 1px line immediately after full stop AND tail retraction
-          if (isSweeping && idleMs >= 36 && Math.abs(tearScale) < 0.09) {
+          // Collapse stationary dot into 1px line smoothly after full stop AND tail retraction
+          if (isSweeping && idleMs >= stopDelay && Math.abs(tearScale) < 0.08) {
             stopSweeping(scrollY);
           }
 
-          if (isSweeping || Math.abs(wakePx) > 0.08 || now - lastScrollTime < 60) {
+          if (isSweeping || Math.abs(wakePx) > 0.08 || now - lastScrollTime < 80) {
             rafId = requestAnimationFrame(tick);
           } else {
             prevScrollY = scrollY;
@@ -1011,7 +1051,7 @@
         window.addEventListener(
           "scroll",
           () => {
-            const scrollY = window.scrollY;
+            const scrollY = getClampedScrollY();
             syncFallbackPosition();
 
             // Ignore initial browser scroll-restoration / hash jumps on refresh before any user input
@@ -1025,7 +1065,7 @@
             const now = performance.now();
             lastScrollTime = now;
 
-            if (!isSweeping && Math.abs(scrollY - restScrollY) >= 2.5) {
+            if (!isSweeping && Math.abs(scrollY - restScrollY) >= 4) {
               startSweeping(now, scrollY);
             }
 
@@ -1040,7 +1080,7 @@
         document.addEventListener(
           "toggle",
           () => {
-            scrollableH = Math.max(1, root.scrollHeight - root.clientHeight);
+            scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
           },
           { capture: true, passive: true }
         );
@@ -1049,10 +1089,10 @@
           "resize",
           () => {
             viewportH = Math.max(1, window.innerHeight);
+            scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
             const width = root.clientWidth;
             if (width === clientW) return;
             clientW = width;
-            scrollableH = Math.max(1, root.scrollHeight - root.clientHeight);
             syncFallbackPosition();
             if (supportsScrollTimeline && typeof head.getAnimations === "function") {
               head.getAnimations().forEach((anim) => anim.effect?.updateTiming?.({}));
