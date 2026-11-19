@@ -40,7 +40,8 @@
       </nav>
     </div>
     <div class="crt-sweep" aria-hidden="true">
-      <div class="crt-sweep-beam">
+      <div class="crt-sweep-line"></div>
+      <div class="crt-sweep-head">
         <span class="crt-sweep-tear"></span>
         <img
           class="crt-sweep-dot"
@@ -802,15 +803,17 @@
     // Ignite CRT beam spot while scrolling; drive tear length from actual horizontal beam velocity
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       const sweep = document.querySelector(".crt-sweep");
-      const beam = sweep?.querySelector(".crt-sweep-beam");
+      const line = sweep?.querySelector(".crt-sweep-line");
+      const head = sweep?.querySelector(".crt-sweep-head");
       const tear = sweep?.querySelector(".crt-sweep-tear");
       const needsScrollFallback = !CSS.supports("animation-timeline", "scroll()");
 
-      if (sweep) {
+      if (sweep && head) {
         const getHeadState = () => {
-          const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+          const root = document.documentElement;
+          const scrollable = root.scrollHeight - window.innerHeight;
           const progress = scrollable > 0 ? Math.min(1, Math.max(0, window.scrollY / scrollable)) : 0;
-          return { progress, headX: progress * window.innerWidth };
+          return { progress, headX: progress * root.clientWidth };
         };
 
         let { progress: initProgress, headX: tailX } = getHeadState();
@@ -819,9 +822,11 @@
         let rafId = 0;
         let lastTime = 0;
         let lastFastMoveTime = 0;
+        let resizeHoldUntil = 0;
 
-        if (needsScrollFallback && beam) {
-          beam.style.transform = `translateX(${(initProgress - 1) * 100}%)`;
+        head.style.transform = `translate3d(${tailX.toFixed(2)}px, 0, 0)`;
+        if (needsScrollFallback && line) {
+          line.style.transform = `scaleX(${initProgress})`;
         }
 
         const stopSweeping = () => {
@@ -835,8 +840,9 @@
           lastTime = now;
 
           const { progress, headX } = getHeadState();
-          if (needsScrollFallback && beam) {
-            beam.style.transform = `translateX(${(progress - 1) * 100}%)`;
+          head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
+          if (needsScrollFallback && line) {
+            line.style.transform = `scaleX(${progress})`;
           }
 
           const speedPxPerSec = (Math.abs(headX - prevHeadX) * 1000) / dt;
@@ -879,8 +885,18 @@
         window.addEventListener(
           "scroll",
           () => {
+            const now = performance.now();
+            if (now < resizeHoldUntil) {
+              const { progress, headX } = getHeadState();
+              tailX = headX;
+              prevHeadX = headX;
+              head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
+              if (needsScrollFallback && line) {
+                line.style.transform = `scaleX(${progress})`;
+              }
+              return;
+            }
             if (!rafId) {
-              const now = performance.now();
               lastTime = now;
               lastFastMoveTime = now;
               isSweeping = true;
@@ -894,11 +910,14 @@
         window.addEventListener(
           "resize",
           () => {
+            resizeHoldUntil = performance.now() + 140;
             const { progress, headX } = getHeadState();
             tailX = headX;
             prevHeadX = headX;
-            if (needsScrollFallback && beam) {
-              beam.style.transform = `translateX(${(progress - 1) * 100}%)`;
+            head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
+            if (tear) tear.style.transform = "scaleX(0)";
+            if (needsScrollFallback && line) {
+              line.style.transform = `scaleX(${progress})`;
             }
           },
           { passive: true }

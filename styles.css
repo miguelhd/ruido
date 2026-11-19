@@ -964,8 +964,8 @@
     overflow: clip;
   }
 
-  /* 1px trace + tapered CRT drawing tear + 3x3px 7.5x HDR pinpoint nose */
-  .crt-sweep-beam {
+  /* Dimensionless scaleX(0 -> 1) progress line (never goes stale on window resize) */
+  .crt-sweep-line {
     position: absolute;
     inset-block-start: 8px;
     inset-inline: 0;
@@ -975,8 +975,9 @@
       rgba(245, 245, 245, 0.14) 0%,
       rgba(245, 245, 245, 0.45) 100%
     );
+    transform-origin: 0 50%;
+    transform: scaleX(0);
     opacity: 0;
-    transform: translateX(-100%);
 
     @media (prefers-reduced-motion: no-preference) {
       opacity: 1;
@@ -985,6 +986,15 @@
     @media (forced-colors: active) {
       background: Highlight;
     }
+  }
+
+  /* Unscaled beam head container so the 3x3px dot & velocity tear never stretch */
+  .crt-sweep-head {
+    position: absolute;
+    inset-block-start: 8px;
+    inset-inline-start: 0;
+    inline-size: 0;
+    block-size: 1px;
   }
 
   /* Velocity-proportional teardrop tail (driven by real header-pixel wake in JS) */
@@ -1008,7 +1018,7 @@
 
   .crt-sweep-dot {
     position: absolute;
-    inset-inline-end: -1.5px;
+    inset-inline-start: -1.5px;
     inset-block-start: -1px;
     inline-size: 3px;
     block-size: 3px;
@@ -1041,17 +1051,17 @@
     }
 
     @supports (animation-timeline: scroll()) {
-      @keyframes crt-beam-sweep {
+      @keyframes crt-line-sweep {
         from {
-          transform: translateX(-100%);
+          transform: scaleX(0);
         }
         to {
-          transform: translateX(0%);
+          transform: scaleX(1);
         }
       }
 
-      .crt-sweep-beam {
-        animation: crt-beam-sweep auto linear both;
+      .crt-sweep-line {
+        animation: crt-line-sweep auto linear both;
         animation-timeline: scroll(root block);
       }
     }
