@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=23">
+  <link rel="stylesheet" href="styles.css?v=24">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -885,164 +885,107 @@
     let activeScrollRaf = 0;
     let activeScrollToken = 0;
 
-    // Ignite CRT beam spot while scrolling; drive velocity tear from viewport-normalized scroll speed
+    // CRT oscilloscope beam: position runs on GPU scroll-timeline; spot & tail couple to smoothed scroll velocity
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       const sweep = document.querySelector(".crt-sweep");
       const line = sweep?.querySelector(".crt-sweep-line");
       const head = sweep?.querySelector(".crt-sweep-head");
+      const spot = sweep?.querySelector(".crt-sweep-spot");
       const tear = sweep?.querySelector(".crt-sweep-tear");
       const supportsScrollTimeline =
         CSS.supports("animation-timeline", "scroll()") && CSS.supports("width", "1cqi");
 
-      if (sweep && head) {
+      if (sweep && head && spot && tear) {
         const root = document.documentElement;
+        const restScale = 1 / 3;
         let viewportH = Math.max(1, window.innerHeight);
         let clientW = root.clientWidth;
+        let maxScale = clientW > 640 ? 0.72 : 1;
         let scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
 
-        const getClampedScrollY = () => {
-          const rawY = window.scrollY;
-          if (rawY <= 0) return 0;
-          if (rawY > scrollableH) {
+        const getClampedY = () => {
+          const y = window.scrollY;
+          if (y <= 0) return 0;
+          if (y > scrollableH) {
             scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
-            if (rawY > scrollableH) return scrollableH;
+            if (y > scrollableH) return scrollableH;
           }
-          return rawY;
+          return y;
         };
 
-        let prevScrollY = getClampedScrollY();
-        let restScrollY = prevScrollY;
-        let moveAnchorY = prevScrollY;
-        let catchScrollY = prevScrollY;
-        let virtualX = 0;
-        let tailX = 0;
-        let isSweeping = false;
+        let prevY = getClampedY();
         let allowSweep = false;
-        let isTouching = false;
-        let caughtInMotion = false;
+        let vel1 = 0;
+        let vel = 0;
+        let glow1 = 0;
+        let glow = 0;
         let rafId = 0;
         let lastTime = 0;
-        let lastMoveTime = 0;
-        let lastScrollTime = 0;
 
         const enableSweep = () => {
           allowSweep = true;
         };
         window.addEventListener("wheel", enableSweep, { passive: true, once: true });
+        window.addEventListener("touchstart", enableSweep, { passive: true, once: true });
+        window.addEventListener("touchmove", enableSweep, { passive: true, once: true });
         window.addEventListener("pointerdown", enableSweep, { passive: true, once: true });
         window.addEventListener("keydown", enableSweep, { passive: true, once: true });
 
-        window.addEventListener(
-          "touchstart",
-          () => {
-            allowSweep = true;
-            isTouching = true;
-            caughtInMotion = isSweeping;
-            catchScrollY = getClampedScrollY();
-          },
-          { passive: true }
-        );
-        window.addEventListener("touchmove", enableSweep, { passive: true, once: true });
-
-        const onTouchEnd = () => {
-          isTouching = false;
-          caughtInMotion = false;
-        };
-        window.addEventListener("touchend", onTouchEnd, { passive: true });
-        window.addEventListener("touchcancel", onTouchEnd, { passive: true });
-
         const syncFallbackPosition = () => {
           if (supportsScrollTimeline) return;
-          const progress = Math.min(1, Math.max(0, getClampedScrollY() / scrollableH));
+          const progress = Math.min(1, Math.max(0, getClampedY() / scrollableH));
           head.style.transform = `translate3d(${(progress * clientW).toFixed(2)}px, 0, 0)`;
           if (line) line.style.transform = `scaleX(${progress.toFixed(5)})`;
         };
 
         syncFallbackPosition();
 
-        const startSweeping = (now, scrollY) => {
-          lastMoveTime = now;
-          moveAnchorY = scrollY;
-          if (isSweeping) return;
-          isSweeping = true;
-          sweep.classList.add("is-sweeping");
-        };
-
-        const stopSweeping = (scrollY) => {
-          restScrollY = scrollY;
-          if (!isSweeping) return;
-          isSweeping = false;
-          sweep.classList.remove("is-sweeping");
-        };
-
         const tick = (now) => {
           const dt = lastTime > 0 ? Math.max(1, Math.min(48, now - lastTime)) : 16;
           lastTime = now;
 
-          const scrollY = getClampedScrollY();
-          const dy = scrollY - prevScrollY;
-          prevScrollY = scrollY;
+          const y = getClampedY();
+          const dy = y - prevY;
+          prevY = y;
           syncFallbackPosition();
 
-          if (caughtInMotion && Math.abs(scrollY - catchScrollY) >= 5) {
-            caughtInMotion = false;
+          // Reset wake cleanly at turnaround point so tail never points ahead of motion
+          if ((dy > 0.5 && vel < -5) || (dy < -0.5 && vel > 5)) {
+            vel1 = 0;
+            vel = 0;
           }
 
-          if (!isSweeping) {
-            if (Math.abs(scrollY - restScrollY) >= 4) {
-              startSweeping(now, scrollY);
-            }
-          } else if (Math.abs(scrollY - moveAnchorY) >= 0.3) {
-            lastMoveTime = now;
-            moveAnchorY = scrollY;
-          }
+          // 2-pole low-pass velocity filter smooths bursty mobile scroll updates without phase glitches
+          const gain = clientW > 640 ? 260 : 360;
+          const rawVel = ((dy / viewportH) * gain * 1000) / dt;
+          const aV = 1 - Math.exp(-dt / 36);
+          vel1 = Math.max(-450, Math.min(450, vel1 + (rawVel - vel1) * aV));
+          vel += (vel1 - vel) * aV;
 
-          // Higher normalized gain on mobile so comfortable thumb drags draw a full phosphor tail
-          const gain = clientW <= 640 ? 360 : 260;
-          const dx = isSweeping ? (dy / viewportH) * gain : 0;
+          // Couple dot scale & brightness to velocity: faster tail retracts first, dot collapses into 1px line right after
+          const speed = Math.abs(vel);
+          const targetGlow = speed < 14 ? 0 : Math.min(1, (speed - 14) / 105);
+          const aG = 1 - Math.exp(-dt / (targetGlow > glow ? 40 : 56));
+          glow1 += (targetGlow - glow1) * aG;
+          glow += (glow1 - glow) * aG;
 
-          // Anchor tail at turnaround point on direction reversal so it never points ahead or whips
-          if ((dx > 0.04 && tailX > virtualX) || (dx < -0.04 && tailX < virtualX)) {
-            tailX = virtualX;
-          }
-          virtualX += dx;
+          const tearScale = Math.tanh(vel / 200);
+          const spotScale = restScale + (maxScale - restScale) * glow;
 
-          // Clamp wake at visual saturation so tail begins retracting the instant deceleration or hand-stop starts
-          const maxWake = 66;
-          if (virtualX - tailX > maxWake) {
-            tailX = virtualX - maxWake;
-          } else if (virtualX - tailX < -maxWake) {
-            tailX = virtualX + maxWake;
-          }
+          spot.style.opacity = glow < 0.005 ? "0" : glow.toFixed(3);
+          spot.style.transform = `scale(${spotScale.toFixed(4)})`;
+          tear.style.transform = Math.abs(tearScale) < 0.01 ? "scaleX(0)" : `scaleX(${tearScale.toFixed(4)})`;
 
-          // Absorb iOS async IPC scroll gaps & thumb micro-pauses without blinking; zip tail into dot on real stop
-          const activeThumbDrag = isTouching && !caughtInMotion;
-          const fastRetractDelay = activeThumbDrag ? 115 : 68;
-          const stopDelay = activeThumbDrag ? 175 : 100;
-          const idleMs = now - lastMoveTime;
-          const tau = idleMs >= fastRetractDelay ? 26 : 185;
-          const alpha = 1 - Math.exp(-dt / tau);
-          tailX += (virtualX - tailX) * alpha;
-
-          const wakePx = virtualX - tailX;
-          const tearScale = Math.tanh(wakePx / 30);
-          if (tear) {
-            tear.style.transform =
-              Math.abs(tearScale) < 0.02 ? "scaleX(0)" : `scaleX(${tearScale.toFixed(4)})`;
-          }
-
-          // Collapse stationary dot into 1px line smoothly after full stop AND tail retraction
-          if (isSweeping && idleMs >= stopDelay && Math.abs(tearScale) < 0.08) {
-            stopSweeping(scrollY);
-          }
-
-          if (isSweeping || Math.abs(wakePx) > 0.08 || now - lastScrollTime < 80) {
+          if (glow >= 0.005 || speed >= 1) {
             rafId = requestAnimationFrame(tick);
           } else {
-            prevScrollY = scrollY;
-            virtualX = 0;
-            tailX = 0;
-            if (tear) tear.style.transform = "scaleX(0)";
+            vel1 = 0;
+            vel = 0;
+            glow1 = 0;
+            glow = 0;
+            spot.style.opacity = "0";
+            spot.style.transform = `scale(${restScale.toFixed(4)})`;
+            tear.style.transform = "scaleX(0)";
             rafId = 0;
             lastTime = 0;
           }
@@ -1051,26 +994,13 @@
         window.addEventListener(
           "scroll",
           () => {
-            const scrollY = getClampedScrollY();
             syncFallbackPosition();
-
-            // Ignore initial browser scroll-restoration / hash jumps on refresh before any user input
             if (!allowSweep && !activeScrollRaf) {
-              prevScrollY = scrollY;
-              restScrollY = scrollY;
-              moveAnchorY = scrollY;
+              prevY = getClampedY();
               return;
             }
-
-            const now = performance.now();
-            lastScrollTime = now;
-
-            if (!isSweeping && Math.abs(scrollY - restScrollY) >= 4) {
-              startSweeping(now, scrollY);
-            }
-
             if (!rafId) {
-              lastTime = now - 16;
+              lastTime = performance.now() - 16;
               rafId = requestAnimationFrame(tick);
             }
           },
@@ -1093,6 +1023,7 @@
             const width = root.clientWidth;
             if (width === clientW) return;
             clientW = width;
+            maxScale = clientW > 640 ? 0.72 : 1;
             syncFallbackPosition();
             if (supportsScrollTimeline && typeof head.getAnimations === "function") {
               head.getAnimations().forEach((anim) => anim.effect?.updateTiming?.({}));
