@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=26">
+  <link rel="stylesheet" href="styles.css?v=27">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -885,7 +885,7 @@
     let activeScrollRaf = 0;
     let activeScrollToken = 0;
 
-    // CRT oscilloscope beam: 1px wake stays anchored to [tailX .. headX] on the glass; dot blooms at headX
+    // Scale-invariant CRT oscilloscope beam: dimensionless [0..1] glass wake + DPI-calibrated head bloom
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       const sweep = document.querySelector(".crt-sweep");
       const line = sweep?.querySelector(".crt-sweep-line");
@@ -898,9 +898,12 @@
       if (sweep && head && spot && tear) {
         const root = document.documentElement;
         const restScale = 1 / 3;
+        const getMaxScale = () =>
+          Math.min(1, Math.max(0.67, ((window.devicePixelRatio || 1) + 1) / 4));
+
         let viewportH = Math.max(1, window.innerHeight);
         let clientW = Math.max(1, root.clientWidth);
-        let maxScale = clientW > 640 ? 0.72 : 1;
+        let maxScale = getMaxScale();
         let scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
 
         const getClampedY = () => {
@@ -913,10 +916,10 @@
           return y;
         };
 
-        const getHeadX = () => (getClampedY() / scrollableH) * clientW;
+        const getProgress = () => getClampedY() / scrollableH;
 
-        let smoothHead = getHeadX();
-        let tailX = smoothHead;
+        let smoothP = getProgress();
+        let tailP = smoothP;
         let allowSweep = false;
         let vel = 0;
         let glow1 = 0;
@@ -935,7 +938,7 @@
 
         const syncFallbackPosition = () => {
           if (supportsScrollTimeline) return;
-          const progress = Math.min(1, Math.max(0, getClampedY() / scrollableH));
+          const progress = Math.min(1, Math.max(0, getProgress()));
           head.style.transform = `translate3d(${(progress * clientW).toFixed(2)}px, 0, 0)`;
           if (line) line.style.transform = `scaleX(${progress.toFixed(5)})`;
         };
@@ -947,8 +950,8 @@
           () => {
             scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
             if (!rafId) {
-              smoothHead = getHeadX();
-              tailX = smoothHead;
+              smoothP = getProgress();
+              tailP = smoothP;
             }
           },
           { passive: true, once: true }
@@ -959,36 +962,32 @@
           lastTime = now;
           syncFallbackPosition();
 
-          const isMobile = clientW <= 640;
-          const rawHead = getHeadX();
-          const prevSmooth = smoothHead;
-          smoothHead += (rawHead - smoothHead) * (1 - Math.exp(-dt / 12));
-          const dx = smoothHead - prevSmooth;
+          const rawP = getProgress();
+          const prevSmooth = smoothP;
+          smoothP += (rawP - smoothP) * (1 - Math.exp(-dt / 12));
+          const dp = smoothP - prevSmooth;
 
-          // Pin tailX at exact turnaround pixel so wake never extends past where the sweep started
-          if ((dx > 0.02 && tailX > smoothHead) || (dx < -0.02 && tailX < smoothHead)) {
-            tailX = smoothHead;
+          // Pin tailP at exact turnaround point so wake never extends past where the sweep started
+          const epsP = 0.02 / clientW;
+          if ((dp > epsP && tailP > smoothP) || (dp < -epsP && tailP < smoothP)) {
+            tailP = smoothP;
           }
 
-          // Smooth screen-per-sec speed blends moving phosphor persistence into post-stop cooling
-          const instVel = (Math.abs(dx / clientW) * (scrollableH / viewportH) * 1000) / dt;
-          vel = Math.min(1.2, vel + (instVel - vel) * (1 - Math.exp(-dt / (isMobile ? 65 : 30))));
+          // Scale moving persistence by document screens so 1 screen/s lights ~7.3% of header on any device
+          const screensOfContent = scrollableH / viewportH;
+          const instVel = (Math.abs(dp) * screensOfContent * 1000) / dt;
+          vel = Math.min(1.2, vel + (instVel - vel) * (1 - Math.exp(-dt / 65)));
 
-          const tauMove = isMobile ? 950 : 180;
-          const tauStop = isMobile ? 120 : 42;
-          const velKnee = isMobile ? 0.3 : 0.85;
-          const tauTail = tauStop + (tauMove - tauStop) * Math.min(1, vel / velKnee);
-          tailX += (smoothHead - tailX) * (1 - Math.exp(-dt / tauTail));
+          const tauMove = Math.min(1200, Math.max(250, 73 * screensOfContent));
+          const tauStop = 120;
+          const tauTail = tauStop + (tauMove - tauStop) * Math.min(1, vel / 0.3);
+          tailP += (smoothP - tailP) * (1 - Math.exp(-dt / tauTail));
 
-          // Wake is exact [tailX .. headX] pixel span on the 1px line; dot glow couples directly to wake
-          const wakePx = smoothHead - tailX;
-          const absWake = Math.abs(wakePx);
-          const noiseWake = isMobile ? 0.4 : 0.9;
-          const fullWake = isMobile ? 5 : 16;
-          const targetGlow =
-            absWake < noiseWake ? 0 : Math.min(1, (absWake - noiseWake) / (fullWake - noiseWake));
-          const tauGlowRelease = isMobile ? 95 : 48;
-          const aG = 1 - Math.exp(-dt / (targetGlow > glow ? 28 : tauGlowRelease));
+          // Wake is dimensionless [tailP .. headP] fraction of bar width; dot glow couples directly to wake
+          const wakeP = smoothP - tailP;
+          const absWake = Math.abs(wakeP);
+          const targetGlow = absWake < 0.001 ? 0 : Math.min(1, (absWake - 0.001) / 0.012);
+          const aG = 1 - Math.exp(-dt / (targetGlow > glow ? 28 : 95));
           glow1 += (targetGlow - glow1) * aG;
           glow += (glow1 - glow) * aG;
 
@@ -996,19 +995,20 @@
           spot.style.opacity = glow < 0.005 ? "0" : glow.toFixed(3);
           spot.style.transform = `scale(${spotScale.toFixed(4)})`;
 
-          if (absWake < 0.2) {
+          const minWake = 0.2 / clientW;
+          if (absWake < minWake) {
             tear.style.opacity = "0";
             tear.style.transform = "scaleX(0)";
           } else {
             tear.style.opacity = Math.min(1, glow * 1.15).toFixed(3);
-            tear.style.transform = `scaleX(${(wakePx / 100).toFixed(5)})`;
+            tear.style.transform = `scaleX(${wakeP.toFixed(6)})`;
           }
 
-          if (glow >= 0.005 || absWake >= 0.2 || Math.abs(rawHead - smoothHead) >= 0.1) {
+          if (glow >= 0.005 || absWake >= minWake || Math.abs(rawP - smoothP) >= minWake) {
             rafId = requestAnimationFrame(tick);
           } else {
-            smoothHead = rawHead;
-            tailX = rawHead;
+            smoothP = rawP;
+            tailP = rawP;
             vel = 0;
             glow1 = 0;
             glow = 0;
@@ -1026,8 +1026,8 @@
           () => {
             syncFallbackPosition();
             if (!allowSweep && !activeScrollRaf) {
-              smoothHead = getHeadX();
-              tailX = smoothHead;
+              smoothP = getProgress();
+              tailP = smoothP;
               return;
             }
             if (!rafId) {
@@ -1051,13 +1051,10 @@
           () => {
             viewportH = Math.max(1, window.innerHeight);
             scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
+            maxScale = getMaxScale();
             const width = Math.max(1, root.clientWidth);
             if (width === clientW) return;
-            const ratio = width / clientW;
             clientW = width;
-            maxScale = clientW > 640 ? 0.72 : 1;
-            smoothHead *= ratio;
-            tailX *= ratio;
             syncFallbackPosition();
             if (supportsScrollTimeline && typeof head.getAnimations === "function") {
               head.getAnimations().forEach((anim) => anim.effect?.updateTiming?.({}));

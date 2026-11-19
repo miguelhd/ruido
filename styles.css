@@ -1361,12 +1361,13 @@
     will-change: transform, opacity;
   }
 
-  /* 1px glass-anchored phosphor wake: literally IS the 1px line cooling from [tailX .. headX] */
+  /* 1px glass-anchored phosphor wake: spans [tailP .. headP] directly in 100cqi bar units */
   .crt-sweep-tear {
     position: absolute;
     inset-inline-end: 0;
     inset-block-start: 0;
-    inline-size: 100px;
+    inline-size: 100vw;
+    inline-size: 100cqi;
     block-size: 1px;
     max-inline-size: none;
     object-fit: fill;
