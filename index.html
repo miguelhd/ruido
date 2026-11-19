@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=15">
+  <link rel="stylesheet" href="styles.css?v=16">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -905,6 +905,7 @@
         let viewportH = Math.max(1, window.innerHeight);
         let lastClientWidth = root.clientWidth;
         let prevScrollY = window.scrollY;
+        let lastActiveScrollY = prevScrollY;
         let virtualX = 0;
         let tailX = 0;
         let smoothSpeed = 0;
@@ -912,7 +913,7 @@
         let isSweeping = false;
         let rafId = 0;
         let lastTime = 0;
-        let lastFastMoveTime = 0;
+        let lastMoveTime = 0;
         let lastScrollTime = 0;
 
         const syncFallbackPosition = () => {
@@ -947,14 +948,13 @@
           const instSpeed = (Math.abs(dEquiv) * 1000) / dt;
           smoothSpeed += (instSpeed - smoothSpeed) * (1 - Math.exp(-dt / 32));
 
-          const threshold = isSweeping ? 9.5 : 12;
-          if (smoothSpeed >= threshold) {
-            lastFastMoveTime = now;
+          if (smoothSpeed >= 2.5) {
+            lastMoveTime = now;
             if (!isSweeping) {
               isSweeping = true;
               sweep.classList.add("is-sweeping");
             }
-          } else if (isSweeping && now - lastFastMoveTime > 60) {
+          } else if (isSweeping && now - lastMoveTime > 85) {
             stopSweeping();
           }
 
@@ -974,6 +974,7 @@
             rafId = requestAnimationFrame(tick);
           } else {
             prevScrollY = scrollY;
+            lastActiveScrollY = scrollY;
             virtualX = 0;
             tailX = 0;
             smoothSpeed = 0;
@@ -988,8 +989,17 @@
           "scroll",
           () => {
             const now = performance.now();
+            const scrollY = window.scrollY;
             lastScrollTime = now;
             syncFallbackPosition();
+            if (Math.abs(scrollY - lastActiveScrollY) >= 0.5) {
+              lastActiveScrollY = scrollY;
+              lastMoveTime = now;
+              if (!isSweeping) {
+                isSweeping = true;
+                sweep.classList.add("is-sweeping");
+              }
+            }
             if (!rafId) {
               lastTime = now - 16;
               rafId = requestAnimationFrame(tick);
@@ -1009,15 +1019,6 @@
             if (supportsScrollTimeline && typeof head.getAnimations === "function") {
               head.getAnimations().forEach((anim) => anim.effect?.updateTiming?.({}));
             }
-          },
-          { passive: true }
-        );
-
-        window.addEventListener(
-          "scrollend",
-          () => {
-            if (activeScrollRaf) return;
-            requestAnimationFrame(stopSweeping);
           },
           { passive: true }
         );
