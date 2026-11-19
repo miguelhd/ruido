@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=9">
+  <link rel="stylesheet" href="styles.css?v=11">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -31,6 +31,7 @@
 </head>
 <body>
   <a class="skip-link visually-hidden" href="#main-title">Skip to content</a>
+  <div class="crt-lvh-probe" aria-hidden="true"></div>
 
   <!-- Sticky 52px Top Bar -->
   <header class="site-header">
@@ -902,27 +903,35 @@
       const line = sweep?.querySelector(".crt-sweep-line");
       const head = sweep?.querySelector(".crt-sweep-head");
       const tear = sweep?.querySelector(".crt-sweep-tear");
-      const needsScrollFallback = !CSS.supports("animation-timeline", "scroll()");
+      const lvhProbe = document.querySelector(".crt-lvh-probe");
+      const isCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
+      const needsScrollFallback = !CSS.supports("animation-timeline", "scroll()") || isCoarsePointer;
 
       if (sweep && head) {
+        const root = document.documentElement;
+        let lastClientWidth = root.clientWidth;
+        let cachedViewportH = (isCoarsePointer && lvhProbe?.offsetHeight) || root.clientHeight;
+
         const getHeadState = () => {
-          const root = document.documentElement;
-          const scrollable = root.scrollHeight - window.innerHeight;
+          const scrollable = root.scrollHeight - cachedViewportH;
           const progress = scrollable > 0 ? Math.min(1, Math.max(0, window.scrollY / scrollable)) : 0;
-          return { progress, headX: progress * root.clientWidth };
+          return { progress, headX: progress * lastClientWidth };
         };
 
         let { progress: initProgress, headX: tailX } = getHeadState();
         let prevHeadX = tailX;
+        let smoothSpeed = 0;
+        let smoothWake = 0;
         let isSweeping = false;
         let rafId = 0;
         let lastTime = 0;
         let lastFastMoveTime = 0;
+        let lastScrollTime = 0;
         let resizeHoldUntil = 0;
 
         head.style.transform = `translate3d(${tailX.toFixed(2)}px, 0, 0)`;
         if (needsScrollFallback && line) {
-          line.style.transform = `scaleX(${initProgress})`;
+          line.style.transform = `scaleX(${initProgress.toFixed(5)})`;
         }
 
         const stopSweeping = () => {
@@ -938,13 +947,18 @@
           const { progress, headX } = getHeadState();
           head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
           if (needsScrollFallback && line) {
-            line.style.transform = `scaleX(${progress})`;
+            line.style.transform = `scaleX(${progress.toFixed(5)})`;
           }
 
-          const speedPxPerSec = (Math.abs(headX - prevHeadX) * 1000) / dt;
+          // Smooth instantaneous speed over ~36ms so 120Hz ProMotion alternating scroll frames never drop to 0
+          const instSpeed = (Math.abs(headX - prevHeadX) * 1000) / dt;
           prevHeadX = headX;
+          smoothSpeed += (instSpeed - smoothSpeed) * (1 - Math.exp(-dt / 36));
 
-          if (speedPxPerSec >= 10) {
+          const isMobile = lastClientWidth <= 640;
+          const threshold = isSweeping ? (isMobile ? 5.5 : 9.5) : (isMobile ? 9 : 12);
+
+          if (smoothSpeed >= threshold) {
             lastFastMoveTime = now;
             if (!isSweeping) {
               isSweeping = true;
@@ -959,19 +973,23 @@
           const tau = isSweeping ? 125 : 280;
           const alpha = 1 - Math.exp(-dt / tau);
           tailX += (headX - tailX) * alpha;
-          const wakePx = headX - tailX;
+          const rawWake = headX - tailX;
+          smoothWake += (rawWake - smoothWake) * (1 - Math.exp(-dt / 28));
 
           // Keep tail at 0 inside the 1.2px dot radius so tiny scrolls never wag left/right
-          const excessPx = Math.abs(wakePx) > 1.2 ? wakePx - Math.sign(wakePx) * 1.2 : 0;
-          const tearScale = Math.tanh((excessPx * 1.25) / 24);
+          const excessPx = Math.abs(smoothWake) > 1.2 ? smoothWake - Math.sign(smoothWake) * 1.2 : 0;
+          const tearGain = isMobile ? 2.0 : 1.25;
+          const tearScale = Math.tanh((excessPx * tearGain) / 24);
           if (tear) {
             tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
           }
 
-          if (isSweeping || Math.abs(wakePx) > 0.15) {
+          if (isSweeping || Math.abs(smoothWake) > 0.15 || now - lastScrollTime < 90) {
             rafId = requestAnimationFrame(tick);
           } else {
             tailX = headX;
+            smoothSpeed = 0;
+            smoothWake = 0;
             if (tear) tear.style.transform = "scaleX(0)";
             rafId = 0;
             lastTime = 0;
@@ -982,21 +1000,21 @@
           "scroll",
           () => {
             const now = performance.now();
+            lastScrollTime = now;
+            const { progress, headX } = getHeadState();
+            head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
+            if (needsScrollFallback && line) {
+              line.style.transform = `scaleX(${progress.toFixed(5)})`;
+            }
             if (now < resizeHoldUntil) {
-              const { progress, headX } = getHeadState();
               tailX = headX;
               prevHeadX = headX;
-              head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
-              if (needsScrollFallback && line) {
-                line.style.transform = `scaleX(${progress})`;
-              }
+              smoothSpeed = 0;
+              smoothWake = 0;
               return;
             }
             if (!rafId) {
-              lastTime = now;
-              lastFastMoveTime = now;
-              isSweeping = true;
-              sweep.classList.add("is-sweeping");
+              lastTime = now - 16;
               rafId = requestAnimationFrame(tick);
             }
           },
@@ -1006,14 +1024,21 @@
         window.addEventListener(
           "resize",
           () => {
+            const width = root.clientWidth;
+            // Ignore mobile URL/toolbar height-only resizes so scrolling on iOS never freezes or resets the tail
+            if (width === lastClientWidth && !(!isCoarsePointer && root.clientHeight !== cachedViewportH)) return;
+            lastClientWidth = width;
+            cachedViewportH = (isCoarsePointer && lvhProbe?.offsetHeight) || root.clientHeight;
             resizeHoldUntil = performance.now() + 140;
             const { progress, headX } = getHeadState();
             tailX = headX;
             prevHeadX = headX;
+            smoothSpeed = 0;
+            smoothWake = 0;
             head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
             if (tear) tear.style.transform = "scaleX(0)";
             if (needsScrollFallback && line) {
-              line.style.transform = `scaleX(${progress})`;
+              line.style.transform = `scaleX(${progress.toFixed(5)})`;
             }
           },
           { passive: true }

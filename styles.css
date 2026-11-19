@@ -1257,6 +1257,17 @@
   }
 
   /* 1px CRT Oscilloscope Sweep Reading Progress Indicator */
+  .crt-lvh-probe {
+    position: fixed;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    inline-size: 0;
+    block-size: 100vh;
+    block-size: 100lvh;
+    pointer-events: none;
+    visibility: hidden;
+  }
+
   .crt-sweep {
     position: absolute;
     inset-block-end: -9px;
@@ -1280,6 +1291,7 @@
     );
     transform-origin: 0 50%;
     transform: scaleX(0);
+    will-change: transform;
     opacity: 0;
 
     @media (prefers-reduced-motion: no-preference) {
@@ -1291,13 +1303,14 @@
     }
   }
 
-  /* Unscaled beam head container so the 3x3px dot & velocity tear never stretch */
+  /* Unscaled beam head container so the dot & velocity tear never stretch */
   .crt-sweep-head {
     position: absolute;
     inset-block-start: 8px;
     inset-inline-start: 0;
     inline-size: 0;
     block-size: 1px;
+    will-change: transform;
   }
 
   /* Velocity-proportional teardrop tail (driven by real header-pixel wake in JS) */
@@ -1316,6 +1329,7 @@
     clip-path: polygon(0 33.3%, 100% 0, 100% 100%, 0 66.7%);
     transform-origin: right center;
     transform: scaleX(0);
+    will-change: transform, opacity;
     opacity: 0;
   }
 
@@ -1331,6 +1345,7 @@
     background-color: var(--white);
     box-shadow: 0 0 4px 0 rgba(255, 255, 255, 0.85);
     transform: scale(0.35);
+    will-change: transform, opacity;
     opacity: 0;
 
     @media (dynamic-range: high) {
@@ -1362,19 +1377,22 @@
       transition: none;
     }
 
-    @supports (animation-timeline: scroll()) {
-      @keyframes crt-line-sweep {
-        from {
-          transform: scaleX(0);
+    /* Use scroll-timeline on fine-pointer desktops; on coarse-pointer touch screens JS drives line + head in lockstep */
+    @media (hover: hover) and (pointer: fine) {
+      @supports (animation-timeline: scroll()) {
+        @keyframes crt-line-sweep {
+          from {
+            transform: scaleX(0);
+          }
+          to {
+            transform: scaleX(1);
+          }
         }
-        to {
-          transform: scaleX(1);
-        }
-      }
 
-      .crt-sweep-line {
-        animation: crt-line-sweep auto linear both;
-        animation-timeline: scroll(root block);
+        .crt-sweep-line {
+          animation: crt-line-sweep auto linear both;
+          animation-timeline: scroll(root block);
+        }
       }
     }
   }
@@ -1489,18 +1507,12 @@
       border-block-end: 1px solid var(--border);
     }
 
-    .crt-sweep-tear {
-      inset-block-start: -2px;
-      block-size: 5px;
-      clip-path: polygon(0 40%, 100% 0, 100% 100%, 0 60%);
-    }
-
     .crt-sweep-dot {
-      inset-inline-start: -2.5px;
-      inset-block-start: -2px;
-      inline-size: 5px;
-      block-size: 5px;
-      box-shadow: 0 0 5px 0 rgba(255, 255, 255, 0.85);
+      inset-inline-start: -2px;
+      inset-block-start: -1.5px;
+      inline-size: 4px;
+      block-size: 4px;
+      box-shadow: 0 0 4.5px 0 rgba(255, 255, 255, 0.88);
     }
   }
 }
