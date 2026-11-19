@@ -130,10 +130,18 @@
     min-block-size: var(--header-height);
     display: flex;
     align-items: center;
+    border-block-end: 1px solid var(--border);
+  }
+
+  .site-header::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
     background-color: var(--ground-glass);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    border-block-end: 1px solid var(--border);
   }
 
   .site-header.is-measuring * {
@@ -1297,23 +1305,13 @@
   }
 
   /* 1px CRT Oscilloscope Sweep Reading Progress Indicator */
-  .crt-lvh-probe {
-    position: fixed;
-    inset-block-start: 0;
-    inset-inline-start: 0;
-    inline-size: 0;
-    block-size: 100vh;
-    block-size: 100lvh;
-    pointer-events: none;
-    visibility: hidden;
-  }
-
   .crt-sweep {
     position: absolute;
     inset-block-end: -9px;
     inset-inline: 0;
     inline-size: 100%;
     block-size: 17px;
+    container-type: inline-size;
     pointer-events: none;
     overflow: clip;
   }
@@ -1417,27 +1415,38 @@
       transition: none;
     }
 
-    /* Use scroll-timeline on fine-pointer desktops; on coarse-pointer touch screens JS drives line + head in lockstep */
-    @media (hover: hover) and (pointer: fine) {
-      @supports (animation-timeline: scroll()) {
-        @keyframes crt-line-sweep {
-          from {
-            transform: scaleX(0);
-          }
-          to {
-            transform: scaleX(1);
-          }
+    @supports (animation-timeline: scroll()) and (width: 1cqi) {
+      @keyframes crt-line-sweep {
+        from {
+          transform: scaleX(0);
         }
+        to {
+          transform: scaleX(1);
+        }
+      }
 
-        .crt-sweep-line {
-          animation: crt-line-sweep auto linear both;
-          animation-timeline: scroll(root block);
+      @keyframes crt-head-sweep {
+        from {
+          transform: translate3d(0, 0, 0);
         }
+        to {
+          transform: translate3d(100cqi, 0, 0);
+        }
+      }
+
+      .crt-sweep-line {
+        animation: crt-line-sweep auto linear both;
+        animation-timeline: scroll(root block);
+      }
+
+      .crt-sweep-head {
+        animation: crt-head-sweep auto linear both;
+        animation-timeline: scroll(root block);
       }
     }
   }
 
-  /* Mobile readability & enlarged oscilloscope spot (<= 640px; desktop >= 641px untouched) */
+  /* Mobile readability (<= 640px; desktop >= 641px untouched) */
   @media (max-width: 40rem) {
     body {
       font-size: 0.9375rem;
@@ -1553,27 +1562,6 @@
     .glo-grid > div:not(:last-child) {
       padding-block-end: 0.5rem;
       border-block-end: 1px solid var(--border);
-    }
-
-    .crt-sweep-tear {
-      inline-size: 32px;
-      inset-block-start: -1.25px;
-      block-size: 3.5px;
-      background: linear-gradient(
-        90deg,
-        rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.62) 48%,
-        var(--white) 100%
-      );
-      clip-path: polygon(0 35.7%, 100% 0, 100% 100%, 0 64.3%);
-    }
-
-    .crt-sweep-dot {
-      inset-inline-start: -2px;
-      inset-block-start: -1.5px;
-      inline-size: 4px;
-      block-size: 4px;
-      box-shadow: 0 0 4.5px 0 rgba(255, 255, 255, 0.88);
     }
   }
 }

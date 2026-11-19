@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=14">
+  <link rel="stylesheet" href="styles.css?v=15">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -31,7 +31,6 @@
 </head>
 <body>
   <a class="skip-link visually-hidden" href="#main-title">Skip to content</a>
-  <div class="crt-lvh-probe" aria-hidden="true"></div>
 
   <!-- Sticky 52px Top Bar -->
   <header class="site-header">
@@ -892,29 +891,22 @@
       );
     }
 
-    // Ignite CRT beam spot while scrolling; drive tear length from actual horizontal beam velocity
+    // Ignite CRT beam spot while scrolling; drive velocity tear from viewport-normalized scroll speed
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       const sweep = document.querySelector(".crt-sweep");
       const line = sweep?.querySelector(".crt-sweep-line");
       const head = sweep?.querySelector(".crt-sweep-head");
       const tear = sweep?.querySelector(".crt-sweep-tear");
-      const lvhProbe = document.querySelector(".crt-lvh-probe");
-      const isCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
-      const needsScrollFallback = !CSS.supports("animation-timeline", "scroll()") || isCoarsePointer;
+      const supportsScrollTimeline =
+        CSS.supports("animation-timeline", "scroll()") && CSS.supports("width", "1cqi");
 
       if (sweep && head) {
         const root = document.documentElement;
+        let viewportH = Math.max(1, window.innerHeight);
         let lastClientWidth = root.clientWidth;
-        let cachedViewportH = (isCoarsePointer && lvhProbe?.offsetHeight) || root.clientHeight;
-
-        const getHeadState = () => {
-          const scrollable = root.scrollHeight - cachedViewportH;
-          const progress = scrollable > 0 ? Math.min(1, Math.max(0, window.scrollY / scrollable)) : 0;
-          return { progress, headX: progress * lastClientWidth };
-        };
-
-        let { progress: initProgress, headX: tailX } = getHeadState();
-        let prevHeadX = tailX;
+        let prevScrollY = window.scrollY;
+        let virtualX = 0;
+        let tailX = 0;
         let smoothSpeed = 0;
         let smoothWake = 0;
         let isSweeping = false;
@@ -922,12 +914,16 @@
         let lastTime = 0;
         let lastFastMoveTime = 0;
         let lastScrollTime = 0;
-        let resizeHoldUntil = 0;
 
-        head.style.transform = `translate3d(${tailX.toFixed(2)}px, 0, 0)`;
-        if (needsScrollFallback && line) {
-          line.style.transform = `scaleX(${initProgress.toFixed(5)})`;
-        }
+        const syncFallbackPosition = () => {
+          if (supportsScrollTimeline) return;
+          const scrollable = root.scrollHeight - root.clientHeight;
+          const progress = scrollable > 0 ? Math.min(1, Math.max(0, window.scrollY / scrollable)) : 0;
+          head.style.transform = `translate3d(${(progress * lastClientWidth).toFixed(2)}px, 0, 0)`;
+          if (line) line.style.transform = `scaleX(${progress.toFixed(5)})`;
+        };
+
+        syncFallbackPosition();
 
         const stopSweeping = () => {
           if (!isSweeping) return;
@@ -939,20 +935,19 @@
           const dt = lastTime > 0 ? Math.max(1, Math.min(48, now - lastTime)) : 16;
           lastTime = now;
 
-          const { progress, headX } = getHeadState();
-          head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
-          if (needsScrollFallback && line) {
-            line.style.transform = `scaleX(${progress.toFixed(5)})`;
-          }
+          const scrollY = window.scrollY;
+          const dy = scrollY - prevScrollY;
+          prevScrollY = scrollY;
+          syncFallbackPosition();
 
-          // Smooth instantaneous speed over ~36ms so 120Hz ProMotion alternating scroll frames never drop to 0
-          const instSpeed = (Math.abs(headX - prevHeadX) * 1000) / dt;
-          prevHeadX = headX;
-          smoothSpeed += (instSpeed - smoothSpeed) * (1 - Math.exp(-dt / 36));
+          // 1 screen height scrolled = 280 desktop-equivalent beam units on every screen width
+          const dEquiv = (dy / viewportH) * 280;
+          virtualX += dEquiv;
 
-          const isMobile = lastClientWidth <= 640;
-          const threshold = isSweeping ? (isMobile ? 5.5 : 9.5) : (isMobile ? 9 : 12);
+          const instSpeed = (Math.abs(dEquiv) * 1000) / dt;
+          smoothSpeed += (instSpeed - smoothSpeed) * (1 - Math.exp(-dt / 32));
 
+          const threshold = isSweeping ? 9.5 : 12;
           if (smoothSpeed >= threshold) {
             lastFastMoveTime = now;
             if (!isSweeping) {
@@ -960,22 +955,17 @@
               sweep.classList.add("is-sweeping");
             }
           } else if (isSweeping && now - lastFastMoveTime > 60) {
-            // Blank the beam as soon as visible header motion stops (don't wait on sub-pixel coasting)
             stopSweeping();
           }
 
-          // Responsive RC wake (125ms) while sweeping; gentler hold (280ms) while fading out with the dot
           const tau = isSweeping ? 125 : 280;
           const alpha = 1 - Math.exp(-dt / tau);
-          tailX += (headX - tailX) * alpha;
-          const rawWake = headX - tailX;
+          tailX += (virtualX - tailX) * alpha;
+          const rawWake = virtualX - tailX;
           smoothWake += (rawWake - smoothWake) * (1 - Math.exp(-dt / 28));
 
-          // Scale deadzone & gain to viewport/page geometry on mobile (~8x fewer headX px per vertical scroll px)
-          const coreRadius = isMobile ? 0.35 : 1.2;
-          const excessPx = Math.abs(smoothWake) > coreRadius ? smoothWake - Math.sign(smoothWake) * coreRadius : 0;
-          const tearGain = isMobile ? 7.5 : 1.25;
-          const tearScale = Math.tanh((excessPx * tearGain) / 24);
+          const excessPx = Math.abs(smoothWake) > 1.2 ? smoothWake - Math.sign(smoothWake) * 1.2 : 0;
+          const tearScale = Math.tanh((excessPx * 1.25) / 24);
           if (tear) {
             tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
           }
@@ -983,7 +973,9 @@
           if (isSweeping || Math.abs(smoothWake) > 0.15 || now - lastScrollTime < 90) {
             rafId = requestAnimationFrame(tick);
           } else {
-            tailX = headX;
+            prevScrollY = scrollY;
+            virtualX = 0;
+            tailX = 0;
             smoothSpeed = 0;
             smoothWake = 0;
             if (tear) tear.style.transform = "scaleX(0)";
@@ -997,18 +989,7 @@
           () => {
             const now = performance.now();
             lastScrollTime = now;
-            const { progress, headX } = getHeadState();
-            head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
-            if (needsScrollFallback && line) {
-              line.style.transform = `scaleX(${progress.toFixed(5)})`;
-            }
-            if (now < resizeHoldUntil) {
-              tailX = headX;
-              prevHeadX = headX;
-              smoothSpeed = 0;
-              smoothWake = 0;
-              return;
-            }
+            syncFallbackPosition();
             if (!rafId) {
               lastTime = now - 16;
               rafId = requestAnimationFrame(tick);
@@ -1020,21 +1001,13 @@
         window.addEventListener(
           "resize",
           () => {
+            viewportH = Math.max(1, window.innerHeight);
             const width = root.clientWidth;
-            // Ignore mobile URL/toolbar height-only resizes so scrolling on iOS never freezes or resets the tail
-            if (width === lastClientWidth && !(!isCoarsePointer && root.clientHeight !== cachedViewportH)) return;
+            if (width === lastClientWidth) return;
             lastClientWidth = width;
-            cachedViewportH = (isCoarsePointer && lvhProbe?.offsetHeight) || root.clientHeight;
-            resizeHoldUntil = performance.now() + 140;
-            const { progress, headX } = getHeadState();
-            tailX = headX;
-            prevHeadX = headX;
-            smoothSpeed = 0;
-            smoothWake = 0;
-            head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
-            if (tear) tear.style.transform = "scaleX(0)";
-            if (needsScrollFallback && line) {
-              line.style.transform = `scaleX(${progress.toFixed(5)})`;
+            syncFallbackPosition();
+            if (supportsScrollTimeline && typeof head.getAnimations === "function") {
+              head.getAnimations().forEach((anim) => anim.effect?.updateTiming?.({}));
             }
           },
           { passive: true }
