@@ -1351,7 +1351,7 @@
     will-change: transform;
   }
 
-  /* Unified spot wrapper: scales dot + tail together from 1px line thickness on the GPU compositor */
+  /* Active electron beam spot: blooms wider than the 1px line at the head and collapses back to 1px at rest */
   .crt-sweep-spot {
     position: absolute;
     inset: 0;
@@ -1361,39 +1361,38 @@
     will-change: transform, opacity;
   }
 
-  /* Same HDR gain-map source as the dot with smooth phosphor falloff into the 1px line */
+  /* 1px glass-anchored phosphor wake: literally IS the 1px line cooling from [tailX .. headX] */
   .crt-sweep-tear {
     position: absolute;
     inset-inline-end: 0;
-    inset-block-start: -1px;
-    inline-size: 48px;
-    block-size: 3px;
+    inset-block-start: 0;
+    inline-size: 100px;
+    block-size: 1px;
     max-inline-size: none;
     object-fit: fill;
     background-color: var(--white);
     -webkit-mask-image: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(0, 0, 0, 0.1) 22%,
-      rgba(0, 0, 0, 0.28) 50%,
-      rgba(0, 0, 0, 0.56) 75%,
-      rgba(0, 0, 0, 0.86) 90%,
-      #000 95%,
+      rgba(0, 0, 0, 0.14) 24%,
+      rgba(0, 0, 0, 0.38) 54%,
+      rgba(0, 0, 0, 0.72) 80%,
+      rgba(0, 0, 0, 0.93) 93%,
       #000 100%
     );
     mask-image: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(0, 0, 0, 0.1) 22%,
-      rgba(0, 0, 0, 0.28) 50%,
-      rgba(0, 0, 0, 0.56) 75%,
-      rgba(0, 0, 0, 0.86) 90%,
-      #000 95%,
+      rgba(0, 0, 0, 0.14) 24%,
+      rgba(0, 0, 0, 0.38) 54%,
+      rgba(0, 0, 0, 0.72) 80%,
+      rgba(0, 0, 0, 0.93) 93%,
       #000 100%
     );
     transform-origin: right center;
     transform: scaleX(0);
-    will-change: transform;
+    opacity: 0;
+    will-change: transform, opacity;
 
     @media (dynamic-range: high) {
       @supports (dynamic-range-limit: no-limit) {
@@ -1418,13 +1417,6 @@
       @supports (dynamic-range-limit: no-limit) {
         dynamic-range-limit: no-limit;
       }
-    }
-  }
-
-  /* Keep integer 3px vertical geometry on desktop (zero subpixel snap); GPU maxScale=0.72 yields 36px x 2.16px */
-  @media (min-width: 40.0625rem) {
-    .crt-sweep-tear {
-      inline-size: 50px;
     }
   }
 

@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=24">
+  <link rel="stylesheet" href="styles.css?v=25">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -61,15 +61,15 @@
     <div class="crt-sweep" aria-hidden="true">
       <div class="crt-sweep-line"></div>
       <div class="crt-sweep-head">
+        <img
+          class="crt-sweep-tear"
+          src="assets/images/white-7.5x.jpg"
+          alt=""
+          width="100"
+          height="1"
+          decoding="sync"
+        >
         <span class="crt-sweep-spot">
-          <img
-            class="crt-sweep-tear"
-            src="assets/images/white-7.5x.jpg"
-            alt=""
-            width="28"
-            height="3"
-            decoding="sync"
-          >
           <img
             class="crt-sweep-dot"
             src="assets/images/white-7.5x.jpg"
@@ -885,7 +885,7 @@
     let activeScrollRaf = 0;
     let activeScrollToken = 0;
 
-    // CRT oscilloscope beam: position runs on GPU scroll-timeline; spot & tail couple to smoothed scroll velocity
+    // CRT oscilloscope beam: 1px wake stays anchored to [tailX .. headX] on the glass; dot blooms at headX
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       const sweep = document.querySelector(".crt-sweep");
       const line = sweep?.querySelector(".crt-sweep-line");
@@ -899,7 +899,7 @@
         const root = document.documentElement;
         const restScale = 1 / 3;
         let viewportH = Math.max(1, window.innerHeight);
-        let clientW = root.clientWidth;
+        let clientW = Math.max(1, root.clientWidth);
         let maxScale = clientW > 640 ? 0.72 : 1;
         let scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
 
@@ -913,9 +913,11 @@
           return y;
         };
 
-        let prevY = getClampedY();
+        const getHeadX = () => (getClampedY() / scrollableH) * clientW;
+
+        let smoothHead = getHeadX();
+        let tailX = smoothHead;
         let allowSweep = false;
-        let vel1 = 0;
         let vel = 0;
         let glow1 = 0;
         let glow = 0;
@@ -940,51 +942,77 @@
 
         syncFallbackPosition();
 
+        window.addEventListener(
+          "load",
+          () => {
+            scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
+            if (!rafId) {
+              smoothHead = getHeadX();
+              tailX = smoothHead;
+            }
+          },
+          { passive: true, once: true }
+        );
+
         const tick = (now) => {
           const dt = lastTime > 0 ? Math.max(1, Math.min(48, now - lastTime)) : 16;
           lastTime = now;
-
-          const y = getClampedY();
-          const dy = y - prevY;
-          prevY = y;
           syncFallbackPosition();
 
-          // Reset wake cleanly at turnaround point so tail never points ahead of motion
-          if ((dy > 0.5 && vel < -5) || (dy < -0.5 && vel > 5)) {
-            vel1 = 0;
-            vel = 0;
+          const isMobile = clientW <= 640;
+          const rawHead = getHeadX();
+          const prevSmooth = smoothHead;
+          smoothHead += (rawHead - smoothHead) * (1 - Math.exp(-dt / 12));
+          const dx = smoothHead - prevSmooth;
+
+          // Pin tailX at exact turnaround pixel so wake never extends past where the sweep started
+          if ((dx > 0.02 && tailX > smoothHead) || (dx < -0.02 && tailX < smoothHead)) {
+            tailX = smoothHead;
           }
 
-          // 2-pole low-pass velocity filter smooths bursty mobile scroll updates without phase glitches
-          const gain = clientW > 640 ? 260 : 360;
-          const rawVel = ((dy / viewportH) * gain * 1000) / dt;
-          const aV = 1 - Math.exp(-dt / 36);
-          vel1 = Math.max(-450, Math.min(450, vel1 + (rawVel - vel1) * aV));
-          vel += (vel1 - vel) * aV;
+          // Smooth screen-per-sec speed blends moving phosphor persistence into fast post-stop cooling
+          const instVel = (Math.abs(dx / clientW) * (scrollableH / viewportH) * 1000) / dt;
+          vel = Math.min(1.2, vel + (instVel - vel) * (1 - Math.exp(-dt / 30)));
 
-          // Couple dot scale & brightness to velocity: faster tail retracts first, dot collapses into 1px line right after
-          const speed = Math.abs(vel);
-          const targetGlow = speed < 14 ? 0 : Math.min(1, (speed - 14) / 105);
-          const aG = 1 - Math.exp(-dt / (targetGlow > glow ? 40 : 56));
+          const tauMove = isMobile ? 460 : 180;
+          const tauStop = 42;
+          const tauTail = tauStop + (tauMove - tauStop) * Math.min(1, vel / 0.85);
+          tailX += (smoothHead - tailX) * (1 - Math.exp(-dt / tauTail));
+
+          // Wake is exact [tailX .. headX] pixel span on the 1px line; dot glow couples directly to wake
+          const wakePx = smoothHead - tailX;
+          const absWake = Math.abs(wakePx);
+          const noiseWake = isMobile ? 0.5 : 0.9;
+          const fullWake = isMobile ? 6 : 16;
+          const targetGlow =
+            absWake < noiseWake ? 0 : Math.min(1, (absWake - noiseWake) / (fullWake - noiseWake));
+          const aG = 1 - Math.exp(-dt / (targetGlow > glow ? 28 : 48));
           glow1 += (targetGlow - glow1) * aG;
           glow += (glow1 - glow) * aG;
 
-          const tearScale = Math.tanh(vel / 200);
           const spotScale = restScale + (maxScale - restScale) * glow;
-
           spot.style.opacity = glow < 0.005 ? "0" : glow.toFixed(3);
           spot.style.transform = `scale(${spotScale.toFixed(4)})`;
-          tear.style.transform = Math.abs(tearScale) < 0.01 ? "scaleX(0)" : `scaleX(${tearScale.toFixed(4)})`;
 
-          if (glow >= 0.005 || speed >= 1) {
+          if (absWake < 0.2) {
+            tear.style.opacity = "0";
+            tear.style.transform = "scaleX(0)";
+          } else {
+            tear.style.opacity = Math.min(1, glow * 1.15).toFixed(3);
+            tear.style.transform = `scaleX(${(wakePx / 100).toFixed(5)})`;
+          }
+
+          if (glow >= 0.005 || absWake >= 0.2 || Math.abs(rawHead - smoothHead) >= 0.1) {
             rafId = requestAnimationFrame(tick);
           } else {
-            vel1 = 0;
+            smoothHead = rawHead;
+            tailX = rawHead;
             vel = 0;
             glow1 = 0;
             glow = 0;
             spot.style.opacity = "0";
             spot.style.transform = `scale(${restScale.toFixed(4)})`;
+            tear.style.opacity = "0";
             tear.style.transform = "scaleX(0)";
             rafId = 0;
             lastTime = 0;
@@ -996,7 +1024,8 @@
           () => {
             syncFallbackPosition();
             if (!allowSweep && !activeScrollRaf) {
-              prevY = getClampedY();
+              smoothHead = getHeadX();
+              tailX = smoothHead;
               return;
             }
             if (!rafId) {
@@ -1020,10 +1049,13 @@
           () => {
             viewportH = Math.max(1, window.innerHeight);
             scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
-            const width = root.clientWidth;
+            const width = Math.max(1, root.clientWidth);
             if (width === clientW) return;
+            const ratio = width / clientW;
             clientW = width;
             maxScale = clientW > 640 ? 0.72 : 1;
+            smoothHead *= ratio;
+            tailX *= ratio;
             syncFallbackPosition();
             if (supportsScrollTimeline && typeof head.getAnimations === "function") {
               head.getAnimations().forEach((anim) => anim.effect?.updateTiming?.({}));
