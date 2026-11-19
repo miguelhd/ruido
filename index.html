@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=21">
+  <link rel="stylesheet" href="styles.css?v=22">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -881,24 +881,9 @@
       }
     }
 
-    // Shared handle for programmatic eased anchor scrolling (so per-frame instant scrollTo doesn't trigger premature scrollend blanking)
+    // Shared handle for programmatic eased anchor scrolling
     let activeScrollRaf = 0;
     let activeScrollToken = 0;
-
-    // Fallback for browsers without native `scrollend` support
-    if (!("onscrollend" in window)) {
-      let scrollEndTimer;
-      window.addEventListener(
-        "scroll",
-        () => {
-          clearTimeout(scrollEndTimer);
-          scrollEndTimer = setTimeout(() => {
-            window.dispatchEvent(new CustomEvent("scrollend"));
-          }, 120);
-        },
-        { passive: true }
-      );
-    }
 
     // Ignite CRT beam spot while scrolling; drive velocity tear from viewport-normalized scroll speed
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -915,16 +900,16 @@
         let clientW = root.clientWidth;
         let scrollableH = Math.max(1, root.scrollHeight - root.clientHeight);
         let prevScrollY = window.scrollY;
+        let restScrollY = prevScrollY;
+        let moveAnchorY = prevScrollY;
         let virtualX = 0;
         let tailX = 0;
-        let smoothSpeed = 0;
         let isSweeping = false;
         let allowSweep = false;
         let rafId = 0;
         let lastTime = 0;
         let lastMoveTime = 0;
         let lastScrollTime = 0;
-        let extinguishTimer = 0;
 
         const enableSweep = () => {
           allowSweep = true;
@@ -944,24 +929,19 @@
 
         syncFallbackPosition();
 
-        const startSweeping = (now) => {
+        const startSweeping = (now, scrollY) => {
           lastMoveTime = now;
+          moveAnchorY = scrollY;
           if (isSweeping) return;
           isSweeping = true;
-          clearTimeout(extinguishTimer);
-          sweep.classList.remove("is-extinguishing");
           sweep.classList.add("is-sweeping");
         };
 
-        const stopSweeping = () => {
+        const stopSweeping = (scrollY) => {
+          restScrollY = scrollY;
           if (!isSweeping) return;
           isSweeping = false;
           sweep.classList.remove("is-sweeping");
-          sweep.classList.add("is-extinguishing");
-          clearTimeout(extinguishTimer);
-          extinguishTimer = setTimeout(() => {
-            sweep.classList.remove("is-extinguishing");
-          }, 230);
         };
 
         const tick = (now) => {
@@ -973,8 +953,17 @@
           prevScrollY = scrollY;
           syncFallbackPosition();
 
+          if (!isSweeping) {
+            if (Math.abs(scrollY - restScrollY) >= 2.5) {
+              startSweeping(now, scrollY);
+            }
+          } else if (Math.abs(scrollY - moveAnchorY) >= 0.3) {
+            lastMoveTime = now;
+            moveAnchorY = scrollY;
+          }
+
           // 1 screen height scrolled = 280 desktop-equivalent units (identical physics on desktop & mobile)
-          const dx = (dy / viewportH) * 280;
+          const dx = isSweeping ? (dy / viewportH) * 280 : 0;
 
           // Anchor tail at turnaround point on direction reversal so it never points ahead or whips
           if ((dx > 0.04 && tailX > virtualX) || (dx < -0.04 && tailX < virtualX)) {
@@ -982,36 +971,37 @@
           }
           virtualX += dx;
 
-          const instSpeed = (Math.abs(dx) * 1000) / dt;
-          smoothSpeed += (instSpeed - smoothSpeed) * (1 - Math.exp(-dt / 24));
-
-          const threshold = isSweeping ? 7 : 11;
-          if (smoothSpeed >= threshold) {
-            startSweeping(now);
-          } else if (isSweeping && now - lastMoveTime > 35) {
-            stopSweeping();
+          // Clamp wake at visual saturation so tail begins retracting the instant deceleration or hand-stop starts
+          const maxWake = 66;
+          if (virtualX - tailX > maxWake) {
+            tailX = virtualX - maxWake;
+          } else if (virtualX - tailX < -maxWake) {
+            tailX = virtualX + maxWake;
           }
 
-          const alpha = 1 - Math.exp(-dt / 190);
+          // Lush phosphor persistence while moving (175ms); rapid zip-into-dot retraction on stop (20ms)
+          const idleMs = now - lastMoveTime;
+          const tau = idleMs >= 20 ? 20 : 175;
+          const alpha = 1 - Math.exp(-dt / tau);
           tailX += (virtualX - tailX) * alpha;
+
           const wakePx = virtualX - tailX;
-          const tearScale = Math.tanh(wakePx / 28);
+          const tearScale = Math.tanh(wakePx / 30);
           if (tear) {
             tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
           }
 
-          if (
-            isSweeping ||
-            sweep.classList.contains("is-extinguishing") ||
-            Math.abs(wakePx) > 0.1 ||
-            now - lastScrollTime < 60
-          ) {
+          // Collapse stationary dot into 1px line immediately after full stop AND tail retraction
+          if (isSweeping && idleMs >= 36 && Math.abs(tearScale) < 0.09) {
+            stopSweeping(scrollY);
+          }
+
+          if (isSweeping || Math.abs(wakePx) > 0.08 || now - lastScrollTime < 60) {
             rafId = requestAnimationFrame(tick);
           } else {
             prevScrollY = scrollY;
             virtualX = 0;
             tailX = 0;
-            smoothSpeed = 0;
             if (tear) tear.style.transform = "scaleX(0)";
             rafId = 0;
             lastTime = 0;
@@ -1027,15 +1017,19 @@
             // Ignore initial browser scroll-restoration / hash jumps on refresh before any user input
             if (!allowSweep && !activeScrollRaf) {
               prevScrollY = scrollY;
+              restScrollY = scrollY;
+              moveAnchorY = scrollY;
               return;
             }
 
             const now = performance.now();
             lastScrollTime = now;
+
+            if (!isSweeping && Math.abs(scrollY - restScrollY) >= 2.5) {
+              startSweeping(now, scrollY);
+            }
+
             if (!rafId) {
-              if (Math.abs(scrollY - prevScrollY) >= 0.5) {
-                startSweeping(now);
-              }
               lastTime = now - 16;
               rafId = requestAnimationFrame(tick);
             }
