@@ -189,7 +189,7 @@
           </li>
           <li class="card">
             <span class="card-title">4 ALGORITHM</span>
-            <p class="prose">Starves the shared power supply so the four voices pull and lock together; sets tempo in Rhythm Lab.</p>
+            <p class="prose">Starves the shared power supply so the four voices pull and lock together; changes settings in <kbd class="keycap">[GLO]</kbd> and sets tempo with <kbd class="keycap">[SHIFT]</kbd>.</p>
           </li>
           <li class="card">
             <span class="card-title">5 KNOB 1–4</span>
@@ -201,11 +201,11 @@
           </li>
           <li class="card">
             <span class="card-title">7 MODE BUTTONS</span>
-            <p class="prose">Jump to Filter <kbd class="keycap">[FX]</kbd>, Keyboard <kbd class="keycap">[SEL]</kbd>, Modulation <kbd class="keycap">[LFO]</kbd>, Voice Trim <kbd class="keycap">[EDIT]</kbd>, Settings <kbd class="keycap">[GLO]</kbd>, or <kbd class="keycap">[HOME]</kbd>.</p>
+            <p class="prose">Jump to Filter <kbd class="keycap">[FX]</kbd>, Keyboard <kbd class="keycap">[SEL]</kbd>, Modulation <kbd class="keycap">[LFO]</kbd>, Voice Trim <kbd class="keycap">[EDIT]</kbd>, Settings <kbd class="keycap">[GLO]</kbd>, Scene Save <kbd class="keycap">[SAVE]</kbd>, Audio Mute <kbd class="keycap">[PLAY/STOP]</kbd>, or <kbd class="keycap">[HOME]</kbd>.</p>
           </li>
           <li class="card">
             <span class="card-title">8 27-KEY SURFACE (20 PRESSURE)</span>
-            <p class="prose">The left 20 keys respond continuously to finger weight; the right-side Solo, Mute, and Tap keys act as on/off switches.</p>
+            <p class="prose">The left 20 keys respond continuously to finger weight; the right-side Latch, Tap, Mute, and lit top-right Shift keys act as on/off switches.</p>
           </li>
         </ol>
       </div>
@@ -302,6 +302,14 @@
         </li>
         <li class="card">
           <div class="combo-line">
+            <span class="card-title">HOME</span>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(ALGORITHM)</kbd>
+          </div>
+          <p class="prose">Starve the shared power rail so voices pull and lock together.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
             <span class="card-title">HOLD</span>
             <kbd class="keycap">[OCT-]</kbd>
             <span class="combo-op" aria-hidden="true">+</span>
@@ -328,7 +336,6 @@
         </li>
         <li class="card">
           <div class="combo-line">
-            <span class="card-title">HOLD</span>
             <kbd class="keycap">[SEL]</kbd>
             <span class="combo-op" aria-hidden="true">+</span>
             <kbd class="keycap-knob">(SELECT)</kbd>
@@ -337,12 +344,56 @@
         </li>
         <li class="card">
           <div class="combo-line">
+            <kbd class="keycap">[MONO]</kbd>
+          </div>
+          <p class="prose">Latch or release any pressed pressure keys hands-free.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <kbd class="keycap">[MUTE 1–4]</kbd>
+          </div>
+          <p class="prose">Mute or unmute voices 1–4 on the bottom-right four keys.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
             <span class="card-title">HOLD</span>
+            <kbd class="keycap">[SHIFT]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap">[MUTE 1–4]</kbd>
+          </div>
+          <p class="prose">Hold the lit top-right key to solo voices 1–4.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOLD</span>
+            <kbd class="keycap">[SHIFT]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap">[SCENE 1–4]</kbd>
+          </div>
+          <p class="prose">Recall or pressure-blend your four saved scenes.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOLD</span>
+            <kbd class="keycap">[SHIFT]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(ALGORITHM)</kbd>
+          </div>
+          <p class="prose">Set master tempo, or tap <kbd class="keycap">[POLY]</kbd> in Rhythm Lab.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
             <kbd class="keycap">[SAVE]</kbd>
             <span class="combo-op" aria-hidden="true">+</span>
             <kbd class="keycap">[SCENE 1–4]</kbd>
           </div>
-          <p class="prose">Save your current sound into one of four scene slots.</p>
+          <p class="prose">Tap <kbd class="keycap">[SAVE]</kbd> once to store a scene, or twice to delete one.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <kbd class="keycap">[PLAY/STOP]</kbd>
+          </div>
+          <p class="prose">Mute or unmute the master output cleanly.</p>
         </li>
       </ul>
     </section>
@@ -454,7 +505,7 @@
           </li>
           <li class="card">
             <span class="card-title">6 SAVE YOUR SCENE</span>
-            <p class="prose">Hold <kbd class="keycap">[SAVE]</kbd> and tap one of the four scene keys on the bottom row to store your patch.</p>
+            <p class="prose">Tap <kbd class="keycap">[SAVE]</kbd> and tap one of the four blinking scene keys on the bottom row to store your patch.</p>
           </li>
         </ol>
       </div>
@@ -516,9 +567,9 @@
         <p class="prose prose--italic"><span class="prose-strong">Tip:</span> Point LFO B at A-rate or depth for shifting patterns that never repeat.</p>
       </div>
 
-      <!-- 8.3 [EDIT] -->
+      <!-- 8.3 [EDIT] & [HOME] -->
       <div class="subsection">
-        <h3 class="subsection-heading">8.3 [EDIT] VOICE TRIM</h3>
+        <h3 class="subsection-heading">8.3 [EDIT] &amp; [HOME] VOICE TRIM</h3>
         <figure class="specimen-frame">
           <img
             class="crt-img"
@@ -531,7 +582,7 @@
           >
           <figcaption class="specimen-caption">EDIT VOICE TRIM PULSE HUD</figcaption>
         </figure>
-        <p class="prose">Turn <kbd class="keycap-knob">(SELECT)</kbd> to step through four trim pages where <kbd class="keycap-knob">(KNOB 1)</kbd> – <kbd class="keycap-knob">(KNOB 4)</kbd> adjust voices 1–4 side by side:</p>
+        <p class="prose">Press <kbd class="keycap">[EDIT]</kbd> for level and stereo pan, or tap <kbd class="keycap">[HOME]</kbd> for pulse width and pitch drift, where <kbd class="keycap-knob">(KNOB 1)</kbd> – <kbd class="keycap-knob">(KNOB 4)</kbd> adjust voices 1–4 side by side:</p>
         <div class="param-box">
           <div><span class="param-key">LEVEL:</span> Clean volume up to 70%, warm drive past 70%</div>
           <div><span class="param-key">DUTY:</span> Hollow square to thin pulse</div>
@@ -540,10 +591,33 @@
         </div>
       </div>
 
-      <!-- 8.4 [GLO] -->
+      <!-- 8.4 (ALGORITHM) -->
       <div class="subsection">
-        <h3 class="subsection-heading">8.4 [GLO] GLOBAL SETTINGS</h3>
-        <p class="prose">Turn <kbd class="keycap-knob">(SELECT)</kbd> to pick a setting and <kbd class="keycap-knob">(KNOB 1)</kbd> to change it: stereo or mono output, momentary or latching mutes/solo/scene behavior, external MIDI clock sync, and key pressure sensitivity (1–5).</p>
+        <h3 class="subsection-heading">8.4 (ALGORITHM) RAIL COUPLING</h3>
+        <figure class="specimen-frame">
+          <img
+            class="crt-img"
+            src="assets/images/14-rail-coupling-pull.png"
+            alt="Ruido Rail Coupling screen at 35 percent showing shared Vdd voltage rail sag dips above four overlapping oscillator ramps"
+            width="240"
+            height="240"
+            loading="lazy"
+            decoding="async"
+          >
+          <figcaption class="specimen-caption">SHARED POWER RAIL COUPLING SCOPE</figcaption>
+        </figure>
+        <p class="prose">Turn <kbd class="keycap-knob">(ALGORITHM)</kbd> on <kbd class="keycap">[HOME]</kbd> to starve the shared power supply and watch the voltage rail sag above the four oscillator ramps:</p>
+        <div class="param-box">
+          <div><span class="param-key">0%:</span> Isolated voices with no crosstalk</div>
+          <div><span class="param-key">1–45%:</span> Gentle voltage dips pull close pitches into warm chorus</div>
+          <div><span class="param-key">45–100%:</span> Starved supply warps pulse width and snaps voices into hard-sync</div>
+        </div>
+      </div>
+
+      <!-- 8.5 [GLO] -->
+      <div class="subsection">
+        <h3 class="subsection-heading">8.5 [GLO] GLOBAL SETTINGS</h3>
+        <p class="prose">Turn <kbd class="keycap-knob">(SELECT)</kbd> to pick a setting and <kbd class="keycap-knob">(ALGORITHM)</kbd> to change it: stereo or mono output, momentary or latching mutes/solo/scene behavior, external MIDI clock sync, and key pressure sensitivity (1–5).</p>
         <div class="glo-grid">
           <div>
             <span class="glo-label">ROUTING</span>
@@ -573,7 +647,7 @@
       </div>
 
       <p class="prose">
-        Hold <kbd class="keycap">[SEL]</kbd> and turn <kbd class="keycap-knob">(SELECT)</kbd> to switch the 27-key surface between three instruments. The left 20 keys respond continuously to finger weight; the right-side Solo, Mute, and Tap keys act as on/off switches.
+        Press <kbd class="keycap">[SEL]</kbd> and turn <kbd class="keycap-knob">(SELECT)</kbd> to switch the left 20 pressure keys between three instruments. On the right side, <kbd class="keycap">[MONO]</kbd> latches held keys, <kbd class="keycap">[POLY]</kbd> taps tempo, the bottom four keys mute voices 1–4, and the lit top-right <kbd class="keycap">[SHIFT]</kbd> key unlocks solo and scene recall.
       </p>
 
       <!-- 9.1 Live Mixer -->
@@ -592,7 +666,47 @@
           <figcaption class="specimen-caption">MODEL 1/3: LIVE MIXER MAP</figcaption>
         </figure>
         <p class="prose">
-          Performance mixing and macros: upper row offers global drive, harmonic ratio lock, and stereo spread; bottom row opens per-voice filters like vactrol gates, shifts octaves, and morphs across four scenes.
+          Performance mixing and macros: upper row offers global drive, sub-octaves, harmonic ratio lock, filter sweeps, and stereo spread; bottom row opens per-voice filters like vactrol gates, shifts octaves, and narrows pulse width.
+        </p>
+      </div>
+
+      <!-- 9.2 Circuit Lab -->
+      <div class="subsection">
+        <h3 class="subsection-heading">9.2 CIRCUIT LAB</h3>
+        <figure class="specimen-frame">
+          <img
+            class="crt-img"
+            src="assets/images/10-sel-keyboard-circuit-lab.png"
+            alt="Ruido Keyboard 2 of 3 Circuit Lab map showing upper-row Starve, Ring/Mod, Sync, and Solo keys and lower-row Cross, Fold, Crush, and Mute keys"
+            width="240"
+            height="240"
+            loading="lazy"
+            decoding="async"
+          >
+          <figcaption class="specimen-caption">MODEL 2/3: CIRCUIT LAB MAP</figcaption>
+        </figure>
+        <p class="prose">
+          CMOS circuit-bending: upper row starves the power rail, ring-modulates voice pairs, overclocks LFOs into audio rate, and locks hard-sync; bottom row patches neighbor-capacitor FM, wavefolding, and sample-and-hold clock crush per voice.
+        </p>
+      </div>
+
+      <!-- 9.3 Rhythm Lab -->
+      <div class="subsection">
+        <h3 class="subsection-heading">9.3 RHYTHM LAB</h3>
+        <figure class="specimen-frame">
+          <img
+            class="crt-img"
+            src="assets/images/11-sel-keyboard-rhythm-lab.png"
+            alt="Ruido Keyboard 3 of 3 Rhythm Lab map showing upper-row Pump, Clock, Swing, Solo, and Tap keys and lower-row Stutter, Divide, Euclid, and Mute keys"
+            width="240"
+            height="240"
+            loading="lazy"
+            decoding="async"
+          >
+          <figcaption class="specimen-caption">MODEL 3/3: RHYTHM LAB MAP</figcaption>
+        </figure>
+        <p class="prose">
+          Polyrhythmic gates and clock dividers: upper row shapes ducking pump, four-voice chase, clock speed, filter plucks, and swing; bottom row runs free vactrol stutters, synced clock dividers, and 16-step Euclidean rhythms per voice.
         </p>
       </div>
 
@@ -615,7 +729,7 @@
           <ol class="recipe-steps" role="list">
             <li>1. Press <kbd class="keycap">[GLO]</kbd>.</li>
             <li>2. Scroll <kbd class="keycap-knob">(SELECT)</kbd> to Key Sensitivity.</li>
-            <li>3. Turn <kbd class="keycap-knob">(KNOB 1)</kbd> from 1 (light touch) to 5 (firm press) while testing any key.</li>
+            <li>3. Turn <kbd class="keycap-knob">(ALGORITHM)</kbd> from 1 (light touch) to 5 (firm press) while testing any key.</li>
           </ol>
         </div>
 
@@ -655,7 +769,7 @@
           <h3 class="card-title">10.5 SYNC RHYTHM LAB TO EXTERNAL MIDI</h3>
           <ol class="recipe-steps" role="list">
             <li>1. Send MIDI clock via 3.5 mm TRS, USB-C, or Bluetooth MIDI.</li>
-            <li>2. Hold <kbd class="keycap">[SEL]</kbd> + turn <kbd class="keycap-knob">(SELECT)</kbd> to 3/3 Rhythm Lab.</li>
+            <li>2. Press <kbd class="keycap">[SEL]</kbd> + turn <kbd class="keycap-knob">(SELECT)</kbd> to 3/3 Rhythm Lab.</li>
             <li>3. Hold any Divide or Euclid key on the bottom row.</li>
           </ol>
         </div>
@@ -688,7 +802,7 @@
             <span class="faq-icon" aria-hidden="true">+</span>
           </summary>
           <div class="faq-answer">
-            <p>Yes. Alongside the analog line jack, Ruido streams 48 kHz class-compliant UAC1 digital stereo audio with 1-LSB TPDF dithering and clock-drift interpolation directly to macOS, iOS, Windows, Linux, or standalone USB host hardware.</p>
+            <p>Yes. Alongside the analog line jack, Ruido streams 44.1 / 48 kHz class-compliant UAC1 digital stereo audio with 1-LSB TPDF dithering and clock-drift interpolation directly to macOS, iOS, Windows, Linux, or standalone USB host hardware.</p>
           </div>
         </details>
 
