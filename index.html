@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=27">
+  <link rel="stylesheet" href="styles.css?v=28">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -906,20 +906,34 @@
         let maxScale = getMaxScale();
         let scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
 
+        let smoothP = 0;
+        let tailP = 0;
+        let peakP = 0;
+
+        const updateScrollableH = () => {
+          const nextH = Math.max(1, root.scrollHeight - window.innerHeight);
+          if (nextH !== scrollableH) {
+            const scale = scrollableH / nextH;
+            scrollableH = nextH;
+            smoothP = Math.min(1, smoothP * scale);
+            tailP = Math.min(1, tailP * scale);
+            peakP = Math.min(1, peakP * scale);
+          }
+        };
+
         const getClampedY = () => {
+          updateScrollableH();
           const y = window.scrollY;
           if (y <= 0) return 0;
-          if (y > scrollableH) {
-            scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
-            if (y > scrollableH) return scrollableH;
-          }
+          if (y > scrollableH) return scrollableH;
           return y;
         };
 
         const getProgress = () => getClampedY() / scrollableH;
 
-        let smoothP = getProgress();
-        let tailP = smoothP;
+        smoothP = getProgress();
+        tailP = smoothP;
+        peakP = smoothP;
         let allowSweep = false;
         let vel = 0;
         let glow1 = 0;
@@ -948,10 +962,11 @@
         window.addEventListener(
           "load",
           () => {
-            scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
+            updateScrollableH();
             if (!rafId) {
               smoothP = getProgress();
               tailP = smoothP;
+              peakP = smoothP;
             }
           },
           { passive: true, once: true }
@@ -967,11 +982,19 @@
           smoothP += (rawP - smoothP) * (1 - Math.exp(-dt / 12));
           const dp = smoothP - prevSmooth;
 
-          // Pin tailP at exact turnaround point so wake never extends past where the sweep started
-          const epsP = 0.02 / clientW;
-          if ((dp > epsP && tailP > smoothP) || (dp < -epsP && tailP < smoothP)) {
-            tailP = smoothP;
+          // Ignore <12px finger liftoff recoil; on true direction reversal, cool old wake smoothly (never 1-frame snap)
+          const wakeBefore = smoothP - tailP;
+          if (wakeBefore > 0.0005) {
+            peakP = Math.max(peakP, smoothP);
+          } else if (wakeBefore < -0.0005) {
+            peakP = Math.min(peakP, smoothP);
+          } else {
+            peakP = smoothP;
           }
+
+          const revScrollPx = Math.abs(peakP - smoothP) * scrollableH;
+          const reversing =
+            revScrollPx >= 12 && ((dp < 0 && tailP < smoothP) || (dp > 0 && tailP > smoothP));
 
           // Scale moving persistence by document screens so 1 screen/s lights ~7.3% of header on any device
           const screensOfContent = scrollableH / viewportH;
@@ -980,8 +1003,15 @@
 
           const tauMove = Math.min(1200, Math.max(250, 73 * screensOfContent));
           const tauStop = 120;
-          const tauTail = tauStop + (tauMove - tauStop) * Math.min(1, vel / 0.3);
+          const tauTail = reversing ? 22 : tauStop + (tauMove - tauStop) * Math.min(1, vel / 0.3);
           tailP += (smoothP - tailP) * (1 - Math.exp(-dt / tauTail));
+
+          if (
+            (wakeBefore > 0 && smoothP - tailP <= 0.0005) ||
+            (wakeBefore < 0 && smoothP - tailP >= -0.0005)
+          ) {
+            peakP = smoothP;
+          }
 
           // Wake is dimensionless [tailP .. headP] fraction of bar width; dot glow couples directly to wake
           const wakeP = smoothP - tailP;
@@ -1009,6 +1039,7 @@
           } else {
             smoothP = rawP;
             tailP = rawP;
+            peakP = rawP;
             vel = 0;
             glow1 = 0;
             glow = 0;
@@ -1028,29 +1059,24 @@
             if (!allowSweep && !activeScrollRaf) {
               smoothP = getProgress();
               tailP = smoothP;
+              peakP = smoothP;
               return;
             }
             if (!rafId) {
-              lastTime = performance.now() - 16;
+              lastTime = 0;
               rafId = requestAnimationFrame(tick);
             }
           },
           { passive: true }
         );
 
-        document.addEventListener(
-          "toggle",
-          () => {
-            scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
-          },
-          { capture: true, passive: true }
-        );
+        document.addEventListener("toggle", updateScrollableH, { capture: true, passive: true });
 
         window.addEventListener(
           "resize",
           () => {
             viewportH = Math.max(1, window.innerHeight);
-            scrollableH = Math.max(1, root.scrollHeight - window.innerHeight);
+            updateScrollableH();
             maxScale = getMaxScale();
             const width = Math.max(1, root.clientWidth);
             if (width === clientW) return;
@@ -1232,8 +1258,8 @@
         const bx = -0.54;
         const ax = 0.79;
         const cy = 2.85;
-        const by = -2.64;
-        const ay = 0.79;
+        const by = -2.7;
+        const ay = 0.85;
         let s = t;
         for (let i = 0; i < 6; i++) {
           const xs = ((ax * s + bx) * s + cx) * s - t;
