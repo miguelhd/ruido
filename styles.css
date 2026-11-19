@@ -1425,16 +1425,16 @@
   @media (prefers-reduced-motion: no-preference) {
     .crt-sweep-spot {
       transition:
-        opacity 260ms cubic-bezier(0.33, 0, 0.2, 1),
-        transform 280ms cubic-bezier(0.33, 0, 0.2, 1);
+        opacity 150ms cubic-bezier(0.4, 0, 0.2, 1),
+        transform 160ms cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .crt-sweep.is-sweeping .crt-sweep-spot {
       opacity: 1;
       transform: scale(1);
       transition:
-        opacity 150ms cubic-bezier(0.2, 0.8, 0.2, 1),
-        transform 190ms cubic-bezier(0.22, 1, 0.36, 1);
+        opacity 110ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     @supports (animation-timeline: scroll()) and (width: 1cqi) {
