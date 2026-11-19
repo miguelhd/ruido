@@ -156,21 +156,13 @@
     align-items: center;
     min-block-size: 28px;
     flex-shrink: 0;
-    translate: 0 0;
-    transition: color 0.14s ease-out, translate 0.08s ease-out;
+    transition: color 0.12s ease;
   }
 
   .brand-mark:hover {
     color: var(--white);
     text-decoration: underline;
     text-underline-offset: 4px;
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .brand-mark:active {
-      translate: 0 1px;
-      transition-duration: 26ms;
-    }
   }
 
   .header-nav {
@@ -195,21 +187,13 @@
     align-items: center;
     min-block-size: 28px;
     padding-inline: 0.15rem;
-    translate: 0 0;
-    transition: color 0.14s ease-out, translate 0.08s ease-out;
+    transition: color 0.12s ease;
   }
 
   .header-links a:hover {
     color: var(--white);
     text-decoration: underline;
     text-underline-offset: 4px;
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .header-links a:active {
-      translate: 0 1px;
-      transition-duration: 26ms;
-    }
   }
 
   .btn-flash-sm {
@@ -230,38 +214,29 @@
     flex-shrink: 0;
     translate: 0 0;
     transition:
-      background-color 140ms cubic-bezier(0, 0, 0.2, 1),
-      color 140ms cubic-bezier(0, 0, 0.2, 1),
-      border-color 140ms cubic-bezier(0, 0, 0.2, 1),
-      box-shadow 140ms cubic-bezier(0, 0, 0.2, 1),
-      text-shadow 140ms cubic-bezier(0, 0, 0.2, 1),
-      translate 80ms ease-out;
+      background-color 0.12s ease,
+      color 0.12s ease,
+      border-color 0.12s ease,
+      translate 0.06s ease-out;
   }
 
   .btn-flash-sm:hover {
-    background-color: var(--panel);
+    background-color: var(--ground);
     color: var(--white);
     border-color: var(--white);
     text-decoration: none;
-    text-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
-    box-shadow:
-      0 2px 0 var(--white),
-      0 0 14px rgba(255, 255, 255, 0.22);
   }
 
   .btn-flash-sm:active {
-    background-color: #1f1f1f;
+    background-color: var(--subpanel);
     color: var(--white);
     border-color: var(--white);
-    box-shadow:
-      0 0 0 var(--white),
-      0 0 20px rgba(255, 255, 255, 0.35);
-    transition-duration: 26ms;
+    transition-duration: 25ms;
   }
 
   @media (prefers-reduced-motion: no-preference) {
     .btn-flash-sm:active {
-      translate: 0 2px;
+      translate: 0 1px;
     }
   }
 
@@ -357,21 +332,13 @@
     display: inline-flex;
     align-items: center;
     min-block-size: 26px;
-    translate: 0 0;
-    transition: color 0.14s ease-out, translate 0.08s ease-out;
+    transition: color 0.12s ease;
   }
 
   .index-list a:hover {
     color: var(--white);
     text-decoration: underline;
     text-underline-offset: 3px;
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .index-list a:active {
-      translate: 0 1px;
-      transition-duration: 26ms;
-    }
   }
 
   /* Chapter Sections */
@@ -407,21 +374,13 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--muted);
-    translate: 0 0;
-    transition: color 0.14s ease-out, translate 0.08s ease-out;
+    transition: color 0.12s ease;
   }
 
   .return-link:hover {
     color: var(--white);
     text-decoration: underline;
     text-underline-offset: 3px;
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .return-link:active {
-      translate: 0 1px;
-      transition-duration: 26ms;
-    }
   }
 
   .subsection {
@@ -764,17 +723,15 @@
   .faq-item {
     background-color: var(--subpanel);
     border: 1px solid var(--border);
-    transition: border-color 0.14s ease-out;
+    transition: border-color 0.14s ease;
   }
 
   .faq-item[open] {
     border-color: var(--border-knob);
   }
 
-  @media (hover: hover) {
-    .faq-item:has(> .faq-summary:hover) {
-      border-color: var(--border-active);
-    }
+  .faq-item:has(> .faq-summary:hover) {
+    border-color: var(--border-active);
   }
 
   .faq-summary {
@@ -792,44 +749,29 @@
     line-height: 1.45;
     text-transform: uppercase;
     color: var(--fg);
-    transition: background-color 0.14s ease-out, color 0.14s ease-out;
-  }
-
-  .faq-summary > span:first-child {
-    translate: 0 0;
-    transition: translate 0.12s ease-out;
+    transition: background-color 0.14s ease, color 0.14s ease;
   }
 
   .faq-summary::-webkit-details-marker {
     display: none;
   }
 
-  @media (hover: hover) {
-    .faq-summary:hover {
-      background-color: #1c1c1c;
-      color: var(--white);
-    }
+  .faq-summary:hover {
+    background-color: #1b1b1b;
+    color: var(--white);
+  }
 
-    .faq-summary:hover .faq-icon {
-      color: var(--white);
-    }
+  .faq-summary:hover .faq-icon {
+    color: var(--white);
   }
 
   .faq-summary:active {
-    background-color: #0b0b0b;
-    transition-duration: 35ms;
-  }
-
-  .faq-summary:active > span:first-child {
-    transition-duration: 35ms;
-
-    @media (prefers-reduced-motion: no-preference) {
-      translate: 0 1px;
-    }
+    background-color: var(--panel);
   }
 
   .faq-icon {
     flex-shrink: 0;
+    display: inline-block;
     font-family: var(--font-mono);
     font-size: 0.875rem;
     line-height: 1;
@@ -837,31 +779,14 @@
     rotate: 0deg;
   }
 
-  .faq-item[open] > .faq-summary .faq-icon {
+  .faq-item[open]:not(.is-closing) > .faq-summary .faq-icon {
     rotate: 45deg;
     color: var(--fg);
   }
 
   @media (prefers-reduced-motion: no-preference) {
     .faq-icon {
-      transition: rotate 0.2s ease-out, color 0.14s ease-out;
-    }
-  }
-
-  .faq-item::details-content {
-    interpolate-size: allow-keywords;
-    overflow: clip;
-    contain: layout;
-  }
-
-  .faq-item:not([open])::details-content {
-    block-size: 0;
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .faq-item::details-content {
-      transition: block-size 0.22s ease-out, content-visibility 0.22s ease-out, display 0.22s ease-out;
-      transition-behavior: allow-discrete;
+      transition: rotate 0.22s cubic-bezier(0.22, 1, 0.36, 1), color 0.14s ease;
     }
   }
 
@@ -924,38 +849,29 @@
     text-decoration: none;
     translate: 0 0;
     transition:
-      background-color 140ms cubic-bezier(0, 0, 0.2, 1),
-      color 140ms cubic-bezier(0, 0, 0.2, 1),
-      border-color 140ms cubic-bezier(0, 0, 0.2, 1),
-      box-shadow 140ms cubic-bezier(0, 0, 0.2, 1),
-      text-shadow 140ms cubic-bezier(0, 0, 0.2, 1),
-      translate 80ms ease-out;
+      background-color 0.12s ease,
+      color 0.12s ease,
+      border-color 0.12s ease,
+      translate 0.06s ease-out;
   }
 
   .btn-block-primary:hover {
-    background-color: var(--panel);
+    background-color: var(--ground);
     color: var(--white);
     border-color: var(--white);
     text-decoration: none;
-    text-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
-    box-shadow:
-      0 3px 0 var(--white),
-      0 0 18px rgba(255, 255, 255, 0.24);
   }
 
   .btn-block-primary:active {
-    background-color: #1f1f1f;
+    background-color: var(--subpanel);
     color: var(--white);
     border-color: var(--white);
-    box-shadow:
-      0 0 0 var(--white),
-      0 0 22px rgba(255, 255, 255, 0.36);
-    transition-duration: 26ms;
+    transition-duration: 25ms;
   }
 
   @media (prefers-reduced-motion: no-preference) {
     .btn-block-primary:active {
-      translate: 0 3px;
+      translate: 0 1px;
     }
   }
 
@@ -1086,21 +1002,13 @@
     align-items: center;
     min-block-size: 24px;
     padding-inline: 0.15rem;
-    translate: 0 0;
-    transition: color 0.14s ease-out, translate 0.08s ease-out;
+    transition: color 0.12s ease;
   }
 
   .footer-nav a:hover {
     color: var(--white);
     text-decoration: underline;
     text-underline-offset: 3px;
-  }
-
-  @media (prefers-reduced-motion: no-preference) {
-    .footer-nav a:active {
-      translate: 0 1px;
-      transition-duration: 26ms;
-    }
   }
 
   /* 1px CRT Oscilloscope Sweep Reading Progress Indicator */

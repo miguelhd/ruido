@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <a class="skip-link visually-hidden" href="#main-title">Skip to content</a>
@@ -932,6 +932,73 @@
         );
       }
     }
+
+    // Cross-browser smooth slide animation for <details class="faq-item"> (works in Safari/WebKit, Chrome, Firefox)
+    document.addEventListener("click", (event) => {
+      const summary = event.target.closest(".faq-summary");
+      if (!summary || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+      const details = summary.parentElement;
+      const answer = details?.querySelector(".faq-answer");
+      if (!details || !answer) return;
+
+      event.preventDefault();
+
+      const styles = getComputedStyle(answer);
+      const padTop = styles.paddingTop;
+      const padBottom = styles.paddingBottom;
+
+      if (details._faqAnim) {
+        details._faqAnim.cancel();
+        details._faqAnim = null;
+      }
+
+      const isClosing = details.open && !details.classList.contains("is-closing");
+      answer.style.overflow = "clip";
+
+      if (isClosing) {
+        const startHeight = `${answer.getBoundingClientRect().height}px`;
+        details.classList.add("is-closing");
+        const anim = answer.animate(
+          [
+            { height: startHeight, paddingTop: padTop, paddingBottom: padBottom, borderTopWidth: "1px", opacity: 1 },
+            { height: "0px", paddingTop: "0px", paddingBottom: "0px", borderTopWidth: "0px", opacity: 0 }
+          ],
+          { duration: 250, easing: "cubic-bezier(0.25, 0.8, 0.25, 1)" }
+        );
+        details._faqAnim = anim;
+        anim.onfinish = () => {
+          details.open = false;
+          details.classList.remove("is-closing");
+          answer.style.overflow = "";
+          details._faqAnim = null;
+        };
+      } else {
+        const wasMidClose = details.classList.contains("is-closing");
+        const startHeight = wasMidClose ? `${answer.getBoundingClientRect().height}px` : "0px";
+        details.classList.remove("is-closing");
+        details.open = true;
+        const endHeight = `${answer.offsetHeight}px`;
+        const anim = answer.animate(
+          [
+            {
+              height: startHeight,
+              paddingTop: wasMidClose ? padTop : "0px",
+              paddingBottom: wasMidClose ? padBottom : "0px",
+              borderTopWidth: "1px",
+              opacity: wasMidClose ? 1 : 0
+            },
+            { height: endHeight, paddingTop: padTop, paddingBottom: padBottom, borderTopWidth: "1px", opacity: 1 }
+          ],
+          { duration: 250, easing: "cubic-bezier(0.25, 0.8, 0.25, 1)" }
+        );
+        details._faqAnim = anim;
+        anim.onfinish = () => {
+          answer.style.overflow = "";
+          details._faqAnim = null;
+        };
+      }
+    });
 
     // Smooth-scroll same-page anchors (including re-clicks on active hash) & manage post-scroll focus
     document.addEventListener("click", (event) => {
