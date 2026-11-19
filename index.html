@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=19">
+  <link rel="stylesheet" href="styles.css?v=20">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -911,28 +911,34 @@
 
       if (sweep && head) {
         const root = document.documentElement;
+        let viewportH = Math.max(1, window.innerHeight);
         let clientW = root.clientWidth;
         let scrollableH = Math.max(1, root.scrollHeight - root.clientHeight);
-
-        const getHeadX = () => {
-          const progress = Math.min(1, Math.max(0, window.scrollY / scrollableH));
-          return { progress, headX: progress * clientW };
-        };
-
-        let { headX: prevHeadX } = getHeadX();
-        let lastActiveHeadX = prevHeadX;
-        let tailX = prevHeadX;
+        let prevScrollY = window.scrollY;
+        let virtualX = 0;
+        let lastActiveX = 0;
+        let tailX = 0;
         let smoothSpeed = 0;
         let isSweeping = false;
+        let allowSweep = false;
         let rafId = 0;
         let lastTime = 0;
         let lastMoveTime = 0;
         let lastScrollTime = 0;
 
+        const enableSweep = () => {
+          allowSweep = true;
+        };
+        window.addEventListener("wheel", enableSweep, { passive: true, once: true });
+        window.addEventListener("touchstart", enableSweep, { passive: true, once: true });
+        window.addEventListener("touchmove", enableSweep, { passive: true, once: true });
+        window.addEventListener("pointerdown", enableSweep, { passive: true, once: true });
+        window.addEventListener("keydown", enableSweep, { passive: true, once: true });
+
         const syncFallbackPosition = () => {
           if (supportsScrollTimeline) return;
-          const { progress, headX } = getHeadX();
-          head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
+          const progress = Math.min(1, Math.max(0, window.scrollY / scrollableH));
+          head.style.transform = `translate3d(${(progress * clientW).toFixed(2)}px, 0, 0)`;
           if (line) line.style.transform = `scaleX(${progress.toFixed(5)})`;
         };
 
@@ -948,16 +954,19 @@
           const dt = lastTime > 0 ? Math.max(1, Math.min(48, now - lastTime)) : 16;
           lastTime = now;
 
-          const { headX } = getHeadX();
-          const dx = headX - prevHeadX;
+          const scrollY = window.scrollY;
+          const dy = scrollY - prevScrollY;
+          prevScrollY = scrollY;
           syncFallbackPosition();
 
-          // Real world-space phosphor persistence: on direction reversal, anchor tail at turnaround point
-          // so the tail never points ahead of the dot or extends past pixels the dot actually crossed
-          if ((dx > 0.04 && tailX > prevHeadX) || (dx < -0.04 && tailX < prevHeadX)) {
-            tailX = prevHeadX;
+          // 1 screen height scrolled = 280 desktop-equivalent units (identical physics on desktop & mobile)
+          const dx = (dy / viewportH) * 280;
+
+          // Anchor tail at turnaround point on direction reversal so it never points ahead or whips
+          if ((dx > 0.04 && tailX > virtualX) || (dx < -0.04 && tailX < virtualX)) {
+            tailX = virtualX;
           }
-          prevHeadX = headX;
+          virtualX += dx;
 
           const instSpeed = (Math.abs(dx) * 1000) / dt;
           smoothSpeed += (instSpeed - smoothSpeed) * (1 - Math.exp(-dt / 24));
@@ -972,10 +981,9 @@
             stopSweeping();
           }
 
-          // 190ms world-space phosphor decay mapped 1:1 in real bar pixels (28px tear width)
           const alpha = 1 - Math.exp(-dt / 190);
-          tailX += (headX - tailX) * alpha;
-          const wakePx = headX - tailX;
+          tailX += (virtualX - tailX) * alpha;
+          const wakePx = virtualX - tailX;
           const tearScale = Math.tanh(wakePx / 28);
           if (tear) {
             tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
@@ -984,8 +992,10 @@
           if (isSweeping || Math.abs(wakePx) > 0.1 || now - lastScrollTime < 60) {
             rafId = requestAnimationFrame(tick);
           } else {
-            tailX = headX;
-            lastActiveHeadX = headX;
+            prevScrollY = scrollY;
+            virtualX = 0;
+            lastActiveX = 0;
+            tailX = 0;
             smoothSpeed = 0;
             if (tear) tear.style.transform = "scaleX(0)";
             rafId = 0;
@@ -996,12 +1006,20 @@
         window.addEventListener(
           "scroll",
           () => {
+            const scrollY = window.scrollY;
+            syncFallbackPosition();
+
+            // Ignore initial browser scroll-restoration / hash jumps on refresh before any user input
+            if (!allowSweep && !activeScrollRaf) {
+              prevScrollY = scrollY;
+              return;
+            }
+
             const now = performance.now();
             lastScrollTime = now;
-            syncFallbackPosition();
-            const { headX } = getHeadX();
-            if (Math.abs(headX - lastActiveHeadX) >= 0.45) {
-              lastActiveHeadX = headX;
+            const estX = virtualX + ((scrollY - prevScrollY) / viewportH) * 280;
+            if (Math.abs(estX - lastActiveX) >= 0.45) {
+              lastActiveX = estX;
               lastMoveTime = now;
               if (!isSweeping) {
                 isSweeping = true;
@@ -1027,16 +1045,11 @@
         window.addEventListener(
           "resize",
           () => {
+            viewportH = Math.max(1, window.innerHeight);
             const width = root.clientWidth;
             if (width === clientW) return;
             clientW = width;
             scrollableH = Math.max(1, root.scrollHeight - root.clientHeight);
-            const { headX } = getHeadX();
-            prevHeadX = headX;
-            lastActiveHeadX = headX;
-            tailX = headX;
-            smoothSpeed = 0;
-            if (tear) tear.style.transform = "scaleX(0)";
             syncFallbackPosition();
             if (supportsScrollTimeline && typeof head.getAnimations === "function") {
               head.getAnimations().forEach((anim) => anim.effect?.updateTiming?.({}));
