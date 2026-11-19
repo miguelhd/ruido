@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -725,7 +725,7 @@
       </p>
       <div class="cta-actions">
         <a class="btn-block-primary" href="https://thefirmwarehub.com/firmware/ruido/" target="_blank" rel="noopener noreferrer">
-          [ INSTALL FIRMWARE ON THE FIRMWARE HUB ↗ ]
+          [ INSTALL ON THE FIRMWARE HUB ↗ ]
         </a>
       </div>
       <div class="cta-meta">BOOTLOADER PROTECTED • SCENES PRESERVED • REVERSIBLE TO STOCK FIRMWARE</div>
@@ -807,6 +807,17 @@
   <script>
     // Enable instant CSS :active feedback on iOS Safari touch
     document.addEventListener("touchstart", () => {}, { passive: true });
+
+    // Persist Phosphor Bloom on primary buttons after click until clicking elsewhere
+    document.addEventListener("click", (event) => {
+      const clickedBtn = event.target.closest(".btn-flash-sm, .btn-block-primary");
+      document.querySelectorAll(".btn-flash-sm.is-bloomed, .btn-block-primary.is-bloomed").forEach((btn) => {
+        if (btn !== clickedBtn) btn.classList.remove("is-bloomed");
+      });
+      if (clickedBtn) {
+        clickedBtn.classList.add("is-bloomed");
+      }
+    });
 
     // Responsive navigation: inline row on wide viewports when all items fit, native popover menu on mobile/zoom
     const siteHeader = document.querySelector(".site-header");
