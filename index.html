@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en" id="top">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ruido User Guide | M-VAVE FM-1 Field Manual</title>
+  <meta name="description" content="Hands-on field manual for Ruido, an open-source 4-voice CMOS drone synthesizer firmware for the M-VAVE FM-1—built for guitar pedals and Eurorack.">
+  <meta name="author" content="Miguel Hernández Domenech">
+  <meta name="theme-color" content="#050505">
+  <link rel="canonical" href="https://miguelhd.github.io/ruido/">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://miguelhd.github.io/ruido/">
+  <meta property="og:title" content="Ruido User Guide — M-VAVE FM-1 Field Manual">
+  <meta property="og:description" content="Practical field manual for playing, shaping, and patching Ruido on your unmodified M-VAVE FM-1 synthesizer.">
+  <meta property="og:image" content="https://miguelhd.github.io/ruido/assets/images/Ruido-FM-1.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://miguelhd.github.io/ruido/assets/images/Ruido-FM-1.png">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link visually-hidden" href="#main-title">Skip to content</a>
+
+  <!-- Sticky 52px Top Bar -->
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand-mark" href="#top">RUIDO // FM-1</a>
+      <nav class="header-nav" aria-label="Primary">
+        <div class="header-links">
+          <a href="#index">INDEX</a>
+          <span aria-hidden="true">·</span>
+          <a href="#ch-11">FAQ</a>
+          <span aria-hidden="true">·</span>
+          <a href="#credits">CREDITS</a>
+        </div>
+        <a class="btn-flash-sm" href="#flasher">[ INSTALL ]</a>
+      </nav>
+    </div>
+    <div class="crt-sweep" aria-hidden="true">
+      <div class="crt-sweep-beam">
+        <span class="crt-sweep-tear"></span>
+        <img
+          class="crt-sweep-dot"
+          src="assets/images/white-7.5x.jpg"
+          alt=""
+          width="3"
+          height="3"
+          decoding="sync"
+        >
+      </div>
+    </div>
+  </header>
+
+  <main class="guide-column">
+    <!-- Masthead -->
+    <section class="masthead">
+      <div class="eyebrow">FIELD MANUAL // M-VAVE FM-1</div>
+      <h1 class="page-title" id="main-title" tabindex="-1">RUIDO USER GUIDE</h1>
+      <p class="lead-copy">
+        A practical, hands-on field manual for playing, shaping, and patching Ruido on your production M-VAVE FM-1 synthesizer.
+      </p>
+    </section>
+
+    <!-- Index Jump Matrix -->
+    <nav class="index-card" id="index" aria-labelledby="index-heading">
+      <div class="index-header">
+        <span class="index-title" id="index-heading">INDEX</span>
+        <span class="index-count">11 CHAPTERS</span>
+      </div>
+      <ol class="index-list">
+        <li><a href="#ch-01">01. HARDWARE OVERVIEW</a></li>
+        <li><a href="#ch-02">02. POWER &amp; INSTALL</a></li>
+        <li><a href="#ch-03">03. THE SCREEN</a></li>
+        <li><a href="#ch-04">04. CONTROLS &amp; COMBOS</a></li>
+        <li><a href="#ch-05">05. GUIDE CONVENTIONS</a></li>
+        <li><a href="#ch-06">06. HOW RUIDO WORKS</a></li>
+        <li><a href="#ch-07">07. GET STARTED</a></li>
+        <li><a href="#ch-08">08. MODES</a></li>
+        <li><a href="#ch-09">09. KEYBOARDS &amp; SCENES</a></li>
+        <li><a href="#ch-10">10. HOW TO</a></li>
+        <li><a href="#ch-11">11. FREQUENTLY ASKED QUESTIONS</a></li>
+      </ol>
+    </nav>
+
+    <!-- CHAPTER 01: HARDWARE OVERVIEW -->
+    <section class="chapter" id="ch-01">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">01 // HARDWARE OVERVIEW</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <!-- 1.1 Connections -->
+      <div class="subsection">
+        <h3 class="subsection-heading">1.1 CONNECTIONS</h3>
+        <p class="prose">All audio and data connections run along the top edge of the chassis.</p>
+        <ul class="stack-sm" role="list">
+          <li class="card">
+            <div class="card-row">
+              <span class="card-title">HEADPHONES / LINE OUT</span>
+              <span class="card-tag">3.5 MM STEREO</span>
+            </div>
+            <p class="prose">3.5 mm stereo output for headphones, pedals, mixer, or Eurorack modular gear.</p>
+          </li>
+          <li class="card">
+            <div class="card-row">
+              <span class="card-title">MIDI IN</span>
+              <span class="card-tag">3.5 MM TYPE-A</span>
+            </div>
+            <p class="prose">3.5 mm mini-jack input for external tempo clock, start/stop transport, and note sync.</p>
+          </li>
+          <li class="card">
+            <div class="card-row">
+              <span class="card-title">USB-C</span>
+              <span class="card-tag">AUDIO + POWER</span>
+            </div>
+            <p class="prose">Charges the internal battery, streams stereo digital audio and MIDI to a computer or tablet, and updates firmware.</p>
+          </li>
+          <li class="card">
+            <div class="card-row">
+              <span class="card-title">POWER / MASTER</span>
+              <span class="card-tag">ANALOG POT</span>
+            </div>
+            <p class="prose">Turn clockwise past the click to switch on and set analog output volume.</p>
+          </li>
+        </ul>
+      </div>
+
+      <!-- 1.2 Front Panel -->
+      <div class="subsection">
+        <h3 class="subsection-heading">1.2 FRONT PANEL</h3>
+        <p class="prose">All controls are direct and accessible without nested sub-menus.</p>
+
+        <figure class="specimen-frame">
+          <img
+            class="hardware-img"
+            src="assets/images/Ruido-FM-1.png"
+            alt="Top-down view of the M-VAVE FM-1 synthesizer showing four left encoders, central square oscilloscope screen, four right encoders, twelve mode buttons, and 27-key surface"
+            width="1335"
+            height="794"
+            fetchpriority="high"
+          >
+          <figcaption class="specimen-caption">M-VAVE FM-1 PHYSICAL HARDWARE INTERFACE</figcaption>
+        </figure>
+
+        <ol class="stack-sm" role="list">
+          <li class="card">
+            <span class="card-title">1 MASTER</span>
+            <p class="prose">Switches the unit on/off and sets analog output volume.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">2 SELECT</span>
+            <p class="prose">Scrolls menus, chooses which voice you are editing, and swaps keyboard layouts.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">3 PRESETS</span>
+            <p class="prose">Blends smoothly across your four saved scenes.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">4 ALGORITHM</span>
+            <p class="prose">Starves the shared power supply so the four voices pull and lock together; sets tempo in Rhythm Lab.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">5 KNOB 1–4</span>
+            <p class="prose">Tunes oscillators 1–4 on Home, or adjusts the four parameters along the bottom of the screen.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">6 OCT- / OCT+</span>
+            <p class="prose">Tuning gears. Hold <kbd class="keycap">[OCT-]</kbd> for slow fine tuning, or <kbd class="keycap">[OCT+]</kbd> for wide sweeps.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">7 MODE BUTTONS</span>
+            <p class="prose">Jump to Filter <kbd class="keycap">[FX]</kbd>, Keyboard <kbd class="keycap">[SEL]</kbd>, Modulation <kbd class="keycap">[LFO]</kbd>, Voice Trim <kbd class="keycap">[EDIT]</kbd>, Settings <kbd class="keycap">[GLO]</kbd>, or <kbd class="keycap">[HOME]</kbd>.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">8 27-KEY SURFACE (20 PRESSURE)</span>
+            <p class="prose">The left 20 keys respond continuously to finger weight; the right-side Solo, Mute, and Tap keys act as on/off switches.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- CHAPTER 02: POWER & INSTALL -->
+    <section class="chapter" id="ch-02">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">02 // POWER &amp; INSTALL</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <ol class="stack-md" role="list">
+        <li class="card">
+          <span class="card-title">1 SWITCH ON</span>
+          <p class="prose">Turn <kbd class="keycap-knob">(MASTER)</kbd> clockwise past the click. The unit wakes up into your last sound.</p>
+        </li>
+        <li class="card">
+          <span class="card-title">2 CONNECT AUDIO</span>
+          <p class="prose">Plug headphones or a stereo breakout cable into the 3.5 mm output and raise <kbd class="keycap-knob">(MASTER)</kbd> gradually.</p>
+        </li>
+        <li class="card">
+          <span class="card-title">3 INSTALL IN BROWSER</span>
+          <p class="prose">Connect via a data-capable USB-C cable, open <a class="inline-link" href="https://thefirmwarehub.com/firmware/ruido/" target="_blank" rel="noopener noreferrer">Ruido on The Firmware Hub</a> in Chrome or Edge, and follow the prompts.</p>
+        </li>
+        <li class="card">
+          <span class="card-title">4 RESCUE &amp; REVERT</span>
+          <p class="prose">If an update is interrupted, switch off, hold <kbd class="keycap">[OCT-]</kbd> while turning <kbd class="keycap-knob">(MASTER)</kbd> on, and re-flash. You can return to the stock M-VAVE firmware at any time.</p>
+        </li>
+      </ol>
+    </section>
+
+    <!-- CHAPTER 03: THE SCREEN -->
+    <section class="chapter" id="ch-03">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">03 // THE SCREEN</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <p class="prose">The high-contrast monochrome display keeps you oriented without clutter.</p>
+
+      <figure class="specimen-frame">
+        <img
+          class="crt-img"
+          src="assets/images/02-home-frequency-hud.png"
+          alt="Ruido Home screen showing four overlapping monochrome oscilloscope traces and OSC 1 to OSC 4 frequency sliders along the bottom"
+          width="240"
+          height="240"
+          loading="lazy"
+          decoding="async"
+        >
+        <figcaption class="specimen-caption">HOME FREQUENCY CRT HUD</figcaption>
+      </figure>
+
+      <ul class="stack-sm" role="list">
+        <li class="card">
+          <span class="card-title">TOP LEFT</span>
+          <p class="prose">Current page and selected voice.</p>
+        </li>
+        <li class="card">
+          <span class="card-title">TOP RIGHT</span>
+          <p class="prose">Stereo/mono routing or active mode.</p>
+        </li>
+        <li class="card">
+          <span class="card-title">CENTER SCOPE</span>
+          <p class="prose">Live waveform of all four voices; labels fade out when idle so you only see the sound.</p>
+        </li>
+        <li class="card">
+          <span class="card-title">BOTTOM STRIP</span>
+          <p class="prose">Four sliders matching <kbd class="keycap-knob">(KNOB 1)</kbd> – <kbd class="keycap-knob">(KNOB 4)</kbd> directly below the screen.</p>
+        </li>
+      </ul>
+    </section>
+
+    <!-- CHAPTER 04: CONTROLS & COMBOS -->
+    <section class="chapter" id="ch-04">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">04 // CONTROLS &amp; COMBOS</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <ul class="stack-md" role="list">
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOME</span>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(KNOB 1–4)</kbd>
+          </div>
+          <p class="prose">Tune oscillators 1–4 from slow clicks up to high tones.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOLD</span>
+            <kbd class="keycap">[OCT-]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(KNOB 1–4)</kbd>
+          </div>
+          <p class="prose">Fine tune slowly to dial in gentle beating intervals.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOLD</span>
+            <kbd class="keycap">[OCT+]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(KNOB 1–4)</kbd>
+          </div>
+          <p class="prose">Sweep across the full pitch range in two turns.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOME</span>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(SELECT)</kbd>
+          </div>
+          <p class="prose">Zoom the oscilloscope waveform in or out.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOLD</span>
+            <kbd class="keycap">[SEL]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(SELECT)</kbd>
+          </div>
+          <p class="prose">Switch between the three 27-key instruments.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOLD</span>
+            <kbd class="keycap">[SAVE]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap">[SCENE 1–4]</kbd>
+          </div>
+          <p class="prose">Save your current sound into one of four scene slots.</p>
+        </li>
+      </ul>
+    </section>
+
+    <!-- CHAPTER 05: GUIDE CONVENTIONS -->
+    <section class="chapter" id="ch-05">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">05 // GUIDE CONVENTIONS</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <p class="prose">Quick visual notation used throughout this manual:</p>
+
+      <ul class="grid-two" role="list">
+        <li class="convention-cell">
+          <kbd class="keycap">[FX]</kbd>
+          <span class="convention-label">TAP</span>
+          <span class="convention-sub">Press &amp; release</span>
+        </li>
+        <li class="convention-cell">
+          <kbd class="keycap">[OCT-]</kbd>
+          <span class="convention-label">HOLD</span>
+          <span class="convention-sub">Keep pressed</span>
+        </li>
+        <li class="convention-cell">
+          <div class="convention-pair">
+            <kbd class="keycap">[OCT-]</kbd>
+            <span class="convention-sub" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(K1)</kbd>
+          </div>
+          <span class="convention-label">COMBO</span>
+          <span class="convention-sub">Together</span>
+        </li>
+        <li class="convention-cell">
+          <div class="convention-pair">
+            <kbd class="keycap">[EDIT]</kbd>
+            <span class="convention-sub" aria-hidden="true">→</span>
+            <kbd class="keycap-knob">(SEL)</kbd>
+          </div>
+          <span class="convention-label">SEQUENCE</span>
+          <span class="convention-sub">In order</span>
+        </li>
+        <li class="convention-cell">
+          <kbd class="keycap-knob">(KNOB 1)</kbd>
+          <span class="convention-label">TURN</span>
+          <span class="convention-sub">Rotate knob</span>
+        </li>
+        <li class="convention-cell">
+          <kbd class="keycap">[KEY]</kbd>
+          <span class="convention-label">LEAN</span>
+          <span class="convention-sub">Finger pressure</span>
+        </li>
+      </ul>
+    </section>
+
+    <!-- CHAPTER 06: HOW RUIDO WORKS -->
+    <section class="chapter" id="ch-06">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">06 // HOW RUIDO WORKS</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <ol class="flow-box" role="list">
+        <li class="flow-node">01 // 4 DRONE VOICES</li>
+        <li class="flow-arrow" aria-hidden="true">↓</li>
+        <li class="flow-node">02 // PER-VOICE FILTER &amp; 2 LFOS</li>
+        <li class="flow-arrow" aria-hidden="true">↓</li>
+        <li class="flow-node">03 // 3 KEYBOARD INSTRUMENTS</li>
+        <li class="flow-arrow" aria-hidden="true">↓</li>
+        <li class="flow-node">04 // 4 MORPHING SCENES</li>
+      </ol>
+
+      <p class="prose">
+        All four voices run continually, like an analog drone box. Instead of playing standard piano notes, you shape pitch, filter resonance, shared power-supply sag, and finger weight in real time.
+      </p>
+    </section>
+
+    <!-- CHAPTER 07: GET STARTED -->
+    <section class="chapter" id="ch-07">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">07 // GET STARTED</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <div class="subsection">
+        <h3 class="subsection-heading">7.1 BUILD YOUR FIRST DRONE</h3>
+        <ol class="stack-md" role="list">
+          <li class="card">
+            <span class="card-title">1 TUNE A CHORD</span>
+            <p class="prose">Press <kbd class="keycap">[HOME]</kbd> and turn <kbd class="keycap-knob">(KNOB 1)</kbd> – <kbd class="keycap-knob">(KNOB 4)</kbd> to set a low root note and three close harmonies. Hold <kbd class="keycap">[OCT-]</kbd> while turning to find slow, warm beating.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">2 STARVE THE SUPPLY</span>
+            <p class="prose">Turn <kbd class="keycap-knob">(ALGORITHM)</kbd> to around 40% so close pitches pull into chorus. Turn past 50% to hear the voices tug and snap together.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">3 SCULPT THE FILTERS</span>
+            <p class="prose">Press <kbd class="keycap">[FX]</kbd>, turn <kbd class="keycap-knob">(SELECT)</kbd> to pick voice 1 and roll <kbd class="keycap-knob">(KNOB 3)</kbd> down for deep bass; pick voice 2 and raise <kbd class="keycap-knob">(KNOB 4)</kbd> until the filter begins to sing.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">4 ADD SLOW MOTION</span>
+            <p class="prose">Press <kbd class="keycap">[LFO]</kbd>, set <kbd class="keycap-knob">(KNOB 1)</kbd> to LPF, pick a smooth wave on <kbd class="keycap-knob">(KNOB 2)</kbd>, keep speed slow on <kbd class="keycap-knob">(KNOB 3)</kbd>, and raise depth on <kbd class="keycap-knob">(KNOB 4)</kbd> so the filter breathes on its own.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">5 LEAN INTO THE KEYS</span>
+            <p class="prose">Press <kbd class="keycap">[SEL]</kbd> to confirm Live Mixer is active, then lean into the first four bottom keys to open and close each voice's filter by hand.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">6 SAVE YOUR SCENE</span>
+            <p class="prose">Hold <kbd class="keycap">[SAVE]</kbd> and tap one of the four scene keys on the bottom row to store your patch.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- CHAPTER 08: MODES -->
+    <section class="chapter" id="ch-08">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">08 // MODES</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <!-- 8.1 [FX] -->
+      <div class="subsection">
+        <h3 class="subsection-heading">8.1 [FX] DUAL FILTER</h3>
+        <figure class="specimen-frame">
+          <img
+            class="crt-img"
+            src="assets/images/03-fx-ms20-dual-filter.png"
+            alt="Ruido Filter screen displaying a dual-peak passband curve for Oscillator 1 with HPF, HP RES, LPF, and LP RES controls"
+            width="240"
+            height="240"
+            loading="lazy"
+            decoding="async"
+          >
+          <figcaption class="specimen-caption">DUAL FILTER PASSBAND SCOPE</figcaption>
+        </figure>
+        <p class="prose">Each voice has its own high-pass and low-pass filter in series. Turn <kbd class="keycap-knob">(SELECT)</kbd> to choose voice 1–4.</p>
+        <div class="param-box">
+          <div><span class="param-key">KNOB 1:</span> High-pass</div>
+          <div><span class="param-key">KNOB 2:</span> High-pass peak</div>
+          <div><span class="param-key">KNOB 3:</span> Low-pass</div>
+          <div><span class="param-key">KNOB 4:</span> Low-pass peak; resonance stays warm up to 60% and self-oscillates above 60%.</div>
+        </div>
+      </div>
+
+      <!-- 8.2 [LFO] -->
+      <div class="subsection">
+        <h3 class="subsection-heading">8.2 [LFO] MODULATION</h3>
+        <figure class="specimen-frame">
+          <img
+            class="crt-img"
+            src="assets/images/04-lfo-dual-modulation.png"
+            alt="Ruido LFO screen showing a skewed triangle-sawtooth modulation wave with Target, Shape, Rate, and Depth controls"
+            width="240"
+            height="240"
+            loading="lazy"
+            decoding="async"
+          >
+          <figcaption class="specimen-caption">LFO COMPANION WAVEFORM SCOPE</figcaption>
+        </figure>
+        <p class="prose">Two LFOs per voice (A and B). Turn <kbd class="keycap-knob">(SELECT)</kbd> to pick an LFO.</p>
+        <div class="param-box">
+          <div><span class="param-key">KNOB 1:</span> Target</div>
+          <div><span class="param-key">KNOB 2:</span> Wave shape</div>
+          <div><span class="param-key">KNOB 3:</span> Rate (slow tides up to audio-rate FM)</div>
+          <div><span class="param-key">KNOB 4:</span> Depth</div>
+        </div>
+        <p class="prose prose--italic"><span class="prose-strong">Tip:</span> Point LFO B at A-rate or depth for shifting patterns that never repeat.</p>
+      </div>
+
+      <!-- 8.3 [EDIT] -->
+      <div class="subsection">
+        <h3 class="subsection-heading">8.3 [EDIT] VOICE TRIM</h3>
+        <figure class="specimen-frame">
+          <img
+            class="crt-img"
+            src="assets/images/06-edit-pulse-duty.png"
+            alt="Ruido Edit Duty screen displaying four pulse-width square waves side by side for Oscillators 1 to 4"
+            width="240"
+            height="240"
+            loading="lazy"
+            decoding="async"
+          >
+          <figcaption class="specimen-caption">EDIT VOICE TRIM PULSE HUD</figcaption>
+        </figure>
+        <p class="prose">Turn <kbd class="keycap-knob">(SELECT)</kbd> to step through four trim pages where <kbd class="keycap-knob">(KNOB 1)</kbd> – <kbd class="keycap-knob">(KNOB 4)</kbd> adjust voices 1–4 side by side:</p>
+        <div class="param-box">
+          <div><span class="param-key">LEVEL:</span> Clean volume up to 70%, warm drive past 70%</div>
+          <div><span class="param-key">DUTY:</span> Hollow square to thin pulse</div>
+          <div><span class="param-key">DRIFT:</span> Gentle analog pitch wander</div>
+          <div><span class="param-key">PAN:</span> Left/right stereo placement</div>
+        </div>
+      </div>
+
+      <!-- 8.4 [GLO] -->
+      <div class="subsection">
+        <h3 class="subsection-heading">8.4 [GLO] GLOBAL SETTINGS</h3>
+        <p class="prose">Turn <kbd class="keycap-knob">(SELECT)</kbd> to pick a setting and <kbd class="keycap-knob">(KNOB 1)</kbd> to change it: stereo or mono output, momentary or latching mutes/solo/scene behavior, external MIDI clock sync, and key pressure sensitivity (1–5).</p>
+        <div class="glo-grid">
+          <div>
+            <span class="glo-label">ROUTING</span>
+            <span class="glo-value">STEREO / MONO</span>
+          </div>
+          <div>
+            <span class="glo-label">MUTE / SOLO</span>
+            <span class="glo-value">MOMENTARY / LATCH</span>
+          </div>
+          <div>
+            <span class="glo-label">MIDI CLOCK IN</span>
+            <span class="glo-value">AUTO / OFF / 24PPQN</span>
+          </div>
+          <div>
+            <span class="glo-label">SENSITIVITY</span>
+            <span class="glo-value">CURVE 1–5</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CHAPTER 09: KEYBOARDS & SCENES -->
+    <section class="chapter" id="ch-09">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">09 // KEYBOARDS &amp; SCENES</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <p class="prose">
+        Hold <kbd class="keycap">[SEL]</kbd> and turn <kbd class="keycap-knob">(SELECT)</kbd> to switch the 27-key surface between three instruments. The left 20 keys respond continuously to finger weight; the right-side Solo, Mute, and Tap keys act as on/off switches.
+      </p>
+
+      <!-- 9.1 Live Mixer -->
+      <div class="subsection">
+        <h3 class="subsection-heading">9.1 LIVE MIXER</h3>
+        <figure class="specimen-frame">
+          <img
+            class="crt-img"
+            src="assets/images/09-sel-keyboard-live-mixer.png"
+            alt="Ruido Keyboard 1 of 3 Live Mixer map showing upper-row Drive, Sub/LPF, Spread, and Solo keys and lower-row Filter, Octave, Scene, and Mute keys"
+            width="240"
+            height="240"
+            loading="lazy"
+            decoding="async"
+          >
+          <figcaption class="specimen-caption">MODEL 1/3: LIVE MIXER MAP</figcaption>
+        </figure>
+        <p class="prose">
+          Performance mixing and macros: upper row offers global drive, harmonic ratio lock, and stereo spread; bottom row opens per-voice filters like vactrol gates, shifts octaves, and morphs across four scenes.
+        </p>
+      </div>
+
+      <div class="tip-callout">
+        <span class="tip-callout-label">TIP:</span>For the most intuitive starting point, try Keyboards 1–3 alongside Factory Scenes 2–4 (Live Mixer with Scene 2, Circuit Lab with Scene 3, and Rhythm Lab with Scene 4).
+      </div>
+    </section>
+
+    <!-- CHAPTER 10: HOW TO -->
+    <section class="chapter" id="ch-10">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">10 // HOW TO</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <div class="stack-md">
+        <!-- 10.1 -->
+        <div class="card">
+          <h3 class="card-title">10.1 ADJUST KEY PRESSURE SENSITIVITY</h3>
+          <ol class="recipe-steps" role="list">
+            <li>1. Press <kbd class="keycap">[GLO]</kbd>.</li>
+            <li>2. Scroll <kbd class="keycap-knob">(SELECT)</kbd> to Key Sensitivity.</li>
+            <li>3. Turn <kbd class="keycap-knob">(KNOB 1)</kbd> from 1 (light touch) to 5 (firm press) while testing any key.</li>
+          </ol>
+        </div>
+
+        <!-- 10.2 -->
+        <div class="card">
+          <h3 class="card-title">10.2 PLUG INTO A MONO GUITAR PEDALBOARD</h3>
+          <ol class="recipe-steps" role="list">
+            <li>1. Connect a 3.5 mm stereo to dual 1/4" mono TS breakout cable and run one 1/4" plug to your pedals.</li>
+            <li>2. Press <kbd class="keycap">[GLO]</kbd> and set output routing to mono.</li>
+          </ol>
+          <div class="note-callout">
+            <span class="note-callout-label">Note:</span>
+            <p class="prose">Avoid plugging a single mono 3.5 mm cable directly into the output jack, as it shorts the right channel.</p>
+          </div>
+        </div>
+
+        <!-- 10.3 -->
+        <div class="card">
+          <h3 class="card-title">10.3 SWELL A MUTED VOICE WITH FINGER WEIGHT</h3>
+          <ol class="recipe-steps" role="list">
+            <li>1. On 1/3 Live Mixer, tap a mute key on the bottom right to silence a voice.</li>
+            <li>2. Lean slowly into that voice's filter key on the bottom left to fade it in organically, and release to let it decay.</li>
+          </ol>
+        </div>
+
+        <!-- 10.4 -->
+        <div class="card">
+          <h3 class="card-title">10.4 TURN AN OSCILLATOR INTO RHYTHMIC DRUM PINGS</h3>
+          <ol class="recipe-steps" role="list">
+            <li>1. On <kbd class="keycap">[HOME]</kbd>, hold <kbd class="keycap">[OCT-]</kbd> and turn <kbd class="keycap-knob">(KNOB 1)</kbd> below 1 Hz until it clicks slowly.</li>
+            <li>2. Press <kbd class="keycap">[FX]</kbd> and raise <kbd class="keycap-knob">(KNOB 4)</kbd> past 60% so each click rings the filter.</li>
+          </ol>
+        </div>
+
+        <!-- 10.5 -->
+        <div class="card">
+          <h3 class="card-title">10.5 SYNC RHYTHM LAB TO EXTERNAL MIDI</h3>
+          <ol class="recipe-steps" role="list">
+            <li>1. Send MIDI clock via 3.5 mm TRS, USB-C, or Bluetooth MIDI.</li>
+            <li>2. Hold <kbd class="keycap">[SEL]</kbd> + turn <kbd class="keycap-knob">(SELECT)</kbd> to 3/3 Rhythm Lab.</li>
+            <li>3. Hold any Divide or Euclid key on the bottom row.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- CHAPTER 11: FAQ -->
+    <section class="chapter" id="ch-11">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading" id="faq-heading">11 // FAQ</h2>
+        <a class="return-link" href="#index">↑ INDEX</a>
+      </div>
+
+      <div class="faq-list">
+        <!-- FAQ 1 -->
+        <details class="faq-item" open>
+          <summary class="faq-summary">
+            <span>Is flashing Ruido safe, and can I revert back to the factory M-VAVE firmware?</span>
+            <span class="faq-icon" aria-hidden="true">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>Yes. Ruido writes exclusively to the application partition and preserves the hardware bootloader. Power-on Hold <kbd class="keycap">[OCT-]</kbd> forces hardware recovery mode at any time, allowing clean recovery or instant reversion to factory stock firmware.</p>
+          </div>
+        </details>
+
+        <!-- FAQ 2 -->
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>Does Ruido output digital audio over USB-C as well as the 3.5 mm analog jack?</span>
+            <span class="faq-icon" aria-hidden="true">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>Yes. Alongside the analog line jack, Ruido streams 48 kHz class-compliant UAC1 digital stereo audio with 1-LSB TPDF dithering and clock-drift interpolation directly to macOS, iOS, Windows, Linux, or standalone USB host hardware.</p>
+          </div>
+        </details>
+
+        <!-- FAQ 3 -->
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>Why doesn't Ruido include built-in digital reverb or delay?</span>
+            <span class="faq-icon" aria-hidden="true">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>Ruido puts all of its DSP into 4× oversampling and per-voice high-pass and low-pass Sallen-Key filters, so guitar pedals and Eurorack get an alias-free signal.</p>
+          </div>
+        </details>
+
+        <!-- FAQ 4 -->
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>Can I plug Ruido straight into a mono guitar pedalboard?</span>
+            <span class="faq-icon" aria-hidden="true">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>Yes. Use a standard 3.5 mm TRS stereo-to-dual-1/4" TS breakout cable (never use a mono 3.5 mm TS cable directly in a stereo headphone jack, as that shorts the right channel to ground), and set OUTPUT ROUTING to MONO in Global Settings to sum all voices into a phase-coherent signal.</p>
+          </div>
+        </details>
+
+        <!-- FAQ 5 -->
+        <details class="faq-item">
+          <summary class="faq-summary">
+            <span>Why square and pulse waves instead of wavetables or multiple shapes?</span>
+            <span class="faq-icon" aria-hidden="true">+</span>
+          </summary>
+          <div class="faq-answer">
+            <p>Real CD40106 oscillators couple and hard-sync across a shared power rail because of their sharp switching edges. Acoustically, square waves contain only odd harmonics, leaving open frequency space for fuzz and distortion pedals without intermodulation mud.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- BOTTOM INSTALL CTA BLOCK -->
+    <section class="cta-section" id="flasher">
+      <div class="eyebrow eyebrow--muted">FIRMWARE INSTALLATION</div>
+      <h2 class="cta-heading">READY TO PLAY RUIDO ON YOUR FM-1?</h2>
+      <p class="cta-copy">
+        Install Ruido directly onto your unmodified M-VAVE FM-1 from your browser over USB-C via The Firmware Hub. No command-line tools required.
+      </p>
+      <div class="cta-actions">
+        <a class="btn-block-primary" href="https://thefirmwarehub.com/firmware/ruido/" target="_blank" rel="noopener noreferrer">
+          [ INSTALL FIRMWARE ON THE FIRMWARE HUB ↗ ]
+        </a>
+      </div>
+      <div class="cta-meta">BOOTLOADER PROTECTED • SCENES PRESERVED • REVERSIBLE TO STOCK FIRMWARE</div>
+    </section>
+
+    <!-- PRODUCTION CREDITS, OPEN-SOURCE LINEAGE & SAFETY -->
+    <section class="credits-section" id="credits">
+      <div class="chapter-bar">
+        <h2 class="chapter-heading">CREDITS &amp; OPEN SOURCE</h2>
+        <a class="return-link" href="#top">↑ TOP</a>
+      </div>
+
+      <div class="credits-card">
+        <!-- Author -->
+        <div class="credits-block">
+          <span class="credits-label">AUTHOR &amp; LICENSE</span>
+          <p class="prose">
+            Ruido v0.7.2 (package ID <code>FM-1_312</code>) is created by
+            <a class="inline-link" href="https://miguelhd.com" target="_blank" rel="noopener noreferrer">Miguel Hernández Domenech</a>
+            and released as open-source software under the
+            <a class="inline-link" href="https://github.com/miguelhd/ruido" target="_blank" rel="noopener noreferrer">GNU General Public License v3.0 (GPL-3.0-only)</a>.
+          </p>
+        </div>
+
+        <!-- Open-Source Lineage -->
+        <div class="credits-block">
+          <span class="credits-label">OPEN-SOURCE FOUNDATIONS</span>
+          <ul class="credits-list" role="list">
+            <li class="credits-item">
+              <div class="credits-item-head">
+                <span><strong>Felucca &amp; Dinghy FM-1 Platform</strong></span>
+                <span class="license-chip">GPL-3.0-ONLY</span>
+              </div>
+              <span>Hardware HAL, Hold <kbd class="keycap">[OCT-]</kbd> USB rescue, <code>FELUCCA-LOADER-1</code> updater, USB audio/MIDI, and <code>.fwsc</code> packaging by Leo Kuroshita (<a class="inline-link" href="https://github.com/hugelton/Felucca" target="_blank" rel="noopener noreferrer">Felucca</a> / Hügelton Instruments), packaged in <a class="inline-link" href="https://github.com/zvenson/dinghy" target="_blank" rel="noopener noreferrer">Dinghy</a> by zvenson (<code>platform.c</code>, <code>store.h</code>) with USB audio &amp; TRS MIDI fixes from SLOOP (isod89) and Felucca [Salt] (ChanceTheMaker).</span>
+            </li>
+            <li class="credits-item">
+              <div class="credits-item-head">
+                <span><strong>JieLi AC79NN Boot &amp; EQ Blobs</strong></span>
+                <span class="license-chip">APACHE-2.0</span>
+              </div>
+              <span>Unmodified <code>uboot.boot</code>, <code>cfg_tool.bin</code>, and <code>eq_cfg_hw.bin</code> container blobs from <code>fw-AC79_AIoT_SDK</code> (Copyright © JieLi Tech).</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Hearing Safety & Trademarks -->
+        <div class="credits-block">
+          <span class="credits-label">SAFETY &amp; TRADEMARK NOTICE</span>
+          <p class="legal-fineprint">
+            Start with <kbd class="keycap-knob">(MASTER)</kbd> turned low before connecting headphones or studio monitors—self-oscillating filters and starved-rail pulses can produce loud low-frequency and high-frequency peaks. Provided "as is" without warranty under GPL-3.0-only.
+          </p>
+          <p class="legal-fineprint">
+            "M-VAVE" and "FM-1" are trademarks of their respective owners. Ruido is an independent open-source project and is not affiliated with, sponsored by, or endorsed by M-VAVE or any third-party trademark holder.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div>RUIDO v0.7.2 // PACKAGE FM-1_312 • GPL-3.0-ONLY • © MIGUEL HERNÁNDEZ DOMENECH</div>
+      <nav class="footer-nav" aria-label="Footer">
+        <a href="#top">TOP ↑</a>
+        <span aria-hidden="true">·</span>
+        <a href="#index">INDEX</a>
+        <span aria-hidden="true">·</span>
+        <a href="#ch-11">FAQ</a>
+        <span aria-hidden="true">·</span>
+        <a href="#credits">CREDITS</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://thefirmwarehub.com/firmware/ruido/" target="_blank" rel="noopener noreferrer">FIRMWARE HUB ↗</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://github.com/miguelhd/ruido" target="_blank" rel="noopener noreferrer">GITHUB ↗</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    // Enable instant CSS :active feedback on iOS Safari touch
+    document.addEventListener("touchstart", () => {}, { passive: true });
+
+    // Fallback for browsers without native `scrollend` support
+    if (!("onscrollend" in window)) {
+      let scrollEndTimer;
+      window.addEventListener(
+        "scroll",
+        () => {
+          clearTimeout(scrollEndTimer);
+          scrollEndTimer = setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("scrollend"));
+          }, 120);
+        },
+        { passive: true }
+      );
+    }
+
+    // Ignite CRT beam spot while scrolling; drive tear length from actual horizontal beam velocity
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      const sweep = document.querySelector(".crt-sweep");
+      const beam = sweep?.querySelector(".crt-sweep-beam");
+      const tear = sweep?.querySelector(".crt-sweep-tear");
+      const needsScrollFallback = !CSS.supports("animation-timeline", "scroll()");
+
+      if (sweep) {
+        const getHeadState = () => {
+          const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+          const progress = scrollable > 0 ? Math.min(1, Math.max(0, window.scrollY / scrollable)) : 0;
+          return { progress, headX: progress * window.innerWidth };
+        };
+
+        let { progress: initProgress, headX: tailX } = getHeadState();
+        let prevHeadX = tailX;
+        let isSweeping = false;
+        let rafId = 0;
+        let lastTime = 0;
+        let lastFastMoveTime = 0;
+
+        if (needsScrollFallback && beam) {
+          beam.style.transform = `translateX(${(initProgress - 1) * 100}%)`;
+        }
+
+        const stopSweeping = () => {
+          if (!isSweeping) return;
+          isSweeping = false;
+          sweep.classList.remove("is-sweeping");
+        };
+
+        const tick = (now) => {
+          const dt = lastTime > 0 ? Math.max(1, Math.min(48, now - lastTime)) : 16;
+          lastTime = now;
+
+          const { progress, headX } = getHeadState();
+          if (needsScrollFallback && beam) {
+            beam.style.transform = `translateX(${(progress - 1) * 100}%)`;
+          }
+
+          const speedPxPerSec = (Math.abs(headX - prevHeadX) * 1000) / dt;
+          prevHeadX = headX;
+
+          if (speedPxPerSec >= 10) {
+            lastFastMoveTime = now;
+            if (!isSweeping) {
+              isSweeping = true;
+              sweep.classList.add("is-sweeping");
+            }
+          } else if (isSweeping && now - lastFastMoveTime > 60) {
+            // Blank the beam as soon as visible header motion stops (don't wait on sub-pixel coasting)
+            stopSweeping();
+          }
+
+          // Responsive RC wake (125ms) while sweeping; gentler hold (280ms) while fading out with the dot
+          const tau = isSweeping ? 125 : 280;
+          const alpha = 1 - Math.exp(-dt / tau);
+          tailX += (headX - tailX) * alpha;
+          const wakePx = headX - tailX;
+
+          // Keep tail at 0 inside the 1.2px dot radius so tiny scrolls never wag left/right
+          const excessPx = Math.abs(wakePx) > 1.2 ? wakePx - Math.sign(wakePx) * 1.2 : 0;
+          const tearScale = Math.tanh((excessPx * 1.25) / 24);
+          if (tear) {
+            tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
+          }
+
+          if (isSweeping || Math.abs(wakePx) > 0.15) {
+            rafId = requestAnimationFrame(tick);
+          } else {
+            tailX = headX;
+            if (tear) tear.style.transform = "scaleX(0)";
+            rafId = 0;
+            lastTime = 0;
+          }
+        };
+
+        window.addEventListener(
+          "scroll",
+          () => {
+            if (!rafId) {
+              const now = performance.now();
+              lastTime = now;
+              lastFastMoveTime = now;
+              isSweeping = true;
+              sweep.classList.add("is-sweeping");
+              rafId = requestAnimationFrame(tick);
+            }
+          },
+          { passive: true }
+        );
+
+        window.addEventListener(
+          "resize",
+          () => {
+            const { progress, headX } = getHeadState();
+            tailX = headX;
+            prevHeadX = headX;
+            if (needsScrollFallback && beam) {
+              beam.style.transform = `translateX(${(progress - 1) * 100}%)`;
+            }
+          },
+          { passive: true }
+        );
+
+        window.addEventListener(
+          "scrollend",
+          () => {
+            requestAnimationFrame(stopSweeping);
+          },
+          { passive: true }
+        );
+      }
+    }
+
+    // Smooth-scroll same-page anchors (including re-clicks on active hash) & manage post-scroll focus
+    document.addEventListener("click", (event) => {
+      const link = event.target.closest('a[href^="#"]');
+      if (!link) return;
+      const hash = link.getAttribute("href");
+      const isTop = hash === "#top";
+      const target = isTop ? document.documentElement : document.querySelector(hash);
+      if (!target) return;
+
+      event.preventDefault();
+      const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      history.pushState(null, "", hash);
+
+      const moveFocus = () => {
+        const focusTarget = isTop
+          ? document.getElementById("main-title")
+          : target.querySelector("h1, h2, .index-title") || target;
+        if (focusTarget) {
+          if (!focusTarget.hasAttribute("tabindex")) {
+            focusTarget.setAttribute("tabindex", "-1");
+          }
+          focusTarget.focus({ preventScroll: true });
+        }
+      };
+
+      if (smooth) {
+        window.addEventListener("scrollend", moveFocus, { once: true });
+      }
+
+      if (isTop) {
+        window.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+      } else {
+        target.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+      }
+
+      if (!smooth) {
+        moveFocus();
+      }
+    });
+  </script>
+</body>
+</html>
