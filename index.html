@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=8">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -897,15 +897,12 @@
         const getHeadState = () => {
           const root = document.documentElement;
           const scrollable = root.scrollHeight - window.innerHeight;
-          const scrollY = window.scrollY;
-          const progress = scrollable > 0 ? Math.min(1, Math.max(0, scrollY / scrollable)) : 0;
-          const dotHalf = window.innerWidth <= 640 ? 3 : 1.5;
-          const rawX = progress * root.clientWidth;
-          const headX = progress <= 0 ? 0 : Math.min(root.clientWidth - dotHalf, Math.max(dotHalf, rawX));
-          return { scrollY, progress, headX };
+          const progress = scrollable > 0 ? Math.min(1, Math.max(0, window.scrollY / scrollable)) : 0;
+          return { progress, headX: progress * root.clientWidth };
         };
 
-        let { scrollY: prevScrollY, progress: initProgress, headX: tailX } = getHeadState();
+        let { progress: initProgress, headX: tailX } = getHeadState();
+        let prevHeadX = tailX;
         let isSweeping = false;
         let rafId = 0;
         let lastTime = 0;
@@ -927,23 +924,23 @@
           const dt = lastTime > 0 ? Math.max(1, Math.min(48, now - lastTime)) : 16;
           lastTime = now;
 
-          const { scrollY, progress, headX } = getHeadState();
+          const { progress, headX } = getHeadState();
           head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
           if (needsScrollFallback && line) {
             line.style.transform = `scaleX(${progress})`;
           }
 
-          const verticalSpeedPxPerSec = (Math.abs(scrollY - prevScrollY) * 1000) / dt;
-          prevScrollY = scrollY;
+          const speedPxPerSec = (Math.abs(headX - prevHeadX) * 1000) / dt;
+          prevHeadX = headX;
 
-          if (activeScrollRaf || verticalSpeedPxPerSec >= 24) {
+          if (speedPxPerSec >= 10) {
             lastFastMoveTime = now;
             if (!isSweeping) {
               isSweeping = true;
               sweep.classList.add("is-sweeping");
             }
-          } else if (isSweeping && now - lastFastMoveTime > 70) {
-            // Blank the beam as soon as visible scroll motion stops (don't wait on sub-pixel coasting)
+          } else if (isSweeping && now - lastFastMoveTime > 60) {
+            // Blank the beam as soon as visible header motion stops (don't wait on sub-pixel coasting)
             stopSweeping();
           }
 
@@ -953,13 +950,9 @@
           tailX += (headX - tailX) * alpha;
           const wakePx = headX - tailX;
 
-          // Keep tail at 0 inside the dot radius (2.6px on mobile 6x6 dot, 1.2px on desktop 3x3 dot)
-          const isMobileSweep = window.innerWidth <= 640;
-          const coreRadius = isMobileSweep ? 2.6 : 1.2;
-          const tearSpan = isMobileSweep ? 28 : 24;
-          const tearGain = isMobileSweep ? 3.2 : 1.25;
-          const excessPx = Math.abs(wakePx) > coreRadius ? wakePx - Math.sign(wakePx) * coreRadius : 0;
-          const tearScale = Math.tanh((excessPx * tearGain) / tearSpan);
+          // Keep tail at 0 inside the 1.2px dot radius so tiny scrolls never wag left/right
+          const excessPx = Math.abs(wakePx) > 1.2 ? wakePx - Math.sign(wakePx) * 1.2 : 0;
+          const tearScale = Math.tanh((excessPx * 1.25) / 24);
           if (tear) {
             tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
           }
@@ -979,9 +972,9 @@
           () => {
             const now = performance.now();
             if (now < resizeHoldUntil) {
-              const { scrollY, progress, headX } = getHeadState();
+              const { progress, headX } = getHeadState();
               tailX = headX;
-              prevScrollY = scrollY;
+              prevHeadX = headX;
               head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
               if (needsScrollFallback && line) {
                 line.style.transform = `scaleX(${progress})`;
@@ -1003,9 +996,9 @@
           "resize",
           () => {
             resizeHoldUntil = performance.now() + 140;
-            const { scrollY, progress, headX } = getHeadState();
+            const { progress, headX } = getHeadState();
             tailX = headX;
-            prevScrollY = scrollY;
+            prevHeadX = headX;
             head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
             if (tear) tear.style.transform = "scaleX(0)";
             if (needsScrollFallback && line) {
