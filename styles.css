@@ -1351,24 +1351,53 @@
     will-change: transform;
   }
 
-  /* Velocity-proportional teardrop tail (driven by real header-pixel wake in JS) */
+  /* Unified spot wrapper: scales dot + tail together from 1px line thickness with one shared glow */
+  .crt-sweep-spot {
+    position: absolute;
+    inset: 0;
+    transform-origin: 0 50%;
+    transform: scale(0.3333);
+    opacity: 0;
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.85));
+    will-change: transform, opacity;
+  }
+
+  /* Same HDR gain-map source as the dot so there is zero brightness/color seam at the junction */
   .crt-sweep-tear {
     position: absolute;
     inset-inline-end: 0;
     inset-block-start: -1px;
-    inline-size: 24px;
+    inline-size: 28px;
     block-size: 3px;
-    background: linear-gradient(
+    max-inline-size: none;
+    object-fit: fill;
+    background-color: var(--white);
+    clip-path: polygon(0 33.33%, 86% 0, 100% 0, 100% 100%, 86% 100%, 0 66.67%);
+    -webkit-mask-image: linear-gradient(
       90deg,
-      rgba(255, 255, 255, 0) 0%,
-      rgba(255, 255, 255, 0.45) 55%,
-      var(--white) 100%
+      transparent 0%,
+      rgba(0, 0, 0, 0.5) 36%,
+      rgba(0, 0, 0, 0.88) 72%,
+      #000 88%,
+      #000 100%
     );
-    clip-path: polygon(0 33.3%, 100% 0, 100% 100%, 0 66.7%);
+    mask-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(0, 0, 0, 0.5) 36%,
+      rgba(0, 0, 0, 0.88) 72%,
+      #000 88%,
+      #000 100%
+    );
     transform-origin: right center;
     transform: scaleX(0);
-    will-change: transform, opacity;
-    opacity: 0;
+    will-change: transform;
+
+    @media (dynamic-range: high) {
+      @supports (dynamic-range-limit: no-limit) {
+        dynamic-range-limit: no-limit;
+      }
+    }
   }
 
   .crt-sweep-dot {
@@ -1381,10 +1410,6 @@
     border-radius: 50%;
     object-fit: cover;
     background-color: var(--white);
-    box-shadow: 0 0 4px 0 rgba(255, 255, 255, 0.85);
-    transform: scale(0.3333);
-    will-change: transform, opacity;
-    opacity: 0;
 
     @media (dynamic-range: high) {
       @supports (dynamic-range-limit: no-limit) {
@@ -1394,22 +1419,13 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    .crt-sweep-tear {
-      transition: opacity 250ms cubic-bezier(0.33, 0, 0.2, 1);
-    }
-
-    .crt-sweep-dot {
+    .crt-sweep-spot {
       transition:
         opacity 260ms cubic-bezier(0.33, 0, 0.2, 1),
         transform 280ms cubic-bezier(0.33, 0, 0.2, 1);
     }
 
-    .crt-sweep.is-sweeping .crt-sweep-tear {
-      opacity: 1;
-      transition: opacity 150ms ease-out;
-    }
-
-    .crt-sweep.is-sweeping .crt-sweep-dot {
+    .crt-sweep.is-sweeping .crt-sweep-spot {
       opacity: 1;
       transform: scale(1);
       transition:

@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -61,15 +61,24 @@
     <div class="crt-sweep" aria-hidden="true">
       <div class="crt-sweep-line"></div>
       <div class="crt-sweep-head">
-        <span class="crt-sweep-tear"></span>
-        <img
-          class="crt-sweep-dot"
-          src="assets/images/white-7.5x.jpg"
-          alt=""
-          width="3"
-          height="3"
-          decoding="sync"
-        >
+        <span class="crt-sweep-spot">
+          <img
+            class="crt-sweep-tear"
+            src="assets/images/white-7.5x.jpg"
+            alt=""
+            width="28"
+            height="3"
+            decoding="sync"
+          >
+          <img
+            class="crt-sweep-dot"
+            src="assets/images/white-7.5x.jpg"
+            alt=""
+            width="3"
+            height="3"
+            decoding="sync"
+          >
+        </span>
       </div>
     </div>
   </header>
@@ -909,7 +918,7 @@
         let virtualX = 0;
         let tailX = 0;
         let smoothSpeed = 0;
-        let smoothWake = 0;
+        let lastDir = 1;
         let isSweeping = false;
         let rafId = 0;
         let lastTime = 0;
@@ -944,6 +953,9 @@
           // 1 screen height scrolled = 280 desktop-equivalent beam units on every screen width
           const dEquiv = (dy / viewportH) * 280;
           virtualX += dEquiv;
+          if (Math.abs(dEquiv) > 0.04) {
+            lastDir = dEquiv >= 0 ? 1 : -1;
+          }
 
           const instSpeed = (Math.abs(dEquiv) * 1000) / dt;
           smoothSpeed += (instSpeed - smoothSpeed) * (1 - Math.exp(-dt / 32));
@@ -958,19 +970,23 @@
             stopSweeping();
           }
 
-          const tau = isSweeping ? 125 : 280;
+          // Direct 1-pole RC wake (zero deadzone & zero double-filter lag so dot never moves without its tail)
+          const tau = isSweeping ? 150 : 240;
           const alpha = 1 - Math.exp(-dt / tau);
           tailX += (virtualX - tailX) * alpha;
-          const rawWake = virtualX - tailX;
-          smoothWake += (rawWake - smoothWake) * (1 - Math.exp(-dt / 28));
+          const wake = virtualX - tailX;
+          const wakeMag = Math.abs(wake);
+          const dir = wakeMag > 0.08 ? Math.sign(wake) : lastDir;
 
-          const excessPx = Math.abs(smoothWake) > 1.2 ? smoothWake - Math.sign(smoothWake) * 1.2 : 0;
-          const tearScale = Math.tanh((excessPx * 1.25) / 24);
+          // Concave response curve so even gentle scrolls immediately show a visible tapered tail
+          const minActiveMag = isSweeping ? 0.14 : 0;
+          const curvedMag = Math.tanh(Math.pow(wakeMag / 14, 0.68) * 1.35);
+          const tearScale = dir * Math.max(minActiveMag, curvedMag);
           if (tear) {
             tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
           }
 
-          if (isSweeping || Math.abs(smoothWake) > 0.15 || now - lastScrollTime < 90) {
+          if (isSweeping || wakeMag > 0.08 || now - lastScrollTime < 90) {
             rafId = requestAnimationFrame(tick);
           } else {
             prevScrollY = scrollY;
@@ -978,7 +994,6 @@
             virtualX = 0;
             tailX = 0;
             smoothSpeed = 0;
-            smoothWake = 0;
             if (tear) tear.style.transform = "scaleX(0)";
             rafId = 0;
             lastTime = 0;
@@ -990,13 +1005,16 @@
           () => {
             const now = performance.now();
             const scrollY = window.scrollY;
+            const delta = scrollY - lastActiveScrollY;
             lastScrollTime = now;
             syncFallbackPosition();
-            if (Math.abs(scrollY - lastActiveScrollY) >= 0.5) {
+            if (Math.abs(delta) >= 0.5) {
+              lastDir = delta >= 0 ? 1 : -1;
               lastActiveScrollY = scrollY;
               lastMoveTime = now;
               if (!isSweeping) {
                 isSweeping = true;
+                if (tear) tear.style.transform = `scaleX(${(lastDir * 0.16).toFixed(4)})`;
                 sweep.classList.add("is-sweeping");
               }
             }
