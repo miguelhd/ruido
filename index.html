@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=7">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -37,14 +37,25 @@
     <div class="header-inner">
       <a class="brand-mark" href="#top">RUIDO // FM-1</a>
       <nav class="header-nav" aria-label="Primary">
-        <div class="header-links">
-          <a href="#index">INDEX</a>
-          <span aria-hidden="true">·</span>
-          <a href="#ch-11">FAQ</a>
-          <span aria-hidden="true">·</span>
-          <a href="#credits">CREDITS</a>
-        </div>
-        <a class="btn-flash-sm" href="#flasher">[ INSTALL ]</a>
+        <button
+          class="menu-button"
+          type="button"
+          popovertarget="site-menu"
+          popovertargetaction="toggle"
+          aria-controls="site-menu"
+          aria-expanded="false"
+        >
+          <span class="menu-bars" aria-hidden="true"></span>
+          <span class="visually-hidden">Menu</span>
+        </button>
+        <ul id="site-menu" class="header-links" popover="auto">
+          <li><a class="nav-link" href="#index">INDEX</a></li>
+          <li class="nav-sep" aria-hidden="true">·</li>
+          <li><a class="nav-link" href="#ch-11">FAQ</a></li>
+          <li class="nav-sep" aria-hidden="true">·</li>
+          <li><a class="nav-link" href="#credits">CREDITS</a></li>
+          <li class="nav-cta"><a class="btn-flash-sm" href="#flasher">[ INSTALL ]</a></li>
+        </ul>
       </nav>
     </div>
     <div class="crt-sweep" aria-hidden="true">
@@ -797,6 +808,68 @@
     // Enable instant CSS :active feedback on iOS Safari touch
     document.addEventListener("touchstart", () => {}, { passive: true });
 
+    // Responsive navigation: inline row on wide viewports when all items fit, native popover menu on mobile/zoom
+    const siteHeader = document.querySelector(".site-header");
+    const headerInner = siteHeader?.querySelector(".header-inner");
+    const menuButton = siteHeader?.querySelector(".menu-button");
+    const siteMenu = document.getElementById("site-menu");
+
+    if (siteHeader && headerInner && menuButton && siteMenu) {
+      let lastCollapsedWidth = 0;
+
+      const syncHeaderLayout = () => {
+        const wasOpen = siteMenu.matches(":is(:popover-open, .\\:popover-open)");
+        siteHeader.classList.add("is-measuring", "is-wide");
+        siteMenu.removeAttribute("popover");
+
+        const canGoWide = window.matchMedia("(min-width: 40.0625rem)").matches;
+        const fitsInline = canGoWide && headerInner.scrollWidth <= headerInner.clientWidth;
+
+        if (fitsInline) {
+          lastCollapsedWidth = 0;
+          menuButton.setAttribute("aria-expanded", "false");
+        } else {
+          siteHeader.classList.remove("is-wide");
+          siteMenu.setAttribute("popover", "auto");
+          lastCollapsedWidth = headerInner.clientWidth;
+          if (wasOpen && typeof siteMenu.showPopover === "function") {
+            try {
+              siteMenu.showPopover();
+            } catch (_) {}
+          } else {
+            menuButton.setAttribute("aria-expanded", "false");
+          }
+        }
+
+        requestAnimationFrame(() => {
+          siteHeader.classList.remove("is-measuring");
+        });
+      };
+
+      siteMenu.addEventListener("toggle", (event) => {
+        menuButton.setAttribute("aria-expanded", String(event.newState === "open"));
+      });
+
+      syncHeaderLayout();
+
+      if (typeof ResizeObserver === "function") {
+        const headerObserver = new ResizeObserver(() => {
+          const isWide = siteHeader.classList.contains("is-wide");
+          if (isWide || headerInner.clientWidth > lastCollapsedWidth) {
+            syncHeaderLayout();
+          } else {
+            lastCollapsedWidth = headerInner.clientWidth;
+          }
+        });
+        headerObserver.observe(headerInner);
+        headerObserver.observe(siteMenu);
+      }
+    }
+
+    // Shared handle for programmatic eased anchor scrolling (so per-frame instant scrollTo doesn't trigger premature scrollend blanking)
+    let activeScrollRaf = 0;
+    let activeScrollToken = 0;
+
     // Fallback for browsers without native `scrollend` support
     if (!("onscrollend" in window)) {
       let scrollEndTimer;
@@ -824,12 +897,15 @@
         const getHeadState = () => {
           const root = document.documentElement;
           const scrollable = root.scrollHeight - window.innerHeight;
-          const progress = scrollable > 0 ? Math.min(1, Math.max(0, window.scrollY / scrollable)) : 0;
-          return { progress, headX: progress * root.clientWidth };
+          const scrollY = window.scrollY;
+          const progress = scrollable > 0 ? Math.min(1, Math.max(0, scrollY / scrollable)) : 0;
+          const dotHalf = window.innerWidth <= 640 ? 3 : 1.5;
+          const rawX = progress * root.clientWidth;
+          const headX = progress <= 0 ? 0 : Math.min(root.clientWidth - dotHalf, Math.max(dotHalf, rawX));
+          return { scrollY, progress, headX };
         };
 
-        let { progress: initProgress, headX: tailX } = getHeadState();
-        let prevHeadX = tailX;
+        let { scrollY: prevScrollY, progress: initProgress, headX: tailX } = getHeadState();
         let isSweeping = false;
         let rafId = 0;
         let lastTime = 0;
@@ -851,23 +927,23 @@
           const dt = lastTime > 0 ? Math.max(1, Math.min(48, now - lastTime)) : 16;
           lastTime = now;
 
-          const { progress, headX } = getHeadState();
+          const { scrollY, progress, headX } = getHeadState();
           head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
           if (needsScrollFallback && line) {
             line.style.transform = `scaleX(${progress})`;
           }
 
-          const speedPxPerSec = (Math.abs(headX - prevHeadX) * 1000) / dt;
-          prevHeadX = headX;
+          const verticalSpeedPxPerSec = (Math.abs(scrollY - prevScrollY) * 1000) / dt;
+          prevScrollY = scrollY;
 
-          if (speedPxPerSec >= 10) {
+          if (activeScrollRaf || verticalSpeedPxPerSec >= 24) {
             lastFastMoveTime = now;
             if (!isSweeping) {
               isSweeping = true;
               sweep.classList.add("is-sweeping");
             }
-          } else if (isSweeping && now - lastFastMoveTime > 60) {
-            // Blank the beam as soon as visible header motion stops (don't wait on sub-pixel coasting)
+          } else if (isSweeping && now - lastFastMoveTime > 70) {
+            // Blank the beam as soon as visible scroll motion stops (don't wait on sub-pixel coasting)
             stopSweeping();
           }
 
@@ -877,9 +953,13 @@
           tailX += (headX - tailX) * alpha;
           const wakePx = headX - tailX;
 
-          // Keep tail at 0 inside the 1.2px dot radius so tiny scrolls never wag left/right
-          const excessPx = Math.abs(wakePx) > 1.2 ? wakePx - Math.sign(wakePx) * 1.2 : 0;
-          const tearScale = Math.tanh((excessPx * 1.25) / 24);
+          // Keep tail at 0 inside the dot radius (2.6px on mobile 6x6 dot, 1.2px on desktop 3x3 dot)
+          const isMobileSweep = window.innerWidth <= 640;
+          const coreRadius = isMobileSweep ? 2.6 : 1.2;
+          const tearSpan = isMobileSweep ? 28 : 24;
+          const tearGain = isMobileSweep ? 3.2 : 1.25;
+          const excessPx = Math.abs(wakePx) > coreRadius ? wakePx - Math.sign(wakePx) * coreRadius : 0;
+          const tearScale = Math.tanh((excessPx * tearGain) / tearSpan);
           if (tear) {
             tear.style.transform = `scaleX(${tearScale.toFixed(4)})`;
           }
@@ -899,9 +979,9 @@
           () => {
             const now = performance.now();
             if (now < resizeHoldUntil) {
-              const { progress, headX } = getHeadState();
+              const { scrollY, progress, headX } = getHeadState();
               tailX = headX;
-              prevHeadX = headX;
+              prevScrollY = scrollY;
               head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
               if (needsScrollFallback && line) {
                 line.style.transform = `scaleX(${progress})`;
@@ -923,9 +1003,9 @@
           "resize",
           () => {
             resizeHoldUntil = performance.now() + 140;
-            const { progress, headX } = getHeadState();
+            const { scrollY, progress, headX } = getHeadState();
             tailX = headX;
-            prevHeadX = headX;
+            prevScrollY = scrollY;
             head.style.transform = `translate3d(${headX.toFixed(2)}px, 0, 0)`;
             if (tear) tear.style.transform = "scaleX(0)";
             if (needsScrollFallback && line) {
@@ -938,6 +1018,7 @@
         window.addEventListener(
           "scrollend",
           () => {
+            if (activeScrollRaf) return;
             requestAnimationFrame(stopSweeping);
           },
           { passive: true }
@@ -1012,7 +1093,23 @@
       }
     });
 
-    // Smooth-scroll same-page anchors (including re-clicks on active hash) & manage post-scroll focus
+    // Eased smooth-scroll for same-page anchors (unhurried, distance-scaled, cancellable on manual scroll)
+    const cancelActiveScroll = () => {
+      if (!activeScrollRaf) return;
+      cancelAnimationFrame(activeScrollRaf);
+      activeScrollRaf = 0;
+      activeScrollToken++;
+      document.documentElement.style.scrollBehavior = "";
+    };
+
+    window.addEventListener("wheel", cancelActiveScroll, { passive: true });
+    window.addEventListener("touchstart", cancelActiveScroll, { passive: true });
+    window.addEventListener("keydown", (event) => {
+      if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key)) {
+        cancelActiveScroll();
+      }
+    });
+
     document.addEventListener("click", (event) => {
       const link = event.target.closest('a[href^="#"]');
       if (!link) return;
@@ -1022,10 +1119,20 @@
       if (!target) return;
 
       event.preventDefault();
-      const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      // Dismiss mobile navigation popover if the clicked link was inside it
+      if (siteMenu?.hasAttribute("popover") && siteMenu.matches(":is(:popover-open, .\\:popover-open)")) {
+        if (typeof siteMenu.hidePopover === "function") {
+          siteMenu.hidePopover();
+        }
+      }
+
+      cancelActiveScroll();
+      const token = ++activeScrollToken;
       history.pushState(null, "", hash);
 
       const moveFocus = () => {
+        if (token !== activeScrollToken) return;
         const focusTarget = isTop
           ? document.getElementById("main-title")
           : target.querySelector("h1, h2, .index-title") || target;
@@ -1037,20 +1144,54 @@
         }
       };
 
-      if (smooth) {
-        window.addEventListener("scrollend", moveFocus, { once: true });
-      }
+      const root = document.documentElement;
+      const headerOffset = (siteHeader?.getBoundingClientRect().height || 52) + 16;
+      const scrollMargin = isTop ? 0 : parseFloat(getComputedStyle(target).scrollMarginTop) || headerOffset;
+      const maxScroll = Math.max(0, root.scrollHeight - window.innerHeight);
+      const startY = window.scrollY;
+      const destY = isTop ? 0 : Math.min(maxScroll, Math.max(0, target.getBoundingClientRect().top + startY - scrollMargin));
+      const deltaY = destY - startY;
+      const distance = Math.abs(deltaY);
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-      if (isTop) {
-        window.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
-      } else {
-        target.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
-      }
-
-      if (!smooth) {
+      if (prefersReducedMotion || distance < 2) {
+        root.style.scrollBehavior = "auto";
+        window.scrollTo(0, destY);
+        root.style.scrollBehavior = "";
         moveFocus();
+        return;
       }
+
+      // Scale duration smoothly with distance (~600ms short hops up to ~1180ms full-page glides)
+      const duration = Math.min(1180, Math.max(600, 460 + Math.sqrt(distance) * 8.8));
+      const startTime = performance.now();
+      root.style.scrollBehavior = "auto";
+
+      // Gentle ease-in from rest + long, cushioned deceleration landing
+      const easeGlide = (t) => 0.5 - 0.5 * Math.cos(Math.PI * Math.pow(t, 0.82));
+
+      const step = (now) => {
+        if (token !== activeScrollToken) return;
+        const t = Math.min(1, (now - startTime) / duration);
+        const eased = easeGlide(t);
+        window.scrollTo(0, startY + deltaY * eased);
+
+        if (t < 1) {
+          activeScrollRaf = requestAnimationFrame(step);
+        } else {
+          activeScrollRaf = 0;
+          root.style.scrollBehavior = "";
+          moveFocus();
+        }
+      };
+
+      activeScrollRaf = requestAnimationFrame(step);
     });
+  </script>
+  <script type="module">
+    if (!Object.hasOwn(HTMLElement.prototype, "popover")) {
+      import("https://unpkg.com/@oddbird/popover-polyfill@latest/dist/popover.min.js");
+    }
   </script>
 </body>
 </html>
