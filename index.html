@@ -12,14 +12,14 @@
   <meta property="og:url" content="https://miguelhd.github.io/ruido/">
   <meta property="og:title" content="Ruido User Guide | M-VAVE FM-1 Field Manual">
   <meta property="og:description" content="Practical field manual for playing, shaping, and patching Ruido on your M-VAVE FM-1 synthesizer.">
-  <meta property="og:image" content="https://miguelhd.github.io/ruido/assets/images/fm1-front-panel.png">
+  <meta property="og:image" content="https://miguelhd.github.io/ruido/assets/images/Ruido-FM-1.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:image" content="https://miguelhd.github.io/ruido/assets/images/fm1-front-panel.png">
+  <meta name="twitter:image" content="https://miguelhd.github.io/ruido/assets/images/Ruido-FM-1.png">
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=31">
+  <link rel="stylesheet" href="styles.css?v=30">
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-6BGZWNQCXP"></script>
   <script>
@@ -51,7 +51,7 @@
         <ul id="site-menu" class="header-links" popover="auto">
           <li><a class="nav-link" href="#index">INDEX</a></li>
           <li class="nav-sep" aria-hidden="true">·</li>
-          <li><a class="nav-link" href="#ch-12">FAQ</a></li>
+          <li><a class="nav-link" href="#ch-11">FAQ</a></li>
           <li class="nav-sep" aria-hidden="true">·</li>
           <li><a class="nav-link" href="#credits">CREDITS</a></li>
           <li class="nav-cta"><a class="btn-flash-sm" href="#flasher">[ INSTALL FIRMWARE ]</a></li>
@@ -97,66 +97,118 @@
     <nav class="index-card" id="index" aria-labelledby="index-heading">
       <div class="index-header">
         <span class="index-title" id="index-heading">INDEX</span>
-        <span class="index-count">12 CHAPTERS</span>
+        <span class="index-count">11 CHAPTERS</span>
       </div>
       <ol class="index-list">
-        <li><a href="#ch-01">01. FIRST SOUND</a></li>
+        <li><a href="#ch-01">01. HARDWARE OVERVIEW</a></li>
         <li><a href="#ch-02">02. POWER &amp; INSTALL</a></li>
-        <li><a href="#ch-03">03. HARDWARE OVERVIEW</a></li>
+        <li><a href="#ch-03">03. THE SCREEN</a></li>
         <li><a href="#ch-04">04. CONTROLS &amp; COMBOS</a></li>
         <li><a href="#ch-05">05. GUIDE CONVENTIONS</a></li>
         <li><a href="#ch-06">06. HOW RUIDO WORKS</a></li>
         <li><a href="#ch-07">07. GET STARTED</a></li>
-        <li><a href="#ch-08">08. HUD REFERENCE</a></li>
-        <li><a href="#ch-09">09. EXPRESSIVE KEYBOARD</a></li>
-        <li><a href="#ch-10">10. SCENE MORPHING &amp; NVS</a></li>
-        <li><a href="#ch-11">11. GLOBAL CONFIG &amp; CALIBRATION</a></li>
-        <li><a href="#ch-12">12. FREQUENTLY ASKED QUESTIONS</a></li>
+        <li><a href="#ch-08">08. MODES</a></li>
+        <li><a href="#ch-09">09. KEYBOARDS &amp; SCENES</a></li>
+        <li><a href="#ch-10">10. HOW TO</a></li>
+        <li><a href="#ch-11">11. FREQUENTLY ASKED QUESTIONS</a></li>
       </ol>
     </nav>
 
-    <!-- CHAPTER 01: FIRST SOUND -->
+    <!-- CHAPTER 01: HARDWARE OVERVIEW -->
     <section class="chapter" id="ch-01">
       <div class="chapter-bar">
-        <h2 class="chapter-heading">01 // FIRST SOUND</h2>
+        <h2 class="chapter-heading">01 // HARDWARE OVERVIEW</h2>
         <a class="return-link" href="#index">↑ INDEX</a>
       </div>
 
-      <figure class="specimen-frame">
-        <div class="specimen-pair">
+      <!-- 1.1 Connections -->
+      <div class="subsection">
+        <h3 class="subsection-heading">1.1 CONNECTIONS</h3>
+        <p class="prose">All connections and the power switch run along the top edge of the chassis.</p>
+        <ul class="stack-sm" role="list">
+          <li class="card">
+            <div class="card-row">
+              <span class="card-title">HEADPHONES / LINE OUT</span>
+              <span class="card-tag">3.5 MM STEREO</span>
+            </div>
+            <p class="prose">3.5 mm stereo output for headphones, pedals, mixer, or Eurorack modular gear.</p>
+          </li>
+          <li class="card">
+            <div class="card-row">
+              <span class="card-title">MIDI IN</span>
+              <span class="card-tag">3.5 MM TYPE-A</span>
+            </div>
+            <p class="prose">3.5 mm mini-jack input for external tempo clock, start/stop transport, and note sync.</p>
+          </li>
+          <li class="card">
+            <div class="card-row">
+              <span class="card-title">USB-C</span>
+              <span class="card-tag">AUDIO + POWER</span>
+            </div>
+            <p class="prose">Charges the internal battery, streams stereo digital audio and MIDI to a computer or tablet, and updates firmware.</p>
+          </li>
+          <li class="card">
+            <div class="card-row">
+              <span class="card-title">POWER</span>
+              <span class="card-tag">ON / OFF SWITCH</span>
+            </div>
+            <p class="prose">Switches the unit on and off.</p>
+          </li>
+        </ul>
+      </div>
+
+      <!-- 1.2 Front Panel -->
+      <div class="subsection">
+        <h3 class="subsection-heading">1.2 FRONT PANEL</h3>
+        <p class="prose">All controls are direct and accessible without nested sub-menus.</p>
+
+        <figure class="specimen-frame">
           <img
-            class="crt-img"
-            src="assets/images/12-boot-intro-crt.png"
-            alt="Ruido CRT boot intro screen displaying the glowing monochrome RUIDO logotype"
-            width="240"
-            height="240"
+            class="hardware-img"
+            src="assets/images/Ruido-FM-1.png"
+            alt="Top-down view of the M-VAVE FM-1 synthesizer showing four left knobs, central square oscilloscope screen, four right encoders, twelve mode buttons, and 27-key surface"
+            width="1335"
+            height="794"
             fetchpriority="high"
           >
-          <img
-            class="crt-img"
-            src="assets/images/01-idle-caustic-scope.png"
-            alt="Ruido clean idle caustic oscilloscope screen displaying live overlapping four-voice waveforms"
-            width="240"
-            height="240"
-          >
-        </div>
-        <figcaption class="specimen-caption">CRT BOOT INTRO &amp; LIVE FOUR-VOICE CAUSTIC SCOPE</figcaption>
-      </figure>
+          <figcaption class="specimen-caption">M-VAVE FM-1 PHYSICAL HARDWARE INTERFACE</figcaption>
+        </figure>
 
-      <ol class="stack-sm" role="list">
-        <li class="card">
-          <span class="card-title">1.1 / POWER ON</span>
-          <p class="prose">Flip the rear power switch; the screen flashes the CRT intro and immediately begins generating a live four-voice drone.</p>
-        </li>
-        <li class="card">
-          <span class="card-title">1.2 / TUNE THE VOICES</span>
-          <p class="prose">Turn <kbd class="keycap-knob">(KNOB 1)</kbd> through <kbd class="keycap-knob">(KNOB 4)</kbd> at the top right to sweep the pitch of Oscillators 1–4, or tap <kbd class="keycap">[HOME]</kbd> to cycle the four knobs through voice <code>FREQUENCY</code>, <code>DUTY</code>, and <code>DRIFT</code>.</p>
-        </li>
-        <li class="card">
-          <span class="card-title">1.3 / PLAY THE SURFACE</span>
-          <p class="prose">Press the 20 left and center keys to bend the drone with finger pressure, or tap <span class="key-unlabeled">Lower Keys 13–16</span> at the bottom right to mute and unmute Oscillators 1–4.</p>
-        </li>
-      </ol>
+        <ol class="stack-sm" role="list">
+          <li class="card">
+            <span class="card-title">1 MASTER</span>
+            <p class="prose">Sets analog output volume.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">2 SELECT</span>
+            <p class="prose">Scrolls menus, chooses which voice you are editing, and swaps keyboard layouts.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">3 PRESETS</span>
+            <p class="prose">Blends smoothly across your four saved scenes.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">4 ALGORITHM</span>
+            <p class="prose">Starves the shared power supply so the four voices pull and lock together; sets tempo in Rhythm Lab.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">5 KNOB 1–4</span>
+            <p class="prose">Tunes oscillators 1–4 on Home, or adjusts the four parameters along the bottom of the screen.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">6 OCT- / OCT+</span>
+            <p class="prose">Tuning gears. Hold <kbd class="keycap">[OCT-]</kbd> for slow fine tuning, or <kbd class="keycap">[OCT+]</kbd> for wide sweeps.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">7 MODE BUTTONS</span>
+            <p class="prose">Jump to Filter <kbd class="keycap">[FX]</kbd>, Keyboard <kbd class="keycap">[SEL]</kbd>, Modulation <kbd class="keycap">[LFO]</kbd>, Voice Trim <kbd class="keycap">[EDIT]</kbd>, Settings <kbd class="keycap">[GLO]</kbd>, or <kbd class="keycap">[HOME]</kbd>.</p>
+          </li>
+          <li class="card">
+            <span class="card-title">8 27-KEY SURFACE (20 PRESSURE)</span>
+            <p class="prose">The left 20 keys respond continuously to finger weight; the right-side Solo, Mute, and Tap keys act as on/off switches.</p>
+          </li>
+        </ol>
+      </div>
     </section>
 
     <!-- CHAPTER 02: POWER & INSTALL -->
@@ -168,99 +220,68 @@
 
       <ol class="stack-md" role="list">
         <li class="card">
-          <span class="card-title">1 / SWITCH ON SAFELY</span>
-          <p class="prose">Flip the rear power switch on; the unit wakes directly into your last sound.</p>
+          <span class="card-title">1 SWITCH ON</span>
+          <p class="prose">Flip the power switch on the top edge. The unit wakes up into your last sound.</p>
           <div class="note-callout">
             <span class="note-callout-label">Note:</span>
             <p class="prose">Start with <kbd class="keycap-knob">(MASTER)</kbd> turned low before connecting headphones or studio monitors.</p>
           </div>
         </li>
         <li class="card">
-          <span class="card-title">2 / CONNECT AUDIO</span>
-          <p class="prose">Plug headphones or a stereo breakout cable into the 3.5 mm output jack and raise <kbd class="keycap-knob">(MASTER)</kbd> gradually.</p>
+          <span class="card-title">2 CONNECT AUDIO</span>
+          <p class="prose">Plug headphones or a stereo breakout cable into the 3.5 mm output and raise <kbd class="keycap-knob">(MASTER)</kbd> gradually.</p>
         </li>
         <li class="card">
-          <span class="card-title">3 / INSTALL IN BROWSER</span>
+          <span class="card-title">3 INSTALL IN BROWSER</span>
           <p class="prose">Connect via a data-capable USB-C cable, open <a class="inline-link" href="https://thefirmwarehub.com/firmware/ruido/" target="_blank" rel="noopener noreferrer">Ruido on The Firmware Hub</a> in Chrome or Edge, and follow the prompts.</p>
         </li>
         <li class="card">
-          <span class="card-title">4 / RESCUE &amp; REVERT</span>
-          <p class="prose">If an update is interrupted, switch power off, hold <kbd class="keycap">[OCT-]</kbd> while flipping the rear power switch on, and re-flash or return to stock M-VAVE firmware at any time.</p>
+          <span class="card-title">4 RESCUE &amp; REVERT</span>
+          <p class="prose">If an update is interrupted, switch off, hold <kbd class="keycap">[OCT-]</kbd> while flipping the power switch on, and re-flash. You can return to the stock M-VAVE firmware at any time.</p>
         </li>
       </ol>
     </section>
 
-    <!-- CHAPTER 03: HARDWARE OVERVIEW -->
+    <!-- CHAPTER 03: THE SCREEN -->
     <section class="chapter" id="ch-03">
       <div class="chapter-bar">
-        <h2 class="chapter-heading">03 // HARDWARE OVERVIEW</h2>
+        <h2 class="chapter-heading">03 // THE SCREEN</h2>
         <a class="return-link" href="#index">↑ INDEX</a>
       </div>
 
-      <div class="subsection">
-        <h3 class="subsection-heading">3.1 // FRONT PANEL &amp; KEYBED</h3>
-        <figure class="specimen-frame">
-          <img
-            class="hardware-img"
-            src="assets/images/fm1-front-panel.png"
-            alt="Top-down view of the physical M-VAVE FM-1 hardware showing the left master and scene knobs, central square IPS screen, right four voice encoders and mode buttons, 11 upper keys with the blank far-right Shift key, and 16 blank lower keys grouped by four molded dots"
-            width="1024"
-            height="636"
-            loading="lazy"
-            decoding="async"
-          >
-          <figcaption class="specimen-caption">M-VAVE FM-1 PHYSICAL HARDWARE INTERFACE</figcaption>
-        </figure>
+      <p class="prose">The high-contrast monochrome display keeps you oriented without clutter.</p>
 
-        <ul class="stack-sm" role="list">
-          <li class="card">
-            <span class="card-title">LEFT DECK / MASTER &amp; SCENE</span>
-            <p class="prose"><kbd class="keycap-knob">(MASTER)</kbd> sets analog output volume, <kbd class="keycap-knob">(SELECT)</kbd> steps through on-screen lists and voice pages, <kbd class="keycap-knob">(PRESETS)</kbd> morphs continuously across Scenes 1–4, <kbd class="keycap-knob">(ALGORITHM)</kbd> drives power-rail sag (<code>RAIL COUPLING</code>), and <kbd class="keycap">[OCT-]</kbd> / <kbd class="keycap">[OCT+]</kbd> act as Fine and Coarse encoder gears.</p>
-          </li>
-          <li class="card">
-            <span class="card-title">RIGHT DECK / 4-VOICE KNOBS &amp; PAGE GRID</span>
-            <p class="prose"><kbd class="keycap-knob">(KNOB 1)</kbd> through <kbd class="keycap-knob">(KNOB 4)</kbd> always adjust four visible values on screen: either one parameter across all four oscillators (<kbd class="keycap">[HOME]</kbd>, <kbd class="keycap">[EDIT]</kbd>) or four parameters of a single selected voice (<kbd class="keycap">[FX]</kbd>, <kbd class="keycap">[LFO]</kbd>).</p>
-          </li>
-          <li class="card">
-            <span class="card-title">BOTTOM DECK / 27-KEY CAPACITIVE BED</span>
-            <p class="prose">The 16 blank lower keys are divided by four molded dots into four 4-key groups (<span class="key-unlabeled">Lower Keys 1–4</span>, <span class="key-unlabeled">5–8</span>, <span class="key-unlabeled">9–12</span>, <span class="key-unlabeled">13–16</span>), while the 11 upper keys carry labels <kbd class="keycap">[OP1]</kbd> through <kbd class="keycap">[POLY]</kbd> plus one blank <span class="key-unlabeled">Shift (top-right key)</span> at the far right; press <kbd class="keycap">[SEL]</kbd> or hold <span class="key-unlabeled">Shift (top-right key)</span> anytime to display a live on-screen map of every key.</p>
-          </li>
-        </ul>
-      </div>
+      <figure class="specimen-frame">
+        <img
+          class="crt-img"
+          src="assets/images/02-home-frequency-hud.png"
+          alt="Ruido Home screen showing four overlapping monochrome oscilloscope traces and OSC 1 to OSC 4 frequency sliders along the bottom"
+          width="240"
+          height="240"
+          loading="lazy"
+          decoding="async"
+        >
+        <figcaption class="specimen-caption">HOME FREQUENCY CRT HUD</figcaption>
+      </figure>
 
-      <div class="subsection">
-        <h3 class="subsection-heading">3.2 // REAR EDGE CONNECTIONS</h3>
-        <ul class="cards-two" role="list">
-          <li class="card">
-            <div class="card-row">
-              <span class="card-title">HEADPHONES / LINE OUT</span>
-              <span class="card-tag">3.5 MM STEREO</span>
-            </div>
-            <p class="prose">3.5 mm TRS stereo output for headphones, mixer channels, guitar pedals, or Eurorack gear.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <span class="card-title">MIDI IN</span>
-              <span class="card-tag">3.5 MM TYPE-A</span>
-            </div>
-            <p class="prose">3.5 mm Type-A TRS MIDI input for external 24 PPQN tempo clock and transport sync.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <span class="card-title">USB-C</span>
-              <span class="card-tag">AUDIO + MIDI</span>
-            </div>
-            <p class="prose">Charges the internal battery, streams class-compliant stereo digital audio and MIDI, and flashes firmware.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <span class="card-title">POWER</span>
-              <span class="card-tag">REAR SWITCH</span>
-            </div>
-            <p class="prose">Hardware power slide switch along the rear edge of the chassis.</p>
-          </li>
-        </ul>
-      </div>
+      <ul class="stack-sm" role="list">
+        <li class="card">
+          <span class="card-title">TOP LEFT</span>
+          <p class="prose">Current page and selected voice.</p>
+        </li>
+        <li class="card">
+          <span class="card-title">TOP RIGHT</span>
+          <p class="prose">Stereo/mono routing or active mode.</p>
+        </li>
+        <li class="card">
+          <span class="card-title">CENTER SCOPE</span>
+          <p class="prose">Live waveform of all four voices; labels fade out when idle so you only see the sound.</p>
+        </li>
+        <li class="card">
+          <span class="card-title">BOTTOM STRIP</span>
+          <p class="prose">Four sliders matching <kbd class="keycap-knob">(KNOB 1)</kbd> – <kbd class="keycap-knob">(KNOB 4)</kbd> directly below the screen.</p>
+        </li>
+      </ul>
     </section>
 
     <!-- CHAPTER 04: CONTROLS & COMBOS -->
@@ -270,222 +291,60 @@
         <a class="return-link" href="#index">↑ INDEX</a>
       </div>
 
-      <!-- 4.1 Panel Buttons & Knobs -->
-      <div class="subsection">
-        <h3 class="subsection-heading">4.1 // PANEL BUTTONS &amp; KNOBS</h3>
-        <ul class="cards-two" role="list">
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap">[HOME]</kbd></div>
-              <span class="card-tag">CYCLE</span>
-            </div>
-            <p class="prose">Cycles <kbd class="keycap-knob">(KNOB 1)</kbd>–<kbd class="keycap-knob">(KNOB 4)</kbd> through all-voice <code>FREQUENCY</code>, <code>DUTY</code>, <code>DRIFT</code>, and the clean idle scope.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap">[EDIT]</kbd></div>
-              <span class="card-tag">CYCLE</span>
-            </div>
-            <p class="prose">Cycles <kbd class="keycap-knob">(KNOB 1)</kbd>–<kbd class="keycap-knob">(KNOB 4)</kbd> through all-voice <code>LEVEL</code> (with MS-20 filter overdrive above <code>70%</code>) and stereo <code>PAN</code>.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap">[FX]</kbd></div>
-              <span class="card-tag">TAP</span>
-            </div>
-            <p class="prose">Opens the per-voice MS-20 dual filter page (<code>HPF</code>, <code>HP RES</code>, <code>LPF</code>, <code>LP RES</code>); turn <kbd class="keycap-knob">(SELECT)</kbd> or tap <kbd class="keycap">[FX]</kbd> again to step through <code>OSC 1–4</code>.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap">[LFO]</kbd></div>
-              <span class="card-tag">TAP</span>
-            </div>
-            <p class="prose">Opens the dual modulation page (<code>TARGET</code>, <code>SHAPE</code>, <code>RATE</code>, <code>DEPTH</code>); turn <kbd class="keycap-knob">(SELECT)</kbd> or tap <kbd class="keycap">[LFO]</kbd> again to step through the 8 LFO slots (<code>A1/B1</code>–<code>A4/B4</code>).</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap">[SEL]</kbd></div>
-              <span class="card-tag">TAP</span>
-            </div>
-            <p class="prose">Opens the interactive 27-key diagram; press any key to preview its role or turn <kbd class="keycap-knob">(SELECT)</kbd> to switch between <code>1/3 LIVE MIXER</code>, <code>2/3 CIRCUIT LAB</code>, and <code>3/3 RHYTHM LAB</code>.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap">[GLO]</kbd></div>
-              <span class="card-tag">TAP</span>
-            </div>
-            <p class="prose">Opens the 9-row <code>GLOBAL CONFIG</code> list menu; turn <kbd class="keycap-knob">(SELECT)</kbd> to scroll and turn <kbd class="keycap-knob">(KNOB 1)</kbd>–<kbd class="keycap-knob">(KNOB 4)</kbd> or <kbd class="keycap-knob">(ALGORITHM)</kbd> to change the highlighted setting.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap">[PLAY/STOP]</kbd></div>
-              <span class="card-tag">TAP</span>
-            </div>
-            <p class="prose">Fades the master output smoothly to silence and freezes all oscillators and LFOs in place; tap again to resume.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap">[SAVE]</kbd></div>
-              <span class="card-tag">TAP × 2</span>
-            </div>
-            <p class="prose">Arms <code>SAVE SCENE</code> across <kbd class="keycap">[OP1]</kbd>–<kbd class="keycap">[OP4]</kbd>; tap <kbd class="keycap">[OP1]</kbd>–<kbd class="keycap">[OP4]</kbd> to choose a target slot, then tap <kbd class="keycap">[SAVE]</kbd> again to commit to flash (or tap any other button to cancel).</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap-knob">(PRESETS)</kbd></div>
-              <span class="card-tag">TURN</span>
-            </div>
-            <p class="prose">Morphs every parameter continuously across occupied Scenes 1–4 in a seamless circular loop.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap-knob">(ALGORITHM)</kbd></div>
-              <span class="card-tag">TURN</span>
-            </div>
-            <p class="prose">Drives global <code>RAIL COUPLING</code> (<code>0%–100%</code>), starving the shared virtual power rail so loud peaks pull neighbor oscillators into hard sync.</p>
-          </li>
-        </ul>
-      </div>
-
-      <!-- 4.2 Right-End Keybed Switches -->
-      <div class="subsection">
-        <h3 class="subsection-heading">4.2 // RIGHT-END KEYBED SWITCHES · ALWAYS WITHIN RIGHT-THUMB REACH</h3>
-        <ul class="stack-sm" role="list">
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><span class="key-unlabeled">Lower Keys 13–16</span></div>
-              <span class="card-tag">TAP</span>
-            </div>
-            <p class="prose">Toggles <code>Mute 1–4</code> for Oscillators 1–4 from any page, with solid LEDs marking active voices and dark LEDs marking muted voices.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap">[MONO]</kbd></div>
-              <span class="card-tag">TAP</span>
-            </div>
-            <p class="prose">Toggles <code>Latch</code> (Hold), freezing any currently pressed expression keys in <code>LIVE MIXER</code>, <code>CIRCUIT LAB</code>, or <code>RHYTHM LAB</code> so you can free your left hand.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control"><kbd class="keycap">[POLY]</kbd></div>
-              <span class="card-tag">TAP</span>
-            </div>
-            <p class="prose">Taps the master rhythm clock tempo (<code>20–300 BPM</code>) when the keyboard is in <code>3/3 RHYTHM LAB</code>.</p>
-          </li>
-        </ul>
-      </div>
-
-      <!-- 4.3 Two-Hand Modifiers -->
-      <div class="subsection">
-        <h3 class="subsection-heading">4.3 // TWO-HAND MODIFIERS</h3>
-        <figure class="specimen-frame">
-          <img
-            class="crt-img"
-            src="assets/images/16-shift-map.png"
-            alt="Ruido full-chassis Shift map highlighting SELECT Keyboard, ALGORITHM Tempo, OP1 to OP3 Keyboard shortcuts, Shift top-right blank key, Lower Keys 9 to 12 Scene slots, and Lower Keys 13 to 16 Solo switches"
-            width="240"
-            height="240"
-            loading="lazy"
-            decoding="async"
-          >
-          <figcaption class="specimen-caption">HOLD SHIFT (TOP-RIGHT BLANK KEY) / FULL-CHASSIS SHORTCUT MAP</figcaption>
-        </figure>
-
-        <ul class="cards-two" role="list">
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OCT-]</kbd>
-                <span class="combo-op" aria-hidden="true">+</span>
-                <span class="key-unlabeled">Any Knob</span>
-              </div>
-              <span class="card-tag">HOLD + TURN</span>
-            </div>
-            <p class="prose">Engages Fine gear for sub-cent beating and precision cutoff tuning (<code>~63 cents</code> per full knob revolution).</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OCT+]</kbd>
-                <span class="combo-op" aria-hidden="true">+</span>
-                <span class="key-unlabeled">Any Knob</span>
-              </div>
-              <span class="card-tag">HOLD + TURN</span>
-            </div>
-            <p class="prose">Engages Coarse gear to sweep the full 18.6-octave range (<code>0.05 Hz</code> to <code>20 kHz</code>) in just over one turn.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OCT-]</kbd>
-                <span class="combo-op" aria-hidden="true">+</span>
-                <kbd class="keycap">[OCT+]</kbd>
-              </div>
-              <span class="card-tag">HOLD BOTH</span>
-            </div>
-            <p class="prose">Snaps the active parameter page back to clean factory calibration (<code>55 / 82.4 / 110 / 165 Hz</code>, <code>50%</code> duty, <code>0%</code> coupling, open filters).</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Shift (top-right key)</span>
-                <span class="combo-op" aria-hidden="true">+</span>
-                <span class="key-unlabeled">Lower Keys 13–16</span>
-              </div>
-              <span class="card-tag">HOLD + TAP</span>
-            </div>
-            <p class="prose">Toggles additive <code>Solo 1–4</code> for Oscillators 1–4, isolating the selected voices while pulsing their LEDs.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Shift (top-right key)</span>
-                <span class="combo-op" aria-hidden="true">+</span>
-                <kbd class="keycap">[OP1]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <kbd class="keycap">[OP2]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <kbd class="keycap">[OP3]</kbd>
-              </div>
-              <span class="card-tag">HOLD + TAP</span>
-            </div>
-            <p class="prose">Switches the 27-key surface directly to <code>1/3 LIVE MIXER</code> (<kbd class="keycap">[OP1]</kbd>), <code>2/3 CIRCUIT LAB</code> (<kbd class="keycap">[OP2]</kbd>), or <code>3/3 RHYTHM LAB</code> (<kbd class="keycap">[OP3]</kbd>) without opening <kbd class="keycap">[SEL]</kbd>.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Shift (top-right key)</span>
-                <span class="combo-op" aria-hidden="true">+</span>
-                <span class="key-unlabeled">Lower Keys 9–12</span>
-              </div>
-              <span class="card-tag">HOLD + TAP</span>
-            </div>
-            <p class="prose">Recalls or glides directly to <code>Scene 1–4</code> across the third 4-key group on the bottom row.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Shift (top-right key)</span>
-                <span class="combo-op" aria-hidden="true">+</span>
-                <kbd class="keycap-knob">(SELECT)</kbd>
-              </div>
-              <span class="card-tag">HOLD + TURN</span>
-            </div>
-            <p class="prose">Steps directly through keyboard modes <code>1/3 LIVE MIXER</code>, <code>2/3 CIRCUIT LAB</code>, and <code>3/3 RHYTHM LAB</code> from any screen.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Shift (top-right key)</span>
-                <span class="combo-op" aria-hidden="true">+</span>
-                <kbd class="keycap-knob">(ALGORITHM)</kbd>
-              </div>
-              <span class="card-tag">HOLD + TURN</span>
-            </div>
-            <p class="prose">Adjusts internal master <code>TEMPO</code> (<code>20–3000 BPM</code>) from any screen without leaving your current keyboard mode.</p>
-          </li>
-        </ul>
-      </div>
+      <ul class="stack-md" role="list">
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOME</span>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(KNOB 1–4)</kbd>
+          </div>
+          <p class="prose">Tune oscillators 1–4 from slow clicks up to high tones.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOLD</span>
+            <kbd class="keycap">[OCT-]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(KNOB 1–4)</kbd>
+          </div>
+          <p class="prose">Fine tune slowly to dial in gentle beating intervals.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOLD</span>
+            <kbd class="keycap">[OCT+]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(KNOB 1–4)</kbd>
+          </div>
+          <p class="prose">Sweep across the full pitch range in two turns.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOME</span>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(SELECT)</kbd>
+          </div>
+          <p class="prose">Zoom the oscilloscope waveform in or out.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOLD</span>
+            <kbd class="keycap">[SEL]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap-knob">(SELECT)</kbd>
+          </div>
+          <p class="prose">Switch between the three 27-key instruments.</p>
+        </li>
+        <li class="card">
+          <div class="combo-line">
+            <span class="card-title">HOLD</span>
+            <kbd class="keycap">[SAVE]</kbd>
+            <span class="combo-op" aria-hidden="true">+</span>
+            <kbd class="keycap">[SCENE 1–4]</kbd>
+          </div>
+          <p class="prose">Save your current sound into one of four scene slots.</p>
+        </li>
+      </ul>
     </section>
 
     <!-- CHAPTER 05: GUIDE CONVENTIONS -->
@@ -495,51 +354,46 @@
         <a class="return-link" href="#index">↑ INDEX</a>
       </div>
 
-      <p class="prose">Hardware notation used throughout this manual matches the physical M-VAVE FM-1 silkscreen and its 17 blank keys:</p>
+      <p class="prose">Quick visual notation used throughout this manual:</p>
 
       <ul class="grid-two" role="list">
         <li class="convention-cell">
-          <div class="convention-pair">
-            <kbd class="keycap">[FX]</kbd>
-            <kbd class="keycap">[OP1]</kbd>
-          </div>
-          <span class="convention-label">PRINTED BUTTON / KEY</span>
-          <span class="convention-sub">Text printed on the case</span>
+          <kbd class="keycap">[FX]</kbd>
+          <span class="convention-label">TAP</span>
+          <span class="convention-sub">Press &amp; release</span>
         </li>
         <li class="convention-cell">
-          <div class="convention-pair">
-            <kbd class="keycap-knob">(KNOB 1)</kbd>
-            <kbd class="keycap-knob">(SELECT)</kbd>
-          </div>
-          <span class="convention-label">PRINTED KNOB</span>
-          <span class="convention-sub">Potentiometer or encoder</span>
-        </li>
-        <li class="convention-cell">
-          <span class="key-unlabeled">Shift (top-right key)</span>
-          <span class="convention-label">BLANK UPPER KEY</span>
-          <span class="convention-sub">Isolated key next to <kbd class="keycap">[POLY]</kbd></span>
-        </li>
-        <li class="convention-cell">
-          <span class="key-unlabeled">Lower Keys 1–16</span>
-          <span class="convention-label">BLANK LOWER ROW</span>
-          <span class="convention-sub">Four 4-key dot groups</span>
+          <kbd class="keycap">[OCT-]</kbd>
+          <span class="convention-label">HOLD</span>
+          <span class="convention-sub">Keep pressed</span>
         </li>
         <li class="convention-cell">
           <div class="convention-pair">
             <kbd class="keycap">[OCT-]</kbd>
             <span class="convention-sub" aria-hidden="true">+</span>
-            <kbd class="keycap-knob">(KNOB 1)</kbd>
+            <kbd class="keycap-knob">(K1)</kbd>
           </div>
-          <span class="convention-label">MODIFIER COMBO</span>
-          <span class="convention-sub">Hold first, move second</span>
+          <span class="convention-label">COMBO</span>
+          <span class="convention-sub">Together</span>
         </li>
         <li class="convention-cell">
           <div class="convention-pair">
-            <span class="card-tag">CYCLE</span>
-            <span class="card-tag">PRESS</span>
+            <kbd class="keycap">[EDIT]</kbd>
+            <span class="convention-sub" aria-hidden="true">→</span>
+            <kbd class="keycap-knob">(SEL)</kbd>
           </div>
-          <span class="convention-label">GESTURE BADGE</span>
-          <span class="convention-sub">Physical hand action</span>
+          <span class="convention-label">SEQUENCE</span>
+          <span class="convention-sub">In order</span>
+        </li>
+        <li class="convention-cell">
+          <kbd class="keycap-knob">(KNOB 1)</kbd>
+          <span class="convention-label">TURN</span>
+          <span class="convention-sub">Rotate knob</span>
+        </li>
+        <li class="convention-cell">
+          <kbd class="keycap">[KEY]</kbd>
+          <span class="convention-label">LEAN</span>
+          <span class="convention-sub">Finger pressure</span>
         </li>
       </ul>
     </section>
@@ -551,27 +405,20 @@
         <a class="return-link" href="#index">↑ INDEX</a>
       </div>
 
-      <div class="glo-grid">
-        <div>
-          <span class="glo-label">SOUND SOURCE</span>
-          <span class="glo-value">4 CMOS PULSE OSCILLATORS</span>
-        </div>
-        <div>
-          <span class="glo-label">VOICE CIRCUIT</span>
-          <span class="glo-value">RAIL COUPLING + MS-20 FILTERS</span>
-        </div>
-        <div>
-          <span class="glo-label">MODULATION &amp; TOUCH</span>
-          <span class="glo-value">8 LFOS + 3 PRESSURE KEYBOARDS</span>
-        </div>
-        <div>
-          <span class="glo-label">PATCH MEMORY</span>
-          <span class="glo-value">4 CONTINUOUS MORPH SCENES</span>
-        </div>
+      <div class="specimen-frame">
+        <ol class="flow-diagram" role="list">
+          <li class="flow-node">4 DRONE VOICES</li>
+          <li class="flow-wire" aria-hidden="true"></li>
+          <li class="flow-node">PER-VOICE FILTER &amp; 2 LFOS</li>
+          <li class="flow-wire" aria-hidden="true"></li>
+          <li class="flow-node">3 KEYBOARD INSTRUMENTS</li>
+          <li class="flow-wire" aria-hidden="true"></li>
+          <li class="flow-node">4 MORPHING SCENES</li>
+        </ol>
       </div>
 
       <p class="prose">
-        All four oscillators run continually like a hardware CMOS drone box, feeding a shared virtual power rail into per-voice MS-20 high-pass and low-pass filters. Instead of triggering standard piano notes, you sculpt beating pitches, filter self-oscillation, LFO cross-modulation, finger pressure, and scene morphing in real time.
+        All four voices run continually, like an analog drone box. Instead of playing standard piano notes, you shape pitch, filter resonance, shared power-supply sag, and finger weight in real time.
       </p>
     </section>
 
@@ -583,694 +430,242 @@
       </div>
 
       <div class="subsection">
-        <h3 class="subsection-heading">7.1 // BUILD YOUR FIRST DRONE</h3>
+        <h3 class="subsection-heading">7.1 BUILD YOUR FIRST DRONE</h3>
         <ol class="stack-md" role="list">
           <li class="card">
-            <span class="card-title">1 / TUNE A CHORD</span>
-            <p class="prose">Tap <kbd class="keycap">[HOME]</kbd> to view <code>FREQUENCY</code> and turn <kbd class="keycap-knob">(KNOB 1)</kbd> through <kbd class="keycap-knob">(KNOB 4)</kbd> to set a low root and three close harmonies; hold <kbd class="keycap">[OCT-]</kbd> while turning to dial in slow beating.</p>
+            <span class="card-title">1 TUNE A CHORD</span>
+            <p class="prose">Press <kbd class="keycap">[HOME]</kbd> and turn <kbd class="keycap-knob">(KNOB 1)</kbd> – <kbd class="keycap-knob">(KNOB 4)</kbd> to set a low root note and three close harmonies. Hold <kbd class="keycap">[OCT-]</kbd> while turning to find slow, warm beating.</p>
           </li>
           <li class="card">
-            <span class="card-title">2 / STARVE THE SUPPLY</span>
-            <p class="prose">Turn <kbd class="keycap-knob">(ALGORITHM)</kbd> to around <code>35%</code> so close pitches pull warmly together, then push past <code>50%</code> to hear slower voices snap into hard sync.</p>
+            <span class="card-title">2 STARVE THE SUPPLY</span>
+            <p class="prose">Turn <kbd class="keycap-knob">(ALGORITHM)</kbd> to around 40% so close pitches pull into chorus. Turn past 50% to hear the voices tug and snap together.</p>
           </li>
           <li class="card">
-            <span class="card-title">3 / SCULPT THE FILTERS</span>
-            <p class="prose">Tap <kbd class="keycap">[FX]</kbd>, turn <kbd class="keycap-knob">(SELECT)</kbd> to pick <code>OSC 1</code> and roll <kbd class="keycap-knob">(KNOB 3)</kbd> down for deep bass, then pick <code>OSC 2</code> and raise <kbd class="keycap-knob">(KNOB 4)</kbd> past <code>60%</code> until the filter begins to sing.</p>
+            <span class="card-title">3 SCULPT THE FILTERS</span>
+            <p class="prose">Press <kbd class="keycap">[FX]</kbd>, turn <kbd class="keycap-knob">(SELECT)</kbd> to pick voice 1 and roll <kbd class="keycap-knob">(KNOB 3)</kbd> down for deep bass; pick voice 2 and raise <kbd class="keycap-knob">(KNOB 4)</kbd> until the filter begins to sing.</p>
           </li>
           <li class="card">
-            <span class="card-title">4 / ADD SLOW MOTION</span>
-            <p class="prose">Tap <kbd class="keycap">[LFO]</kbd>, set <kbd class="keycap-knob">(KNOB 1)</kbd> to <code>LPF</code>, pick a smooth shape on <kbd class="keycap-knob">(KNOB 2)</kbd>, keep <code>RATE</code> slow on <kbd class="keycap-knob">(KNOB 3)</kbd>, and raise <code>DEPTH</code> on <kbd class="keycap-knob">(KNOB 4)</kbd> so the filter breathes on its own.</p>
+            <span class="card-title">4 ADD SLOW MOTION</span>
+            <p class="prose">Press <kbd class="keycap">[LFO]</kbd>, set <kbd class="keycap-knob">(KNOB 1)</kbd> to LPF, pick a smooth wave on <kbd class="keycap-knob">(KNOB 2)</kbd>, keep speed slow on <kbd class="keycap-knob">(KNOB 3)</kbd>, and raise depth on <kbd class="keycap-knob">(KNOB 4)</kbd> so the filter breathes on its own.</p>
           </li>
           <li class="card">
-            <span class="card-title">5 / LEAN INTO THE KEYS</span>
-            <p class="prose">Tap <kbd class="keycap">[SEL]</kbd> to confirm <code>1/3 LIVE MIXER</code> is active, then press <span class="key-unlabeled">Lower Keys 1–4</span> on the bottom left to open and close each voice's filter with finger weight.</p>
+            <span class="card-title">5 LEAN INTO THE KEYS</span>
+            <p class="prose">Press <kbd class="keycap">[SEL]</kbd> to confirm Live Mixer is active, then lean into the first four bottom keys to open and close each voice's filter by hand.</p>
           </li>
           <li class="card">
-            <span class="card-title">6 / SAVE YOUR SCENE</span>
-            <p class="prose">Tap <kbd class="keycap">[SAVE]</kbd> to arm <code>SAVE SCENE</code>, tap <kbd class="keycap">[OP1]</kbd>–<kbd class="keycap">[OP4]</kbd> to choose a target slot, and tap <kbd class="keycap">[SAVE]</kbd> a second time to commit your patch to flash.</p>
+            <span class="card-title">6 SAVE YOUR SCENE</span>
+            <p class="prose">Hold <kbd class="keycap">[SAVE]</kbd> and tap one of the four scene keys on the bottom row to store your patch.</p>
           </li>
         </ol>
       </div>
     </section>
 
-    <!-- CHAPTER 08: HUD REFERENCE -->
+    <!-- CHAPTER 08: MODES -->
     <section class="chapter" id="ch-08">
       <div class="chapter-bar">
-        <h2 class="chapter-heading">08 // HUD REFERENCE</h2>
+        <h2 class="chapter-heading">08 // MODES</h2>
         <a class="return-link" href="#index">↑ INDEX</a>
       </div>
 
-      <!-- 8.1 [FX] Dual Filter -->
+      <!-- 8.1 [FX] -->
       <div class="subsection">
-        <h3 class="subsection-heading">8.1 // <kbd class="keycap">[FX]</kbd> DUAL FILTER</h3>
+        <h3 class="subsection-heading">8.1 [FX] DUAL FILTER</h3>
         <figure class="specimen-frame">
           <img
             class="crt-img"
             src="assets/images/03-fx-ms20-dual-filter.png"
-            alt="Ruido FX MS-20 dual filter screen displaying a dual-peak passband curve for Oscillator 1 with HPF, HP RES, LPF, and LP RES controls"
+            alt="Ruido Filter screen displaying a dual-peak passband curve for Oscillator 1 with HPF, HP RES, LPF, and LP RES controls"
             width="240"
             height="240"
             loading="lazy"
             decoding="async"
           >
-          <figcaption class="specimen-caption">[FX] MS-20 DUAL FILTER / PER-VOICE HPF &amp; LPF PASSBAND</figcaption>
+          <figcaption class="specimen-caption">DUAL FILTER PASSBAND SCOPE</figcaption>
         </figure>
-        <p class="prose">Each oscillator runs through dedicated <code>12 dB/oct</code> Korg-35 high-pass and low-pass filters in series; turn <kbd class="keycap-knob">(SELECT)</kbd> or tap <kbd class="keycap">[FX]</kbd> to step across <code>OSC 1–4</code>.</p>
-        <ul class="cards-two" role="list">
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap-knob">(KNOB 1)</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">HPF Cutoff</span>
-              </div>
-              <span class="card-tag">TURN</span>
-            </div>
-            <p class="prose">Sweeps the resonant high-pass cutoff from <code>2.0 Hz</code> to <code>28 kHz</code> to carve sub-bass weight or band-pass throats.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap-knob">(KNOB 2)</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">HP Resonance</span>
-              </div>
-              <span class="card-tag">TURN</span>
-            </div>
-            <p class="prose">Boosts the high-pass cutoff peak for tight low-end punch above <code>0%</code> and diode-clipped singing above <code>60%</code>.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap-knob">(KNOB 3)</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">LPF Cutoff</span>
-              </div>
-              <span class="card-tag">TURN</span>
-            </div>
-            <p class="prose">Sweeps the low-pass cutoff from dark sub-harmonics up to open <code>28 kHz</code> square-wave edges.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap-knob">(KNOB 4)</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">LP Resonance</span>
-              </div>
-              <span class="card-tag">TURN</span>
-            </div>
-            <p class="prose">Adds warm Korg-35 feedback up to <code>60%</code> and drives full self-oscillation from <code>60%</code> to <code>100%</code>.</p>
-          </li>
-        </ul>
+        <p class="prose">Each voice has its own high-pass and low-pass filter in series. Turn <kbd class="keycap-knob">(SELECT)</kbd> to choose voice 1–4.</p>
+        <div class="param-box">
+          <div><span class="param-key">KNOB 1:</span> High-pass</div>
+          <div><span class="param-key">KNOB 2:</span> High-pass peak</div>
+          <div><span class="param-key">KNOB 3:</span> Low-pass</div>
+          <div><span class="param-key">KNOB 4:</span> Low-pass peak; resonance stays warm up to 60% and self-oscillates above 60%.</div>
+        </div>
       </div>
 
-      <!-- 8.2 [LFO] Dual Modulators -->
+      <!-- 8.2 [LFO] -->
       <div class="subsection">
-        <h3 class="subsection-heading">8.2 // <kbd class="keycap">[LFO]</kbd> DUAL MODULATORS</h3>
+        <h3 class="subsection-heading">8.2 [LFO] MODULATION</h3>
         <figure class="specimen-frame">
           <img
             class="crt-img"
             src="assets/images/04-lfo-dual-modulation.png"
-            alt="Ruido LFO dual modulation screen showing a live modulation waveform with Target, Shape, Rate, and Depth controls"
+            alt="Ruido LFO screen showing a skewed triangle-sawtooth modulation wave with Target, Shape, Rate, and Depth controls"
             width="240"
             height="240"
             loading="lazy"
             decoding="async"
           >
-          <figcaption class="specimen-caption">[LFO] DUAL MODULATION / 8 SLOTS · A1/B1 TO A4/B4</figcaption>
+          <figcaption class="specimen-caption">LFO COMPANION WAVEFORM SCOPE</figcaption>
         </figure>
-        <p class="prose">Every oscillator carries two dedicated modulators (<code>LFO A</code> and <code>LFO B</code>); turn <kbd class="keycap-knob">(SELECT)</kbd> or tap <kbd class="keycap">[LFO]</kbd> to step through all 8 slots (<code>A1/B1</code>–<code>A4/B4</code>).</p>
-        <ul class="cards-two" role="list">
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap-knob">(KNOB 1)</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Target</span>
-              </div>
-              <span class="card-tag">TURN</span>
-            </div>
-            <p class="prose">Routes modulation to <code>FREQ</code>, <code>DUTY</code>, <code>LPF</code>, <code>LP RES</code>, <code>HPF</code>, <code>HP RES</code>, <code>LEVEL</code>, <code>PAN</code>, or on <code>LFO B</code> directly into <code>A RATE</code> and <code>A DEPTH</code>.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap-knob">(KNOB 2)</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Shape</span>
-              </div>
-              <span class="card-tag">TURN</span>
-            </div>
-            <p class="prose">Morphs continuously across sine, triangle, sawtooth, square, and smooth analog random drift.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap-knob">(KNOB 3)</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Rate</span>
-              </div>
-              <span class="card-tag">TURN</span>
-            </div>
-            <p class="prose">Spans multi-minute tidal cycles (<code>0.01 Hz</code>) all the way up to audio-rate FM sidebands (<code>2 kHz</code>).</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap-knob">(KNOB 4)</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Depth</span>
-              </div>
-              <span class="card-tag">TURN</span>
-            </div>
-            <p class="prose">Scales modulation excursion around the target parameter's resting knob position.</p>
-          </li>
-        </ul>
+        <p class="prose">Two LFOs per voice (A and B). Turn <kbd class="keycap-knob">(SELECT)</kbd> to pick an LFO.</p>
+        <div class="param-box">
+          <div><span class="param-key">KNOB 1:</span> Target</div>
+          <div><span class="param-key">KNOB 2:</span> Wave shape</div>
+          <div><span class="param-key">KNOB 3:</span> Rate (slow tides up to audio-rate FM)</div>
+          <div><span class="param-key">KNOB 4:</span> Depth</div>
+        </div>
+        <p class="prose prose--italic"><span class="prose-strong">Tip:</span> Point LFO B at A-rate or depth for shifting patterns that never repeat.</p>
       </div>
 
-      <!-- 8.3 [HOME] & [EDIT] All-Voice Bars -->
+      <!-- 8.3 [EDIT] -->
       <div class="subsection">
-        <h3 class="subsection-heading">8.3 // <kbd class="keycap">[HOME]</kbd> &amp; <kbd class="keycap">[EDIT]</kbd> ALL-VOICE BARS</h3>
+        <h3 class="subsection-heading">8.3 [EDIT] VOICE TRIM</h3>
         <figure class="specimen-frame">
-          <div class="specimen-trio">
-            <img
-              class="crt-img"
-              src="assets/images/02-home-frequency-hud.png"
-              alt="Ruido Home Frequency HUD showing four-voice oscilloscope waveform above OSC 1 to OSC 4 Hz readouts"
-              width="240"
-              height="240"
-              loading="lazy"
-              decoding="async"
-            >
-            <img
-              class="crt-img"
-              src="assets/images/06-edit-pulse-duty.png"
-              alt="Ruido Home Duty HUD displaying pulse-width square waveforms across Oscillators 1 to 4"
-              width="240"
-              height="240"
-              loading="lazy"
-              decoding="async"
-            >
-            <img
-              class="crt-img"
-              src="assets/images/07-edit-thermal-drift.png"
-              alt="Ruido Home Drift HUD displaying per-voice analog pitch wander across Oscillators 1 to 4"
-              width="240"
-              height="240"
-              loading="lazy"
-              decoding="async"
-            >
-          </div>
-          <figcaption class="specimen-caption">[HOME] CYCLE: FREQUENCY · PULSE DUTY · THERMAL DRIFT</figcaption>
+          <img
+            class="crt-img"
+            src="assets/images/06-edit-pulse-duty.png"
+            alt="Ruido Edit Duty screen displaying four pulse-width square waves side by side for Oscillators 1 to 4"
+            width="240"
+            height="240"
+            loading="lazy"
+            decoding="async"
+          >
+          <figcaption class="specimen-caption">EDIT VOICE TRIM PULSE HUD</figcaption>
         </figure>
-
-        <figure class="specimen-frame">
-          <div class="specimen-pair">
-            <img
-              class="crt-img"
-              src="assets/images/05-edit-level-overdrive.png"
-              alt="Ruido Edit Level HUD showing four voice level bars with the 70 percent MS-20 filter overdrive threshold"
-              width="240"
-              height="240"
-              loading="lazy"
-              decoding="async"
-            >
-            <img
-              class="crt-img"
-              src="assets/images/08-edit-stereo-pan.png"
-              alt="Ruido Edit Stereo Pan HUD showing four Cauchy acoustic localization bells across L100 to R100"
-              width="240"
-              height="240"
-              loading="lazy"
-              decoding="async"
-            >
-          </div>
-          <figcaption class="specimen-caption">[EDIT] CYCLE: LEVEL &amp; MS-20 OVERDRIVE · STEREO PAN</figcaption>
-        </figure>
-
-        <p class="prose">All-voice pages map <kbd class="keycap-knob">(KNOB 1)</kbd> through <kbd class="keycap-knob">(KNOB 4)</kbd> directly to Oscillators 1–4 side by side: <kbd class="keycap">[HOME]</kbd> cycles <code>FREQUENCY</code>, <code>DUTY</code>, and <code>DRIFT</code> (plus the clean idle scope), while <kbd class="keycap">[EDIT]</kbd> cycles <code>LEVEL</code> and <code>PAN</code>.</p>
-        <ul class="cards-two" role="list">
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[HOME]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Frequency · Duty · Drift</span>
-              </div>
-              <span class="card-tag">CYCLE</span>
-            </div>
-            <p class="prose">Tunes voice pitch (<code>0.05 Hz–20 kHz</code>), pinches square waves from <code>50%</code> to narrow <code>5%–95%</code> pulses, and dials in independent <code>1/f</code> thermal wander.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[EDIT]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Level · Pan</span>
-              </div>
-              <span class="card-tag">CYCLE</span>
-            </div>
-            <p class="prose">Balances clean post-filter volume up to <code>70%</code> before driving up to <code>4.5x</code> pre-filter MS-20 saturation above <code>70%</code>, then places voices across <code>L100–R100</code>.</p>
-          </li>
-        </ul>
+        <p class="prose">Turn <kbd class="keycap-knob">(SELECT)</kbd> to step through four trim pages where <kbd class="keycap-knob">(KNOB 1)</kbd> – <kbd class="keycap-knob">(KNOB 4)</kbd> adjust voices 1–4 side by side:</p>
+        <div class="param-box">
+          <div><span class="param-key">LEVEL:</span> Clean volume up to 70%, warm drive past 70%</div>
+          <div><span class="param-key">DUTY:</span> Hollow square to thin pulse</div>
+          <div><span class="param-key">DRIFT:</span> Gentle analog pitch wander</div>
+          <div><span class="param-key">PAN:</span> Left/right stereo placement</div>
+        </div>
       </div>
 
-      <!-- 8.4 (ALGORITHM) Rail Coupling -->
+      <!-- 8.4 [GLO] -->
       <div class="subsection">
-        <h3 class="subsection-heading">8.4 // <kbd class="keycap-knob">(ALGORITHM)</kbd> RAIL COUPLING</h3>
-        <figure class="specimen-frame">
-          <div class="specimen-stack">
-            <img
-              class="crt-img"
-              src="assets/images/14-rail-coupling-pull.png"
-              alt="Ruido Rail Coupling analyzer at 35 percent showing gentle PWR supply ripple above OSC 1 to OSC 4 capacitor ramps with Shared Power Soft Pull readout"
-              width="240"
-              height="240"
-              loading="lazy"
-              decoding="async"
-            >
-            <img
-              class="crt-img"
-              src="assets/images/15-rail-coupling-starved.png"
-              alt="Ruido Rail Coupling analyzer at 83 percent showing heavy PWR supply sag and vertical hard-sync discharge lines across OSC 1 to OSC 4 with Starved Power Hard Sync readout"
-              width="240"
-              height="240"
-              loading="lazy"
-              decoding="async"
-            >
+        <h3 class="subsection-heading">8.4 [GLO] GLOBAL SETTINGS</h3>
+        <p class="prose">Turn <kbd class="keycap-knob">(SELECT)</kbd> to pick a setting and <kbd class="keycap-knob">(KNOB 1)</kbd> to change it: stereo or mono output, momentary or latching mutes/solo/scene behavior, external MIDI clock sync, and key pressure sensitivity (1–5).</p>
+        <div class="glo-grid">
+          <div>
+            <span class="glo-label">ROUTING</span>
+            <span class="glo-value">STEREO / MONO</span>
           </div>
-          <figcaption class="specimen-caption">TOP: 35% SHARED POWER · SOFT PULL / BOTTOM: 83% STARVED POWER · HARD SYNC</figcaption>
-        </figure>
-        <p class="prose">Turning <kbd class="keycap-knob">(ALGORITHM)</kbd> from any screen opens the five-lane <code>RAIL COUPLING</code> analyzer, plotting the drooping virtual supply rail (<code>PWR</code>) above the four oscillator capacitor ramps (<code>OSC 1–4</code>).</p>
-        <ul class="cards-two" role="list">
-          <li class="card">
-            <span class="card-title">0%–35% / SHARED POWER &amp; SOFT PULL</span>
-            <p class="prose">Light supply sag introduces warm sympathetic frequency pull between neighboring oscillators without breaking their independent pitch cycles.</p>
-          </li>
-          <li class="card">
-            <span class="card-title">36%–100% / STARVED POWER &amp; HARD SYNC</span>
-            <p class="prose">Heavy rail droop fires vertical hard-sync discharge lines across the lower lanes, forcing slower oscillators to reset on dominant peaks.</p>
-          </li>
-        </ul>
+          <div>
+            <span class="glo-label">MUTE / SOLO</span>
+            <span class="glo-value">MOMENTARY / LATCH</span>
+          </div>
+          <div>
+            <span class="glo-label">MIDI CLOCK IN</span>
+            <span class="glo-value">AUTO / OFF / 24PPQN</span>
+          </div>
+          <div>
+            <span class="glo-label">SENSITIVITY</span>
+            <span class="glo-value">CURVE 1–5</span>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- CHAPTER 09: EXPRESSIVE KEYBOARD -->
+    <!-- CHAPTER 09: KEYBOARDS & SCENES -->
     <section class="chapter" id="ch-09">
       <div class="chapter-bar">
-        <h2 class="chapter-heading">09 // EXPRESSIVE KEYBOARD</h2>
+        <h2 class="chapter-heading">09 // KEYBOARDS &amp; SCENES</h2>
         <a class="return-link" href="#index">↑ INDEX</a>
       </div>
 
+      <p class="prose">
+        Hold <kbd class="keycap">[SEL]</kbd> and turn <kbd class="keycap-knob">(SELECT)</kbd> to switch the 27-key surface between three instruments. The left 20 keys respond continuously to finger weight; the right-side Solo, Mute, and Tap keys act as on/off switches.
+      </p>
+
       <!-- 9.1 Live Mixer -->
       <div class="subsection">
-        <h3 class="subsection-heading">9.1 // MODE 1/3 · LIVE MIXER</h3>
+        <h3 class="subsection-heading">9.1 LIVE MIXER</h3>
         <figure class="specimen-frame">
           <img
             class="crt-img"
             src="assets/images/09-sel-keyboard-live-mixer.png"
-            alt="Ruido SEL 1 of 3 Live Mixer 27-key diagram showing upper Tone, Filter, and Stereo Width macros alongside Latch and Tap, and lower Filter, Octave, Duty, and Mute groups"
+            alt="Ruido Keyboard 1 of 3 Live Mixer map showing upper-row Drive, Sub/LPF, Spread, and Solo keys and lower-row Filter, Octave, Scene, and Mute keys"
             width="240"
             height="240"
             loading="lazy"
             decoding="async"
           >
-          <figcaption class="specimen-caption">[SEL] 1/3 LIVE MIXER / TONE, FILTER &amp; WIDTH MACROS</figcaption>
+          <figcaption class="specimen-caption">MODEL 1/3: LIVE MIXER MAP</figcaption>
         </figure>
-        <p class="prose">Default performance surface mapping the 20 left and center pressure keys to formant swells, sub-octave shifts, and stereo macros while keeping <code>Latch</code> (<kbd class="keycap">[MONO]</kbd>) and <code>Mute 1–4</code> (<span class="key-unlabeled">Lower Keys 13–16</span>) anchored on the right.</p>
-        <ul class="cards-two" role="list">
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Lower Keys 1–4</span>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Filter 1–4</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Opens each voice's resonant MS-20 low-pass filter and vactrol VCA with finger pressure.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Lower Keys 5–8</span>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Octave 1–4</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Drops Oscillators 1–4 down one full sub-octave while held.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Lower Keys 9–12</span>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Duty 1–4</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Pinches each oscillator's pulse width toward a thin nasal reed under finger pressure.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OP1]</kbd>
-                <kbd class="keycap">[OP2]</kbd>
-                <kbd class="keycap">[OP3]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Tone Macros</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Bends all voices simultaneously with <code>Sub-Bass</code> (<kbd class="keycap">[OP1]</kbd>), <code>5th Bend</code> (<kbd class="keycap">[OP2]</kbd>), or <code>4.5x MS-20 Drive</code> (<kbd class="keycap">[OP3]</kbd>).</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OP4]</kbd>
-                <kbd class="keycap">[OP5]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Master Filter Curtains</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Sweeps a master resonant <code>LPF Drop</code> (<kbd class="keycap">[OP4]</kbd>) or <code>HPF Sweep</code> (<kbd class="keycap">[OP5]</kbd>) across the stereo mix.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OP6]</kbd>
-                <kbd class="keycap">[PIT]</kbd>
-                <kbd class="keycap">[GLO]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Stereo Width</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Collapses the drone to dead-center <code>Mono</code> (<kbd class="keycap">[OP6]</kbd>), widens it into <code>Hyper-Wide</code> stereo (<kbd class="keycap">[PIT]</kbd>), or damps drift into <code>Ratio Lock</code> (<kbd class="keycap">[GLO]</kbd>).</p>
-          </li>
-        </ul>
-      </div>
-
-      <!-- 9.2 Circuit Lab -->
-      <div class="subsection">
-        <h3 class="subsection-heading">9.2 // MODE 2/3 · CIRCUIT LAB</h3>
-        <figure class="specimen-frame">
-          <img
-            class="crt-img"
-            src="assets/images/10-sel-keyboard-circuit-lab.png"
-            alt="Ruido SEL 2 of 3 Circuit Lab 27-key diagram showing upper Mod Macros, Lock and Scream, and Master Bends, and lower Cross, Fold, Crush, and Mute groups"
-            width="240"
-            height="240"
-            loading="lazy"
-            decoding="async"
-          >
-          <figcaption class="specimen-caption">[SEL] 2/3 CIRCUIT LAB / CROSS-MOD, WAVEFOLD &amp; BITCRUSH</figcaption>
-        </figure>
-        <p class="prose">Turns the 20 pressure keys into a live circuit-bending matrix for inter-voice FM, West-Coast wavefolding, sample-rate decimation, and twin-filter scream.</p>
-        <ul class="cards-two" role="list">
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Lower Keys 1–4</span>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Cross 1–4</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Drives each oscillator's pitch and filter cutoff straight from its neighbor oscillator at audio rate.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Lower Keys 5–8</span>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Fold 1–4</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Pushes Oscillators 1–4 through a triple-stage West-Coast wavefolder for dense upper harmonics.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Lower Keys 9–12</span>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Crush 1–4</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Decimates each oscillator's sample rate and bit depth into raw aliasing grit.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OP1]</kbd>
-                <kbd class="keycap">[OP2]</kbd>
-                <kbd class="keycap">[OP3]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Mod Macros</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Crossfades paired <code>Ring Mod</code> (<kbd class="keycap">[OP1]</kbd>), locks <code>OSC 2–4</code> to <code>OSC 1</code> in <code>Hard Sync</code> (<kbd class="keycap">[OP2]</kbd>), or overclocks all LFOs <code>32x</code> into <code>LFO Turbo</code> (<kbd class="keycap">[OP3]</kbd>).</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OP4]</kbd>
-                <kbd class="keycap">[OP5]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Lock &amp; Scream</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Freezes thermal drift into <code>Ratio Lock</code> (<kbd class="keycap">[OP4]</kbd>) or drives twin Korg-35 filters into self-oscillating <code>Filter Scream</code> (<kbd class="keycap">[OP5]</kbd>).</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OP6]</kbd>
-                <kbd class="keycap">[PIT]</kbd>
-                <kbd class="keycap">[GLO]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Master Bends</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Slams the full mix into <code>4.5x Drive</code> (<kbd class="keycap">[OP6]</kbd>), master <code>Fold All</code> (<kbd class="keycap">[PIT]</kbd>), or master <code>Crush All</code> (<kbd class="keycap">[GLO]</kbd>).</p>
-          </li>
-        </ul>
-      </div>
-
-      <!-- 9.3 Rhythm Lab -->
-      <div class="subsection">
-        <h3 class="subsection-heading">9.3 // MODE 3/3 · RHYTHM LAB</h3>
-        <figure class="specimen-frame">
-          <img
-            class="crt-img"
-            src="assets/images/11-sel-keyboard-rhythm-lab.png"
-            alt="Ruido SEL 3 of 3 Rhythm Lab 27-key diagram showing upper Pulse Macros, Gate Envelope, and Rhythm FX alongside Latch and Tap, and lower Stutter, Divide, Euclid, and Mute groups"
-            width="240"
-            height="240"
-            loading="lazy"
-            decoding="async"
-          >
-          <figcaption class="specimen-caption">[SEL] 3/3 RHYTHM LAB / CLOCKED GATES, DIVISIONS &amp; EUCLIDEAN PULSES</figcaption>
-        </figure>
-        <p class="prose">Transforms sustained drones into phase-locked rhythmic patterns; turn <kbd class="keycap-knob">(ALGORITHM)</kbd> to sweep master <code>TEMPO</code> (<code>20–3000 BPM</code>) or tap <kbd class="keycap">[POLY]</kbd> for live tap tempo.</p>
-        <ul class="cards-two" role="list">
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Lower Keys 1–4</span>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Stutter 1–4</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Chops Oscillators 1–4 with pressure-sensitive tremolo gates.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Lower Keys 5–8</span>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Divide 1–4</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Locks Oscillators 1–4 to master-clocked <code>/1</code>, <code>/2</code>, <code>/3</code>, and <code>/4</code> rhythmic subdivisions.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <span class="key-unlabeled">Lower Keys 9–12</span>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Euclid 1–4</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Drives Oscillators 1–4 with interlocking <code>E(3,8)</code>, <code>E(5,8)</code>, <code>E(5,16)</code>, and <code>E(7,16)</code> Euclidean polyrhythms.</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OP1]</kbd>
-                <kbd class="keycap">[OP2]</kbd>
-                <kbd class="keycap">[OP3]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Pulse Macros</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Applies 4-voice <code>Sidechain Pump</code> (<kbd class="keycap">[OP1]</kbd>), steps a <code>1-2-3-4 Chase</code> sequence (<kbd class="keycap">[OP2]</kbd>), or multiplies master clock speed up to <code>4x</code> (<kbd class="keycap">[OP3]</kbd>).</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OP4]</kbd>
-                <kbd class="keycap">[OP5]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Gate Envelope</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Shapes every active rhythmic gate into a resonant MS-20 <code>Filter Pluck</code> (<kbd class="keycap">[OP4]</kbd>) or pinpoint <code>6% Short Gate</code> (<kbd class="keycap">[OP5]</kbd>).</p>
-          </li>
-          <li class="card">
-            <div class="card-row">
-              <div class="card-control">
-                <kbd class="keycap">[OP6]</kbd>
-                <kbd class="keycap">[PIT]</kbd>
-                <kbd class="keycap">[GLO]</kbd>
-                <span class="control-sep" aria-hidden="true">/</span>
-                <span class="control-fn">Rhythm FX</span>
-              </div>
-              <span class="card-tag">PRESS</span>
-            </div>
-            <p class="prose">Adds 16th-note <code>Swing</code> (<kbd class="keycap">[OP6]</kbd>), alternating stereo <code>Ping-Pong</code> bounce (<kbd class="keycap">[PIT]</kbd>), or fast <code>Ratchet Roll</code> fills (<kbd class="keycap">[GLO]</kbd>).</p>
-          </li>
-        </ul>
+        <p class="prose">
+          Performance mixing and macros: upper row offers global drive, harmonic ratio lock, and stereo spread; bottom row opens per-voice filters like vactrol gates, shifts octaves, and morphs across four scenes.
+        </p>
       </div>
 
       <div class="tip-callout">
-        <span class="tip-callout-label">TIP:</span>Pair Modes 1–3 with Factory Scenes 2–4 for an immediate starting point: <code>1/3 LIVE MIXER</code> with Scene 2, <code>2/3 CIRCUIT LAB</code> with Scene 3, and <code>3/3 RHYTHM LAB</code> with Scene 4.
+        <span class="tip-callout-label">TIP:</span>For the most intuitive starting point, try Keyboards 1–3 alongside Factory Scenes 2–4 (Live Mixer with Scene 2, Circuit Lab with Scene 3, and Rhythm Lab with Scene 4).
       </div>
     </section>
 
-    <!-- CHAPTER 10: SCENE MORPHING & NVS -->
+    <!-- CHAPTER 10: HOW TO -->
     <section class="chapter" id="ch-10">
       <div class="chapter-bar">
-        <h2 class="chapter-heading">10 // SCENE MORPHING &amp; NVS</h2>
+        <h2 class="chapter-heading">10 // HOW TO</h2>
         <a class="return-link" href="#index">↑ INDEX</a>
       </div>
 
-      <ul class="cards-two" role="list">
-        <li class="card">
-          <span class="card-title">10.1 / 4-SCENE MORPH LOOP &amp; RECALL</span>
-          <p class="prose">Turn <kbd class="keycap-knob">(PRESETS)</kbd> to morph continuously across occupied Scenes 1–4, tap <kbd class="keycap">[OP1]</kbd>–<kbd class="keycap">[OP4]</kbd> while <kbd class="keycap">[SAVE]</kbd> is armed, or hold <span class="key-unlabeled">Shift (top-right key)</span> and tap <span class="key-unlabeled">Lower Keys 9–12</span> to recall Scenes 1–4 directly from the keyboard.</p>
-        </li>
-        <li class="card">
-          <span class="card-title">10.2 / TWO-STEP <kbd class="keycap">[SAVE]</kbd> &amp; WEAR-LEVELED FLASH</span>
-          <p class="prose">Tap <kbd class="keycap">[SAVE]</kbd> once to arm <code>SAVE SCENE</code>, tap <kbd class="keycap">[OP1]</kbd>–<kbd class="keycap">[OP4]</kbd> to select a slot (<code>OVERWRITE?</code> or <code>WRITE NEW?</code>), and tap <kbd class="keycap">[SAVE]</kbd> a second time to commit to non-volatile flash (or hold <kbd class="keycap">[SAVE]</kbd> for 2 seconds to clear the slot).</p>
-        </li>
-      </ul>
+      <div class="stack-md">
+        <!-- 10.1 -->
+        <div class="card">
+          <h3 class="card-title">10.1 ADJUST KEY PRESSURE SENSITIVITY</h3>
+          <ol class="recipe-steps" role="list">
+            <li>1. Press <kbd class="keycap">[GLO]</kbd>.</li>
+            <li>2. Scroll <kbd class="keycap-knob">(SELECT)</kbd> to Key Sensitivity.</li>
+            <li>3. Turn <kbd class="keycap-knob">(KNOB 1)</kbd> from 1 (light touch) to 5 (firm press) while testing any key.</li>
+          </ol>
+        </div>
+
+        <!-- 10.2 -->
+        <div class="card">
+          <h3 class="card-title">10.2 PLUG INTO A MONO GUITAR PEDALBOARD</h3>
+          <ol class="recipe-steps" role="list">
+            <li>1. Connect a 3.5 mm stereo to dual 1/4" mono TS breakout cable and run one 1/4" plug to your pedals.</li>
+            <li>2. Press <kbd class="keycap">[GLO]</kbd> and set output routing to mono.</li>
+          </ol>
+          <div class="note-callout">
+            <span class="note-callout-label">Note:</span>
+            <p class="prose">Avoid plugging a single mono 3.5 mm cable directly into the output jack, as it shorts the right channel.</p>
+          </div>
+        </div>
+
+        <!-- 10.3 -->
+        <div class="card">
+          <h3 class="card-title">10.3 SWELL A MUTED VOICE WITH FINGER WEIGHT</h3>
+          <ol class="recipe-steps" role="list">
+            <li>1. On 1/3 Live Mixer, tap a mute key on the bottom right to silence a voice.</li>
+            <li>2. Lean slowly into that voice's filter key on the bottom left to fade it in organically, and release to let it decay.</li>
+          </ol>
+        </div>
+
+        <!-- 10.4 -->
+        <div class="card">
+          <h3 class="card-title">10.4 TURN AN OSCILLATOR INTO RHYTHMIC DRUM PINGS</h3>
+          <ol class="recipe-steps" role="list">
+            <li>1. On <kbd class="keycap">[HOME]</kbd>, hold <kbd class="keycap">[OCT-]</kbd> and turn <kbd class="keycap-knob">(KNOB 1)</kbd> below 1 Hz until it clicks slowly.</li>
+            <li>2. Press <kbd class="keycap">[FX]</kbd> and raise <kbd class="keycap-knob">(KNOB 4)</kbd> past 60% so each click rings the filter.</li>
+          </ol>
+        </div>
+
+        <!-- 10.5 -->
+        <div class="card">
+          <h3 class="card-title">10.5 SYNC RHYTHM LAB TO EXTERNAL MIDI</h3>
+          <ol class="recipe-steps" role="list">
+            <li>1. Send MIDI clock via 3.5 mm TRS, USB-C, or Bluetooth MIDI.</li>
+            <li>2. Hold <kbd class="keycap">[SEL]</kbd> + turn <kbd class="keycap-knob">(SELECT)</kbd> to 3/3 Rhythm Lab.</li>
+            <li>3. Hold any Divide or Euclid key on the bottom row.</li>
+          </ol>
+        </div>
+      </div>
     </section>
 
-    <!-- CHAPTER 11: GLOBAL CONFIG & CALIBRATION -->
+    <!-- CHAPTER 11: FAQ -->
     <section class="chapter" id="ch-11">
       <div class="chapter-bar">
-        <h2 class="chapter-heading">11 // GLOBAL CONFIG &amp; CALIBRATION</h2>
-        <a class="return-link" href="#index">↑ INDEX</a>
-      </div>
-
-      <figure class="specimen-frame">
-        <img
-          class="crt-img"
-          src="assets/images/13-global-config-menu.png"
-          alt="Ruido Global Config 1 of 9 menu screen listing Output Routing Stereo, Key Sensitivity Medium, Mute Mode Momentary, Scene Mode Latching, MIDI Clock In Auto, and MIDI Transport In Off"
-          width="240"
-          height="240"
-          loading="lazy"
-          decoding="async"
-        >
-        <figcaption class="specimen-caption">[GLO] GLOBAL CONFIG 1 / 9 · SYSTEM, TOUCH &amp; MIDI MENU</figcaption>
-      </figure>
-
-      <p class="prose">Tap <kbd class="keycap">[GLO]</kbd> to open the 9-row <code>GLOBAL CONFIG</code> menu; turn <kbd class="keycap-knob">(SELECT)</kbd> to highlight a row and turn <kbd class="keycap-knob">(KNOB 1)</kbd>–<kbd class="keycap-knob">(KNOB 4)</kbd> or <kbd class="keycap-knob">(ALGORITHM)</kbd> to adjust it.</p>
-
-      <div tabindex="0" role="region" aria-labelledby="global-config-caption" class="table-wrapper">
-        <table class="config-table">
-          <caption id="global-config-caption" class="visually-hidden">Global Config 9-row settings reference</caption>
-          <thead>
-            <tr>
-              <th scope="col">Menu Row</th>
-              <th scope="col">Options</th>
-              <th scope="col">Function</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th scope="row">1. Output Routing</th>
-              <td><code>STEREO</code> / <code>MONO</code></td>
-              <td>Selects wide stereo panorama or phase-coherent summed mono output for mono pedalboards.</td>
-            </tr>
-            <tr>
-              <th scope="row">2. Key Sensitivity</th>
-              <td><code>VERY HIGH</code> – <code>VERY LOW</code></td>
-              <td>Calibrates finger force response across the 20 analog pressure keys (<code>MEDIUM</code> default) with a live on-row meter.</td>
-            </tr>
-            <tr>
-              <th scope="row">3. Mute Mode</th>
-              <td><code>MOMENTARY</code> / <code>LATCHING</code></td>
-              <td>Sets whether <span class="key-unlabeled">Lower Keys 13–16</span> (<code>Mute</code> and <code>Solo</code>) engage only while held or toggle on tap.</td>
-            </tr>
-            <tr>
-              <th scope="row">4. Scene Mode</th>
-              <td><code>LATCHING</code> / <code>MOMENTARY</code></td>
-              <td>Sets whether <span class="key-unlabeled">Shift (top-right key)</span> + <span class="key-unlabeled">Lower Keys 9–12</span> stays on the recalled scene or morphs back on release.</td>
-            </tr>
-            <tr>
-              <th scope="row">5. MIDI Clock In</th>
-              <td><code>AUTO</code> / <code>OFF</code></td>
-              <td>Locks automatically to incoming <code>24 PPQN</code> MIDI clock over 3.5 mm TRS, USB-C, or Bluetooth MIDI.</td>
-            </tr>
-            <tr>
-              <th scope="row">6. MIDI Transport In</th>
-              <td><code>OFF</code> / <code>PHASE</code> / <code>RUN/STOP</code></td>
-              <td>Ignores MIDI Start/Stop, resets Beat-1 bar phase on Start, or starts and mutes master audio.</td>
-            </tr>
-            <tr>
-              <th scope="row">7. MIDI Channel In</th>
-              <td><code>OMNI</code> / <code>CH 1–16</code></td>
-              <td>Receives MIDI messages on all channels (<code>OMNI</code> default) or filters to a single channel.</td>
-            </tr>
-            <tr>
-              <th scope="row">8. Factory Reset / About</th>
-              <td><code>PRESETS</code> / <code>CLEAN INIT</code></td>
-              <td>Restores factory presets and scenes, initializes an unmodulated patch, or displays firmware version info.</td>
-            </tr>
-            <tr>
-              <th scope="row">9. Algorithm Knob</th>
-              <td><code>COUPLING</code> / <code>TEMPO</code></td>
-              <td>Assigns unshifted <kbd class="keycap-knob">(ALGORITHM)</kbd> turns globally to <code>RAIL COUPLING</code> or master <code>TEMPO</code>.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="note-callout">
-        <span class="note-callout-label">Note:</span>
-        <p class="prose">When patching into mono guitar pedals, use a 3.5 mm TRS stereo-to-dual-1/4" TS breakout cable and set <code>Output Routing</code> to <code>MONO</code>; avoid plugging a mono 3.5 mm TS cable directly into the stereo output jack.</p>
-      </div>
-    </section>
-
-    <!-- CHAPTER 12: FAQ -->
-    <section class="chapter" id="ch-12">
-      <div class="chapter-bar">
-        <h2 class="chapter-heading" id="faq-heading">12 // FAQ</h2>
+        <h2 class="chapter-heading" id="faq-heading">11 // FAQ</h2>
         <a class="return-link" href="#index">↑ INDEX</a>
       </div>
 
@@ -1282,7 +677,7 @@
             <span class="faq-icon" aria-hidden="true">+</span>
           </summary>
           <div class="faq-answer">
-            <p>Yes. Ruido writes exclusively to the application partition and preserves the hardware bootloader. Holding <kbd class="keycap">[OCT-]</kbd> while switching power on forces USB recovery mode at any time, allowing clean recovery or instant reversion to stock M-VAVE firmware.</p>
+            <p>Yes. Ruido writes exclusively to the application partition and preserves the hardware bootloader. Power-on Hold <kbd class="keycap">[OCT-]</kbd> forces hardware recovery mode at any time, allowing clean recovery or instant reversion to factory stock firmware.</p>
           </div>
         </details>
 
@@ -1293,7 +688,7 @@
             <span class="faq-icon" aria-hidden="true">+</span>
           </summary>
           <div class="faq-answer">
-            <p>Yes. Alongside the analog line jack, Ruido streams 44.1 / 48 kHz class-compliant UAC1 digital stereo audio with 1-LSB TPDF dithering and clock-drift interpolation directly to macOS, iOS, Windows, Linux, or standalone USB host hardware.</p>
+            <p>Yes. Alongside the analog line jack, Ruido streams 48 kHz class-compliant UAC1 digital stereo audio with 1-LSB TPDF dithering and clock-drift interpolation directly to macOS, iOS, Windows, Linux, or standalone USB host hardware.</p>
           </div>
         </details>
 
@@ -1304,7 +699,7 @@
             <span class="faq-icon" aria-hidden="true">+</span>
           </summary>
           <div class="faq-answer">
-            <p>Ruido dedicates all DSP headroom to 4× oversampling, shared power-rail modeling, and per-voice Korg-35 high-pass and low-pass Sallen-Key filters so external guitar pedals and Eurorack modules receive a dense, alias-free dry signal.</p>
+            <p>Ruido puts all of its DSP into 4× oversampling and per-voice high-pass and low-pass Sallen-Key filters, so guitar pedals and Eurorack get an alias-free signal.</p>
           </div>
         </details>
 
@@ -1315,7 +710,7 @@
             <span class="faq-icon" aria-hidden="true">+</span>
           </summary>
           <div class="faq-answer">
-            <p>Yes. Use a standard 3.5 mm TRS stereo-to-dual-1/4" TS breakout cable (never plug a mono 3.5 mm TS cable directly into the stereo headphone jack, as that shorts the right channel to ground), and set <code>Output Routing</code> to <code>MONO</code> in <kbd class="keycap">[GLO]</kbd> to sum all four voices cleanly.</p>
+            <p>Yes. Use a standard 3.5 mm TRS stereo-to-dual-1/4" TS breakout cable (never use a mono 3.5 mm TS cable directly in a stereo headphone jack, as that shorts the right channel to ground), and set OUTPUT ROUTING to MONO in Global Settings to sum all voices into a phase-coherent signal.</p>
           </div>
         </details>
 
@@ -1326,7 +721,7 @@
             <span class="faq-icon" aria-hidden="true">+</span>
           </summary>
           <div class="faq-answer">
-            <p>Real CD40106 CMOS oscillators couple and hard-sync across a shared power rail because of their sharp switching edges. Acoustically, variable-duty pulse waves carve rich hollow-to-nasal timbres and leave open harmonic space for fuzz, overdrive, and resonant filters without mud.</p>
+            <p>Real CD40106 oscillators couple and hard-sync across a shared power rail because of their sharp switching edges. Acoustically, square waves contain only odd harmonics, leaving open frequency space for fuzz and distortion pedals without intermodulation mud.</p>
           </div>
         </details>
       </div>
@@ -1355,7 +750,7 @@
         <span aria-hidden="true">·</span>
         <a href="#index">INDEX</a>
         <span aria-hidden="true">·</span>
-        <a href="#ch-12">FAQ</a>
+        <a href="#ch-11">FAQ</a>
         <span aria-hidden="true">·</span>
         <a href="https://thefirmwarehub.com/firmware/ruido/" target="_blank" rel="noopener noreferrer">FIRMWARE HUB ↗</a>
         <span aria-hidden="true">·</span>
