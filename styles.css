@@ -12,6 +12,12 @@
     --border: #262626;
     --border-knob: #333333;
     --border-active: #525252;
+    --chip-btn-bg: #383838;
+    --chip-btn-border: #606060;
+    --chip-knob-bg: #000000;
+    --chip-knob-border: #333333;
+    --chip-key-bg: #000000;
+    --chip-key-border: #333333;
     --fg: #f5f5f5;
     --btn-surface: #e2e2e2;
     --white: #ffffff;
@@ -66,8 +72,7 @@
   h1,
   h2,
   h3,
-  h4,
-  .font-headline {
+  h4 {
     font-family: var(--font-headline);
     margin: 0;
     color: var(--fg);
@@ -653,16 +658,6 @@
     overflow-wrap: break-word;
   }
 
-  .prose--italic {
-    font-style: italic;
-  }
-
-  .prose-strong {
-    color: var(--fg);
-    font-weight: 700;
-    font-style: normal;
-  }
-
   .inline-link {
     color: var(--fg);
     text-decoration: underline;
@@ -692,12 +687,6 @@
     gap: 0.5rem;
   }
 
-  .stack-md {
-    display: flex;
-    flex-direction: column;
-    gap: 0.625rem;
-  }
-
   .card {
     background-color: var(--panel);
     border: 1px solid var(--border);
@@ -723,6 +712,12 @@
     color: var(--fg);
   }
 
+  .card-index {
+    color: var(--muted);
+    margin-inline-end: 0.5rem;
+    font-variant-numeric: tabular-nums;
+  }
+
   .card-tag {
     font-family: var(--font-mono);
     font-size: 0.625rem;
@@ -741,11 +736,84 @@
     align-items: center;
   }
 
-  .hardware-img {
+  .hardware-diagram {
+    display: block;
     inline-size: 100%;
-    max-inline-size: 600px;
+    max-inline-size: 712px;
     block-size: auto;
-    object-fit: contain;
+    user-select: none;
+  }
+
+  .hw-photo {
+    opacity: 0.44;
+  }
+
+  .hw-dim-key {
+    fill: #050505;
+    fill-opacity: 0.82;
+  }
+
+  .hw-line {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.68);
+    stroke-width: 1.25px;
+    stroke-linecap: square;
+    stroke-linejoin: miter;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .hw-zone {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.56);
+    stroke-width: 1.25px;
+    stroke-dasharray: 5 4;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .hw-dot {
+    fill: var(--white);
+    stroke: #050505;
+    stroke-width: 2.5px;
+  }
+
+  .hw-label {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    fill: var(--white);
+  }
+
+  .hw-label--outer {
+    font-size: 23px;
+  }
+
+  .hw-label--mid {
+    font-size: 20px;
+    paint-order: stroke;
+    stroke: #080808;
+    stroke-width: 6px;
+    stroke-linejoin: round;
+  }
+
+  .hw-label--btn {
+    font-size: 19px;
+    paint-order: stroke;
+    stroke: #080808;
+    stroke-width: 6px;
+    stroke-linejoin: round;
+  }
+
+  @media (forced-colors: active) {
+    .hw-line,
+    .hw-zone {
+      stroke: CanvasText;
+    }
+
+    .hw-dot,
+    .hw-label {
+      fill: CanvasText;
+      stroke: Canvas;
+    }
   }
 
   .crt-img {
@@ -771,9 +839,9 @@
     font-size: 0.6875rem;
     line-height: 1;
     padding: 3px 6px;
-    background-color: var(--subpanel);
-    border: 1px solid var(--border);
-    color: var(--fg);
+    background-color: var(--chip-btn-bg);
+    border: 1px solid var(--chip-btn-border);
+    color: var(--white);
     text-transform: uppercase;
     font-weight: 700;
     letter-spacing: 0.05em;
@@ -785,28 +853,69 @@
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     line-height: 1;
-    padding: 3px 6px;
-    background-color: var(--panel);
-    border: 1px solid var(--border-knob);
+    padding: 3px 7px;
+    border-radius: 999px;
+    background-color: var(--chip-knob-bg);
+    border: 1px solid var(--chip-knob-border);
     color: var(--fg);
     text-transform: uppercase;
     font-weight: 700;
     vertical-align: baseline;
   }
 
-  .combo-line {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.375rem;
+  .keycap-key {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: 5px;
+    background-color: var(--chip-key-bg);
+    border: 1px solid var(--chip-key-border);
+    color: var(--fg);
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: baseline;
   }
 
-  .combo-op {
-    color: var(--dim);
-    font-size: 0.75rem;
+  .keycap-blank {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: 5px;
+    background-color: var(--chip-key-bg);
+    border: 1px dashed var(--border-active);
+    color: var(--fg);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    vertical-align: baseline;
   }
 
-  /* 2-Column Grids (Chapter 05 Conventions & Chapter 8.4 Global Settings) */
+  :is(.keycap, .keycap-key).is-held {
+    padding: 2px 5px;
+    border-width: 3px;
+  }
+
+  .keycap-blank.is-held {
+    padding: 2px 5px;
+    border-width: 2px;
+  }
+
+  @media (forced-colors: active) {
+    .keycap,
+    .keycap-knob,
+    .keycap-key,
+    .keycap-blank {
+      background-color: Canvas;
+      color: CanvasText;
+      border-color: CanvasText;
+    }
+  }
+
+  /* 2-Column Grid (Chapter 01 Conventions) */
   .grid-two {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -823,6 +932,10 @@
     justify-content: center;
     text-align: center;
     gap: 0.25rem;
+  }
+
+  .convention-cell:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
   }
 
   .convention-pair {
@@ -847,92 +960,17 @@
     color: var(--muted);
   }
 
-  /* Chapter 06 Signal Chain Schematic (non-interactive block diagram) */
-  .flow-diagram {
-    inline-size: 100%;
-    max-inline-size: 20rem;
-    padding-block: 0.625rem;
-    padding-inline: 0.375rem;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    cursor: default;
-  }
-
-  .flow-node {
-    inline-size: 100%;
-    padding: 0.4375rem 0.75rem;
-    text-align: center;
-    background-color: var(--ground);
-    border: 1px dashed var(--border-knob);
-    color: var(--fg);
-    font-weight: 400;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-  }
-
-  .flow-wire {
-    position: relative;
-    inline-size: 1px;
-    block-size: 1.125rem;
-    background-color: var(--border-active);
-  }
-
-  .flow-wire::after {
-    content: "";
-    position: absolute;
-    inset-block-end: 0;
-    inset-inline-start: 50%;
-    translate: -50% 0;
-    border-inline: 3.5px solid transparent;
-    border-block-start: 4.5px solid var(--border-active);
-  }
-
-  /* Mode Parameter Readout Wells */
-  .param-box {
-    background-color: var(--panel);
-    border: 1px solid var(--border);
-    padding: 0.75rem 0.875rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--dim);
-  }
-
-  .param-key {
-    color: var(--fg);
-    font-weight: 700;
-  }
-
-  .glo-grid {
-    background-color: var(--panel);
-    border: 1px solid var(--border);
-    padding: 0.75rem 0.875rem;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.625rem 0.75rem;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-  }
-
-  .glo-label {
+  /* Chapter 04 Signal-Flow Block Diagram */
+  .signal-schematic {
     display: block;
-    font-size: 0.625rem;
-    text-transform: uppercase;
-    color: var(--muted);
+    inline-size: 100%;
+    max-inline-size: 644px;
+    block-size: auto;
+    padding: 0.375rem 0.25rem 0.125rem;
+    user-select: none;
   }
 
-  .glo-value {
-    color: var(--fg);
-    font-weight: 700;
-  }
-
-  /* Callout Boxes (Chapter 09 TIP & Chapter 10.2 Note) */
+  /* Callout Box (Chapter 08 TIP) */
   .tip-callout {
     margin-block-start: 0.25rem;
     padding: 0.75rem 0.875rem;
@@ -950,23 +988,6 @@
     color: var(--white);
     font-weight: 700;
     text-transform: uppercase;
-  }
-
-  .note-callout {
-    margin-block-start: 0.25rem;
-    padding: 0.625rem 0.75rem;
-    background-color: var(--subpanel);
-    border: 1px solid var(--border);
-    border-inline-start: 2px solid var(--fg);
-  }
-
-  .note-callout-label {
-    display: block;
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: var(--fg);
   }
 
   .recipe-steps {
@@ -1169,6 +1190,9 @@
 
   .footer-credits-summary:hover {
     color: var(--white);
+  }
+
+  .footer-credits-summary:hover > :not(.faq-icon) {
     text-decoration: underline;
     text-underline-offset: 3px;
   }
@@ -1193,7 +1217,7 @@
     flex-direction: column;
     gap: 0.875rem;
     font-family: var(--font-sans);
-    font-size: clamp(0.75rem, 0.7rem + 0.25vw, 0.84375rem);
+    font-size: 0.75rem;
     line-height: 1.6;
     color: var(--dim);
   }
@@ -1216,50 +1240,6 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--fg);
-  }
-
-  .credits-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-    margin-block-start: 0.15rem;
-  }
-
-  .credits-item {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    font-size: 0.75rem;
-    color: var(--dim);
-    line-height: 1.55;
-    overflow-wrap: break-word;
-  }
-
-  .credits-item-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    color: var(--fg);
-  }
-
-  .license-chip {
-    font-family: var(--font-mono);
-    font-size: 0.625rem;
-    padding: 1px 5px;
-    background-color: var(--subpanel);
-    border: 1px solid var(--border);
-    color: var(--muted);
-    text-transform: uppercase;
-  }
-
-  .legal-fineprint {
-    font-size: 0.6875rem;
-    color: var(--muted);
-    line-height: 1.6;
   }
 
   /* Minimal Footer */
@@ -1489,8 +1469,7 @@
     .subsection-heading,
     .index-title,
     .index-list,
-    .card-title,
-    .credits-item {
+    .card-title {
       font-size: 0.875rem;
     }
 
@@ -1503,13 +1482,9 @@
     }
 
     .convention-label,
-    .flow-diagram,
-    .param-box,
-    .glo-grid,
     .tip-callout,
     .faq-summary,
-    .faq-answer,
-    .combo-op {
+    .faq-answer {
       font-size: 0.84375rem;
     }
 
@@ -1518,7 +1493,7 @@
     }
 
     .footer-credits-body {
-      font-size: 0.9375rem;
+      font-size: 0.8125rem;
     }
 
     .footer-credits-summary .faq-icon {
@@ -1526,10 +1501,7 @@
     }
 
     .btn-block-primary,
-    .credits-item-head,
-    .convention-sub,
-    .note-callout-label,
-    .legal-fineprint {
+    .convention-sub {
       font-size: 0.8125rem;
     }
 
@@ -1540,9 +1512,19 @@
     }
 
     .keycap,
-    .keycap-knob {
+    .keycap-knob,
+    .keycap-key,
+    .keycap-blank {
       font-size: 0.75rem;
       padding: 0.1875rem 0.4375rem;
+    }
+
+    :is(.keycap, .keycap-key, .keycap-blank).is-held {
+      padding: calc(0.1875rem - 1px) calc(0.4375rem - 1px);
+    }
+
+    .keycap-knob {
+      padding-inline: 0.5rem;
     }
 
     .eyebrow,
@@ -1550,29 +1532,9 @@
     .return-link,
     .card-tag,
     .specimen-caption,
-    .glo-label,
     .credits-label,
-    .license-chip,
     .footer-inner {
       font-size: 0.75rem;
-    }
-
-    .glo-grid {
-      grid-template-columns: 1fr;
-      gap: 0.5rem;
-    }
-
-    .glo-grid > div {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 0.25rem 0.75rem;
-    }
-
-    .glo-grid > div:not(:last-child) {
-      padding-block-end: 0.5rem;
-      border-block-end: 1px solid var(--border);
     }
   }
 }
