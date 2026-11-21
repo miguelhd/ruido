@@ -1,0 +1,289 @@
+{
+  "version": 1,
+  "screens": [
+    {
+      "id": "01-idle-caustic-scope",
+      "category": "scope",
+      "summary": "Clean idle 14-strand monochrome CRT scope playing factory Scene 1 with top-right L/R peak meters.",
+      "steps": [
+        { "op": "init_playing", "frames": 90 }
+      ],
+      "checks": { "min_lit_px": 6000, "max_lit_px": 45000, "pure_bw": true }
+    },
+    {
+      "id": "02-home-frequency-hud",
+      "category": "home",
+      "summary": "HOME Page 1 FREQUENCY readout over live Scene 1 waveform with STEREO badge and 3-dot modulator indicators (fmhub.json hero).",
+      "steps": [
+        { "op": "init_playing", "frames": 85 },
+        { "op": "tap", "button": "Home" },
+        { "op": "step", "frames": 18 }
+      ],
+      "checks": { "min_lit_px": 8000, "max_lit_px": 48000, "pure_bw": true }
+    },
+    {
+      "id": "03-fx-ms20-dual-filter",
+      "category": "fx-lfo-edit",
+      "summary": "FX Dual Sallen-Key 12 dB HP -> LP passband curve on OSC 1 showing twin resonant peaks (LPF focused).",
+      "steps": [
+        { "op": "init_playing", "frames": 45 },
+        {
+          "op": "set_voice",
+          "voice": 1,
+          "hp_hz": 16.3,
+          "hp_res": 0.56,
+          "lp_hz": 489.0,
+          "lp_res": 0.74,
+          "lfo_depth": 0.0,
+          "lfo_b_depth": 0.0
+        },
+        { "op": "tap", "button": "Fx" },
+        { "op": "focus_knob", "knob": "Knob3" },
+        { "op": "step", "frames": 20 }
+      ],
+      "checks": { "min_lit_px": 4000, "max_lit_px": 32000, "pure_bw": true }
+    },
+    {
+      "id": "04-lfo-dual-modulation",
+      "category": "fx-lfo-edit",
+      "summary": "LFO Page showing LFO A1 (TRI-SAW @ 0.50 Hz, 62% -> LPF) and companion LFO B1 Sine curve with separated live phase beacons.",
+      "steps": [
+        { "op": "init_playing", "frames": 32 },
+        {
+          "op": "set_voice",
+          "voice": 1,
+          "lfo_target": "LpCutoff",
+          "lfo_shape": 0.35,
+          "lfo_rate_hz": 0.50,
+          "lfo_depth": 0.62,
+          "lfo_b_target": "PulseWidth",
+          "lfo_b_shape": 0.0,
+          "lfo_b_rate_hz": 0.36,
+          "lfo_b_depth": 0.45
+        },
+        { "op": "tap", "button": "Lfo" },
+        { "op": "focus_knob", "knob": "Knob2" },
+        { "op": "step", "frames": 20 }
+      ],
+      "checks": { "min_lit_px": 4000, "max_lit_px": 32000, "pure_bw": true }
+    },
+    {
+      "id": "05-edit-level-overdrive",
+      "category": "fx-lfo-edit",
+      "summary": "EDIT Page 1 LEVEL & Pre-Filter Overdrive stems (93% DRIVE 3.4x flare, 67% knee, 83% medium flare, 38% clean stem).",
+      "steps": [
+        { "op": "init_playing", "frames": 50 },
+        { "op": "set_voice", "voice": 1, "amp": 0.93, "lfo_depth": 0.25, "lfo_target": "LpCutoff", "lfo_b_depth": 0.0 },
+        { "op": "set_voice", "voice": 2, "amp": 0.67, "lfo_depth": 0.25, "lfo_target": "LpCutoff", "lfo_b_depth": 0.0 },
+        { "op": "set_voice", "voice": 3, "amp": 0.83, "lfo_depth": 0.0, "lfo_b_depth": 0.0 },
+        { "op": "set_voice", "voice": 4, "amp": 0.38, "lfo_depth": 0.0, "lfo_b_depth": 0.20, "lfo_b_target": "Amplitude" },
+        { "op": "tap", "button": "Edit" },
+        { "op": "focus_knob", "knob": "Knob1" },
+        { "op": "step", "frames": 24 }
+      ],
+      "checks": { "min_lit_px": 2500, "max_lit_px": 22000, "pure_bw": true }
+    },
+    {
+      "id": "06-edit-pulse-duty",
+      "category": "home",
+      "summary": "HOME Page 2 DUTY showing 4 stepped pulse widths (22%, 50%, 72%, 89%) over the dimmed live waveform.",
+      "steps": [
+        { "op": "init_playing", "frames": 60 },
+        { "op": "set_voice", "voice": 1, "duty": 0.22, "lfo_b_depth": 0.0 },
+        { "op": "set_voice", "voice": 2, "duty": 0.50, "lfo_b_depth": 0.0 },
+        { "op": "set_voice", "voice": 3, "duty": 0.72, "lfo_target": "LpCutoff", "lfo_b_depth": 0.0 },
+        { "op": "set_voice", "voice": 4, "duty": 0.89, "lfo_target": "LpCutoff", "lfo_b_depth": 0.0 },
+        { "op": "tap", "button": "Home" },
+        { "op": "tap", "button": "Home" },
+        { "op": "focus_knob", "knob": "Knob1" },
+        { "op": "step", "frames": 24 }
+      ],
+      "checks": { "min_lit_px": 5000, "max_lit_px": 42000, "pure_bw": true }
+    },
+    {
+      "id": "07-edit-thermal-drift",
+      "category": "home",
+      "summary": "HOME Page 3 DRIFT showing 0% locked OSC 1 alongside 36%, 71% (focused), and 49% analog 1/f wander brackets.",
+      "steps": [
+        { "op": "init_playing", "frames": 60 },
+        { "op": "set_voice", "voice": 1, "drift": 0.00 },
+        { "op": "set_voice", "voice": 2, "drift": 0.36 },
+        { "op": "set_voice", "voice": 3, "drift": 0.71 },
+        { "op": "set_voice", "voice": 4, "drift": 0.49 },
+        { "op": "tap", "button": "Home" },
+        { "op": "tap", "button": "Home" },
+        { "op": "tap", "button": "Home" },
+        { "op": "focus_knob", "knob": "Knob3" },
+        { "op": "step", "frames": 24 }
+      ],
+      "checks": { "min_lit_px": 4000, "max_lit_px": 40000, "pure_bw": true }
+    },
+    {
+      "id": "08-edit-stereo-pan",
+      "category": "fx-lfo-edit",
+      "summary": "EDIT Page 2 PAN stereo soundstage showing 4 separated Gaussian bells across L/R (L65, R88 focused, L28, R50).",
+      "steps": [
+        { "op": "init_playing", "frames": 45 },
+        { "op": "set_voice", "voice": 1, "pan": -0.65, "amp": 0.68, "lfo_b_depth": 0.0 },
+        { "op": "set_voice", "voice": 2, "pan": 0.88, "amp": 0.68, "lfo_target": "Pan", "lfo_depth": 0.0, "lfo_b_depth": 0.0 },
+        { "op": "set_voice", "voice": 3, "pan": -0.28, "amp": 0.58, "lfo_b_depth": 0.0 },
+        { "op": "set_voice", "voice": 4, "pan": 0.50, "amp": 0.52, "lfo_b_depth": 0.0 },
+        { "op": "tap", "button": "Edit" },
+        { "op": "tap", "button": "Edit" },
+        { "op": "focus_knob", "knob": "Knob2" },
+        { "op": "step", "frames": 20 }
+      ],
+      "checks": { "min_lit_px": 4000, "max_lit_px": 30000, "pure_bw": true }
+    },
+    {
+      "id": "09-sel-keyboard-live-mixer",
+      "category": "keyboard",
+      "summary": "SEL Keyboard Explorer 1/3 LIVE MIXER showing split 20+7 keybed zones (TONE, FILTER, WIDTH, LATCH, SHIFT, OCTAVE, DUTY, MUTE).",
+      "steps": [
+        { "op": "init_playing", "frames": 40 },
+        { "op": "tap", "button": "Sel" },
+        { "op": "step", "frames": 20 }
+      ],
+      "checks": { "min_lit_px": 4500, "max_lit_px": 25000, "pure_bw": true }
+    },
+    {
+      "id": "10-sel-keyboard-circuit-lab",
+      "category": "keyboard",
+      "summary": "SEL Keyboard Explorer 2/3 CIRCUIT LAB (CMOS PATCH BAY: MOD, LOCK, BENDS, LATCH, SHIFT, CROSS, FOLD, CRUSH, MUTE).",
+      "steps": [
+        { "op": "init_playing", "frames": 40 },
+        { "op": "tap", "button": "Sel" },
+        { "op": "turn", "encoder": "Select", "ticks": 4 },
+        { "op": "step", "frames": 20 }
+      ],
+      "checks": { "min_lit_px": 4500, "max_lit_px": 25000, "pure_bw": true }
+    },
+    {
+      "id": "11-sel-keyboard-rhythm-lab",
+      "category": "keyboard",
+      "summary": "SEL Keyboard Explorer 3/3 RHYTHM LAB (CLOCK, DIVIDE & EUCLID: PULSE, GATE, FX, LATCH, TAP, SHIFT, STUTTER, DIVIDE, EUCLID, MUTE).",
+      "steps": [
+        { "op": "init_playing", "frames": 40 },
+        { "op": "tap", "button": "Sel" },
+        { "op": "turn", "encoder": "Select", "ticks": 8 },
+        { "op": "step", "frames": 20 }
+      ],
+      "checks": { "min_lit_px": 4500, "max_lit_px": 25000, "pure_bw": true }
+    },
+    {
+      "id": "12-boot-intro-crt",
+      "category": "system",
+      "summary": "Cold-boot RUIDO CRT wordmark hold at t=0.40s with masterRun=false.",
+      "steps": [
+        { "op": "init_boot" },
+        { "op": "arm_boot_intro" },
+        { "op": "step", "frames": 8, "dt": 0.05, "dsp_blocks": 0 }
+      ],
+      "checks": { "min_lit_px": 2500, "max_lit_px": 18000, "pure_bw": true }
+    },
+    {
+      "id": "13-global-config-menu",
+      "category": "system",
+      "summary": "GLOBAL CONFIG flat list menu (row 1 / 9: Output Routing, Key Sensitivity, Mute Mode, Scene Mode, MIDI Clock/Transport In).",
+      "steps": [
+        { "op": "init_playing", "frames": 30 },
+        { "op": "tap", "button": "GloRight" },
+        { "op": "step", "frames": 18 }
+      ],
+      "checks": { "min_lit_px": 3500, "max_lit_px": 22000, "pure_bw": true }
+    },
+    {
+      "id": "14-rail-coupling-pull",
+      "category": "fx-lfo-edit",
+      "summary": "RAIL COUPLING 5-lane PWR + OSC 1..4 analyzer at 35% (SHARED POWER · SOFT PULL) on Scene 3 harmonic rig.",
+      "steps": [
+        { "op": "init_playing", "frames": 35, "scene": 3 },
+        { "op": "set_coupling", "value": 0.35 },
+        { "op": "turn", "encoder": "Algorithm", "ticks": 1 },
+        { "op": "turn", "encoder": "Algorithm", "ticks": -1 },
+        { "op": "step", "frames": 18 }
+      ],
+      "checks": { "min_lit_px": 4000, "max_lit_px": 28000, "pure_bw": true }
+    },
+    {
+      "id": "15-rail-coupling-starved",
+      "category": "fx-lfo-edit",
+      "summary": "RAIL COUPLING 5-lane PWR + OSC 1..4 analyzer at 85% (STARVED POWER · HARD SYNC) showing threshold-collapse sync lines.",
+      "steps": [
+        { "op": "init_playing", "frames": 35, "scene": 3 },
+        { "op": "set_coupling", "value": 0.85 },
+        { "op": "turn", "encoder": "Algorithm", "ticks": 1 },
+        { "op": "turn", "encoder": "Algorithm", "ticks": -1 },
+        { "op": "step", "frames": 20 }
+      ],
+      "checks": { "min_lit_px": 4500, "max_lit_px": 30000, "pure_bw": true }
+    },
+    {
+      "id": "16-shift-map",
+      "category": "keyboard",
+      "summary": "Universal SHIFT full-chassis map overlay while holding the top-right 11th black key.",
+      "steps": [
+        { "op": "init_playing", "frames": 35 },
+        { "op": "black_key", "key": "ScopeFreezeKey", "pressure": 1.0 },
+        { "op": "step", "frames": 18 }
+      ],
+      "checks": { "min_lit_px": 3500, "max_lit_px": 38000, "pure_bw": true }
+    },
+    {
+      "id": "17-scene-morph-presets",
+      "category": "scenes",
+      "summary": "PRESETS endless 360-deg scene morph overlay crossfading 50/50 between Scene 1 and Scene 2.",
+      "steps": [
+        { "op": "init_playing", "frames": 35 },
+        { "op": "turn", "encoder": "Presets", "ticks": 24 },
+        { "op": "step", "frames": 18 }
+      ],
+      "checks": { "min_lit_px": 1800, "max_lit_px": 15000, "pure_bw": true }
+    },
+    {
+      "id": "18-scene-save-manager",
+      "category": "scenes",
+      "summary": "SAVE Scene Manager (SCENE ... SAVE / STORE SCENE >) showing 4 occupied slots (ACTIVE / STORED) and pulsing SCENE keys.",
+      "steps": [
+        { "op": "init_playing", "frames": 35 },
+        { "op": "tap", "button": "Save" },
+        { "op": "step", "frames": 15 }
+      ],
+      "checks": { "min_lit_px": 3500, "max_lit_px": 22000, "pure_bw": true }
+    },
+    {
+      "id": "19-sel-keyboard-generic",
+      "category": "keyboard",
+      "summary": "Generic Two-Bay 20+7 keyboard diagram highlighting and labeling only permanent LATCH, MUTE, and SHIFT switches.",
+      "steps": [
+        { "op": "render_generic_keyboard" }
+      ],
+      "checks": { "min_lit_px": 3000, "max_lit_px": 22000, "pure_bw": true }
+    },
+    {
+      "id": "20-scene-morph-shift-pressure",
+      "category": "scenes",
+      "summary": "Multi-finger pressure scene morphing (SHIFT + Scene 1 & Scene 2 held together) on the Full-Chassis SHIFT map.",
+      "steps": [
+        { "op": "init_playing", "frames": 35 },
+        { "op": "black_key", "key": "ScopeFreezeKey", "pressure": 1.0 },
+        { "op": "white_key", "index": 8, "pressure": 0.55 },
+        { "op": "white_key", "index": 9, "pressure": 0.85 },
+        { "op": "step", "frames": 18 }
+      ],
+      "checks": { "min_lit_px": 3500, "max_lit_px": 38000, "pure_bw": true }
+    },
+    {
+      "id": "21-scene-delete-manager",
+      "category": "scenes",
+      "summary": "DELETE Scene Manager (SCENE ... DELETE / < DELETE SCENE) showing occupied slots pulsing at 5 Hz.",
+      "steps": [
+        { "op": "init_playing", "frames": 35 },
+        { "op": "tap", "button": "Save" },
+        { "op": "tap", "button": "Save" },
+        { "op": "step", "frames": 18 }
+      ],
+      "checks": { "min_lit_px": 3500, "max_lit_px": 22000, "pure_bw": true }
+    }
+  ]
+}

@@ -20,7 +20,7 @@ void HudAmpGraph::reset() noexcept {
     phase_ = 0.0f;
     widthPhase_ = 0.0f;
     driftPhase_ = 0.0f;
-    masterRun_ = true;
+    masterRun_ = false;
     primed_ = false;
 }
 
@@ -28,7 +28,7 @@ void HudAmpGraph::clearImmediate() noexcept {
     phase_ = 0.0f;
     widthPhase_ = 0.0f;
     driftPhase_ = 0.0f;
-    masterRun_ = true;
+    masterRun_ = false;
     primed_ = false;
 }
 

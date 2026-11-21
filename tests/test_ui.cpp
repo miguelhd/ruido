@@ -453,6 +453,10 @@ void testButtonsOctavesKeybedAndPressure() {
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Glo, false);
     CHECK(near(ctrl.state().keyMod.spatialFocus, 0.0f));
 
+    CHECK(!ctrl.state().global.masterRun);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    CHECK(ctrl.state().global.masterRun);
     ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
     ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
     CHECK(!ctrl.state().global.masterRun);
@@ -477,6 +481,19 @@ void testHudEnvelopeAndVaribrightLeds() {
     std::printf("[Test 5] Soft S-Curve HUD Envelope & 42-Channel Hardware LED Engine...\n");
     ruido::RuidoController ctrl;
     ruido::EngineTelemetry tel{};
+
+    // Cold boot starts quiet (`masterRun = false`, PLAY Green = 1.0, STOP Red = 0.0, MUTE = 0.0)
+    CHECK(!ctrl.state().global.masterRun);
+    CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::PlayStop)], 1.0f));
+    CHECK(near(ctrl.leds().stopLed, 0.0f));
+    CHECK(near(ctrl.leds().whiteKeyLeds[12], 0.0f));
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
+    for (int i = 0; i < 20; ++i) {
+        ctrl.tick(0.050f, tel);
+    }
 
     // Hold OP4 (LOW PASS): unified 150 ms S-curve fade-in (smoothstep01), pinned while held
     ctrl.onBlackKeyEvent(ruido::BlackKeyId::Op4, true);
@@ -797,6 +814,9 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
 
     engine.init(ruido::kBaseSampleRate);
     ctrl.attachControlBus(&engine.controlBus());
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    engine.snapParametersToLatest();
 
     // Open the latching FX Filter page so live CRT beam + HUD + MS-20 filter curve render
     ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
@@ -1019,11 +1039,16 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     // (~0.96 cycles of 55 Hz, where naive single-cycle triggering flips Osc 2 upside-down!)
     ruido::DroneEngine calmEngine;
     ruido::RuidoController calmCtrl;
+    calmCtrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    calmCtrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    calmCtrl.onButtonEvent(ruido::ButtonId::Home, true);
+    calmCtrl.onButtonEvent(ruido::ButtonId::Home, false);
     ruido::ScopeHudRenderer calmRenderer;
     calmEngine.init(ruido::kBaseSampleRate);
     calmEngine.setAnalogCharacterEnabled(false, true);
 
     ruido::EngineControlState lockedSt = ruido::EngineControlState::makeDefault();
+    lockedSt.global.masterRun = true;
     lockedSt.voices[0].frequencyHz = 55.0f;
     lockedSt.voices[1].frequencyHz = 82.5f;
     lockedSt.voices[2].frequencyHz = 110.0f;
@@ -1096,6 +1121,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     //    0% Voice Offset on GLO GlobalFilter, and smooth 72% BG Wave Dimming on FX open/close:
     ruido::RuidoController a3Ctrl;
     ruido::EngineControlState a3State = ruido::EngineControlState::makeDefault();
+    a3State.global.masterRun = true;
     for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
         a3State.voices[v].hpCutoffHz = 150.0f;
         a3State.voices[v].hpResonance = 0.72f;
@@ -1294,6 +1320,10 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     ruido::ScopeHudRenderer trRenderer;
     trEngine.init(ruido::kBaseSampleRate);
     trCtrl.attachControlBus(&trEngine.controlBus());
+    trCtrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    trCtrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    trCtrl.onButtonEvent(ruido::ButtonId::Home, true);
+    trCtrl.onButtonEvent(ruido::ButtonId::Home, false);
     trEngine.snapParametersToLatest();
 
     for (int f = 0; f < 16; ++f) {
@@ -1726,6 +1756,7 @@ void testMonochromeCrtScanlineAndUncompressedWave() {
     ruido::ScopeHudRenderer hotRenderer;
     hotEngine.init(ruido::kBaseSampleRate);
     ruido::EngineControlState hotState = ruido::EngineControlState::makeDefault();
+    hotState.global.masterRun = true;
     hotState.global.masterTrim = 1.15f;
     for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
         hotState.voices[v].amplitude = 1.0f;
@@ -1765,6 +1796,9 @@ void testPerVoiceLfoPageAndHudGraph() {
 
     engine.init(ruido::kBaseSampleRate);
     ctrl.attachControlBus(&engine.controlBus());
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    engine.snapParametersToLatest();
     engine.snapParametersToLatest();
 
     // 1. Open LFO Page via ButtonId::Lfo: latched indefinitely, LED 100%, KNOB1-4 = Lfo bank
@@ -2199,6 +2233,10 @@ void testRailCouplingHudAnalyzer() {
 
     engine.init(ruido::kBaseSampleRate);
     ctrl.attachControlBus(&engine.controlBus());
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     engine.snapParametersToLatest();
     CHECK(ctrl.hud().keyboardModel == ruido::KeyboardModel::LiveMixer);
 
@@ -2381,6 +2419,9 @@ void testPlayStopFreezesAllVisualsAndLeds() {
 
     engine.init(44100.0f);
     ctrl.reset();
+    CHECK(!ctrl.state().global.masterRun);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
     renderer.reset();
 
     // Switch to 3/3 RHYTHM LAB so TAP (`POLY`) beat-glow is also exercised

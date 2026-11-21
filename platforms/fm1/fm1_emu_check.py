@@ -129,19 +129,19 @@ def _gate_timed_lcd(fwsc_path: pathlib.Path, status_addr: int) -> tuple[list[str
         errs.append(f"Dual-core Idle DSP ({idle_insns_f:.0f} insns/f) exceeds 240 MHz budget ({cyc_budget_240:.0f})")
     if full_insns_f > cyc_budget_320:
         errs.append(f"Dual-core Stress DSP ({full_insns_f:.0f} insns/f) exceeds 320 MHz budget ({cyc_budget_320:.0f})")
-    if audio_blocks == 0 or peak_q15 == 0:
-        errs.append(f"fm1-emu normal boot produced silent/zero audio (blocks={audio_blocks}, peak={peak_q15})")
+    if audio_blocks == 0 or peak_q15 > 2:
+        errs.append(f"fm1-emu cold boot expected quiet stopped audio (blocks={audio_blocks}, peak={peak_q15})")
     if dma_insns_f > 120.0:
         errs.append(f"Core 0 ALNK0 DMA ISR too heavy ({dma_insns_f:.1f} insns/frame; expected ring drain < 120)")
     if wav_bytes <= 44:
         errs.append(f"fm1-emu did not write valid audio WAV ({wav_bytes} B)")
     if lcd_frames == 0:
         errs.append("fm1-emu timed SPI1 boot rendered 0 LCD frames")
-    if boot_hud != 0 or boot_run != 1 or boot_bpm_x10 != 1200 or boot_osc1_x10 != 654:
+    if boot_hud != 0 or boot_run != 0 or boot_bpm_x10 != 1200 or boot_osc1_x10 != 654:
         errs.append(
             f"boot state mismatch (hud={boot_hud}, run={boot_run}, bpm_x10={boot_bpm_x10}, osc1_x10={boot_osc1_x10})"
         )
-    if boot_stop_led != 1 or boot_play_led != 0 or (led_summary & 0x00FFFFFF) == 0:
+    if boot_stop_led != 0 or boot_play_led != 1 or (led_summary & 0x00FFFFFF) == 0:
         errs.append(f"boot 42-LED summary mismatch (led_summary={led_summary:#010x})")
     return logs, errs
 
@@ -186,28 +186,31 @@ def _gate_panel_midi(fwsc_path: pathlib.Path, status_addr: int) -> tuple[list[st
     l_stop = (csw[14] >> 25) & 1
     c_osc1_x10 = (csw[15] >> 16) & 0xFFFF
     c_underruns = (csw[11] >> 8) & 0xFF
+    c_peak_q15 = csw[7]
     if (
         p_model != 2
         or p_sync != 1
-        or p_run != 0
+        or p_run != 1
         or p_events < 6
         or not (975 <= m_bpm_x10 <= 1025)
         or m_events != 31
-        or l_play != 1
-        or l_stop != 0
+        or l_play != 0
+        or l_stop != 1
         or c_osc1_x10 <= 580
+        or c_peak_q15 <= 1000
         or c_underruns != 0
     ):
         errs.append(
             f"Gate 4.3 panel/MIDI check failed: model={p_model}, sync={p_sync}, run={p_run}, "
             f"events={p_events}, bpm_x10={m_bpm_x10}, midi_ev={m_events}, "
-            f"play_led={l_play}, stop_led={l_stop}, osc1_x10={c_osc1_x10}, underruns={c_underruns}"
+            f"play_led={l_play}, stop_led={l_stop}, osc1_x10={c_osc1_x10}, "
+            f"peak_q15={c_peak_q15}, underruns={c_underruns}"
         )
     else:
         logs.append(
             f"  fm1-emu Panel+MIDI: PASS (model=RhythmLab, osc1={c_osc1_x10 / 10.0:.1f} Hz, "
             f"events={p_events}, MIDI={m_bpm_x10 / 10.0:.1f} BPM [{m_events} msgs], "
-            f"PLAY_green={l_play}/STOP_red={l_stop}, underruns=0)"
+            f"PLAY_green={l_play}/STOP_red={l_stop}, peak_q15={c_peak_q15}, underruns=0)"
         )
     return logs, errs
 
@@ -432,6 +435,8 @@ def _gate_flaky_c1(fwsc_path: pathlib.Path, status_addr: int) -> tuple[list[str]
         "--seed",
         "1",
         "--cpu1-survives",
+        "--keys",
+        "520-550:PLAY",
         "--dump",
         f"{status_addr:#x}",
         "16",

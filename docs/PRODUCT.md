@@ -78,7 +78,7 @@ At idle, on `HOME (FREQUENCY)`, on `SEL`, on `GLOBAL CONFIG`, and during keybed 
 - **`OCT-` / `OCT+` (Momentary Rate Modifiers):** Hold `OCT-` for `FINE` resolution or `OCT+` for `COARSE` range on any continuous encoder. Releasing the button returns to `STANDARD` rate.
 
 ### 3.3 Right `2x6` Function Buttons
-- **`PLAY/STOP`:** Toggles audio output on and off with a short fade (`Green` LED when off, `Red` LED when on).
+- **`PLAY/STOP`:** Boots off; toggles audio output on and off with a short fade and pauses live visual and LED modulation while stopped (`Green` LED when off, `Red` LED when on).
 - **`HOME`:** Returns to the clean scope in one tap from any open page, modifier, or toast. From the clean scope, repeated taps cycle `FREQUENCY -> DUTY -> DRIFT -> Clean Scope` (`LED` is `100%` on all Home states and `15%` when another page is open).
 - **`SAVE`:** Two-step scene manager (`LED` is off on an unmodified scene, pulses slowly when live edits exist, and blinks while open):
   - `1st tap` (`STORE SCENE`): Blinks all 4 scene keys (`Keys 9-12`); tap one to store.
@@ -89,7 +89,7 @@ At idle, on `HOME (FREQUENCY)`, on `SEL`, on `GLOBAL CONFIG`, and during keybed 
 - **`EDIT`:** Opens the **Mixer** page; repeated taps toggle `LEVEL <-> PAN`.
 - **`LFO`:** Opens the **LFO** page (`KNOB 1 = TARGET`, `KNOB 2 = SHAPE`, `KNOB 3 = RATE`, `KNOB 4 = DEPTH`); repeated taps cycle `LFO A1 -> B1 -> A2 -> B2 -> A3 -> B3 -> A4 -> B4`:
   - **Shared Destinations (`A` & `B`):** `FREQ`, `DUTY`, `LPF`, `LP RES`, `HPF`, `HP RES`, `LEVEL`, `PAN` (summed when `A` and `B` share a target).
-  - **Cross-Modulation (`B` only):** `A RATE` (`±6 oct`) and `A DEPTH`.
+  - **Cross-Modulation (`B` only):** `A1-A4 RATE` (`±6 oct`) and `A1-A4 DEPTH`.
   - **Shape (`0-100%`):** Continuous morph across `Sine -> Triangle -> Sawtooth -> Square -> Smooth Random`.
   - **Rate:** `0.01 Hz` to `2,000 Hz`.
 - **`GLO`:** Opens and closes **`GLOBAL CONFIG`**:
@@ -97,7 +97,7 @@ At idle, on `HOME (FREQUENCY)`, on `SEL`, on `GLOBAL CONFIG`, and during keybed 
   2. **`Key Sensitivity`:** `VERY HIGH` / `HIGH` / `MEDIUM` *(default)* / `LOW` / `VERY LOW`. Pressing any of the 20 pressure keys while this row is selected shows a live pressure meter on the row.
   3. **`Mute Mode`:** `MOMENTARY` *(default)* / `LATCHING` (applies to `MUTE 1-4` and `SOLO 1-4`).
   4. **`Scene Mode`:** `LATCHING` *(default)* / `MOMENTARY` (`LATCHING` stays on the recalled scene; `MOMENTARY` morphs back on key release).
-  5. **`MIDI Clock In`:** `AUTO` *(default, syncs `30-300 BPM` `24 PPQN` clock over TRS, USB-C, and BLE-MIDI)* / `OFF`.
+  5. **`MIDI Clock In`:** `AUTO` *(default, syncs `30-300 BPM` `24 PPQN` clock over 3.5 mm TRS and USB-C MIDI)* / `OFF`.
   6. **`MIDI Transport In`:** `OFF` *(default)* / `PHASE` *(resets bar phase on Start)* / `RUN/STOP` *(starts and mutes audio with MIDI Start/Continue/Stop)*.
   7. **`MIDI Channel In`:** `OMNI` *(default)* / `CH 1-16`.
   8. **`Factory Reset`:** Two-detent confirmation on `ALGORITHM` (`CCW` cancels) for **`Factory Presets`** (restores default sound, all 4 scenes, and config) or **`Clean Init`** (loads an unmodulated startup sound, clears scenes to `EMPTY`, and keeps config).

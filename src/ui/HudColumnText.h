@@ -143,7 +143,7 @@ inline void formatSnapshotHeader(const HudState& hud, char* leftMain, size_t lef
     }
     appendStr(leftMain, 0u, leftMainCap, "SCENE");
     if (hud.mode == HudMode::SaveArmed) {
-        appendStr(leftSuffix, 0u, suffixCap, hud.saveDeleteMode ? " 2/2" : " 1/2");
+        appendStr(rightText, 0u, rightCap, hud.saveDeleteMode ? "DELETE" : "SAVE");
         return;
     }
     const bool isKeyRecall =

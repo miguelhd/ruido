@@ -410,7 +410,7 @@ inline constexpr const char* keyPunchGuidanceDesc(KeyPunchKind kind) noexcept {
     case KeyPunchKind::VoiceDuty:
         return "PINCH PULSE DUTY TOWARD NARROW";
     case KeyPunchKind::SnapshotRecall:
-        return "RECALL OR SQUEEZE TO MORPH SCENE";
+        return "RECALL SCENE (1-4)";
     case KeyPunchKind::RailStarve:
         return "STARVE SHARED POWER RAIL & DRIVE";
     case KeyPunchKind::RingXor:
@@ -430,7 +430,7 @@ inline constexpr const char* keyPunchGuidanceDesc(KeyPunchKind kind) noexcept {
     case KeyPunchKind::VoiceXMod:
         return "NEIGHBOR PIN FM & LOGIC XOR";
     case KeyPunchKind::VoiceFold:
-        return "SERGE-STYLE MULTI-STAGE WAVEFOLDER";
+        return "MULTI-STAGE TRIANGLE WAVEFOLDER";
     case KeyPunchKind::VoiceCrush:
         return "LO-FI SAMPLE & HOLD CLOCK CRUSH";
     case KeyPunchKind::VoiceStutter:

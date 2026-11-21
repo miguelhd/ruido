@@ -11,7 +11,8 @@ namespace ruido {
 inline constexpr std::array<float, kNumSnapshots> kSceneNodeX = {48.0f, 96.0f, 144.0f, 192.0f};
 
 // Container-free scanline-composited Spatial Scene UX overlays (`0 B` framebuffer RAM):
-//  1. `SAVE` 2-step screen (`SCENE 1/2` `STORE SCENE >` <-> `SCENE 2/2` `< DELETE SCENE`):
+//  1. `SAVE` 2-step screen (`SCENE ... SAVE` `STORE SCENE >` <-> `SCENE ... DELETE` `< DELETE
+//  SCENE`):
 //     SEL-matched mode carousel, open 4-slot status columns (`ACTIVE` / `STORED` / `EMPTY`),
 //     shared `topY = 92` 27-key FM-1 diagram + `"SCENE"` bracket (pure blinking on `Keys 9-12`),
 //     and calm 2-line action guidance.

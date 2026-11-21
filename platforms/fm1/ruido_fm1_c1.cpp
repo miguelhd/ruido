@@ -292,11 +292,14 @@ void ruido_fm1_set_bench_stress(uint32_t stress_mode) {
     auto* core = ruidoDspCore();
     const float sr = activeBaseSampleRate(ruidoC1Runtime());
     if (stress_mode == 2u) {
-        buses->controlBus.publish(ruido::EngineControlState::makeDefault());
+        auto st = ruido::EngineControlState::makeDefault();
+        st.global.masterRun = true;
+        buses->controlBus.publish(st);
         core->init(*buses, sr);
         core->snapParametersToLatest(*buses);
     } else if (stress_mode != 0u) {
         ruido::EngineControlState st{};
+        st.global.masterRun = true;
         for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
             auto& v = st.voices[i];
             v.frequencyHz = 110.0f * static_cast<float>(i + 1u);

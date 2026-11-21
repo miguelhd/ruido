@@ -67,6 +67,22 @@ const scopeFrameBytes = ex.wasm_dsp_get_scope_frame_size();
   ex.wasm_ui_init();
 }
 
+// Verify cold-boot defaults to stopped (`masterRun === false`, PLAY Green=100%, STOP Red=0%, silent)
+assert.equal(f32[(ex.wasm_ui_get_summary_ptr() >> 2) + WASM_SUMMARY.MASTER_RUN], 0.0);
+assert.ok(Math.abs(f32[(ex.wasm_ui_get_leds_ptr() >> 2) + 27 + 12] - 1.0) < 1e-6);
+assert.ok(Math.abs(f32[(ex.wasm_ui_get_leds_ptr() >> 2) + 41] - 0.0) < 1e-6);
+ex.wasm_dsp_process_block(128);
+for (let i = 0; i < 128; i++) {
+  assert.equal(f32[leftIdx + i], 0.0);
+  assert.equal(f32[rightIdx + i], 0.0);
+}
+ex.wasm_ui_button(12, 1); // PLAY/STOP -> start audio output (`masterRun = true`)
+ex.wasm_ui_button(12, 0);
+for (let i = 0; i < 28; i++) {
+  ex.wasm_ui_tick_and_render(1.0 / (0.35 * 28.0));
+}
+assert.equal(f32[(ex.wasm_ui_get_summary_ptr() >> 2) + WASM_SUMMARY.MASTER_RUN], 1.0);
+
 // Exercise latching FX Filter Page (button 2) + SELECT voice focus + controller -> DSP bus transfer
 ex.wasm_ui_button(2, 1);
 ex.wasm_ui_button(2, 0);

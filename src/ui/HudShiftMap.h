@@ -306,8 +306,8 @@ inline void compositeFullChassisShiftStrip(const MonoStripCanvas& cv,
         }
         const char* desc = tempoHot   ? "MASTER CLOCK SPEED (20-3000 BPM)"
                            : modelHot ? "SWAP ACTIVE KEYBOARD MODEL (1-3)"
-                           : sceneHot ? "RECALL OR SQUEEZE TO MORPH SCENE"
-                           : soloHot  ? "ISOLATE SINGLE OSCILLATOR"
+                           : sceneHot ? keyPunchGuidanceDesc(KeyPunchKind::SnapshotRecall)
+                           : soloHot  ? keyPunchGuidanceDesc(KeyPunchKind::SpotlightSolo)
                                       : "USE LIT CONTROLS WHILE HOLDING SHIFT";
         const uint8_t descLum = (tempoHot || modelHot || sceneHot || soloHot) ? 195u : 138u;
         cv.drawSansCentered(kFontSansSmall, 120, showPressBar ? 208 : 206, desc, descLum, 0);

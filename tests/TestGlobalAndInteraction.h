@@ -31,6 +31,10 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
 #define RTEST_CHECK(expr) checkFn((expr), #expr, __LINE__)
 
     ruido::RuidoController ctrl;
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     ruido::ScopeHudRenderer renderer;
     ruido::EngineTelemetry tel{};
 
@@ -437,6 +441,10 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
 #define RTEST_CHECK(expr) checkFn((expr), #expr, __LINE__)
 
     ruido::RuidoController ctrl;
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     ruido::ScopeHudRenderer renderer;
     ruido::EngineTelemetry tel{};
     ruido::LfoSignalArray zeroLfo{0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
@@ -898,7 +906,7 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(ctrl.hud().configCursor == 8u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::Credits), "About") ==
                 0);
-    RTEST_CHECK(std::strcmp(ruido::kRuidoVersionStr, "0.7.1") == 0);
+    RTEST_CHECK(std::strcmp(ruido::kRuidoVersionStr, "0.7.2") == 0);
     RTEST_CHECK(ruido::measureSansText(ruido::kFontSansMedium, "Hern\xC3\xA1ndez", 0) ==
                 ruido::measureSansText(ruido::kFontSansMedium, "Hernandez", 0));
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
@@ -949,6 +957,10 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
 
     ruido::DroneEngine engine;
     ruido::RuidoController ctrl;
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     ruido::ScopeHudRenderer renderer;
     engine.init(ruido::kBaseSampleRate);
     ctrl.attachControlBus(&engine.controlBus());
@@ -1291,6 +1303,10 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
 
     // 6. 1-to-1 Lower-Rail OSC 1-4 Dimming & 0% / Sub-Audio Alignment (Zero Screen Pulsing):
     ctrl.reset();
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     renderer.reset();
     const auto maxOscLabelG6 = [&](const std::array<uint16_t, 240u * 240u>& img, size_t col) {
         uint16_t maxG6 = 0u;
@@ -1879,6 +1895,10 @@ template <typename CheckFn> inline void runEditChannelDrivePageAndAmpGraphTests(
     //      1-to-1 Hardware `FX` / `LFO` Button LED Sync:
     {
         ctrl.reset();
+        ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+        ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+        ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+        ctrl.onButtonEvent(ruido::ButtonId::Home, false);
         renderer.reset();
         ruido::EngineTelemetry modTel{};
         // Verify first-load boot patch (Scene 1) showcases active modifiers across all 4 voices:
@@ -2239,6 +2259,10 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
 #define RTEST_CHECK(expr) checkFn((expr), #expr, __LINE__)
 
     ruido::RuidoController ctrl;
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     ruido::ScopeHudRenderer renderer;
     ruido::EngineTelemetry tel{};
 
@@ -3177,6 +3201,10 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     // 5. Single-State Latching MUTE & Exclusive-Isolate SHIFT + SOLO (with Pre-Solo Mix Memory &
     //    Release-Order Guard) via GLOBAL CONFIG Row 1:
     ctrl.reset();
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     renderer.reset();
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, true);
     ctrl.onButtonEvent(ruido::ButtonId::GloRight, false);
@@ -3339,8 +3367,8 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         ruido::formatSnapshotHeader(ctrl.hud(), lm, sizeof(lm), ls, sizeof(ls), rt, sizeof(rt), sb,
                                     bn);
         RTEST_CHECK(std::strcmp(lm, "SCENE") == 0);
-        RTEST_CHECK(std::strcmp(ls, " 1/2") == 0);
-        RTEST_CHECK(std::strcmp(rt, "") == 0 && !sb);
+        RTEST_CHECK(std::strcmp(ls, "") == 0);
+        RTEST_CHECK(std::strcmp(rt, "SAVE") == 0 && !sb);
         RTEST_CHECK(std::strcmp(ruido::kKeyboardModelSpecs[0].bottomZones[2], "DUTY") == 0);
     }
     ctrl.tick(0.050f, tel);
@@ -3688,8 +3716,8 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         ruido::formatSnapshotHeader(ctrl.hud(), lm, sizeof(lm), ls, sizeof(ls), rt, sizeof(rt), sb,
                                     bn);
         RTEST_CHECK(std::strcmp(lm, "SCENE") == 0);
-        RTEST_CHECK(std::strcmp(ls, " 2/2") == 0);
-        RTEST_CHECK(std::strcmp(rt, "") == 0 && !sb);
+        RTEST_CHECK(std::strcmp(ls, "") == 0);
+        RTEST_CHECK(std::strcmp(rt, "DELETE") == 0 && !sb);
     }
     // Delete SCENE 2 (white key 9) -> slot 1 becomes EMPTY with valid CRC-32
     ctrl.onWhiteKeyGate(9u, true);
@@ -4182,6 +4210,10 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
     ruido::LockFreeControlBus bus;
     ruido::RuidoController ctrl;
     ctrl.attachControlBus(&bus);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ruido::ButtonId::PlayStop, false);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     static ruido::ScopeHudRenderer renderer;
     renderer.reset();
 
@@ -4240,28 +4272,38 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
         renderer.prepareFrame(0.020f, ctrl.state(), ctrl.hud(), tel);
     }
     checkStripAndMono();
-    // Verify both LATCH (`x ~ 172`) and TAP (`x ~ 203`) top-row legends render cleanly on RHYTHM
-    // LAB SEL with clear separation between them (`x = 190`):
+    // Verify LATCH (`x ~ 159`), TAP (`x ~ 193`), and SHIFT (`x ~ 222`) top-row legends render
+    // cleanly on RHYTHM LAB SEL with clear separation between all three (`x = 179` & `x = 205`):
     {
         uint32_t latchLegendMax = 0u;
         uint32_t tapLegendMax = 0u;
+        uint32_t shiftLegendMax = 0u;
         uint32_t gapMax = 0u;
         for (size_t y = 72u; y <= 82u; ++y) {
-            for (size_t x = 164u; x <= 180u; ++x) {
+            for (size_t x = 148u; x <= 172u; ++x) {
                 const uint32_t g = (s16[y * 240u + x] >> 5u) & 0x3Fu;
                 if (g > latchLegendMax)
                     latchLegendMax = g;
             }
-            for (size_t x = 196u; x <= 210u; ++x) {
+            for (size_t x = 185u; x <= 201u; ++x) {
                 const uint32_t g = (s16[y * 240u + x] >> 5u) & 0x3Fu;
                 if (g > tapLegendMax)
                     tapLegendMax = g;
             }
-            const uint32_t gapG = (s16[y * 240u + 190u] >> 5u) & 0x3Fu;
-            if (gapG > gapMax)
-                gapMax = gapG;
+            for (size_t x = 210u; x <= 234u; ++x) {
+                const uint32_t g = (s16[y * 240u + x] >> 5u) & 0x3Fu;
+                if (g > shiftLegendMax)
+                    shiftLegendMax = g;
+            }
+            const uint32_t gap1 = (s16[y * 240u + 179u] >> 5u) & 0x3Fu;
+            const uint32_t gap2 = (s16[y * 240u + 205u] >> 5u) & 0x3Fu;
+            if (gap1 > gapMax)
+                gapMax = gap1;
+            if (gap2 > gapMax)
+                gapMax = gap2;
         }
-        RTEST_CHECK(latchLegendMax >= 28u && tapLegendMax >= 28u && gapMax == 0u);
+        RTEST_CHECK(latchLegendMax >= 28u && tapLegendMax >= 28u && shiftLegendMax >= 28u &&
+                    gapMax == 0u);
         RTEST_CHECK(std::strcmp(ruido::keyPunchSpec(ruido::KeyPunchKind::KeyHoldSwitch).title,
                                 "LATCH") == 0);
     }
@@ -4783,6 +4825,7 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
 
         // Voice 0 audible via LFO A -> Amplitude while base amplitude == 0.0f:
         ruido::EngineControlState lfoAmpState = regCtrl.state();
+        lfoAmpState.global.masterRun = true;
         lfoAmpState.voices[0].amplitude = 0.0f;
         lfoAmpState.voices[0].lfoTarget = ruido::LfoTarget::Amplitude;
         lfoAmpState.voices[0].lfoDepth = 0.50f;

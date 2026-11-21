@@ -121,7 +121,7 @@ struct GlobalParams {
     float clockBpm = 120.0f;        // Master rhythm clock BPM (120 default, or 30..300 MIDI clock)
     uint8_t clockResetSeq = 0u;     // Incremented on MIDI 0xFA Start to snap bar phase to step 0
     bool monoCollapse = false;      // MONO vs POLY (true = MONO L==R)
-    bool masterRun = true;          // PLAY/STOP button (clickless master kill/run)
+    bool masterRun = false;         // PLAY/STOP button (clickless master kill/run; boots stopped)
     bool pitchPressureMode = false; // SEL button: false = MS-20 Filter/LPG, true = Pitch Bend
 };
 

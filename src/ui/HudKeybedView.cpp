@@ -353,7 +353,8 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
         }
     }
 
-    // 2. Top-Row Brackets: 3 Pressure Clusters across Left Bay + LATCH / TAP above Right Bay
+    // 2. Top-Row Brackets: 3 Pressure Clusters across Left Bay + LATCH / TAP / SHIFT above Right
+    // Bay
     if (y1 > 70 && y0 < 92) {
         for (size_t z = 0u; z < kLeftTopZoneSpans.size(); ++z) {
             const TopZoneSpan& span = kLeftTopZoneSpans[z];
@@ -371,23 +372,26 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
 
         const float latchKeyX = blackKeyDiagramCenterX(kHoldBlackKeyIdx);
         const float latchLum = 56.0f + 92.0f * clampf(blackGlow_[kHoldBlackKeyIdx], 0.0f, 1.0f);
+        const float shiftKeyX = blackKeyDiagramCenterX(kShiftBlackKeyIdx);
+        const float shiftLum = 56.0f + 92.0f * clampf(blackGlow_[kShiftBlackKeyIdx], 0.0f, 1.0f);
         if (frameHud.keyboardModel == KeyboardModel::RhythmLab) {
             const float tapKeyX = blackKeyDiagramCenterX(kTapBlackKeyIdx);
             const float tapLum = 56.0f + 92.0f * clampf(blackGlow_[kTapBlackKeyIdx], 0.0f, 1.0f);
-            cv.drawSansCentered(kFontSansSmall, 172, 72, "LATCH", 214u, 0);
-            cv.drawVerticalSlit(172.0f, 84.5f, 87.0f, latchLum);
-            cv.drawHorizontalFilament(172.0f, latchKeyX, 87.0f, latchLum, 0.58f, false);
+            cv.drawSansCentered(kFontSansSmall, 159, 72, "LATCH", 214u, 0);
+            cv.drawVerticalSlit(159.0f, 84.5f, 87.0f, latchLum);
+            cv.drawHorizontalFilament(159.0f, latchKeyX, 87.0f, latchLum, 0.58f, false);
             cv.drawVerticalSlit(latchKeyX, 87.0f, 89.6f, latchLum);
 
-            cv.drawSansCentered(kFontSansSmall, 203, 72, "TAP", 214u, 0);
-            cv.drawVerticalSlit(203.0f, 84.5f, 87.0f, tapLum);
-            cv.drawHorizontalFilament(tapKeyX, 203.0f, 87.0f, tapLum, 0.58f, false);
-            cv.drawVerticalSlit(tapKeyX, 87.0f, 89.6f, tapLum);
+            cv.drawSansCentered(kFontSansSmall, 193, 72, "TAP", 214u, 0);
+            cv.drawVerticalSlit(tapKeyX, 84.5f, 89.6f, tapLum);
         } else {
             cv.drawSansCentered(kFontSansSmall, static_cast<int>(latchKeyX + 0.5f), 72, "LATCH",
                                 214u, 0);
             cv.drawVerticalSlit(latchKeyX, 84.5f, 89.6f, latchLum);
         }
+        cv.drawSansCentered(kFontSansSmall, static_cast<int>(shiftKeyX + 0.5f), 72, "SHIFT", 214u,
+                            0);
+        cv.drawVerticalSlit(shiftKeyX, 84.5f, 89.6f, shiftLum);
     }
 
     // 3. Two-Bay Rounded-Capsule FM-1 Keybed Map (`y = 92..164`: lines for pads, dots for switches)

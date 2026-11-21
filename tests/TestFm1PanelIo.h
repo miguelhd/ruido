@@ -94,12 +94,12 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
     RUIDO_FM1_CHECK(panel.pollButtonsAndEncoders(ctrl, 0u, 0u, 0u, knobOnly));
     RUIDO_FM1_CHECK(ctrl.state().voices[0].frequencyHz > slot1Osc1Hz);
 
-    // Intra-poll fast press+release on PLAY/STOP (`bit 12`) toggles masterRun `true -> false`
+    // Intra-poll fast press+release on PLAY/STOP (`bit 12`) toggles masterRun `false -> true`
     int32_t zeroEnc[kFm1NumEncoders]{};
     const uint32_t playBit = 1u << static_cast<uint32_t>(ButtonId::PlayStop);
-    RUIDO_FM1_CHECK(ctrl.state().global.masterRun);
-    RUIDO_FM1_CHECK(panel.pollButtonsAndEncoders(ctrl, playBit, playBit, 0u, zeroEnc));
     RUIDO_FM1_CHECK(!ctrl.state().global.masterRun);
+    RUIDO_FM1_CHECK(panel.pollButtonsAndEncoders(ctrl, playBit, playBit, 0u, zeroEnc));
+    RUIDO_FM1_CHECK(ctrl.state().global.masterRun);
 
     // 3. Verify PA7/PA8 DRIVE-2 (`R_s = 132 ohm`) wide `[528..815]` carbon-pill curve & diagnostics
     RUIDO_FM1_CHECK(adcToCarbonPressure01(-2) < 0.0f);
@@ -202,8 +202,21 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
     uint8_t bg[kFm1NumCols]{};
     ledMod.stepFrame909Hz(lit, dim, bg);
 
-    // Running state (`masterRun == true`): STOP red (col 10, row 2) is lit, PLAY green (col 8, row
-    // 1) dark
+    // Cold-boot stopped state (`masterRun == false`): PLAY green (col 8, row 1) lights, STOP red &
+    // MUTE 1-4 stay 0% dark
+    RUIDO_FM1_CHECK((lit[kPlayGreenCol] & (1u << kPlayGreenRow)) != 0u);
+    RUIDO_FM1_CHECK((lit[kStopRedCol] & (1u << kStopRedRow)) == 0u);
+    RUIDO_FM1_CHECK(((lit[1u] | dim[1u] | bg[1u]) & (1u << 2u)) == 0u);
+
+    // Start audio via PLAY/STOP (`masterRun == true`): STOP red (col 10, row 2) lights, PLAY green
+    // (col 8, row 1) goes dark
+    ctrl.onButtonEvent(ButtonId::PlayStop, true);
+    ctrl.onButtonEvent(ButtonId::PlayStop, false);
+    for (int f = 0; f < 16; ++f) {
+        ctrl.tick(0.025f, zeroTel);
+    }
+    ledMod.updateTargets(ctrl.leds());
+    ledMod.stepFrame909Hz(lit, dim, bg);
     RUIDO_FM1_CHECK((lit[kStopRedCol] & (1u << kStopRedRow)) != 0u);
     RUIDO_FM1_CHECK((lit[kPlayGreenCol] & (1u << kPlayGreenRow)) == 0u);
     RUIDO_FM1_CHECK((bg[kPlayGreenCol] & (1u << kPlayGreenRow)) == 0u);
@@ -220,18 +233,6 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
     RUIDO_FM1_CHECK((bg[5u] & (1u << 3u)) != 0u);
     RUIDO_FM1_CHECK((bg[7u] & (1u << 3u)) != 0u);
     RUIDO_FM1_CHECK((lit[1u] & (1u << 2u)) != 0u);
-
-    // Stop audio via PLAY/STOP: PLAY green (col 8, row 1) lights, STOP red & MUTE 1-4 go 0% dark
-    ctrl.onButtonEvent(ButtonId::PlayStop, true);
-    ctrl.onButtonEvent(ButtonId::PlayStop, false);
-    for (int f = 0; f < 16; ++f) {
-        ctrl.tick(0.025f, zeroTel);
-    }
-    ledMod.updateTargets(ctrl.leds());
-    ledMod.stepFrame909Hz(lit, dim, bg);
-    RUIDO_FM1_CHECK((lit[kPlayGreenCol] & (1u << kPlayGreenRow)) != 0u);
-    RUIDO_FM1_CHECK((lit[kStopRedCol] & (1u << kStopRedRow)) == 0u);
-    RUIDO_FM1_CHECK(((lit[1u] | dim[1u] | bg[1u]) & (1u << 2u)) == 0u);
 
     // Verify mid-scale Delta-Sigma duty accuracy AND spatial phase staggering across columns:
     LedState customLeds{};
@@ -636,6 +637,8 @@ template <typename CheckFn> inline void runFm1PanelIoAndLedModulatorTests(CheckF
 
         // Exhausting all 30 `LIVE` slots while `masterRun == true` performs ZERO mid-drone sector
         // erases (`pendingLiveSave` stays armed until `PLAY/STOP` mute or cold boot)!
+        bootCtrl3.onButtonEvent(ButtonId::PlayStop, true);
+        bootCtrl3.onButtonEvent(ButtonId::PlayStop, false);
         for (uint32_t i = 0u; i < kPatchJournalMaxSlots; ++i) {
             bootCtrl3.onEncoderDelta(EncoderId::Knob1, (i & 1u) != 0u ? -4 : 4);
             bootRt3.lastPanelTouchMs = 210000u + i * 2000u;

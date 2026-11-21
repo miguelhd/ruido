@@ -32,6 +32,12 @@ int gFailures = 0;
         }                                                                                          \
     } while (false)
 
+inline ruido::EngineControlState makeRunningDefaultState() noexcept {
+    ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+    st.global.masterRun = true;
+    return st;
+}
+
 bool isSubnormalFloat(float x) {
     uint32_t bits = 0u;
     std::memcpy(&bits, &x, sizeof(bits));
@@ -111,10 +117,30 @@ void testMemoryFootprintAndLockFreeBus() {
     // Total engine (including 2048-frame 16-bit 4-voice + stereo scope ring) must stay < 48 KB
     EXPECT_TRUE(sizeof(ruido::DroneEngine) < 49152u, "DroneEngine exceeded 48 KB SRAM budget");
 
+    // Verify cold-boot default state starts stopped (`masterRun == false`) with pure 0.0f silence
+    {
+        const ruido::GlobalParams defGlobal{};
+        const ruido::EngineControlState defState = ruido::EngineControlState::makeDefault();
+        EXPECT_TRUE(
+            !defGlobal.masterRun && !defState.global.masterRun,
+            "GlobalParams / EngineControlState::makeDefault() must boot with masterRun=false");
+        static ruido::DroneEngine bootEngine;
+        bootEngine.init(ruido::kBaseSampleRate);
+        std::array<float, ruido::kBlockFrames> bootL{}, bootR{};
+        bootEngine.processBlock(bootL.data(), bootR.data(), ruido::kBlockFrames);
+        float maxBootAbs = 0.0f;
+        for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+            maxBootAbs = std::max(maxBootAbs, std::max(std::fabs(bootL[i]), std::fabs(bootR[i])));
+        }
+        EXPECT_TRUE(maxBootAbs == 0.0f,
+                    "Cold-boot DroneEngine emitted non-zero audio while masterRun=false (%.6e)",
+                    static_cast<double>(maxBootAbs));
+    }
+
     // Verify LockFreeControlBus never drops latest published state
     ruido::LockFreeControlBus bus;
     for (int i = 0; i < 5000; ++i) {
-        ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+        ruido::EngineControlState st = makeRunningDefaultState();
         st.voices[0].frequencyHz = 100.0f + static_cast<float>(i);
         st.voices[3].lpResonance = 0.0001f * static_cast<float>(i % 1000);
         bus.publish(st);
@@ -148,7 +174,7 @@ void testMemoryFootprintAndLockFreeBus() {
     static ruido::DroneEngine mtEngine;
     mtEngine.init(ruido::kBaseSampleRate);
     {
-        ruido::EngineControlState initMt = ruido::EngineControlState::makeDefault();
+        ruido::EngineControlState initMt = makeRunningDefaultState();
         initMt.voices[0].frequencyHz = 110.0f;
         initMt.voices[1].frequencyHz = 220.0f;
         mtEngine.controlBus().publish(initMt);
@@ -161,7 +187,7 @@ void testMemoryFootprintAndLockFreeBus() {
         uint32_t step = 0u;
         std::array<ruido::ScopeFrame, 64> scopeChunk{};
         while (!audioDone.load(std::memory_order_acquire)) {
-            ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+            ruido::EngineControlState st = makeRunningDefaultState();
             const float tag = 110.0f + static_cast<float>(step % 250u);
             st.voices[0].frequencyHz = tag;
             st.voices[1].frequencyHz = tag * 2.0f;
@@ -199,7 +225,7 @@ void testUltraSlowLfoPrecision() {
     engine.init(ruido::kBaseSampleRate);
     engine.setAnalogCharacterEnabled(false, true);
 
-    ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState st = makeRunningDefaultState();
     st.global.circuitCoupling = 0.0f;
     st.voices[0].frequencyHz = 0.50f; // Unbroken sub-audio oscillator: 2.000 s period!
     st.voices[0].lfoRateHz = 0.50f;   // 2.000 s period = 88,236 base frames
@@ -367,7 +393,7 @@ void testSpectralAliasSuppression() {
         // Disable random thermal drift during stationary FFT so harmonic bins stay razor-sharp
         engine.setAnalogCharacterEnabled(false, true);
 
-        ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+        ruido::EngineControlState st = makeRunningDefaultState();
         st.global.circuitCoupling = 0.0f;
         st.global.monoCollapse = true;
         st.voices[0].frequencyHz = f0;
@@ -685,7 +711,7 @@ void testExtremeStabilityAndZeroDenormals() {
 
     // 3 seconds of chaotic extreme modulation across all 4 voices
     for (int block = 0; block < 2000; ++block) {
-        ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+        ruido::EngineControlState st = makeRunningDefaultState();
         st.global.circuitCoupling = 1.0f;
         st.global.masterTrim = 1.0f;
         const float t = static_cast<float>(block) * 0.01f;
@@ -720,7 +746,7 @@ void testExtremeStabilityAndZeroDenormals() {
     }
 
     // Cut resonance to 0 and mute all voices + master kill for 4 seconds to check denormal decay
-    ruido::EngineControlState silent = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState silent = makeRunningDefaultState();
     silent.global.masterRun = false;
     for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
         silent.voices[i].muted = true;
@@ -751,7 +777,7 @@ void testExtremeStabilityAndZeroDenormals() {
     EXPECT_TRUE(std::isfinite(ruido::fastExp2(qNan)) && std::isfinite(ruido::fastExp2(pInf)),
                 "fastExp2 failed to sanitize NaN/Inf");
 
-    ruido::EngineControlState nanSt = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState nanSt = makeRunningDefaultState();
     nanSt.voices[0].frequencyHz = qNan;
     nanSt.voices[0].hpCutoffHz = qNan;
     nanSt.voices[0].hpResonance = qNan;
@@ -789,7 +815,7 @@ void testZeroDcOffsetRunaway() {
     static ruido::DroneEngine engine;
     engine.init(ruido::kBaseSampleRate);
 
-    ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState st = makeRunningDefaultState();
     st.voices[0].frequencyHz = 3.7f;
     st.voices[1].hpCutoffHz = 120.0f;
     st.voices[1].hpResonance = 0.75f;
@@ -838,7 +864,7 @@ void testClicklessTransitionsAndMonoPoly() {
     engine.setAnalogCharacterEnabled(false, false);
 
     // Use filtered low-frequency tone (80 Hz, LP=250 Hz) so any raw step click stands out sharply
-    ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState st = makeRunningDefaultState();
     st.voices[0].frequencyHz = 80.0f;
     st.voices[0].lpCutoffHz = 250.0f;
     st.voices[0].amplitude = 0.65f;
@@ -960,7 +986,7 @@ void testClicklessTransitionsAndMonoPoly() {
                 pitchRatio);
 
     // Verify fading a muted high-amplitude (0.90) voice up from 0% via GLO never blips upward
-    st = ruido::EngineControlState::makeDefault();
+    st = makeRunningDefaultState();
     st.voices[0].amplitude = 0.90f;
     st.voices[0].muted = true;
     for (size_t i = 1u; i < ruido::kNumOscillators; ++i) {
@@ -1123,7 +1149,7 @@ void testDecimatorLinearPhaseCrest() {
     engine.init(ruido::kBaseSampleRate);
     engine.setAnalogCharacterEnabled(false, false);
 
-    ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState st = makeRunningDefaultState();
     st.global.circuitCoupling = 0.0f;
     st.global.masterTrim = 1.0f;
     st.global.monoCollapse = true;
@@ -1175,7 +1201,7 @@ void testThroughputBenchmark() {
     static ruido::DroneEngine engine;
     engine.init(ruido::kBaseSampleRate);
 
-    ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState st = makeRunningDefaultState();
     for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
         st.voices[i].hpCutoffHz = 65.0f;
         st.voices[i].hpResonance = 0.55f;
@@ -1278,7 +1304,7 @@ void testPerVoiceAnalogLfoModels() {
         bank.setAnalogCharacterEnabled(false);
         bank.reset(ruido::kBaseSampleRate);
 
-        ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+        ruido::EngineControlState st = makeRunningDefaultState();
         st.voices[0].lfoRateHz = 10.0f;
         st.voices[0].lfoShape = 0.0f;
         st.voices[0].lfoDepth = 1.0f;
@@ -1322,7 +1348,7 @@ void testPerVoiceAnalogLfoModels() {
         bank.setAnalogCharacterEnabled(true);
         bank.reset(ruido::kBaseSampleRate);
 
-        ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+        ruido::EngineControlState st = makeRunningDefaultState();
         for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
             st.voices[v].lfoRateHz = 8.0f;
             st.voices[v].lfoShape = 1.0f; // Pure C^2 Smooth Drift
@@ -1401,7 +1427,7 @@ void testPerVoiceAnalogLfoModels() {
     std::array<ruido::ScopeFrame, ruido::kBlockFrames> drain{};
 
     {
-        ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+        ruido::EngineControlState st = makeRunningDefaultState();
         st.voices[0].frequencyHz = 110.0f;
         st.voices[0].lpCutoffHz = 700.0f;
         st.voices[0].lpResonance = 0.45f;
@@ -1530,7 +1556,7 @@ void testPerVoiceAnalogLfoModels() {
         }
     };
 
-    ruido::EngineControlState base = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState base = makeRunningDefaultState();
     base.voices[0].frequencyHz = 65.0f;
     base.voices[0].amplitude = 0.85f;
     base.voices[0].pan = 0.0f;
@@ -2153,7 +2179,7 @@ void testUnbrokenExtremesSubBassOverdriveSyncAndAudioLfo() {
         engine.init(ruido::kBaseSampleRate);
         engine.setAnalogCharacterEnabled(false, false);
 
-        ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+        ruido::EngineControlState st = makeRunningDefaultState();
         st.global.circuitCoupling = 0.0f;
         st.global.monoCollapse = true;
         st.voices[0].frequencyHz = 440.0f;
@@ -2259,7 +2285,7 @@ void testPulseWidthAndVoiceDriftPhysics() {
     engine.setAnalogCharacterEnabled(false, true);
 
     const float f0 = 997.31f;
-    ruido::EngineControlState st = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState st = makeRunningDefaultState();
     st.global.circuitCoupling = 0.0f;
     st.global.monoCollapse = true;
     st.voices[0].frequencyHz = f0;
@@ -2375,7 +2401,7 @@ void testLiveMixerAndSnapshotMorphDsp() {
     std::array<float, ruido::kBlockFrames> outR{};
     std::array<ruido::ScopeFrame, ruido::kBlockFrames> drain{};
 
-    ruido::EngineControlState baseSt = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState baseSt = makeRunningDefaultState();
     baseSt.voices[0].frequencyHz = 220.0f;
     baseSt.voices[0].lfoRateHz = 6.0f;
     baseSt.voices[0].lfoDepth = 0.50f;
@@ -2560,7 +2586,7 @@ void testCircuitLabPatchMatrixHardSyncTurboAndScreamDsp() {
     std::array<float, ruido::kBlockFrames> outR{};
     std::array<ruido::ScopeFrame, ruido::kBlockFrames> drain{};
 
-    ruido::EngineControlState drySt = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState drySt = makeRunningDefaultState();
     drySt.voices[0].lfoRateHz = 1.5f;
     drySt.voices[0].lfoDepth = 0.0f; // Dry default patch!
     engine.controlBus().publish(drySt);
@@ -2759,7 +2785,7 @@ void testRhythmLabClockDividersEuclidPumpPluckAndSwingDsp() {
     engine.init(ruido::kBaseSampleRate);
     engine.setAnalogCharacterEnabled(false, false);
 
-    ruido::EngineControlState baseSt = ruido::EngineControlState::makeDefault();
+    ruido::EngineControlState baseSt = makeRunningDefaultState();
     baseSt.global.circuitCoupling = 0.0f;
     baseSt.global.clockBpm = 120.0f; // 1 bar = 2.00 s (~88,236 frames)
     for (size_t v = 0u; v < ruido::kNumOscillators; ++v) {
@@ -3252,6 +3278,7 @@ void testFm1TpdfDitherSpscRingAndUsbDriftResampler() {
         coProc.reset();
 
         ruido::EngineControlState st{};
+        st.global.masterRun = true;
         for (size_t i = 0u; i < ruido::kNumOscillators; ++i) {
             auto& v = st.voices[i];
             v.frequencyHz = 110.0f * static_cast<float>(i + 1u);
@@ -3296,7 +3323,7 @@ void testFm1TpdfDitherSpscRingAndUsbDriftResampler() {
         for (int blk = 0; blk < 300; ++blk) {
             if (blk == 100) {
                 // Switch to 1-voice nonlinear (Voice 0 active, Voices 1-3 parked -> 1+3 split)
-                auto oneSt = ruido::EngineControlState::makeDefault();
+                auto oneSt = makeRunningDefaultState();
                 oneSt.voices[0] = st.voices[0];
                 soloEngine.controlBus().publish(oneSt);
                 dualEngine.controlBus().publish(oneSt);
@@ -3304,7 +3331,7 @@ void testFm1TpdfDitherSpscRingAndUsbDriftResampler() {
                 dualEngine.snapParametersToLatest();
             } else if (blk == 200) {
                 // Switch to 2-voice nonlinear on Voices 0-1 (exercises asymmetric 2+2 pairing)
-                auto twoSt = ruido::EngineControlState::makeDefault();
+                auto twoSt = makeRunningDefaultState();
                 twoSt.voices[0] = st.voices[0];
                 twoSt.voices[1] = st.voices[1];
                 soloEngine.controlBus().publish(twoSt);
@@ -3340,7 +3367,7 @@ void testFm1TpdfDitherSpscRingAndUsbDriftResampler() {
     {
         static ruido::DroneEngine zeroEngine;
         zeroEngine.init(ruido::kBaseSampleRate);
-        auto zSt = ruido::EngineControlState::makeDefault();
+        auto zSt = makeRunningDefaultState();
         zeroEngine.controlBus().publish(zSt);
         zeroEngine.snapParametersToLatest();
 

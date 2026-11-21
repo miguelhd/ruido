@@ -2,6 +2,8 @@
 
 **Ruido** is a custom, **4-oscillator Schmitt-trigger drone synthesizer firmware** for the **M-VAVE FM-1** (`JieLi AC791N / pi32v2`), engineered specifically as a raw, harmonically rich stereo sound source for external guitar pedals and Eurorack modular systems.
 
+**User Guide:** [miguelhd.github.io/ruido](https://miguelhd.github.io/ruido/)
+
 ## Core Pillars
 
 1. **Uncompromising Sound Quality:** Unified `4x` oversampled (`176.47 kHz` -> `~44.1 kHz` base rate) signal path modeling CMOS Schmitt-trigger physics (PolyBLEP edges, RC capacitor tilt, thermal drift, and shared power-rail threshold coupling) feeding four dedicated per-oscillator **Dual Series Sallen-Key (`12 dB/oct HPF -> 12 dB/oct LPF`, `OTA -> Silicon-Clamped`) Zero-Delay Feedback filters** and a nonlinear master summing stage across 3.5 mm TRS analog and **`44.1 / 48 kHz` USB-C digital stereo audio**.
@@ -25,8 +27,8 @@ Ruido/
 │   └── ui/                # 240x240 RGB565 scanline strip compositor, scope & varibright LED logic
 ├── platforms/             # Thin target-specific hardware wrappers
 │   ├── sim/               # Native macOS / WebAssembly simulator (real-time audio + 240x240 UI)
-│   └── fm1/               # M-VAVE FM-1 target (Dinghy HAL, fm1_cpu1 SRAM DSP, SARADC, .fwsc)
-├── tests/                 # Headless DSP unit tests (aliasing, DC offset, filter stability, CPU bounds)
+│   └── fm1/               # M-VAVE FM-1 target (Felucca / Dinghy HAL, fm1_cpu1 SRAM DSP, SARADC, .fwsc)
+├── tests/                 # Headless DSP, UI, controller & Wasm verification suites
 └── tools/                 # Build scripts, Docker pi32v2 cross-compiler & SysEx flashing utilities
 ```
 
