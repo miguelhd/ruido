@@ -2,6 +2,7 @@
 
 #include "core/DspMath.h"
 #include "core/FilterModMath.h"
+#include "core/HudEnvelope.h"
 #include "core/KeyboardModelSpec.h"
 #include "core/LfoMath.h"
 #include "core/VoiceCircuit.h"
@@ -28,6 +29,7 @@ void LedSmoothState::reset(const EngineControlState& state) noexcept {
     glintPhaseQ8.fill(0u);
     nextGlintSlot = 0u;
     lastPhantomSeq = 0u;
+    presetSceneLedQ16 = 0u;
 }
 
 void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothState& smooth,
@@ -227,6 +229,32 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     const float runSmooth = clampf(smooth.playStopRunSmooth, 0.0f, 1.0f);
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::PlayStop)] = 1.0f - runSmooth;
     outLeds.stopLed = runSmooth;
+}
+
+void applyPresetKnobSceneLeds(float dtSec, const HudState& hud, bool toastHoldActive,
+                              LedSmoothState& smooth, LedState& ioLeds) noexcept {
+    if (hud.shiftHeld || hud.saveArmed) {
+        smooth.presetSceneLedQ16 = 0u;
+        return;
+    }
+    const bool active = toastHoldActive && !hud.snapshotSavedToast && !hud.snapshotDeletedToast &&
+                        (hud.mode == HudMode::SnapshotSlot);
+    const float cur01 = static_cast<float>(smooth.presetSceneLedQ16) * (1.0f / 65535.0f);
+    const float next01 = stepHudFadeLinear(cur01, active, clampf(dtSec, 0.0f, 0.25f));
+    smooth.presetSceneLedQ16 = static_cast<uint16_t>(next01 * 65535.0f + 0.5f);
+    if (smooth.presetSceneLedQ16 == 0u) {
+        return;
+    }
+    const float blend = smoothstep01(next01);
+    for (size_t s = 0u; s < kNumSnapshots; ++s) {
+        const size_t wIdx = kSceneWhiteKeyBase + s;
+        if (((hud.heldWhiteMask >> wIdx) & 1u) != 0u) {
+            continue;
+        }
+        const float baseLed = ioLeds.whiteKeyLeds[wIdx];
+        const float sceneLed = computeSceneKeyBrightness(s, hud, true);
+        ioLeds.whiteKeyLeds[wIdx] = baseLed + (sceneLed - baseLed) * blend;
+    }
 }
 
 void applyUnassignedLedGlints(const LedSmoothState& smooth, LedState& ioLeds) noexcept {

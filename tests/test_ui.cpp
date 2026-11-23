@@ -2202,6 +2202,25 @@ void testBootIntroCrtSequence() {
     CHECK(ringO == 25u);
     CHECK(holeO < ringO - 6u);
 
+    // Bottom-right firmware version badge (`vX.Y.Z`) rendered during settled hold while bottom-left
+    // remains pure black:
+    uint32_t botRightVerLit = 0u;
+    uint32_t botLeftDarkCheck = 0u;
+    for (size_t y = 216u; y < 232u; ++y) {
+        for (size_t x = 185u; x < 232u; ++x) {
+            if (frame[y * 240u + x] != 0x0000u) {
+                ++botRightVerLit;
+            }
+        }
+        for (size_t x = 0u; x < 160u; ++x) {
+            if (frame[y * 240u + x] != 0x0000u) {
+                ++botLeftDarkCheck;
+            }
+        }
+    }
+    CHECK(botRightVerLit >= 30u);
+    CHECK(botLeftDarkCheck == 0u);
+
     // 3. Advance through +1.00 s extended hold + 180 ms collapse-y exit (2.00 s total) -> hands off
     for (int i = 0; i < 20; ++i) {
         renderer.prepareFrame(0.050f, ctrl, hud, tel);

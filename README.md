@@ -2,7 +2,7 @@
 
 **Ruido** is a custom, **4-oscillator Schmitt-trigger drone synthesizer firmware** for the **M-VAVE FM-1** (`JieLi AC791N / pi32v2`), engineered specifically as a raw, harmonically rich stereo sound source for external guitar pedals and Eurorack modular systems.
 
-**User Guide:** [miguelhd.github.io/ruido](https://miguelhd.github.io/ruido/)
+**User Guide:** [noisexrecords.com/ruido](https://noisexrecords.com/ruido)
 
 ## Core Pillars
 

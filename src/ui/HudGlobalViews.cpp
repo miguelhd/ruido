@@ -499,7 +499,9 @@ void compositeConfigSubViewStrip(const MonoStripCanvas& cv, const HudState& hud)
                          kBodyLum);
     cv.drawSansFlushLeft(kFontSansMedium, kAboutLeftX, 102, "GPL-3.0  /  2026  /  Dinghy HAL",
                          kBodyLum);
-    cv.drawSansFlushLeft(kFontSansMedium, kAboutLeftX, 126, "github.com/miguelhd/ruido", kBodyLum);
+    cv.drawSansFlushLeft(kFontSansMedium, kAboutLeftX, 126, "Guide: noisexrecords.com/ruido",
+                         kBodyLum);
+    cv.drawSansFlushLeft(kFontSansMedium, kAboutLeftX, 150, "github.com/miguelhd/ruido", kBodyLum);
 }
 
 } // namespace

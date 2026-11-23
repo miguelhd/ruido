@@ -47,6 +47,7 @@ class BootIntroRenderer {
     uint16_t logoAlphaQ8_ = 0u;
     uint16_t renderedFrames_ = 0u;
     uint8_t logoQuantLum8_ = 255u;
+    uint8_t versionAlpha8_ = 0u;
     bool active_ = false;
     bool fastDismiss_ = false;
     bool beamVisible_ = false;

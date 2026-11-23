@@ -426,6 +426,7 @@ void RuidoController::updateLeds(float dtSec, const EngineTelemetry& telemetry) 
     // glints
     keyboard_.stepAndComputeKeyLeds(dtSec, ledSmooth_.animPhase, state_, hud_, telemetry, leds_);
     hud_.modeWipeQ8 = keyboard_.modeWipeQ8();
+    applyPresetKnobSceneLeds(dtSec, hud_, env_.holdRemainingSec > 0.0f, ledSmooth_, leds_);
     applyUnassignedLedGlints(ledSmooth_, leds_);
 }
 

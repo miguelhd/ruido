@@ -2,7 +2,7 @@
   "what": "Ruido is a 4-oscillator drone and noise synthesizer firmware for the M-VAVE FM-1 with coupled voices, dual resonant filters, scene morphing, and pressure-sensitive performance effects. It is created as a dry stereo sound source for external pedals and modular setups.",
   "author": "Miguel Hernández Domenech",
   "kinds": ["synth", "drone", "other"],
-  "cheat": "https://miguelhd.github.io/ruido/",
+  "cheat": "https://noisexrecords.com/ruido",
   "image": "docs/assets/screens/240x240/02-home-frequency-hud.png",
   "color": "#E6EDF3"
 }

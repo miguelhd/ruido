@@ -2,7 +2,9 @@
 
 #include "core/DspMath.h"
 #include "core/LfoMath.h"
+#include "core/Version.h"
 #include "ui/BootIntroData.h"
+#include "ui/FontSansAA.h"
 #include "ui/ScopeTraceMath.h"
 
 #include <cstring>
@@ -175,6 +177,7 @@ void BootIntroRenderer::reset() noexcept {
     logoAlphaQ8_ = 0u;
     renderedFrames_ = 0u;
     logoQuantLum8_ = 255u;
+    versionAlpha8_ = 0u;
     active_ = false;
     fastDismiss_ = false;
     beamVisible_ = false;
@@ -221,6 +224,7 @@ void BootIntroRenderer::step(float dtSec, bool hudActive) noexcept {
     if (elapsedMs_ >= kIntroTotalMs) {
         active_ = false;
         scopeAlpha_ = 1.0f;
+        versionAlpha8_ = 0u;
         beamVisible_ = false;
         logoVisible_ = false;
         return;
@@ -423,6 +427,14 @@ void BootIntroRenderer::evaluateAtMs(float tMs) noexcept {
             logoVisible_ = (logoAlphaQ8_ > 0u);
         }
     }
+
+    // 5. Small bottom-right firmware version badge (`vX.Y.Z`, unfolds after initial beam strike)
+    versionAlpha8_ = 0u;
+    if (exitFade > 0.002f && tMs > (kUnfoldDelayMs + 20.0f)) {
+        const float verIn =
+            smoothstep01(clampf((tMs - (kUnfoldDelayMs + 20.0f)) * (1.0f / 160.0f), 0.0f, 1.0f));
+        versionAlpha8_ = static_cast<uint8_t>(verIn * exitFade * 255.0f + 0.5f);
+    }
 }
 
 void BootIntroRenderer::compositeStripChunk(int y0, uint16_t chunkH, uint8_t* lumBuf,
@@ -433,7 +445,7 @@ void BootIntroRenderer::compositeStripChunk(int y0, uint16_t chunkH, uint8_t* lu
     if (!blendOverScope) {
         std::memset(lumBuf, 0, static_cast<size_t>(chunkH) * kDisplayWidth);
     }
-    if (!beamVisible_ && !logoVisible_) {
+    if (!beamVisible_ && !logoVisible_ && versionAlpha8_ == 0u) {
         return;
     }
 
@@ -549,6 +561,11 @@ void BootIntroRenderer::compositeStripChunk(int y0, uint16_t chunkH, uint8_t* lu
                 dstRow[x] = static_cast<uint8_t>((out > 255u) ? 255u : out);
             }
         }
+    }
+
+    if (versionAlpha8_ > 0u) {
+        const MonoStripCanvas cv{lumBuf, y0, y0 + static_cast<int>(chunkH), versionAlpha8_};
+        cv.drawSansRight(kFontSansSmall, 228, 218, "v" RUIDO_VERSION_STR, 126u, 0);
     }
 }
 

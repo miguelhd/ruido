@@ -1,8 +1,15 @@
 # Changelog
 
+## v0.7.3 (`FM-1_312`) — 2026-11-23
+
+User Guide: https://noisexrecords.com/ruido
+
+- **UX refinements:** Improved keybed LED feedback when morphing scenes and added the firmware version to the boot screen.
+- **User Guide:** Added `noisexrecords.com/ruido` to the `About` screen and documentation.
+
 ## v0.7.2 (`FM-1_312`) — 2026-11-20
 
-User Guide: https://miguelhd.github.io/ruido/
+User Guide: https://noisexrecords.com/ruido
 
 - **Silent power-on:** Boots with audio output muted (`PLAY` green LED lit) until `PLAY/STOP` is pressed.
 - **UI clarity:** Added the `SHIFT` label to all `SEL` keyboard maps and clarified `SAVE` / `DELETE` scene labels.

@@ -906,7 +906,7 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(ctrl.hud().configCursor == 8u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::Credits), "About") ==
                 0);
-    RTEST_CHECK(std::strcmp(ruido::kRuidoVersionStr, "0.7.2") == 0);
+    RTEST_CHECK(std::strcmp(ruido::kRuidoVersionStr, "0.7.3") == 0);
     RTEST_CHECK(ruido::measureSansText(ruido::kFontSansMedium, "Hern\xC3\xA1ndez", 0) ==
                 ruido::measureSansText(ruido::kFontSansMedium, "Hernandez", 0));
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
@@ -931,8 +931,9 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
         RTEST_CHECK(firstLitXInBand(46u, 60u) == 16);   // 4-Oscillator Drone Synthesizer
         RTEST_CHECK(firstLitXInBand(78u, 92u) == 16);   // By Miguel Hernández Domenech
         RTEST_CHECK(firstLitXInBand(102u, 116u) == 16); // GPL-3.0  /  2026  /  Dinghy HAL
-        RTEST_CHECK(firstLitXInBand(126u, 140u) == 16); // github.com/miguelhd/ruido
-        RTEST_CHECK(firstLitXInBand(150u, 164u) == 240);
+        RTEST_CHECK(firstLitXInBand(126u, 140u) == 16); // Guide: noisexrecords.com/ruido
+        RTEST_CHECK(firstLitXInBand(150u, 164u) == 16); // github.com/miguelhd/ruido
+        RTEST_CHECK(firstLitXInBand(174u, 188u) == 240);
         RTEST_CHECK(creditsFrame[120u * 240u + 4u] == 0u);
     }
 
@@ -3663,8 +3664,33 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
             ctrl.tick(0.020f, tel);
         }
 
-        // Twisting PRESETS while FX Filter graph is open keeps the Filter passband visible while
-        // showing the Top-Bar spinning disk + 4-dot strip; unshifted Keys 9-12 LEDs stay on Zone 3!
+        // Twisting PRESETS (even without SHIFT, including while FX Filter graph or Clean Scope is
+        // open) lights Keys 9-12 with the live 15% / 40%..80% Scene weights while turning, then
+        // fades Keys 9-12 back to 15% Zone 3 rest once the knob turn ends!
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8], 0.15f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[9], 0.15f, 0.01f));
+        ctrl.onEncoderDelta(ruido::EncoderId::Presets, 24); // Clean Scope 50/50 Scene 1 & 2
+        for (int f = 0; f < 10; ++f) {
+            ctrl.tick(0.020f, tel);
+        }
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8], 0.60f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[9], 0.60f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[10], 0.40f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[11], 0.40f, 0.01f));
+        ctrl.onEncoderDelta(ruido::EncoderId::Presets, -24); // Pure Scene 1 (80% / 40% / 40% / 40%)
+        ctrl.tick(0.020f, tel);
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8], 0.80f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[9], 0.40f, 0.01f));
+        // Let the 1.5 s PRESETS turn toast expire + 150 ms fade-out -> Keys 9-12 return to 15%!
+        for (int f = 0; f < 36; ++f) {
+            ctrl.tick(0.050f, tel);
+        }
+        RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::None);
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8], 0.15f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[9], 0.15f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[10], 0.15f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[11], 0.15f, 0.01f));
+
         ctrl.onButtonEvent(ruido::ButtonId::Fx, true);
         ctrl.onButtonEvent(ruido::ButtonId::Fx, false);
         ctrl.onEncoderDelta(ruido::EncoderId::Presets, 24);
@@ -3673,11 +3699,18 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
             renderer.prepareFrame(0.020f, quietSt, ctrl.hud(), tel);
         }
         RTEST_CHECK(ctrl.hud().fxPageOpen);
-        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8], 0.15f, 0.01f) &&
-                    nearF(ctrl.leds().whiteKeyLeds[9], 0.15f, 0.01f));
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8], 0.60f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[9], 0.60f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[10], 0.40f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[11], 0.40f, 0.01f));
         checkStripAndMono(400u);
         RTEST_CHECK(g6Px(180u, 13u) >= 24u && g6Px(196u, 13u) >= 24u);
         ctrl.onEncoderDelta(ruido::EncoderId::Presets, -24);
+        for (int f = 0; f < 36; ++f) {
+            ctrl.tick(0.050f, tel);
+        }
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[8], 0.15f, 0.01f) &&
+                    nearF(ctrl.leds().whiteKeyLeds[9], 0.15f, 0.01f));
         ctrl.onButtonEvent(ruido::ButtonId::Home, true);
         ctrl.onButtonEvent(ruido::ButtonId::Home, false);
         for (int f = 0; f < 10; ++f) {

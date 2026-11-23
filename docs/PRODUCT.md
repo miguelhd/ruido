@@ -74,7 +74,7 @@ At idle, on `HOME (FREQUENCY)`, on `SEL`, on `GLOBAL CONFIG`, and during keybed 
   - **`SEL`:** Steps across `1/3 LIVE MIXER`, `2/3 CIRCUIT LAB`, and `3/3 RHYTHM LAB`.
   - **`SAVE`:** Switches between `STORE SCENE` and `DELETE SCENE`.
   - **`GLOBAL CONFIG`:** Moves the row highlight up and down.
-- **`PRESETS` (Encoder):** Continuous `360°` circular morph across `Scene 1-4` (`1 -> 2 -> 3 -> 4 -> 1`). Empty slots are skipped, and manual knob edits crossfade onto the loop without jumps (`OCT-` for fine morphs, `OCT+` for whole-scene steps).
+- **`PRESETS` (Encoder):** Continuous `360°` circular morph across `Scene 1-4` (`1 -> 2 -> 3 -> 4 -> 1`), lighting `Keys 9-12` with the live scene blend while turning. Empty slots are skipped, and manual knob edits crossfade onto the loop without jumps (`OCT-` for fine morphs, `OCT+` for whole-scene steps).
 - **`OCT-` / `OCT+` (Momentary Rate Modifiers):** Hold `OCT-` for `FINE` resolution or `OCT+` for `COARSE` range on any continuous encoder. Releasing the button returns to `STANDARD` rate.
 
 ### 3.3 Right `2x6` Function Buttons
@@ -101,7 +101,7 @@ At idle, on `HOME (FREQUENCY)`, on `SEL`, on `GLOBAL CONFIG`, and during keybed 
   6. **`MIDI Transport In`:** `OFF` *(default)* / `PHASE` *(resets bar phase on Start)* / `RUN/STOP` *(starts and mutes audio with MIDI Start/Continue/Stop)*.
   7. **`MIDI Channel In`:** `OMNI` *(default)* / `CH 1-16`.
   8. **`Factory Reset`:** Two-detent confirmation on `ALGORITHM` (`CCW` cancels) for **`Factory Presets`** (restores default sound, all 4 scenes, and config) or **`Clean Init`** (loads an unmodulated startup sound, clears scenes to `EMPTY`, and keeps config).
-  9. **`About`:** Displays version, instrument summary, author, license, and repository URL.
+  9. **`About`:** Displays version, instrument summary, author, license, user guide URL (`noisexrecords.com/ruido`), and repository URL.
 - **`ENV`, `ARP`, `SEQ`, `REC`:** Unassigned (`0%` LED at rest). A press nudges the scope horizontally and flashes the button LED with no change to audio or open pages.
 
 ---
