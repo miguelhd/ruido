@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-**Ruido** is a 4-oscillator drone and noise synthesizer firmware for the **M-VAVE FM-1** with coupled voices, dual resonant filters, scene morphing, and pressure-sensitive performance effects. It is engineered as a dry stereo sound source for external pedals and modular setups.
+**Ruido** is a 4-oscillator drone and noise synthesizer firmware for the **M-VAVE FM-1** with coupled voices, dual resonant filters, scene morphing, and pressure-sensitive performance effects. Designed as a dry stereo sound source for external pedals and modular setups.
 
 - **Signal Path:** Four free-running Schmitt-trigger oscillators share power-rail coupling and thermal pitch drift. Each voice feeds a pre-filter overdrive stage and its own dual Sallen-Key resonant filter (`12 dB/oct HPF -> 12 dB/oct LPF`) at `4x` oversampling (`176.47 kHz` internal rate) into a stereo summing bus.
 - **Audio Output:** Dry stereo output for external effects pedals and modular systems over the 3.5 mm TRS analog jack, alongside class-compliant `44.1 / 48 kHz` USB-C digital stereo audio.
