@@ -22,7 +22,7 @@ constexpr auto kRecipCellQ16 = buildRecipCellQ16();
 
 } // namespace
 
-void ScopeTraceEngine::rebuildTilesAndBloom() noexcept {
+void ScopeTraceEngine::rebuildTilesAndBloom(void (*coProcYield)() noexcept) noexcept {
     bloomGrid_.fill(0u);
     constexpr float kFixedToPx = 1.0f / 64.0f;
 
@@ -37,6 +37,9 @@ void ScopeTraceEngine::rebuildTilesAndBloom() noexcept {
         auto& colCache = strandColCache_[s];
 
         for (size_t tile = 0u; tile < kNumTiles; ++tile) {
+            if (coProcYield != nullptr && (tile == 10u || tile == 20u)) {
+                coProcYield();
+            }
             int tileMin = static_cast<int>(kDisplayHeight);
             int tileMax = -1;
             const size_t colBase = tile * kTileCols;
@@ -119,13 +122,17 @@ void ScopeTraceEngine::rebuildTilesAndBloom() noexcept {
                 strandTileMaxY_[s][tile] = 0u;
             }
         }
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
 
-    blurSeparableBloomGrid<kBloomWidth, kBloomHeight>(bloomGrid_);
+    blurSeparableBloomGrid<kBloomWidth, kBloomHeight>(bloomGrid_, coProcYield);
 }
 
 void ScopeTraceEngine::renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t bgKeepQ8,
-                                             uint16_t* linBuf, uint8_t* lumBuf) const noexcept {
+                                             uint16_t* linBuf, uint8_t* lumBuf,
+                                             void (*coProcYield)() noexcept) const noexcept {
     if (bgKeepQ8 == 0u) {
         std::memset(lumBuf, 0, static_cast<size_t>(chunkH) * kDisplayWidth);
         return;
@@ -134,9 +141,13 @@ void ScopeTraceEngine::renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t b
     std::memset(linBuf, 0, static_cast<size_t>(chunkH) * kDisplayWidth * sizeof(uint16_t));
 
     if (scopeValid_) {
+        uint8_t activeVisited = 0u;
         for (size_t s = 0u; s < kNumStrands; ++s) {
             if (strandWeightQ8_[s] == 0u) {
                 continue;
+            }
+            if (coProcYield != nullptr && ((++activeVisited & 3u) == 0u)) {
+                coProcYield();
             }
             const auto& yFixed = strandYFixed_[s];
             const auto& tMin = strandTileMinY_[s];
@@ -195,6 +206,9 @@ void ScopeTraceEngine::renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t b
         }
     }
 
+    if (coProcYield != nullptr) {
+        coProcYield();
+    }
     for (uint16_t rowIdx = 0u; rowIdx < chunkH; ++rowIdx) {
         const int py = y0 + static_cast<int>(rowIdx);
         const uint16_t* linRow = linBuf + static_cast<size_t>(rowIdx) * kDisplayWidth;

@@ -73,10 +73,20 @@ inline DualMs20Coeffs makeDualMs20Coeffs(float hpHz, float hpRes, float lpHz,
     constexpr float kButterK = 2.0f - kSqrt2;
     const float korgHp = smoothstep01((rHp - 0.60f) * (1.0f / 0.40f));
     const float korgLp = smoothstep01((rLp - 0.60f) * (1.0f / 0.40f));
+    const float rawKHp =
+        kButterK + rHp * (1.18f - 0.18f * rHp) * (1.84f - kButterK) + 0.07f * korgHp;
+    const float rawKLp =
+        kButterK + rLp * (1.18f - 0.18f * rLp) * (1.84f - kButterK) + 0.07f * korgLp;
+    const float hpHfRoll =
+        (clampedHp > 8200.0f) ? smoothstep01((clampedHp - 8200.0f) * (1.0f / 4000.0f)) : 0.0f;
+    const float lpHfRoll =
+        (clampedLp > 8200.0f) ? smoothstep01((clampedLp - 8200.0f) * (1.0f / 4000.0f)) : 0.0f;
+    const float hpHfCeil = 1.55f + 0.18f * korgHp;
+    const float lpHfCeil = 1.55f + 0.18f * korgLp;
     const float targetKHp =
-        kButterK + rHp * (1.42f - 0.42f * rHp) * (1.84f - kButterK) + 0.07f * korgHp;
+        (rawKHp > hpHfCeil) ? (rawKHp + hpHfRoll * (hpHfCeil - rawKHp)) : rawKHp;
     const float targetKLp =
-        kButterK + rLp * (1.42f - 0.42f * rLp) * (1.84f - kButterK) + 0.07f * korgLp;
+        (rawKLp > lpHfCeil) ? (rawKLp + lpHfRoll * (lpHfCeil - rawKLp)) : rawKLp;
     const float hpResWake = smoothstep01(rHp * (1.0f / 0.02f));
     const float lpResWake = smoothstep01(rLp * (1.0f / 0.02f));
     const float hpFreqWake = smoothstep01((clampedHp - kFilterCutoffMinHz) * (1.0f / 1.5f));

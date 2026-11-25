@@ -336,6 +336,20 @@ constexpr bool isPerOscKnobBank(KnobBankMode bank) noexcept {
            bank == KnobBankMode::Panning;
 }
 
+enum class SavePageMode : uint8_t {
+    Store = 0,
+    Delete = 1,
+    Init = 2,
+    Count = 3,
+};
+
+enum class SnapshotToastKind : uint8_t {
+    None = 0,
+    Saved = 1,
+    Initialized = 2,
+    Deleted = 3,
+};
+
 struct HudState {
     GlobalConfigState config{};
     std::array<float, kNumSnapshots> snapshotWeights{1.0f, 0.0f, 0.0f, 0.0f};
@@ -358,7 +372,8 @@ struct HudState {
     BlackKeyId lastBlackKey = BlackKeyId::Count;
     EncoderId lastEncoder = EncoderId::Select;
     uint8_t focusedVoice = 0u;            // 0..3 oscillator index
-    uint8_t focusedKnob = kNoFocusedKnob; // 0..3 active column highlight, or kNoFocusedKnob
+    uint8_t focusedKnob = kNoFocusedKnob; // 0..3 latest knob for Top-Bar readout, or kNoFocusedKnob
+    uint8_t focusedColumnMask = 0u;       // Bits 0..3 = multi-knob / per-voice column spotlight
     uint8_t fxVoiceFocus = 0u;            // 0..3 = OSC 1..4 (SELECT encoder on FX Filter Page)
     uint8_t lfoVoiceFocus = 0u;           // 0..7 = LFO A/B OSC 1..4 (SELECT encoder on LFO Page)
     uint8_t configCursor = 0u;            // 0..kNumGlobalConfigItems-1 (SELECT in GLOBAL CONFIG)
@@ -381,24 +396,27 @@ struct HudState {
     uint8_t shiftBlinkQ8 = 255u; // [0..255] hardware-synced 0.40 Hz slow blink for active OP1..3
     bool scopeFrozen = false;    // Legacy scope freeze flag
     bool saveArmed = false;
-    bool saveDeleteMode = false;       // True when 2nd SAVE / SELECT switches to DELETE SCENE
-    bool snapshotDirty = false;        // True when knobs diverged from the recalled snapshot
-    bool snapshotSavedToast = false;   // True right after SAVE + Key 9-12 stores a slot
-    bool snapshotDeletedToast = false; // True right after DELETE SCENE + Key 9-12 clears a slot
-    bool snapshotGliding = false;      // True while actively gliding/morphing into a snapshot
-    bool freqPageOpen = false;         // Latching Frequency HUD toggle state (ButtonId::Home)
-    bool fxPageOpen = false;           // Latching MS-20 Filter page state (ButtonId::Fx)
-    bool panPageOpen = false;    // Latching EDIT Stereo Panning sub-page state (ButtonId::Edit)
-    bool lfoPageOpen = false;    // Latching LFO page state (ButtonId::Lfo)
-    bool editPageOpen = false;   // Latching EDIT Channel Mix sub-page state (ButtonId::Edit)
-    bool configPageOpen = false; // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
-    bool selPageOpen = false;    // Latching KEYBOARD MODEL status & guidance page (ButtonId::Sel)
-    uint8_t selWakeSeq = 0u;     // Incremented on SEL open or SELECT/ALGORITHM knob interaction
+    SavePageMode savePageMode = SavePageMode::Store; // Active SAVE page (STORE / INIT / DELETE)
+    bool snapshotDirty = false;                      // True when knobs diverged from recalled scene
+    SnapshotToastKind snapshotToast = SnapshotToastKind::None; // Result toast after SAVE/INIT/DEL
+    bool snapshotGliding = false; // True while actively gliding/morphing into a snapshot
+    bool freqPageOpen = false;    // Latching Frequency HUD toggle state (ButtonId::Home)
+    bool fxPageOpen = false;      // Latching MS-20 Filter page state (ButtonId::Fx)
+    bool panPageOpen = false;     // Latching EDIT Stereo Panning sub-page state (ButtonId::Edit)
+    bool lfoPageOpen = false;     // Latching LFO page state (ButtonId::Lfo)
+    bool editPageOpen = false;    // Latching EDIT Channel Mix sub-page state (ButtonId::Edit)
+    bool configPageOpen = false;  // Latching GLOBAL CONFIG menu (ButtonId::GloRight)
+    bool selPageOpen = false;     // Latching KEYBOARD MODEL status & guidance page (ButtonId::Sel)
+    uint8_t selWakeSeq = 0u;      // Incremented on SEL open or SELECT/ALGORITHM knob interaction
     ScopeTimebase scopeTimebase = ScopeTimebase::Auto; // CRT horizontal timebase (idle SELECT)
     uint8_t phantomPinSeq = 0u;   // Incremented when an unconnected switch (ENV/ARP/SEQ/REC) fires
     uint8_t phantomPinIndex = 0u; // 0 = ENV, 1 = ARP, 2 = SEQ, 3 = REC
-    uint8_t savePulseQ8 = 128u;   // [0..255] hardware-synced 2.50 Hz SAVE LED pulse phase
+    uint8_t savePulseQ8 = 128u;   // [0..255] hardware-synced SAVE / LATCH LED pulse phase
 };
+
+constexpr bool hasSnapshotResultToast(const HudState& hud) noexcept {
+    return hud.snapshotToast != SnapshotToastKind::None;
+}
 
 constexpr bool hasNonHomePageOpen(const HudState& hud) noexcept {
     return hud.fxPageOpen || hud.panPageOpen || hud.lfoPageOpen || hud.editPageOpen ||
@@ -407,6 +425,16 @@ constexpr bool hasNonHomePageOpen(const HudState& hud) noexcept {
 
 constexpr bool hasPinnedPageOpen(const HudState& hud) noexcept {
     return hud.freqPageOpen || hasNonHomePageOpen(hud);
+}
+
+constexpr uint8_t effectiveFocusedColumnMask(const HudState& hud) noexcept {
+    const uint8_t singleBit =
+        (hud.focusedKnob < kNumOscillators) ? static_cast<uint8_t>(1u << hud.focusedKnob) : 0u;
+    return static_cast<uint8_t>((hud.focusedColumnMask | singleBit) & 0x0Fu);
+}
+
+constexpr bool isHudColumnFocused(const HudState& hud, size_t col) noexcept {
+    return col < kNumOscillators && ((effectiveFocusedColumnMask(hud) >> col) & 1u) != 0u;
 }
 
 constexpr uint8_t resolveFilterViewVoice(const HudState& hud) noexcept {

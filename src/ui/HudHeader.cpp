@@ -585,7 +585,7 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const PreparedHudHeader&
             if (prep.isStepBadgeText) {
                 dstCv.drawSansRight(kFontSansMedium, 230, 6, prep.rightText, 174u, 0);
             } else {
-                dstCv.drawSansRight(kFontSansSmall, 230, 6, prep.rightText, 168u, 1);
+                dstCv.drawSansRight(kFontSansSmall, 230, 7, prep.rightText, 168u, 1);
             }
         }
     };
@@ -621,13 +621,13 @@ void compositeTopHeaderStrip(const MonoStripCanvas& cv, const PreparedHudHeader&
             badgeRightX = 230 - valW - 8;
             if (rateAlpha8 > 0u) {
                 const MonoStripCanvas rateCv{cv.lum, cv.y0, cv.y1, rateAlpha8};
-                rateCv.drawSans(kFontSansSmall, 230 - valW, 6, rateValBuf, 176u, 0);
-                rateCv.drawOpticalBead(static_cast<float>(230 - valW - 4), 12.2f, 0.52f, 0.95f);
+                rateCv.drawSans(kFontSansSmall, 230 - valW, 7, rateValBuf, 176u, 0);
+                rateCv.drawOpticalBead(static_cast<float>(230 - valW - 4), 13.2f, 0.52f, 0.95f);
             }
         }
         if (rateAlpha8 > 0u) {
             const MonoStripCanvas rateCv{cv.lum, cv.y0, cv.y1, rateAlpha8};
-            rateCv.drawSans(kFontSansSmall, badgeRightX - badgeW, 6, badgeStr, 236u, badgeTrk);
+            rateCv.drawSans(kFontSansSmall, badgeRightX - badgeW, 7, badgeStr, 236u, badgeTrk);
         }
     };
 

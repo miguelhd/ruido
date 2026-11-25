@@ -276,12 +276,25 @@
     {
       "id": "21-scene-delete-manager",
       "category": "scenes",
-      "summary": "DELETE Scene Manager (SCENE ... DELETE / < DELETE SCENE) showing occupied slots pulsing at 5 Hz.",
+      "summary": "DELETE Scene Manager (SCENE ... DELETE / < DELETE SCENE >) showing occupied slots pulsing at 5 Hz.",
       "steps": [
         { "op": "init_playing", "frames": 35 },
         { "op": "tap", "button": "Save" },
         { "op": "tap", "button": "Save" },
         { "op": "step", "frames": 18 }
+      ],
+      "checks": { "min_lit_px": 3500, "max_lit_px": 22000, "pure_bw": true }
+    },
+    {
+      "id": "22-scene-init-manager",
+      "category": "scenes",
+      "summary": "INIT Scene Manager (SCENE ... INIT / < INIT SCENE) showing all 4 slots on the calm double-flash loop.",
+      "steps": [
+        { "op": "init_playing", "frames": 35 },
+        { "op": "tap", "button": "Save" },
+        { "op": "tap", "button": "Save" },
+        { "op": "tap", "button": "Save" },
+        { "op": "step", "frames": 72 }
       ],
       "checks": { "min_lit_px": 3500, "max_lit_px": 22000, "pure_bw": true }
     }

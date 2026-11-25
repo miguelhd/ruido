@@ -56,10 +56,14 @@ struct SatResult {
     float deriv;
 };
 
-// Fast IEEE-754 reciprocal 1 / x for positive x (magic 0x7EF0F0F1 + 2 NR polish steps:
-// < 3.4e-6 max relative error across [1e-12, 1e12], zero hardware fdiv stalls, zero libm).
+// Fast IEEE-754 reciprocal 1 / x for positive x:
+// Uses native 2.66-cycle single-instruction hardware `fdiv` on AC791N `pi32v2` (`-mfprev1`,
+// saving 14 instructions + stack spills per call) and magic 0x7EF0F0F1 + 2 NR steps elsewhere.
 RUIDO_ALWAYS_INLINE float fastRecipPos(float x) noexcept {
     const float safeX = clampf(x, 1.0e-12f, 1.0e12f);
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+    return 1.0f / safeX;
+#else
     uint32_t bits = 0u;
     std::memcpy(&bits, &safeX, sizeof(bits));
     bits = 0x7EF0F0F1u - bits;
@@ -68,9 +72,10 @@ RUIDO_ALWAYS_INLINE float fastRecipPos(float x) noexcept {
     y = y * (2.00173f - safeX * y);
     y = y * (2.0f - safeX * y);
     return y;
+#endif
 }
 
-// C1-continuous algebraic tanh approximation on [-3, 3] (zero transcendentals, zero fdiv):
+// C1-continuous algebraic tanh approximation on [-3, 3] (zero transcendentals):
 //   f(x) = x*(27 + x^2) / (27 + 9*x^2)  for |x| < 3,  sgn(x) for |x| >= 3
 RUIDO_ALWAYS_INLINE float padeClip(float x) noexcept {
     if (x >= 3.0f) {
@@ -80,7 +85,11 @@ RUIDO_ALWAYS_INLINE float padeClip(float x) noexcept {
         return -1.0f;
     }
     const float x2 = x * x;
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+    return (x * (27.0f + x2)) / (27.0f + 9.0f * x2);
+#else
     return (x * (27.0f + x2)) * fastRecipPos(27.0f + 9.0f * x2);
+#endif
 }
 
 // High-headroom master bus analog transformer / op-amp soft ceiling:

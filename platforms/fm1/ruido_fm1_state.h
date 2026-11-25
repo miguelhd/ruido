@@ -50,6 +50,9 @@ struct alignas(64) Fm1InterCoreControl {
     std::atomic<uint32_t> c1BenchTicks{0u};
     std::atomic<uint32_t> c1FlashHold{0u};
     std::atomic<uint32_t> c1FlashAck{0u};
+    // Cache line 2: Core 1 exclusive runtime telemetry (never dirtied by Core 0 or TIMER5 ISR)
+    alignas(64) std::atomic<uint32_t> c1Blocks{0u};
+    std::atomic<uint32_t> c1Last64Ticks{0u};
 };
 
 struct alignas(64) Fm1C1DspRuntime {
@@ -58,6 +61,19 @@ struct alignas(64) Fm1C1DspRuntime {
     volatile uint8_t inSoloDsp = 0u;
     float soloHistL[3]{0.0f, 0.0f, 0.0f};
     float soloHistR[3]{0.0f, 0.0f, 0.0f};
+};
+
+struct RuidoUsbFeedParams {
+    const int32_t* inLrQ15;
+    uint32_t numInFrames;
+    uint32_t rate48k;
+    int32_t fillFrames;
+    int32_t targetFill;
+    uint32_t* uaRingBuf;
+    uint32_t uaRingMask;
+    uint32_t writePos;
+    uint32_t freeSlots;
+    uint32_t streamSeq;
 };
 
 } // namespace ruido::fm1
@@ -113,6 +129,10 @@ void ruido_fm1_c1_step_solo_bench64(void);
 
 /* Claim and run one pending `Voices 2-3` 4x ZDF filter span inside `.c1_text` SRAM (`-O3`). */
 void ruido_fm1_c1_assist_dsp(void);
+
+/* Run USB drift Hermite resampler + TPDF dither inside `.c1_text` SRAM (`-O3`, zero XIP misses). */
+uint32_t ruido_fm1_c1_usb_feed(ruido::Fm1UsbDriftResampler* resampler,
+                               const ruido::fm1::RuidoUsbFeedParams* params);
 
 /* Arm/disarm Core 0 filter assistance via Dekker SPSC fence inside `.c1_text` SRAM. */
 void ruido_fm1_c1_set_helper_armed(uint32_t armed);

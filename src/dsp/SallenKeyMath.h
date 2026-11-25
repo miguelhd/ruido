@@ -46,15 +46,39 @@ inline float computeKorg35Chaos(float resonance) noexcept {
     return smoothstep01((clampf(resonance, 0.0f, 1.0f) - 0.60f) * (1.0f / 0.40f));
 }
 
+// Three-regime MS-20 resonance curve:
+//  - [0.00, 0.50]: warm non-oscillating LM13600 OTA resonant Q (k = 0.5858 -> 2.00)
+//  - (0.50, 0.60]: creamy KLM-307 Rev 2 singing sine self-oscillation (k = 2.00 -> 3.60)
+//  - (0.60, 1.00]: feral Korg35 Rev 1 silicon-clamped screaming instability (k = 3.60 -> 6.80)
 inline float mapResonanceToK(float resonance) noexcept {
     const float r = clampf(resonance, 0.0f, 1.0f);
+    if (r <= 0.50f) {
+        const float u = r * 2.0f;
+        const float shaped = u * (0.82f + 0.18f * u);
+        return kMs20ButterworthK + shaped * (2.00f - kMs20ButterworthK);
+    }
     if (r <= 0.60f) {
-        const float u = r * (1.0f / 0.60f);
-        const float shaped = u * (1.38f - 0.38f * u);
-        return kMs20ButterworthK + shaped * (kMs20Rev2MaxK - kMs20ButterworthK);
+        const float w = (r - 0.50f) * 10.0f;
+        const float shaped = w * (1.28f - 0.28f * w);
+        return 2.00f + shaped * (kMs20Rev2MaxK - 2.00f);
     }
     const float v = (r - 0.60f) * (1.0f / 0.40f);
     return kMs20Rev2MaxK + (kMs20Korg35MaxK - kMs20Rev2MaxK) * v * (0.62f + 0.38f * v);
+}
+
+// Analog LM13600 / Korg35 OTA gain-bandwidth (GBW) high-frequency loop-gain roll-off:
+// Untouched up to 8.2 kHz (preserving < 3% self-oscillation tracking through 8 kHz); smoothly
+// tapers excess feedback across 8.2..12.2 kHz below k < 1.78 so opening or LFO-sweeping the
+// filter into 12..28 kHz preserves bright resonant sheen without sustaining an ultrasonic
+// limit cycle or square-edge intermodulation fizz.
+inline float applyOtaHfLoopTaper(float k, float cutoffHz) noexcept {
+    if (cutoffHz <= 8200.0f || k <= 1.55f) {
+        return k;
+    }
+    const float roll = smoothstep01((cutoffHz - 8200.0f) * (1.0f / 4000.0f));
+    const float hfCeil = 1.55f + 0.22f * clampf((k - 1.55f) * 0.20f, 0.0f, 1.0f);
+    const float target = (k < hfCeil) ? k : hfCeil;
+    return k + roll * (target - k);
 }
 
 // Groszkowski reactive-power + dual-OTA compression pitch compensation:
@@ -66,7 +90,7 @@ inline float compensateHpSelfOscPitch(float hz, float k) noexcept {
     }
     const float rev2Ex = (k < kMs20Rev2MaxK) ? (k - 2.0f) : (kMs20Rev2MaxK - 2.0f);
     const float korgEx = (k > kMs20Rev2MaxK) ? (k - kMs20Rev2MaxK) : 0.0f;
-    const float shift = rev2Ex * (0.062f + 0.046f * rev2Ex) - korgEx * 0.008f;
+    const float shift = rev2Ex * (0.197f - 0.038f * rev2Ex) - korgEx * 0.008f;
     return clampf(hz * (1.0f + shift), kFilterCutoffMinHz, kFilterMaxSafeHz);
 }
 
@@ -76,7 +100,7 @@ inline float compensateLpSelfOscPitch(float hz, float k) noexcept {
     }
     const float rev2Ex = (k < kMs20Rev2MaxK) ? (k - 2.0f) : (kMs20Rev2MaxK - 2.0f);
     const float korgEx = (k > kMs20Rev2MaxK) ? (k - kMs20Rev2MaxK) : 0.0f;
-    const float shift = rev2Ex * (0.068f + 0.053f * rev2Ex) - korgEx * 0.008f;
+    const float shift = rev2Ex * (0.216f - 0.040f * rev2Ex) - korgEx * 0.008f;
     return clampf(hz * (1.0f + shift), kFilterCutoffMinHz, kFilterMaxSafeHz);
 }
 
@@ -142,6 +166,14 @@ RUIDO_ALWAYS_INLINE float stepHpNonlinearPrecomputed(float x, float& s1, float& 
     const float fHp0 = y1_0 - xPlusS1 - g * ota1_0.value;
     const float d1_0 = g * ota1_0.deriv;
     const float d2_0 = g * ota2_0.deriv;
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+    // At 176.47 kHz (4x OS) from the 2nd-order (2*h1 - h2) predictor, 1 exact analytical NR step
+    // + tangent update reaches O(dt^6) accuracy with zero branch/spill bloat in 16-reg q32DSP.
+    const float dy2_0 = clampf(
+        fHp0 * fastRecipPos((1.0f + d1_0) * (1.0f + d2_0) - d1_0 * (k * fb_0.deriv)), -4.0f, 4.0f);
+    y2 -= dy2_0;
+    const float finalOta2 = ota2_0.value + ota2_0.deriv * dy2_0;
+#else
     const float dy2_0 =
         fHp0 * fastRecipPos((1.0f + d1_0) * (1.0f + d2_0) - d1_0 * (k * fb_0.deriv));
     y2 -= dy2_0;
@@ -161,6 +193,7 @@ RUIDO_ALWAYS_INLINE float stepHpNonlinearPrecomputed(float x, float& s1, float& 
         y2 -= dy2_1;
         finalOta2 = ota2_1.value + ota2_1.deriv * dy2_1;
     }
+#endif
 
     const float ic2 = g * finalOta2;
     const float y1 = y2 - s2 - ic2;
@@ -186,6 +219,12 @@ RUIDO_ALWAYS_INLINE float stepLpNonlinear(float x, float& s1, float& s2, float& 
     const float fLp0 = y1_0 - s1 - g * (ota1_0.value + fb_0.value);
     const float d1_0 = g * ota1_0.deriv;
     const float d2_0 = g * ota2_0.deriv;
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+    const float dw0 = clampf(
+        fLp0 * fastRecipPos((1.0f + d1_0) * (1.0f + d2_0) - g * (k * fb_0.deriv)), -4.0f, 4.0f);
+    w -= dw0;
+    const float finalOta2 = ota2_0.value - ota2_0.deriv * dw0;
+#else
     const float dw0 = fLp0 * fastRecipPos((1.0f + d1_0) * (1.0f + d2_0) - g * (k * fb_0.deriv));
     w -= dw0;
     float finalOta2 = ota2_0.value - ota2_0.deriv * dw0;
@@ -204,6 +243,7 @@ RUIDO_ALWAYS_INLINE float stepLpNonlinear(float x, float& s1, float& s2, float& 
         w -= dw1;
         finalOta2 = ota2_1.value - ota2_1.deriv * dw1;
     }
+#endif
 
     const float ic2 = g * finalOta2;
     const float y2 = s2 + ic2;

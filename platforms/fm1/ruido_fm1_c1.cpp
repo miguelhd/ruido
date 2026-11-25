@@ -71,7 +71,7 @@ inline void upsampleCatmullRom32To64(const float halfIn[ruido::kBlockFrames / 2u
         const float c = ext[i + 2u];
         const float d = ext[i + 3u];
         out64[2u * i] = b;
-        out64[2u * i + 1u] = ruido::clampf(0.5625f * (b + c) - 0.0625f * (a + d), -1.0f, 1.0f);
+        out64[2u * i + 1u] = ruido::dacSafetyClip(0.5625f * (b + c) - 0.0625f * (a + d));
     }
     hist[0] = halfIn[kHalfFrames - 3u];
     hist[1] = halfIn[kHalfFrames - 2u];
@@ -345,7 +345,24 @@ void ruido_fm1_c1_step_solo_bench64(void) {
 }
 
 void ruido_fm1_c1_assist_dsp(void) {
-    (void)ruidoCoProc()->tryAssist();
+    auto* coproc = ruidoCoProc();
+    if (!coproc->hasPendingWork()) {
+        return;
+    }
+    uint32_t saved_icfg = 0u;
+    __asm__ volatile("%0 = icfg\n\tcli" : "=r"(saved_icfg)::"memory");
+    (void)coproc->tryAssist();
+    __asm__ volatile("csync\n\ticfg = %0" ::"r"(saved_icfg) : "memory");
+}
+
+uint32_t ruido_fm1_c1_usb_feed(ruido::Fm1UsbDriftResampler* resampler,
+                               const ruido::fm1::RuidoUsbFeedParams* p) {
+    if (resampler == nullptr || p == nullptr) {
+        return 0u;
+    }
+    return resampler->processBlockToRing(p->inLrQ15, p->numInFrames, p->rate48k != 0u,
+                                         p->fillFrames, p->targetFill, p->uaRingBuf, p->uaRingMask,
+                                         p->writePos, p->freeSlots, p->streamSeq);
 }
 
 void ruido_fm1_c1_set_helper_armed(uint32_t armed) {
@@ -356,20 +373,31 @@ void ruido_fm1_cpu1_loop(void) {
     auto* ring = ruidoAudioRing();
     auto* core = ruidoDspCore();
     auto* buses = ruidoSharedBuses();
+    uint32_t idleSpins = 0u;
     for (;;) {
         if (pollSramCanaryFault(16u)) {
             parkOnCore1SelfFault();
         }
 
+        if ((idleSpins & 63u) == 0u) {
+            ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+        }
+
         if (g_ruido_ic_ctrl.c1FallbackActive.load(std::memory_order_acquire) != 0u) {
+            ++idleSpins;
             __asm__ volatile("nop\n\tnop" ::: "memory");
             continue;
         }
 
         if (g_ruido_ic_ctrl.c1FlashHold.load(std::memory_order_acquire) != 0u) {
+            idleSpins = 0u;
             g_ruido_ic_ctrl.c1FlashAck.store(1u, std::memory_order_release);
             ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+            uint32_t holdSpins = 0u;
             while (g_ruido_ic_ctrl.c1FlashHold.load(std::memory_order_acquire) != 0u) {
+                if ((++holdSpins & 31u) == 0u) {
+                    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+                }
                 __asm__ volatile("nop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop\n\tnop" ::
                                      : "memory");
             }
@@ -379,6 +407,7 @@ void ruido_fm1_cpu1_loop(void) {
         }
 
         if (g_ruido_ic_ctrl.c1BenchReq.load(std::memory_order_acquire) != 0u) {
+            idleSpins = 0u;
             const uint32_t dt = runCore1Bench64(core, buses);
             if (pollSramCanaryFault(16u)) {
                 parkOnCore1SelfFault();
@@ -390,6 +419,7 @@ void ruido_fm1_cpu1_loop(void) {
         }
 
         if (g_ruido_ic_ctrl.c1RunEnable.load(std::memory_order_acquire) == 0u) {
+            ++idleSpins;
             __asm__ volatile("nop\n\tnop\n\tnop\n\tnop" ::: "memory");
             continue;
         }
@@ -398,9 +428,11 @@ void ruido_fm1_cpu1_loop(void) {
         if (slot == nullptr) {
             /* Paced strictly by ALNK0 24 MHz crystal DMA draining slots on Core 0 (never `idle`!)
              */
+            ++idleSpins;
             __asm__ volatile("nop\n\tnop\n\tnop\n\tnop" ::: "memory");
             continue;
         }
+        idleSpins = 0u;
 
         const uint32_t t0 = *kTimer4CntReg;
         renderQuantizedBlock64(*slot);
@@ -414,8 +446,10 @@ void ruido_fm1_cpu1_loop(void) {
         ring->commitPush();
         ruido::fm1::hwMemoryBarrier();
 
-        g_ruido_fm1_status.c1_last64_ticks = dt;
-        g_ruido_fm1_status.c1_blocks = g_ruido_fm1_status.c1_blocks + 1u;
+        g_ruido_ic_ctrl.c1Last64Ticks.store(dt, std::memory_order_relaxed);
+        const uint32_t nextBlocks = g_ruido_ic_ctrl.c1Blocks.load(std::memory_order_relaxed) + 1u;
+        g_ruido_ic_ctrl.c1Blocks.store(nextBlocks, std::memory_order_release);
+        ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.c1Blocks);
     }
 }
 

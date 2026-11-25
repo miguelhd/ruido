@@ -25,8 +25,8 @@ class StereoHalfBandDecimator4x {
     StereoFrame process4x(const std::array<StereoFrame, 4>& in4x) noexcept;
 
     // Batch-decimates `count` consecutive 4x stereo frames with ring indices hoisted in registers.
-    void processSpan4x(const std::array<StereoFrame, 4>* in4x, StereoFrame* out,
-                       size_t count) noexcept;
+    void processSpan4x(const std::array<StereoFrame, 4>* in4x, StereoFrame* out, size_t count,
+                       bool exactMono = false) noexcept;
 
   private:
     static constexpr size_t kStage1Pairs = 8u;
@@ -59,6 +59,7 @@ class StereoHalfBandDecimator4x {
     size_t ow1_ = 0u;
     size_t ew2_ = 0u;
     size_t ow2_ = 0u;
+    bool prevMono_ = false;
 };
 
 } // namespace ruido

@@ -66,14 +66,18 @@ void ScopeTraceEngine::reset() noexcept {
     scopeValid_ = true;
 }
 
-void ScopeTraceEngine::ingestScopeRing(ScopeRingBuffer& ring, bool scopeFrozen) noexcept {
-    std::array<ScopeFrame, 32> batch{};
-    while (ring.available() > 0u) {
+void ScopeTraceEngine::ingestScopeRing(ScopeRingBuffer& ring, bool scopeFrozen,
+                                       void (*coProcYield)() noexcept) noexcept {
+    std::array<ScopeFrame, 64> batch{};
+    for (;;) {
         const size_t n = ring.popBatch(batch.data(), batch.size());
         if (n == 0u) {
             break;
         }
         pushScopeSamples(batch.data(), n, scopeFrozen);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
 }
 
@@ -204,6 +208,9 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
 
         if (hasAudioAnchor && searchLen > 0u) {
             for (size_t back = 0u; back < searchLen && numCand < kMaxCandidates; ++back) {
+                if (coProcYield != nullptr && (back & 127u) == 127u) {
+                    coProcYield();
+                }
                 if (back < minNextBack) {
                     continue;
                 }
@@ -247,6 +254,9 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
             float bestScore = 1.0e9f;
             size_t bestC = 0u;
             for (size_t c = 0u; c < numCand; ++c) {
+                if (coProcYield != nullptr && (c & 1u) != 0u) {
+                    coProcYield();
+                }
                 float err = 0.0f;
                 const size_t cTrig = candidates[c].trigInt;
                 const float cFrac = candidates[c].trigFrac;
@@ -334,6 +344,9 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
                 if (av > voicePeak[v]) {
                     voicePeak[v] = av;
                 }
+            }
+            if (coProcYield != nullptr && (pt & 63u) == 63u) {
+                coProcYield();
             }
         }
     } else {
@@ -534,6 +547,9 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
         applyStrandPhosphor(baseStrand + 0u, scratchB.data(), vAlphaSlow, snapColdBoot);
         strandWeightQ8_[baseStrand + 0u] =
             static_cast<uint16_t>((0.34f + 0.16f * soloFactor) * pres * 256.0f + 0.5f);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
 
         for (size_t pt = 0u; pt < kTracePoints; ++pt) {
             scratchA[pt] =
@@ -593,7 +609,7 @@ void ScopeTraceEngine::buildWaveformTrace(float dtSec, const EngineControlState&
     if (coProcYield != nullptr) {
         coProcYield();
     }
-    rebuildTilesAndBloom();
+    rebuildTilesAndBloom(coProcYield);
     scopeValid_ = true;
 }
 

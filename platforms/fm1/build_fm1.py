@@ -131,6 +131,7 @@ def main(argv: list[str]) -> int:
         "pi32v2",
         "-mcpu=r3",
         "-mfprev1",
+        "-DRUIDO_TARGET_PI32V2=1",
         cxx_std,
         "-Wall",
         "-Wextra",
@@ -271,9 +272,12 @@ def main(argv: list[str]) -> int:
 
     raw_dsp_objs: list[pathlib.Path] = []
     for s in dsp_srcs:
-        out_o = RAW_OBJ_DIR / (pathlib.Path(s).stem + ".o")
+        stem = pathlib.Path(s).stem
+        out_o = RAW_OBJ_DIR / (stem + ".o")
         raw_dsp_objs.append(out_o)
-        specs.append(CompileSpec( OUT_DIR.parents[1] / s, out_o, [str(clang), *c1_dsp_cxxflags, "-c", s, "-o", str(out_o)]))
+        # Keep orchestration TU at -O2 so 16-reg q32DSP avoids 4x scalar unroll I-Cache/spill bloat
+        dsp_flags = [*common_cxxflags, "-O2"] if stem == "DroneEngine" else c1_dsp_cxxflags
+        specs.append(CompileSpec(OUT_DIR.parents[1] / s, out_o, [str(clang), *dsp_flags, "-c", s, "-o", str(out_o)]))
 
     cold_ui_stems = {
         "BootIntroRender",

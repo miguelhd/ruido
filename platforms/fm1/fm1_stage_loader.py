@@ -144,6 +144,12 @@ def stage_platform_sources(fw: pathlib.Path) -> None:
     write_text_if_changed(GEN_DIR / "fm1_input_ruido.h", inp_src)
 
     usb_src = (fw / "src" / "usb.c").read_text(encoding="utf-8")
+    usb_src = replace_once(
+        usb_src,
+        "static const uint8_t STR2[] = {16, 3, 'F', 0, 'e', 0, 'l', 0, 'u', 0, 'c', 0, 'c', 0, 'a', 0};",
+        "static const uint8_t STR2[] = {22, 3, 'R', 0, 'u', 0, 'i', 0, 'd', 0, 'o', 0, ' ', 0, 'F', 0, 'M', 0, '-', 0, '1', 0};",
+        "usb.c STR2 USB product string descriptor",
+    )
     write_text_if_changed(GEN_DIR / "usb_ruido.c", usb_src)
 
     rec_src = (fw / "src" / "recovery.c").read_text(encoding="utf-8")
@@ -292,6 +298,36 @@ def stage_platform_sources(fw: pathlib.Path) -> None:
         "        return;\n"
         "    }",
         "fm1_timer5_irq in_audio usb_poll",
+    )
+    plat_src = replace_once(
+        plat_src,
+        "static int32_t abuf[2u * HALF_WORDS] __attribute__((aligned(4)));\n"
+        "static volatile int32_t master_q12 = 2048;",
+        "static int32_t abuf[2u * HALF_WORDS] __attribute__((aligned(32)));\n"
+        "static volatile int32_t master_q12 = 4096;\n"
+        "static volatile int32_t ruido_raw_master_q12 = 2048;",
+        "abuf 32-byte alignment and master_q12 unity isolation",
+    )
+    plat_src = replace_once(
+        plat_src,
+        "        for (i = 0; i < HALF_WORDS; i++)\n"
+        "            o[i] <<= 7;\n"
+        "        fm1_audio_ack_half();",
+        "        for (i = 0; i < HALF_WORDS; i++)\n"
+        "            o[i] <<= 7;\n"
+        "        for (i = 0; i < HALF_WORDS * sizeof(int32_t); i += 32u) {\n"
+        "            const char *dl = (const char *)o + i;\n"
+        '            __asm__ volatile("flushinv [%0]" ::"r"(dl) : "memory");\n'
+        "        }\n"
+        '        __asm__ volatile("ssync\\n\\tcsync" ::: "memory");\n'
+        "        fm1_audio_ack_half();",
+        "fm1_alnk0_irq abuf D-Cache flush before DMA handoff",
+    )
+    plat_src = replace_once(
+        plat_src,
+        "        master_q12 = (int32_t)((k10 * k10) >> 8);",
+        "        ruido_raw_master_q12 = (int32_t)((k10 * k10) >> 8);",
+        "platform_poll master_q12 decoupled pot target",
     )
     plat_src = replace_once(
         plat_src,

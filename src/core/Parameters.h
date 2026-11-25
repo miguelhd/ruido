@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/CacheSync.h"
 #include "core/Config.h"
 #include "core/DspMath.h"
 
@@ -226,73 +227,115 @@ static_assert(std::atomic<float>::is_always_lock_free,
               "float atomics must be lock-free on target architecture");
 
 // Lock-free, 100% CAS-free / spinlock-free triple-buffered SPSC control bus
-// (Core 0 writer -> Core 1 audio reader). Uses Dekker store-load ordering on the 3-slot index
-// handoff so neither core ever executes `compare_exchange` or hardware `lockset` spinlocks, and
-// Core 1 (`consumeLatest`) executes zero loops.
+// (Core 0 writer -> Core 1 audio reader). Uses Dekker store-load ordering with strict
+// single-writer 64-byte cache-line isolation so Core 0 and Core 1 never false-share or clobber
+// L1 D-Cache lines on AC791N (`flushinv`), and Core 1 (`consumeLatest`) executes zero loops.
 class LockFreeControlBus {
   public:
     LockFreeControlBus() noexcept {
         const EngineControlState init = EngineControlState::makeDefault();
-        buffers_[0] = init;
-        buffers_[1] = init;
-        buffers_[2] = init;
+        buffers_[0].state = init;
+        buffers_[1].state = init;
+        buffers_[2].state = init;
+        hwCacheFlushInvalidateRange(this, sizeof(*this));
     }
 
     // Called from Core 0 (UI / GPIO / SARADC thread). Single-producer only.
     void publish(const EngineControlState& state) noexcept {
-        buffers_[writeIdx_] = state;
+        hwCacheFlushInvalidateLine(&c1Swapping_);
+        const uint32_t curReady = c0ReadySlot_.load(std::memory_order_relaxed) % 3u;
+        const uint32_t curRead = c1ReadSlot_.load(std::memory_order_acquire) % 3u;
+        uint32_t w = 0u;
+        for (uint32_t k = 0u; k < 3u; ++k) {
+            if (k != curReady && k != curRead) {
+                w = k;
+                break;
+            }
+        }
+        buffers_[w].state = state;
+        hwCacheFlushInvalidateRange(&buffers_[w], sizeof(buffers_[w]));
+
+        uint32_t nextSeq = c0NextSeq_ + 1u;
+        if (nextSeq == 0u) {
+            nextSeq = 1u;
+        }
+        c0NextSeq_ = nextSeq;
+
         c0Swapping_.store(1u, std::memory_order_seq_cst);
+        hwCacheFlushInvalidateLine(&c0Swapping_);
+        hwCacheFlushInvalidateLine(&c1Swapping_);
         uint32_t spins = 0u;
         while (c1Swapping_.load(std::memory_order_seq_cst) != 0u &&
                c1Faulted_.load(std::memory_order_relaxed) == 0u && ++spins < 8388608u) {
+            if ((spins & 31u) == 0u) {
+                hwCacheFlushInvalidateLine(&c1Swapping_);
+            }
         }
-        const uint32_t prevReady = readySlot_.load(std::memory_order_acquire);
-        readySlot_.store(writeIdx_, std::memory_order_release);
-        hasNew_.store(1u, std::memory_order_release);
-        writeIdx_ = prevReady;
+        c0ReadySlot_.store(w, std::memory_order_relaxed);
+        c0PubSeq_.store(nextSeq, std::memory_order_release);
         c0Swapping_.store(0u, std::memory_order_release);
+        hwCacheFlushInvalidateLine(&c0Swapping_);
     }
 
-    void abortFromFault() noexcept { c1Faulted_.store(1u, std::memory_order_release); }
+    void abortFromFault() noexcept {
+        c1Faulted_.store(1u, std::memory_order_release);
+        hwCacheFlushInvalidateLine(&c0Swapping_);
+    }
 
     // Called from Core 1 at block start (Audio thread). Single-consumer only, O(1) wait-free.
     const EngineControlState& consumeLatest() noexcept {
-        if (hasNew_.load(std::memory_order_acquire) != 0u) {
+        hwCacheFlushInvalidateLine(&c0Swapping_);
+        const uint32_t pubSeq = c0PubSeq_.load(std::memory_order_acquire);
+        if (pubSeq != c1AckSeq_.load(std::memory_order_relaxed)) {
             c1Swapping_.store(1u, std::memory_order_seq_cst);
-            if (c0Swapping_.load(std::memory_order_seq_cst) == 0u &&
-                hasNew_.load(std::memory_order_acquire) != 0u) {
-                const uint32_t nextRead = readySlot_.load(std::memory_order_acquire);
-                readySlot_.store(readIdx_, std::memory_order_release);
-                hasNew_.store(0u, std::memory_order_release);
-                readIdx_ = nextRead;
-                if (++readSeq_ == 0u) {
-                    readSeq_ = 1u;
+            hwCacheFlushInvalidateLine(&c1Swapping_);
+            hwCacheFlushInvalidateLine(&c0Swapping_);
+            if (c0Swapping_.load(std::memory_order_seq_cst) == 0u) {
+                const uint32_t latestSeq = c0PubSeq_.load(std::memory_order_acquire);
+                if (latestSeq != c1AckSeq_.load(std::memory_order_relaxed)) {
+                    const uint32_t nextSlot = c0ReadySlot_.load(std::memory_order_relaxed) % 3u;
+                    c1ReadSlot_.store(nextSlot, std::memory_order_release);
+                    c1AckSeq_.store(latestSeq, std::memory_order_release);
+                    hwCacheFlushInvalidateRange(&buffers_[nextSlot], sizeof(buffers_[nextSlot]));
+                    if (++readSeq_ == 0u) {
+                        readSeq_ = 1u;
+                    }
                 }
             }
             c1Swapping_.store(0u, std::memory_order_release);
+            hwCacheFlushInvalidateLine(&c1Swapping_);
         }
-        return buffers_[readIdx_];
+        return buffers_[c1ReadSlot_.load(std::memory_order_relaxed) % 3u].state;
     }
 
     // Monotonic non-zero consumer generation counter (changes only when `consumeLatest` swaps).
     uint32_t readSeq() const noexcept { return readSeq_; }
 
   private:
-    std::array<EngineControlState, 3> buffers_{};
-    uint32_t writeIdx_ = 0u;
-    alignas(64) uint32_t readIdx_ = 1u;
-    uint32_t readSeq_ = 1u;
-    std::atomic<uint32_t> c1Swapping_{0u};
+    struct alignas(kHwCacheLineBytes) ControlSlot {
+        EngineControlState state{};
+    };
+
+    std::array<ControlSlot, 3> buffers_{};
+
+    // Core 0 Exclusive Writer Line (never dirtied by Core 1)
     alignas(64) std::atomic<uint32_t> c0Swapping_{0u};
-    std::atomic<uint32_t> readySlot_{2u}; // Slot 2 initially parked in middle
-    std::atomic<uint32_t> hasNew_{0u};
+    std::atomic<uint32_t> c0ReadySlot_{2u};
+    std::atomic<uint32_t> c0PubSeq_{0u};
     std::atomic<uint32_t> c1Faulted_{0u};
+    uint32_t c0NextSeq_ = 0u;
+
+    // Core 1 Exclusive Writer Line (never dirtied by Core 0)
+    alignas(64) std::atomic<uint32_t> c1Swapping_{0u};
+    std::atomic<uint32_t> c1ReadSlot_{1u};
+    std::atomic<uint32_t> c1AckSeq_{0u};
+    uint32_t readSeq_ = 1u;
 };
 
 // Quantize per-voice scope tap in [-3.5, +3.5] to signed int16 (1/8192 ~= 0.0095 px step)
 inline int16_t quantizeVoiceScopeQ13(float sample) noexcept {
     const float scaled = clampf(sample * 8192.0f, -28672.0f, 28672.0f);
-    return static_cast<int16_t>(static_cast<int32_t>(scaled + ((scaled >= 0.0f) ? 0.5f : -0.5f)));
+    return static_cast<int16_t>(static_cast<int32_t>(scaled));
 }
 
 inline constexpr float unquantizeVoiceScopeQ13(int16_t q) noexcept {
@@ -313,18 +356,23 @@ static_assert(__is_trivially_copyable(ScopeFrame), "ScopeFrame must remain trivi
 class ScopeRingBuffer {
   public:
     bool push(const ScopeFrame& frame) noexcept {
+        hwCacheFlushInvalidateLine(&readPos_);
         const size_t w = writePos_.load(std::memory_order_relaxed);
         const size_t r = readPos_.load(std::memory_order_acquire);
         if ((w - r) >= kScopeRingCapacity) {
             return false; // Full: drop gracefully without blocking audio
         }
-        buffer_[w & kScopeRingMask] = frame;
+        const size_t idx = w & kScopeRingMask;
+        buffer_[idx] = frame;
+        hwCacheFlushInvalidateRange(&buffer_[idx], sizeof(ScopeFrame));
         writePos_.store(w + 1u, std::memory_order_release);
+        hwCacheFlushInvalidateLine(&writePos_);
         return true;
     }
 
     // Batch SPSC span writer: amortizes acquire/release memory barriers across 16-frame DSP spans.
     size_t beginPushSpan(size_t maxCount, size_t& outWritePos) const noexcept {
+        hwCacheFlushInvalidateLine(&readPos_);
         const size_t w = writePos_.load(std::memory_order_relaxed);
         const size_t r = readPos_.load(std::memory_order_acquire);
         outWritePos = w;
@@ -339,24 +387,35 @@ class ScopeRingBuffer {
     ScopeFrame& slotAt(size_t pos) noexcept { return buffer_[pos & kScopeRingMask]; }
 
     void commitPushSpan(size_t newWritePos) noexcept {
+        const size_t oldW = writePos_.load(std::memory_order_relaxed);
+        const size_t count = newWritePos - oldW;
+        if (count > 0u && count <= kScopeRingCapacity) {
+            syncSliceRange(oldW, count);
+        }
         writePos_.store(newWritePos, std::memory_order_release);
+        hwCacheFlushInvalidateLine(&writePos_);
     }
 
     size_t popBatch(ScopeFrame* dst, size_t maxCount) noexcept {
+        hwCacheFlushInvalidateLine(&writePos_);
         const size_t r = readPos_.load(std::memory_order_relaxed);
         const size_t w = writePos_.load(std::memory_order_acquire);
         const size_t avail = w - r;
         const size_t count = (avail < maxCount) ? avail : maxCount;
         if (count > 0u) {
+            syncSliceRange(r, count);
             for (size_t i = 0u; i < count; ++i) {
                 dst[i] = buffer_[(r + i) & kScopeRingMask];
             }
             readPos_.store(r + count, std::memory_order_release);
+            hwCacheFlushInvalidateLine(&readPos_);
         }
         return count;
     }
 
     size_t available() const noexcept {
+        hwCacheFlushInvalidateLine(&readPos_);
+        hwCacheFlushInvalidateLine(&writePos_);
         const size_t r = readPos_.load(std::memory_order_acquire);
         const size_t w = writePos_.load(std::memory_order_acquire);
         const size_t diff = w - r;
@@ -369,7 +428,17 @@ class ScopeRingBuffer {
     const void* readPosAddr() const noexcept { return &readPos_; }
 
   private:
-    std::array<ScopeFrame, kScopeRingCapacity> buffer_{};
+    void syncSliceRange(size_t startPos, size_t count) const noexcept {
+        const size_t firstIdx = startPos & kScopeRingMask;
+        const size_t firstRun =
+            (firstIdx + count <= kScopeRingCapacity) ? count : (kScopeRingCapacity - firstIdx);
+        hwCacheFlushInvalidateRange(&buffer_[firstIdx], firstRun * sizeof(ScopeFrame));
+        if (firstRun < count) {
+            hwCacheFlushInvalidateRange(&buffer_[0], (count - firstRun) * sizeof(ScopeFrame));
+        }
+    }
+
+    alignas(64) std::array<ScopeFrame, kScopeRingCapacity> buffer_{};
     alignas(64) std::atomic<size_t> writePos_{0u};
     alignas(64) std::atomic<size_t> readPos_{0u};
 };

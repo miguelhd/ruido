@@ -33,7 +33,7 @@ Ruido runs **4 identical mono voices** (`Osc 1-4`) mixed in stereo through a non
 - **Thermal Pitch Drift (`HOME -> DRIFT`, `0-100%`):** Per-oscillator `1/f` pitch drift (`0%` = `LOCKED`, `10%` default, `100%` = `~±120 cents`).
 - **Dual Sallen-Key Filter (`FX`, `2.0 Hz - 28,000 Hz`):** Series `12 dB/oct` High-Pass into `12 dB/oct` Low-Pass per voice:
   - **HP Cutoff (`KNOB 1`) & LP Cutoff (`KNOB 3`):** `2.0 Hz` to `28,000 Hz` (`2.0 Hz` HP and `28 kHz` LP sit flat at `0%` resonance).
-  - **HP Resonance (`KNOB 2`) & LP Resonance (`KNOB 4`):** `0-100%`. `0-60%` applies diode-limited resonance, and `60-100%` drives feedback clipping and self-oscillation across the frequency range.
+  - **HP Resonance (`KNOB 2`) & LP Resonance (`KNOB 4`):** `0-100%`. `0-50%` applies warm OTA resonance, `50-60%` enters singing sine self-oscillation, and `60-100%` drives feedback clipping, with natural analog high-frequency loop-gain roll-off above `8.2 kHz`.
 - **Level & Pre-Filter Overdrive (`EDIT -> LEVEL`, `0-100%`):** Two-range gain curve (`65%` default). `0-70%` sets clean post-filter level (`0%` mutes the voice unless a `LEVEL` LFO is active). `70-100%` applies `1.0x` to `4.5x` asymmetric pre-filter drive into the filter input.
 - **Stereo Pan (`EDIT -> PAN`):** Equal-power stereo pan from `L100` through `C` to `R100` (summed to `L == R` when `Output Routing` is `MONO`).
 
@@ -72,7 +72,7 @@ At idle, on `HOME (FREQUENCY)`, on `SEL`, on `GLOBAL CONFIG`, and during keybed 
   - **`LFO`:** Selects `LFO A1-B4` (`8` slots).
   - **`EDIT (PAN)`:** Toggles `STEREO` and `MONO` output routing.
   - **`SEL`:** Steps across `1/3 LIVE MIXER`, `2/3 CIRCUIT LAB`, and `3/3 RHYTHM LAB`.
-  - **`SAVE`:** Switches between `STORE SCENE` and `DELETE SCENE`.
+  - **`SAVE`:** Steps across `STORE SCENE`, `DELETE SCENE`, and `INIT SCENE`.
   - **`GLOBAL CONFIG`:** Moves the row highlight up and down.
 - **`PRESETS` (Encoder):** Continuous `360°` circular morph across `Scene 1-4` (`1 -> 2 -> 3 -> 4 -> 1`), lighting `Keys 9-12` with the live scene blend while turning. Empty slots are skipped, and manual knob edits crossfade onto the loop without jumps (`OCT-` for fine morphs, `OCT+` for whole-scene steps).
 - **`OCT-` / `OCT+` (Momentary Rate Modifiers):** Hold `OCT-` for `FINE` resolution or `OCT+` for `COARSE` range on any continuous encoder. Releasing the button returns to `STANDARD` rate.
@@ -80,10 +80,11 @@ At idle, on `HOME (FREQUENCY)`, on `SEL`, on `GLOBAL CONFIG`, and during keybed 
 ### 3.3 Right `2x6` Function Buttons
 - **`PLAY/STOP`:** Boots off; toggles audio output on and off with a short fade and pauses live visual and LED modulation while stopped (`Green` LED when off, `Red` LED when on).
 - **`HOME`:** Returns to the clean scope in one tap from any open page, modifier, or toast. From the clean scope, repeated taps cycle `FREQUENCY -> DUTY -> DRIFT -> Clean Scope` (`LED` is `100%` on all Home states and `15%` when another page is open).
-- **`SAVE`:** Two-step scene manager (`LED` is off on an unmodified scene, pulses slowly when live edits exist, and blinks while open):
-  - `1st tap` (`STORE SCENE`): Blinks all 4 scene keys (`Keys 9-12`); tap one to store.
-  - `2nd tap` or `SELECT` (`DELETE SCENE`): Blinks occupied scene keys at double speed; tap one to clear it to `EMPTY`.
-  - `3rd tap` or `HOME`: Exits without changes.
+- **`SAVE`:** Three-step scene manager (`LED` is off on an unmodified scene, pulses slowly when live edits exist, and blinks while open):
+  - `1st tap` (`STORE SCENE`): Blinks all 4 scene keys (`Keys 9-12`) slowly; tap one to store.
+  - `2nd tap` or `SELECT` (`DELETE SCENE`): Blinks occupied scene keys rapidly; tap one to clear it to `EMPTY`.
+  - `3rd tap` or `SELECT` (`INIT SCENE`): Pulses all 4 scene keys in a calm double-flash loop; tap one to set it to a neutral sound.
+  - `4th tap` or `HOME`: Exits without changes.
 - **`FX`:** Opens the **Dual Filter** page; repeated taps cycle `OSC 1 -> 2 -> 3 -> 4`.
 - **`SEL`:** Opens the **Keyboard Explorer**; repeated taps cycle `1/3 LIVE MIXER -> 2/3 CIRCUIT LAB -> 3/3 RHYTHM LAB`. Holding an active key while `SEL` is open shows its parameter name, live pressure bar, and a 1-line description.
 - **`EDIT`:** Opens the **Mixer** page; repeated taps toggle `LEVEL <-> PAN`.

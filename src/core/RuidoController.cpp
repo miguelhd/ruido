@@ -39,8 +39,11 @@ void RuidoController::reset() noexcept {
     latchedButton_ = ButtonId::Count;
     selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
     shiftBlinkPhaseQ8_ = 64u;
+    knobFocusMask_ = 0u;
+    knobTurnHoldQ8_.fill(0u);
 
     keyboard_.evaluate(state_, hud_);
+    syncFocusedColumnMask();
     EngineTelemetry zeroTel{};
     updateLeds(0.0f, zeroTel);
     publishState();
@@ -101,7 +104,7 @@ void RuidoController::applyKeyboardPerformanceChange() noexcept {
     keys_.anyPerfKeyHeld = keyboard_.anyKeyHeld() || keyboard_.isShiftHeld();
     if (keyboard_.isShiftHeld() && hud_.saveArmed) {
         hud_.saveArmed = false;
-        hud_.saveDeleteMode = false;
+        hud_.savePageMode = SavePageMode::Store;
         if (latchedHudMode_ == HudMode::SaveArmed) {
             setLatchedPage(HudMode::None, ButtonId::Count);
         }
@@ -141,8 +144,7 @@ void RuidoController::applyKeyboardPerformanceChange() noexcept {
         }
     }
     if (sHeld[0] || sHeld[1] || sHeld[2] || sHeld[3]) {
-        hud_.snapshotSavedToast = false;
-        hud_.snapshotDeletedToast = false;
+        hud_.snapshotToast = SnapshotToastKind::None;
         hud_.shiftFocus = ShiftFocus::Scene;
     }
     snapshots_.syncHud(hud_);
@@ -162,6 +164,7 @@ void RuidoController::applyKeyboardPerformanceChange() noexcept {
         hud_.shiftFocus = ShiftFocus::Idle;
     }
     syncModifierHud();
+    syncFocusedColumnMask();
     publishState();
 }
 
@@ -237,29 +240,33 @@ bool RuidoController::tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active
     const uint8_t slot = static_cast<uint8_t>(whiteKeyIndex - kSceneWhiteKeyBase);
     const uint8_t sBit = static_cast<uint8_t>(1u << slot);
     saveSwallowedWhiteMask_ |= wBit;
-    if (hud_.saveDeleteMode && !snapshots_.isSlotOccupied(slot)) {
+    const SavePageMode pageMode = hud_.savePageMode;
+    if (pageMode == SavePageMode::Delete && !snapshots_.isSlotOccupied(slot)) {
         // Unassigned feedback (CRT ripple + 120 ms 15% glint) on 0%-dark EMPTY slot in DELETE SCENE
         triggerUnassignedFeedback(phantomWhiteKeyChannel(whiteKeyIndex));
         return true;
     }
-    const bool deleting = hud_.saveDeleteMode;
     hud_.saveArmed = false;
-    hud_.saveDeleteMode = false;
+    hud_.savePageMode = SavePageMode::Store;
     setLatchedPage(HudMode::None, ButtonId::Count);
     hud_.snapshotToastSlot = slot;
-    if (deleting) {
+    if (pageMode == SavePageMode::Delete) {
         const bool deleted = snapshots_.deleteSlot(slot, state_);
-        hud_.snapshotSavedToast = false;
-        hud_.snapshotDeletedToast = deleted;
+        hud_.snapshotToast = deleted ? SnapshotToastKind::Deleted : SnapshotToastKind::None;
         if (deleted) {
             savedSlotMask_ |= sBit;
             settingsDirty_ = true;
             livePatchDirty_ = true;
         }
+    } else if (pageMode == SavePageMode::Init) {
+        snapshots_.initSlot(slot, state_);
+        hud_.snapshotToast = SnapshotToastKind::Initialized;
+        savedSlotMask_ |= sBit;
+        settingsDirty_ = true;
+        livePatchDirty_ = true;
     } else {
         snapshots_.saveSlot(slot, state_);
-        hud_.snapshotSavedToast = true;
-        hud_.snapshotDeletedToast = false;
+        hud_.snapshotToast = SnapshotToastKind::Saved;
         savedSlotMask_ |= sBit;
         settingsDirty_ = true;
         livePatchDirty_ = true;
@@ -362,6 +369,14 @@ void RuidoController::onMidiRealtime(uint8_t statusByte, float msgTimestampSec) 
 
 void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexcept {
     const float dt = clampf(dtSec, 0.0f, 0.25f);
+    if (dt > 0.0f) {
+        constexpr float kMultiKnobChordWindowSec = 0.350f;
+        const uint32_t decQ8 = static_cast<uint32_t>(
+            clampf(dt * (1.0f / kMultiKnobChordWindowSec), 0.0f, 1.0f) * 255.0f + 0.99f);
+        for (uint8_t& holdQ8 : knobTurnHoldQ8_) {
+            holdQ8 = (holdQ8 > decQ8) ? static_cast<uint8_t>(holdQ8 - decQ8) : 0u;
+        }
+    }
     (void)midiClock_.step(dt, hud_.config.clockSync);
     if (syncClockState()) {
         publishState();
@@ -390,7 +405,7 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
     bool dissolvedToIdle = false;
     env_.step(dt, momentaryPinned, switchLatched, toastExpired, dissolvedToIdle, hud_.opacity);
     if (toastExpired) {
-        hud_.focusedKnob = kNoFocusedKnob;
+        clearKnobFocus();
         if (keyboard_.anyKeyHeld()) {
             restoreOrDissolveHud();
         } else {
@@ -401,8 +416,9 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
         dismissedByHome_ = false;
         hud_.mode = HudMode::None;
         hud_.knobBank = baseKnobBank();
-        hud_.focusedKnob = kNoFocusedKnob;
+        clearKnobFocus();
     }
+    syncFocusedColumnMask();
 
     updateLeds(dt, telemetry);
 }

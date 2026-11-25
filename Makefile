@@ -39,10 +39,12 @@ BUILD_DIR := build
 
 DSP_SRCS := \
 	src/dsp/SchmittOscillatorBank.cpp \
+	src/dsp/SchmittOscillatorSpan.cpp \
 	src/dsp/VoiceLfoBank.cpp \
 	src/dsp/SallenKeyFilter.cpp \
 	src/dsp/HalfBandDecimator.cpp \
-	src/dsp/DroneEngine.cpp
+	src/dsp/DroneEngine.cpp \
+	src/dsp/DroneEngineOutput.cpp
 
 UI_SRCS := \
 	src/core/KeyboardLiveMixer.cpp \

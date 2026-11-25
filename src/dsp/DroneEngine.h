@@ -61,7 +61,44 @@ class DroneEngineCore {
         float panR = 0.70710678f;
     };
 
+    struct InFlightFilterSpan {
+        std::array<float, kNumOscillators> startGainL{};
+        std::array<float, kNumOscillators> endGainL{};
+        std::array<float, kNumOscillators> startGainR{};
+        std::array<float, kNumOscillators> endGainR{};
+        std::array<float, kNumOscillators> startScope{};
+        std::array<float, kNumOscillators> endScope{};
+        std::array<float, kNumOscillators> vcaGates{};
+        std::array<float, kNumOscillators> crushDepths{};
+        std::array<uint8_t, kMaxFilterSpanFrames> rising{};
+        size_t bufIdx = 0u;
+        size_t baseFrame = 0u;
+        size_t chunk = 0u;
+        float invChunk = 1.0f;
+        float startRun = 0.0f;
+        float endRun = 0.0f;
+        float startTrim = 0.0f;
+        float endTrim = 0.0f;
+        bool chunkExactMono = false;
+        bool anyCrush = false;
+        bool coProcHandled = false;
+        bool valid = false;
+    };
+
     void updateTargetsFromState(const EngineControlState& state, bool snapImmediate) noexcept;
+    void finishInFlightFilterStage(InFlightFilterSpan& span) noexcept;
+    void launchSpanFilters(size_t bufIdx, size_t chunk,
+                           const std::array<float, kNumOscillators>& startGainL,
+                           const std::array<float, kNumOscillators>& endGainL,
+                           const std::array<float, kNumOscillators>& startGainR,
+                           const std::array<float, kNumOscillators>& endGainR,
+                           const std::array<float, kNumOscillators>& startScope,
+                           const std::array<float, kNumOscillators>& endScope,
+                           bool& outCoProcHandled) noexcept;
+    void mixAndFlushCompletedSpan(const InFlightFilterSpan& span, EngineSharedBuses& buses,
+                                  float* outLeft, float* outRight,
+                                  std::array<float, kNumOscillators>& blockVoicePeak,
+                                  float& blockPeakL, float& blockPeakR) noexcept;
 
     StereoHalfBandDecimator4x decimator_{};
     float baseSampleRate_ = kBaseSampleRate;
@@ -72,8 +109,11 @@ class DroneEngineCore {
 
     SchmittOscillatorBank oscBank_{};
     VoiceLfoBank lfoBank_{};
-    std::array<Ms20DualFilter, kNumOscillators> filters_{};
+    std::array<VoiceLfoFrame, kNumVoiceLfos> lfoFrames_{};
+    alignas(kHwCacheLineBytes) std::array<Ms20DualFilter, kNumOscillators> filters_{};
     std::array<Ms20DualFilter::Coeffs, kNumOscillators> filterCoeffs_{};
+    alignas(kHwCacheLineBytes)
+        std::array<std::array<Ms20DualFilter::Coeffs, kNumOscillators>, 2> spanCoeffs_{};
     VoiceFilterCoProcessor* coProc_ = nullptr;
 
     std::array<VoiceSmoothers, kNumOscillators> voiceSmoothers_{};
@@ -104,6 +144,7 @@ class DroneEngineCore {
     const EngineControlState* lastControlPtr_ = nullptr;
     uint32_t lastControlSeq_ = 0u;
     float prevStutterEdgeSec_ = -1.0f;
+    uint8_t silentFilterMask_ = 0u;
     bool stasisFreeze_ = false;
 
     // 36-frame delay aligning 4-voice rising edges & scope taps with PolyBLEP + FIR delay
@@ -112,11 +153,12 @@ class DroneEngineCore {
     std::array<std::array<int16_t, kNumOscillators>, kScopeAlignDelaySlots> voiceScopeDelay_{};
     uint32_t voiceScopeDelayWrite_ = 0u;
 
-    // Resident 16-frame 4x-oversampled voice & stereo span scratch (keeps 1,536 B off Core 1's
-    // 7.25 KiB _c1_ustack and guarantees VoiceFilterCoProcessor never references a stack frame).
-    alignas(16) VoiceFilterCoProcessor::VoiceSpanBuffer spanSub_{};
-    alignas(16) std::array<std::array<StereoFrame, kOversampleFactor>,
-                           kMaxFilterSpanFrames> osStereoSpan_{};
+    // Ping-pong 16-frame 4x-oversampled voice spans so Core 0 filters `spanSub_[prev]` in parallel
+    // while Core 1 mixes/decimates `prev-1` AND synthesizes oscillators into `spanSub_[cur]`!
+    alignas(kHwCacheLineBytes) std::array<VoiceFilterCoProcessor::VoiceSpanBuffer, 2> spanSub_{};
+    alignas(kHwCacheLineBytes) std::array<std::array<StereoFrame, kOversampleFactor>,
+                                          kMaxFilterSpanFrames> osStereoSpan_{};
+    InFlightFilterSpan inFlightSpan_{};
 };
 
 // Complete Core 1 portable synthesis & filtering engine composing `EngineSharedBuses` +

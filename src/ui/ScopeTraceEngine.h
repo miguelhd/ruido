@@ -46,7 +46,8 @@ class ScopeTraceEngine {
         return (!scopeFrozen) && (timeSinceScopePushSec_ > 0.065f);
     }
 
-    void ingestScopeRing(ScopeRingBuffer& ring, bool scopeFrozen) noexcept;
+    void ingestScopeRing(ScopeRingBuffer& ring, bool scopeFrozen,
+                         void (*coProcYield)() noexcept = nullptr) noexcept;
     void pushScopeSamples(const ScopeFrame* frames, size_t count, bool scopeFrozen) noexcept;
 
     void buildWaveformTrace(float dtSec, const EngineControlState& control, bool scopeFrozen,
@@ -81,12 +82,13 @@ class ScopeTraceEngine {
 
     // Rasterize <= 8-row strip chunk of 14 caustic strands + bilinear 60x60 bloom + tonemap.
     void renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t bgKeepQ8, uint16_t* linBuf,
-                               uint8_t* lumBuf) const noexcept;
+                               uint8_t* lumBuf,
+                               void (*coProcYield)() noexcept = nullptr) const noexcept;
 
     const OverdriveHairTable& overdriveHair() const noexcept { return overdriveHair_; }
 
   private:
-    void rebuildTilesAndBloom() noexcept;
+    void rebuildTilesAndBloom(void (*coProcYield)() noexcept = nullptr) noexcept;
 
     // 4096-sample rolling audio + 4-voice scope history (~93 ms @ 44.1 kHz, locks down to 20 Hz)
     std::array<CompactScopeSample, kHistorySize> history_{};

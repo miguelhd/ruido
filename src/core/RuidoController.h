@@ -118,6 +118,9 @@ class RuidoController {
     void applyKeyboardPerformanceChange() noexcept;
     void syncModifierHud() noexcept;
     void restoreOrDissolveHud() noexcept;
+    void clearKnobFocus() noexcept;
+    void recordKnobFocus(uint8_t knobIndex) noexcept;
+    void syncFocusedColumnMask() noexcept;
     void triggerHud(HudMode mode, uint8_t voiceIndex = 0u,
                     uint8_t knobIndex = kNoFocusedKnob) noexcept;
     void latchSwitchHud(HudMode mode, ButtonId button = ButtonId::Count) noexcept;
@@ -149,6 +152,8 @@ class RuidoController {
     int8_t targetTickAccum_ = 0;
     int8_t configTickAccum_ = 0;
     uint8_t shiftBlinkPhaseQ8_ = 64u;
+    uint8_t knobFocusMask_ = 0u;
+    std::array<uint8_t, kNumOscillators> knobTurnHoldQ8_{};
     HudMode latchedHudMode_ = HudMode::None;
     ButtonId latchedButton_ = ButtonId::Count;
     float masterPot_ = 0.85f;

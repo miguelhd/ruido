@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/CacheSync.h"
 #include "core/Config.h"
 
 #include <array>
@@ -16,9 +17,9 @@ namespace ruido {
 //    Wilson current-mirror rail asymmetry (warm 2nd/3rd harmonics & slew rounding even at 0% RES)
 //  - C^4-deadband / C^2-rail 1S1588 anti-parallel silicon PN-junction feedback limiter
 //  - Exact coupled analytical Newton-Raphson ZDF solver with proven global uniqueness (df > 0.12)
-class Ms20DualFilter {
+class alignas(kHwCacheLineBytes) Ms20DualFilter {
   public:
-    struct Coeffs {
+    struct alignas(kHwCacheLineBytes) Coeffs {
         float gHp = 0.0f;
         float kHp = 0.58578644f;
         float otaScaleHp = 20.0f;

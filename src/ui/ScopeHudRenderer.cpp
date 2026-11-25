@@ -63,8 +63,9 @@ void ScopeHudRenderer::reset() noexcept {
     hudGaugesPrimed_ = false;
 }
 
-void ScopeHudRenderer::ingestScopeRing(ScopeRingBuffer& ring) noexcept {
-    traceEngine_.ingestScopeRing(ring, frameHud_.scopeFrozen);
+void ScopeHudRenderer::ingestScopeRing(ScopeRingBuffer& ring,
+                                       void (*coProcYield)() noexcept) noexcept {
+    traceEngine_.ingestScopeRing(ring, frameHud_.scopeFrozen, coProcYield);
 }
 
 void ScopeHudRenderer::pushScopeSamples(const ScopeFrame* frames, size_t count) noexcept {
@@ -367,6 +368,9 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         }
         prepareHudChrome(preparedChrome_, frameControl_, frameHud_, frameLfoOutput_,
                          frameStutterGateMask_);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
 
     globalViews_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_, frameVoiceDrift_,
@@ -376,6 +380,9 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     sceneView_.update(dtClamped, hud);
     ampGraph_.update(dtClamped, control, hud, frameLfoOutput_, frameVoiceDrift_,
                      frameStutterGateMask_);
+    if (coProcYield != nullptr) {
+        coProcYield();
+    }
     const bool extraCenterView = globalViews_.anyActiveTarget(hud) ||
                                  HudAmpGraph::isLevelViewActive(hud) || keybedView_.isActive(hud) ||
                                  keybedView_.isShiftActive(hud) || sceneView_.isSaveActive(hud) ||
@@ -439,7 +446,8 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight, uint16
         if (scopeVis <= 0.001f) {
             bootIntro_.compositeStripChunk(y0, chunkH, lumBuf.data(), false);
         } else {
-            traceEngine_.renderBackgroundChunk(y0, chunkH, bgKeepQ8, linBuf.data(), lumBuf.data());
+            traceEngine_.renderBackgroundChunk(y0, chunkH, bgKeepQ8, linBuf.data(), lumBuf.data(),
+                                               coProcYield);
 
             if (hudAlpha8 < 255u && y0 < 18 && y1 > 4) {
                 const uint8_t idleAlpha8 =
@@ -458,7 +466,7 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight, uint16
             coProcYield();
         }
         if (hudAlpha8 > 0u && frameHud_.mode != HudMode::None) {
-            compositeHudStrip(curY, chunkH, lumBuf.data(), linBuf.data(), hudAlpha8);
+            compositeHudStrip(curY, chunkH, lumBuf.data(), linBuf.data(), hudAlpha8, coProcYield);
             if (coProcYield != nullptr) {
                 coProcYield();
             }
@@ -497,6 +505,9 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight, uint16
                     }
                 }
             }
+            if (coProcYield != nullptr && (r & 1u) != 0u) {
+                coProcYield();
+            }
         }
 
         curY = static_cast<uint16_t>(curY + chunkH);
@@ -504,7 +515,8 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight, uint16
 }
 
 void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, uint8_t* lumBuf,
-                                         uint16_t* linScratch, uint8_t hudAlpha8) const noexcept {
+                                         uint16_t* linScratch, uint8_t hudAlpha8,
+                                         void (*coProcYield)() noexcept) const noexcept {
     const int y0 = static_cast<int>(yStart);
     const int y1 = y0 + static_cast<int>(stripHeight);
     const MonoStripCanvas cv{lumBuf, y0, y1, hudAlpha8};
@@ -557,32 +569,56 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
     if (lfoAlpha8 > 0u) {
         graphs_.compositeLfoStrip(y0, y1, stripHeight, lumBuf, linScratch, effLfoAlpha01, lfoAlpha8,
                                   frameControl_, frameHud_, frameLfoPhase_);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
     if (filterAlpha8 > 0u) {
         graphs_.compositeFilterStrip(y0, y1, stripHeight, lumBuf, linScratch, effFilterAlpha01,
                                      filterAlpha8);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
     if (effEditGraphAlpha01 > 0.0f) {
         ampGraph_.compositeStrip(y0, y1, stripHeight, lumBuf, linScratch, hudAlpha01, frameHud_,
                                  traceEngine_.overdriveHair());
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
     if (panAlpha8 > 0u) {
         globalViews_.compositePanStageStrip(y0, y1, stripHeight, lumBuf, linScratch, effPanAlpha01,
                                             panAlpha8, frameHud_);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
     if (couplingAlpha8 > 0u) {
         globalViews_.compositeRailCouplingStrip(y0, y1, stripHeight, lumBuf, linScratch,
                                                 effCouplingAlpha01, couplingAlpha8);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
     if (cfgAlpha8 > 0u) {
         globalViews_.compositeGlobalConfigStrip(y0, y1, lumBuf, cfgAlpha8, frameControl_,
                                                 frameHud_);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
     if (keybedAlpha8 > 0u) {
         keybedView_.compositeStrip(y0, y1, lumBuf, keybedAlpha8, frameHud_);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
     if (shiftAlpha8 > 0u) {
         keybedView_.compositeShiftStrip(y0, y1, lumBuf, shiftAlpha8, frameControl_, frameHud_);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
     if (sceneView_.isSaveActive(frameHud_)) {
         if (presetSceneAlpha8 > 0u) {
@@ -598,6 +634,9 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
         if (presetSceneAlpha8 > 0u) {
             sceneView_.compositePresetSceneStrip(y0, y1, lumBuf, presetSceneAlpha8, frameHud_);
         }
+    }
+    if (coProcYield != nullptr) {
+        coProcYield();
     }
     if (y0 < 26) {
         compositeTopHeaderStrip(cv, preparedHeader_, frameHud_, headerBarSmooth_, fineOverlayPhase_,

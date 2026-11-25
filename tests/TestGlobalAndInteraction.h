@@ -3359,7 +3359,7 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
 
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
-    RTEST_CHECK(ctrl.hud().saveArmed && !ctrl.hud().saveDeleteMode);
+    RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().savePageMode == ruido::SavePageMode::Store);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::None);
     {
         char lm[24]{}, ls[16]{}, rt[32]{};
@@ -3417,7 +3417,7 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(!ctrl.hud().saveArmed);
     RTEST_CHECK(ctrl.hud().snapshotSlot == 1u);
     RTEST_CHECK(!ctrl.hud().snapshotDirty);
-    RTEST_CHECK(ctrl.hud().snapshotSavedToast);
+    RTEST_CHECK(ctrl.hud().snapshotToast == ruido::SnapshotToastKind::Saved);
     RTEST_CHECK(!ctrl.hud().snapshotGliding);
     RTEST_CHECK(ctrl.hud().knobBank == ruido::KnobBankMode::None);
     {
@@ -3733,15 +3733,16 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
                     nearF(ctrl.state().voices[1].frequencyHz, 131.35f, 0.25f));
     }
 
-    // (g) Self-discoverable 2-step SAVE (`1st press = STORE SCENE 1/2` -> `2nd press = DELETE SCENE
-    //     2/2`), safe no-op on EMPTY in Delete mode, skipping EMPTY on circular loop, & NVS reload:
+    // (g) Self-discoverable 3-step SAVE (`1st = STORE` -> `2nd = DELETE` -> `3rd = INIT` -> `4th =
+    //     Exit`), calm 1.60 s double-pulse loop & unmodulated slot init in INIT SCENE, safe no-op
+    //     on EMPTY in Delete mode, skipping EMPTY on circular loop, & NVS reload:
     ctrl.reset();
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
-    RTEST_CHECK(ctrl.hud().saveArmed && !ctrl.hud().saveDeleteMode);
+    RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().savePageMode == ruido::SavePageMode::Store);
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
-    RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().saveDeleteMode);
+    RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().savePageMode == ruido::SavePageMode::Delete);
     {
         char lm[24]{}, ls[16]{}, rt[32]{};
         bool sb = false;
@@ -3755,8 +3756,8 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     // Delete SCENE 2 (white key 9) -> slot 1 becomes EMPTY with valid CRC-32
     ctrl.onWhiteKeyGate(9u, true);
     ctrl.onWhiteKeyGate(9u, false);
-    RTEST_CHECK(!ctrl.hud().saveArmed && !ctrl.hud().saveDeleteMode);
-    RTEST_CHECK(ctrl.hud().snapshotDeletedToast);
+    RTEST_CHECK(!ctrl.hud().saveArmed);
+    RTEST_CHECK(ctrl.hud().snapshotToast == ruido::SnapshotToastKind::Deleted);
     RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == 0x0Du); // Scenes 1, 3, 4 occupied
     RTEST_CHECK(ruido::verifyPatchSnapshotCrc(ctrl.snapshots().slotBinary(1u)));
     RTEST_CHECK(!ruido::isPatchSnapshotOccupied(ctrl.snapshots().slotBinary(1u)));
@@ -3781,21 +3782,23 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(g6Px(48u, 54u) == 0u);
     checkBottomKnobZoneClear();
 
-    // Verify 1/2 flashes ALL 4 saveable keys (Empty & Stored), while 2/2 flashes ONLY occupied
-    // deletable keys and keeps EMPTY Key 10 strictly 0% dark & safe no-op!
+    // Verify 1/3 STORE flashes ALL 4 keys at 2.50 Hz, 2/3 DELETE flashes ONLY occupied keys at
+    // 5.00 Hz while keeping EMPTY Key 10 strictly 0% dark & safe no-op, and 3/3 INIT pulses ALL 4
+    // keys (both EMPTY & STORED) in lockstep with SAVE LED over a calm 1.60 s double-pulse loop!
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
     ctrl.tick(0.050f, tel);
     const float storeBothPulse = ctrl.leds().whiteKeyLeds[9u];
     RTEST_CHECK(storeBothPulse >= 0.25f);
-    RTEST_CHECK(
-        nearF(ctrl.leds().whiteKeyLeds[10u], storeBothPulse)); // Stored also flashes in 1/2!
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[10u], storeBothPulse));
+
+    // Advance to 2/3 DELETE SCENE:
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
     ctrl.tick(0.050f, tel);
-    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[9u], 0.0f)); // Empty is 0% dark in 2/2 DELETE
+    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[9u], 0.0f)); // Empty is 0% dark in 2/3 DELETE
     const float delPulseT0 = ctrl.leds().whiteKeyLeds[10u];
-    RTEST_CHECK(delPulseT0 >= 0.25f); // Occupied flashes at 2x (5.00 Hz) in 2/2 DELETE
+    RTEST_CHECK(delPulseT0 >= 0.25f); // Occupied flashes at 2x (5.00 Hz) in 2/3 DELETE
     ctrl.tick(0.100f, tel);           // 100 ms = half-cycle at 5.00 Hz (2x speed)!
     const float delPulseHalf = ctrl.leds().whiteKeyLeds[10u];
     RTEST_CHECK(std::fabs(delPulseHalf - delPulseT0) > 0.25f);
@@ -3803,8 +3806,63 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[10u], delPulseT0, 1.0e-3f));
     ctrl.onWhiteKeyGate(9u, true); // Tapping EMPTY in Delete = safe no-op
     ctrl.onWhiteKeyGate(9u, false);
-    RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().saveDeleteMode);
-    ctrl.onButtonEvent(ruido::ButtonId::Save, true); // 3rd press exits SAVE
+    RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().savePageMode == ruido::SavePageMode::Delete);
+
+    // Advance to 3/3 INIT SCENE -> verify header "INIT" and calm 1.60 s (0.625 Hz) double-pulse
+    // loop (2 gentle swells + >= 800 ms rest floor) on SAVE LED and all 4 Scene keys (incl. 9u):
+    ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+    RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().savePageMode == ruido::SavePageMode::Init);
+    {
+        char lm[24]{}, ls[16]{}, rt[32]{};
+        bool sb = false;
+        float bn = 0.0f;
+        ruido::formatSnapshotHeader(ctrl.hud(), lm, sizeof(lm), ls, sizeof(ls), rt, sizeof(rt), sb,
+                                    bn);
+        RTEST_CHECK(std::strcmp(lm, "SCENE") == 0);
+        RTEST_CHECK(std::strcmp(ls, "") == 0);
+        RTEST_CHECK(std::strcmp(rt, "INIT") == 0 && !sb);
+
+        ctrl.tick(0.010f, tel);
+        const float initT0 = ctrl.leds().whiteKeyLeds[9u];
+        int peakTransitions = 0;
+        int restFloorSamples = 0;
+        bool wasHigh = (initT0 >= 0.65f);
+        for (int step = 0; step < 160; ++step) {
+            ctrl.tick(0.010f, tel); // 160 * 10 ms = 1.60 s exact double-pulse period
+            const float keyEmpty = ctrl.leds().whiteKeyLeds[9u];
+            const float keyOcc = ctrl.leds().whiteKeyLeds[10u];
+            const float saveBtn =
+                ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::Save)];
+            RTEST_CHECK(nearF(keyEmpty, keyOcc, 1.0e-4f));
+            RTEST_CHECK(keyEmpty >= 0.20f - 1.0e-3f && keyEmpty <= 0.95f + 1.0e-3f);
+            RTEST_CHECK(saveBtn >= 0.20f - 1.0e-3f && saveBtn <= 1.00f + 1.0e-3f);
+            for (size_t b = 0u; b < ruido::kNumBlackKeys; ++b) {
+                RTEST_CHECK(nearF(ctrl.leds().blackKeyLeds[b], 0.0f));
+            }
+            for (size_t w = 0u; w < ruido::kNumWhiteKeys; ++w) {
+                if (w < ruido::kSceneWhiteKeyBase || w >= ruido::kMuteWhiteKeyBase) {
+                    RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[w], 0.0f));
+                }
+            }
+            const bool nowHigh = (keyEmpty >= 0.65f);
+            if (nowHigh && !wasHigh) {
+                ++peakTransitions;
+            }
+            wasHigh = nowHigh;
+            if (keyEmpty <= 0.21f) {
+                ++restFloorSamples;
+            }
+        }
+        RTEST_CHECK(peakTransitions == 2);
+        RTEST_CHECK(restFloorSamples >= 80);
+        RTEST_CHECK(nearF(ctrl.leds().whiteKeyLeds[9u], initT0, 0.02f));
+        for (int f = 0; f < 6; ++f) {
+            renderer.prepareFrame(0.020f, quietSt, ctrl.hud(), tel);
+        }
+        checkStripAndMono(750u);
+    }
+    ctrl.onButtonEvent(ruido::ButtonId::Save, true); // 4th press exits SAVE
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
     RTEST_CHECK(!ctrl.hud().saveArmed);
 
@@ -3837,7 +3895,7 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     ctrl.tick(0.016f, tel);
 
     // Deleting the currently active scene (SCENE 3) leaves live panel audio uninterrupted, and
-    // deleting remaining scenes (1 & 4) reaches "SCENES · ALL EMPTY" cleanly:
+    // deleting remaining scenes (1 & 4) reaches "SCENE · ALL EMPTY" cleanly:
     for (uint8_t s : {2u, 0u, 3u}) {
         ctrl.onButtonEvent(ruido::ButtonId::Save, true);
         ctrl.onButtonEvent(ruido::ButtonId::Save, false);
@@ -3858,6 +3916,56 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
                     std::strcmp(rt, "ALL EMPTY") == 0 && !sb);
     }
 
+    // Initializing EMPTY SCENE 4 via SAVE -> INIT SCENE populates a clean unmodulated patch with
+    // "SCENE 4 · INITIALIZED", then deleting it again returns to 0x00u before re-saving SCENE 2:
+    (void)ctrl.consumeSavedSlotMask();
+    (void)ctrl.consumeSettingsDirty();
+    (void)ctrl.consumeLivePatchDirty();
+    ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 8); // Store -> Delete -> Init
+    RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().savePageMode == ruido::SavePageMode::Init);
+    ctrl.onWhiteKeyGate(11u, true); // Initialize SCENE 4 (slot 3)
+    ctrl.onWhiteKeyGate(11u, false);
+    RTEST_CHECK(!ctrl.hud().saveArmed);
+    RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == (1u << 3u));
+    RTEST_CHECK(ctrl.hud().snapshotSlot == 3u);
+    RTEST_CHECK(!ctrl.hud().snapshotDirty);
+    RTEST_CHECK(ctrl.hud().snapshotToast == ruido::SnapshotToastKind::Initialized);
+    RTEST_CHECK((ctrl.consumeSavedSlotMask() & (1u << 3u)) != 0u);
+    RTEST_CHECK(ctrl.consumeSettingsDirty());
+    RTEST_CHECK(ctrl.consumeLivePatchDirty());
+    {
+        char lm[24]{}, ls[16]{}, rt[32]{};
+        bool sb = false;
+        float bn = 0.0f;
+        ruido::formatSnapshotHeader(ctrl.hud(), lm, sizeof(lm), ls, sizeof(ls), rt, sizeof(rt), sb,
+                                    bn);
+        RTEST_CHECK(std::strcmp(lm, "SCENE") == 0 && std::strcmp(ls, " 4") == 0 &&
+                    std::strcmp(rt, "INITIALIZED") == 0 && !sb);
+    }
+    RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, 55.0f, 0.05f));
+    RTEST_CHECK(nearF(ctrl.state().voices[1].frequencyHz, 82.41f, 0.08f));
+    RTEST_CHECK(nearF(ctrl.state().voices[2].frequencyHz, 110.15f, 0.08f));
+    RTEST_CHECK(nearF(ctrl.state().voices[3].frequencyHz, 164.81f, 0.12f));
+    for (size_t v = 0u; v < 4u; ++v) {
+        RTEST_CHECK(nearF(ctrl.state().voices[v].pulseWidth, 0.50f, 1.0e-3f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].hpCutoffHz, ruido::kFilterCutoffMinHz, 0.05f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].lpCutoffHz, ruido::kFilterCutoffMaxHz, 10.0f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].hpResonance, 0.0f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].lpResonance, 0.0f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].lfoDepth, 0.0f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].lfoBDepth, 0.0f));
+        RTEST_CHECK(nearF(ctrl.state().voices[v].amplitude, 0.65f, 1.0e-3f));
+    }
+    // Delete SCENE 4 again so SCENE 2 is the sole occupied scene for the NVS reload check below:
+    ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+    ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+    ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
+    ctrl.onWhiteKeyGate(11u, true);
+    ctrl.onWhiteKeyGate(11u, false);
+    const float initVoice0Hz = ctrl.state().voices[0].frequencyHz;
+
     // Re-saving into SCENE 2 restores occupation, and NVS boot reload preserves deleted slots:
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
@@ -3877,7 +3985,7 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
     RTEST_CHECK(ctrl.loadSettings(nvsBlob));
     RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == (1u << 1u));
     RTEST_CHECK(ctrl.hud().snapshotSlot == 1u);
-    RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, scene3Hz, 0.05f));
+    RTEST_CHECK(nearF(ctrl.state().voices[0].frequencyHz, initVoice0Hz, 0.05f));
 
     // Post-audit regressions: Home Base weight reset on manual edit, smooth Snap-Back takeover,
     // 3rd-press SAVE cancel under momentary holds, PLAY/STOP preserving saveArmed, 2.50 Hz pulse
@@ -3982,7 +4090,7 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         for (int i = 0; i < 30; ++i)
             ctrl.tick(0.02f, tel);
 
-        // 3rd-press SAVE cancel while holding OctMinus must exit HudMode::SaveArmed immediately.
+        // 4th-press SAVE cancel while holding OctMinus must exit HudMode::SaveArmed immediately.
         tapSceneKey(0u);
         for (int i = 0; i < 40; ++i)
             ctrl.tick(0.02f, tel);
@@ -3991,11 +4099,15 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         ctrl.onButtonEvent(ruido::ButtonId::Save, true);
         ctrl.onButtonEvent(ruido::ButtonId::Save, false);
         ctrl.tick(0.02f, tel);
-        RTEST_CHECK(ctrl.hud().saveArmed && !ctrl.hud().saveDeleteMode);
+        RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().savePageMode == ruido::SavePageMode::Store);
         ctrl.onButtonEvent(ruido::ButtonId::Save, true);
         ctrl.onButtonEvent(ruido::ButtonId::Save, false);
         ctrl.tick(0.02f, tel);
-        RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().saveDeleteMode);
+        RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().savePageMode == ruido::SavePageMode::Delete);
+        ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+        ctrl.onButtonEvent(ruido::ButtonId::Save, false);
+        ctrl.tick(0.02f, tel);
+        RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().savePageMode == ruido::SavePageMode::Init);
         ctrl.onButtonEvent(ruido::ButtonId::Save, true);
         ctrl.onButtonEvent(ruido::ButtonId::Save, false);
         ctrl.tick(0.02f, tel);
@@ -4035,7 +4147,9 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         RTEST_CHECK(
             std::abs(static_cast<int>(ctrl.hud().savePulseQ8) - static_cast<int>(q8AtStart)) <= 4);
 
-        // Cancel SAVE cleanly.
+        // Cancel SAVE cleanly (Store -> Init -> Delete -> Exit).
+        ctrl.onButtonEvent(ruido::ButtonId::Save, true);
+        ctrl.onButtonEvent(ruido::ButtonId::Save, false);
         ctrl.onButtonEvent(ruido::ButtonId::Save, true);
         ctrl.onButtonEvent(ruido::ButtonId::Save, false);
         ctrl.onButtonEvent(ruido::ButtonId::Save, true);
@@ -4125,7 +4239,7 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         ctrl.onButtonEvent(ruido::ButtonId::Save, true);
         ctrl.onButtonEvent(ruido::ButtonId::Save, false);
         ctrl.tick(0.02f, tel);
-        RTEST_CHECK(ctrl.hud().saveDeleteMode);
+        RTEST_CHECK(ctrl.hud().savePageMode == ruido::SavePageMode::Delete);
         for (int f = 0; f < 4; ++f) {
             renderer.prepareFrame(0.030f, quietSt, ctrl.hud(), tel);
         }
@@ -5086,6 +5200,50 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
         }
         RTEST_CHECK(op1CrestLum > op1TroughLum * 2u);
         hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
+
+        // (f) Latched MUTE (Keys 13-16) and SOLO (SHIFT + Keys 13-16, including pre-Solo mix
+        // memory) persist across keyboard switches (SEL, SHIFT + OP1..OP3, SHIFT + SELECT):
+        hwCtrl.reset();
+        hwCtrl.onButtonEvent(ruido::ButtonId::GloRight, true);
+        hwCtrl.onButtonEvent(ruido::ButtonId::GloRight, false);
+        hwCtrl.onEncoderDelta(ruido::EncoderId::Select, 8);    // Row 2: Mute Mode
+        hwCtrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // MOMENTARY -> LATCHING
+        hwCtrl.onButtonEvent(ruido::ButtonId::GloRight, true);
+        hwCtrl.onButtonEvent(ruido::ButtonId::GloRight, false);
+        RTEST_CHECK(hwCtrl.hud().config.muteMode == ruido::KeySwitchMode::Latching);
+
+        // 1. Latch MUTE on Osc 1 (White Key 12), then switch LIVE MIXER -> CIRCUIT LAB via SEL:
+        hwCtrl.onWhiteKeyGate(ruido::kMuteWhiteKeyBase + 0u, true);
+        hwCtrl.onWhiteKeyGate(ruido::kMuteWhiteKeyBase + 0u, false);
+        RTEST_CHECK(hwCtrl.state().keyMod.muteMask == 0x01u);
+        hwCtrl.onButtonEvent(ruido::ButtonId::Sel, true);
+        hwCtrl.onButtonEvent(ruido::ButtonId::Sel, false);
+        hwCtrl.onButtonEvent(ruido::ButtonId::Sel, true);
+        hwCtrl.onButtonEvent(ruido::ButtonId::Sel, false);
+        RTEST_CHECK(hwCtrl.hud().keyboardModel == ruido::KeyboardModel::CircuitLab);
+        RTEST_CHECK(hwCtrl.state().keyMod.muteMask == 0x01u);
+
+        // 2. Latch SOLO on Osc 3 (SHIFT + White Key 14 -> muteMask = 0x0B, saving preSolo = 0x01),
+        //    then switch CIRCUIT LAB -> RHYTHM LAB via SHIFT + OP3 and -> LIVE MIXER via SHIFT +
+        //    SELECT:
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, true);
+        hwCtrl.onWhiteKeyGate(ruido::kMuteWhiteKeyBase + 2u, true);
+        hwCtrl.onWhiteKeyGate(ruido::kMuteWhiteKeyBase + 2u, false);
+        RTEST_CHECK(hwCtrl.state().keyMod.muteMask == 0x0Bu);
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::Op3, true);
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::Op3, false);
+        RTEST_CHECK(hwCtrl.hud().keyboardModel == ruido::KeyboardModel::RhythmLab);
+        RTEST_CHECK(hwCtrl.state().keyMod.muteMask == 0x0Bu);
+        hwCtrl.onEncoderDelta(ruido::EncoderId::Select, -8);
+        RTEST_CHECK(hwCtrl.hud().keyboardModel == ruido::KeyboardModel::LiveMixer);
+        RTEST_CHECK(hwCtrl.state().keyMod.muteMask == 0x0Bu);
+
+        // 3. Un-solo Osc 3 on the new keyboard (SHIFT + White Key 14) -> restores pre-Solo Osc 1
+        //    mute (0x01)!
+        hwCtrl.onWhiteKeyGate(ruido::kMuteWhiteKeyBase + 2u, true);
+        hwCtrl.onWhiteKeyGate(ruido::kMuteWhiteKeyBase + 2u, false);
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
+        RTEST_CHECK(hwCtrl.state().keyMod.muteMask == 0x01u);
     }
 #undef RTEST_CHECK
 }

@@ -115,7 +115,6 @@ void KeyboardEngine::setModel(KeyboardModel nextModel) noexcept {
     if (model_ != nextModel) {
         model_ = nextModel;
         clearKeyHold();
-        latch_ = {};
         wipePhase_ = 1.0f;
     }
 }

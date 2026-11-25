@@ -206,6 +206,7 @@ void VoiceLfoBank::stepSlot(size_t idx, uint32_t stride, float rateModDepth, flo
                   ? evalMorphedLfoWave(phase01, curShape, curRate, v.knots)
                   : 0.0f;
 
+    out.singleTarget = v.activeTarget;
     if (v.crossfading) {
         bool allSettled = true;
         for (size_t t = 0u; t < kNumTargets; ++t) {
@@ -218,11 +219,9 @@ void VoiceLfoBank::stepSlot(size_t idx, uint32_t stride, float rateModDepth, flo
         if (allSettled) {
             v.crossfading = false;
         }
-    } else if (curDepth > 0.0f) {
-        for (size_t t = 0u; t < kNumTargets; ++t) {
-            out.targetDepths[t] = 0.0f;
-        }
-        out.targetDepths[v.activeTarget] = curDepth;
+        out.crossfading = v.crossfading;
+    } else {
+        out.crossfading = false;
     }
 
     if (freeze || stride == 0u) {
@@ -253,16 +252,87 @@ void VoiceLfoBank::stepSubBlock(std::array<VoiceLfoFrame, kNumVoiceLfos>& frames
                  frames[4u + i]);
     }
     // 2. Step LFO A [0..3] with instantaneous LFO B Rate/Depth cross-modulation
+    constexpr uint8_t kRateTarget = static_cast<uint8_t>(LfoTarget::LfoARate);
+    constexpr uint8_t kDepthTarget = static_cast<uint8_t>(LfoTarget::LfoADepth);
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const VoiceLfoFrame& bOut = frames[4u + i];
-        const float rMod = (bOut.activeDepth > 0.0f)
-                               ? bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoARate)]
-                               : 0.0f;
-        const float dMod = (bOut.activeDepth > 0.0f)
-                               ? bOut.targetDepths[static_cast<size_t>(LfoTarget::LfoADepth)]
-                               : 0.0f;
+        float rMod = 0.0f;
+        float dMod = 0.0f;
+        if (bOut.activeDepth > 0.0f) {
+            if (bOut.crossfading) {
+                rMod = bOut.targetDepths[kRateTarget];
+                dMod = bOut.targetDepths[kDepthTarget];
+            } else if (bOut.singleTarget == kRateTarget) {
+                rMod = bOut.activeDepth;
+            } else if (bOut.singleTarget == kDepthTarget) {
+                dMod = bOut.activeDepth;
+            }
+        }
         stepSlot(i, stride, rMod, dMod, bOut.raw, turbo, turboMul, freeze, forceWaveEval,
                  frames[i]);
+    }
+}
+
+void VoiceLfoBank::applySlot(const VoiceLfoFrame& lfo, float& baseHz, float& modPw, float& hpBase,
+                             float& hpResBase, float& lpBase, float& lpResBase, float& modAmp,
+                             float& modPan) noexcept {
+    if (!lfo.crossfading) {
+        const float d = lfo.activeDepth;
+        switch (static_cast<LfoTarget>(lfo.singleTarget)) {
+        case LfoTarget::Pitch:
+            baseHz = applyLfoPitchHz(baseHz, d, lfo.raw);
+            return;
+        case LfoTarget::PulseWidth:
+            modPw = applyLfoPulseWidth(modPw, d, lfo.raw);
+            return;
+        case LfoTarget::HpCutoff:
+            hpBase = applyLfoCutoffHz(hpBase, d, lfo.raw);
+            return;
+        case LfoTarget::HpResonance:
+            hpResBase = applyLfoResonance(hpResBase, d, lfo.raw);
+            return;
+        case LfoTarget::LpCutoff:
+            lpBase = applyLfoCutoffHz(lpBase, d, lfo.raw);
+            return;
+        case LfoTarget::LpResonance:
+            lpResBase = applyLfoResonance(lpResBase, d, lfo.raw);
+            return;
+        case LfoTarget::Amplitude:
+            modAmp = applyLfoAmplitude(modAmp, d, lfo.raw);
+            return;
+        case LfoTarget::Pan:
+            modPan = applyLfoPan(modPan, d, lfo.raw);
+            return;
+        default:
+            return;
+        }
+    }
+    const auto& td = lfo.targetDepths;
+    if (td[static_cast<size_t>(LfoTarget::Pitch)] > 0.0f) {
+        baseHz = applyLfoPitchHz(baseHz, td[static_cast<size_t>(LfoTarget::Pitch)], lfo.raw);
+    }
+    if (td[static_cast<size_t>(LfoTarget::PulseWidth)] > 0.0f) {
+        modPw = applyLfoPulseWidth(modPw, td[static_cast<size_t>(LfoTarget::PulseWidth)], lfo.raw);
+    }
+    if (td[static_cast<size_t>(LfoTarget::HpCutoff)] > 0.0f) {
+        hpBase = applyLfoCutoffHz(hpBase, td[static_cast<size_t>(LfoTarget::HpCutoff)], lfo.raw);
+    }
+    if (td[static_cast<size_t>(LfoTarget::HpResonance)] > 0.0f) {
+        hpResBase =
+            applyLfoResonance(hpResBase, td[static_cast<size_t>(LfoTarget::HpResonance)], lfo.raw);
+    }
+    if (td[static_cast<size_t>(LfoTarget::LpCutoff)] > 0.0f) {
+        lpBase = applyLfoCutoffHz(lpBase, td[static_cast<size_t>(LfoTarget::LpCutoff)], lfo.raw);
+    }
+    if (td[static_cast<size_t>(LfoTarget::LpResonance)] > 0.0f) {
+        lpResBase =
+            applyLfoResonance(lpResBase, td[static_cast<size_t>(LfoTarget::LpResonance)], lfo.raw);
+    }
+    if (td[static_cast<size_t>(LfoTarget::Amplitude)] > 0.0f) {
+        modAmp = applyLfoAmplitude(modAmp, td[static_cast<size_t>(LfoTarget::Amplitude)], lfo.raw);
+    }
+    if (td[static_cast<size_t>(LfoTarget::Pan)] > 0.0f) {
+        modPan = applyLfoPan(modPan, td[static_cast<size_t>(LfoTarget::Pan)], lfo.raw);
     }
 }
 

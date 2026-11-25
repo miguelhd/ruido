@@ -170,7 +170,7 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
             const float dim = muteDim_[v];
             const float activeW = 1.0f - 0.78f * dim;
             const float effFoc =
-                (perVoiceFocus && hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - dim);
+                (perVoiceFocus && isHudColumnFocused(hud, v) ? 1.0f : 0.0f) * (1.0f - dim);
             const float focBoost = 1.0f + 0.18f * effFoc;
 
             // Level-scaled brightness: clearly visible ~47% silver-white floor at lowest audible
@@ -374,7 +374,8 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
         const float cleanFrac =
             clampf((kColYBot - fy) * (1.0f / (kCleanAmpKnee * kColYSpan)), 0.0f, 1.0f);
         const float dim = muteDim_[v];
-        const float effFoc = (perVoiceFocus && hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - dim);
+        const float effFoc =
+            (perVoiceFocus && isHudColumnFocused(hud, v) ? 1.0f : 0.0f) * (1.0f - dim);
         const float audibleBeadInt = 0.56f + 0.36f * cleanFrac + 0.12f * effFoc;
         const float beadInt = audibleBeadInt + (0.28f - audibleBeadInt) * dim;
         const float beadRad = 1.80f + 0.25f * effFoc;
@@ -412,7 +413,7 @@ void HudAmpGraph::compositeWidthStrip(int y0, int y1, uint16_t stripHeight, uint
             const float xEdge =
                 x0 + clampf(pulseWidth_[v], kPulseWidthMin, kPulseWidthMax) * (2.0f * kHalfSpanX);
             const float activeW = 1.0f - 0.78f * muteDim_[v];
-            const float effFoc = (hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - muteDim_[v]);
+            const float effFoc = (isHudColumnFocused(hud, v) ? 1.0f : 0.0f) * (1.0f - muteDim_[v]);
             const float focBoost = 1.0f + 0.18f * effFoc;
             const int pxLo = cxInt - 23;
             const int pxHi = cxInt + 23;
@@ -465,7 +466,7 @@ void HudAmpGraph::compositeWidthStrip(int y0, int y1, uint16_t stripHeight, uint
         const float xEdge =
             x0 + clampf(pulseWidth_[v], kPulseWidthMin, kPulseWidthMax) * (2.0f * kHalfSpanX);
         const float dim = muteDim_[v];
-        const float effFoc = (hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - dim);
+        const float effFoc = (isHudColumnFocused(hud, v) ? 1.0f : 0.0f) * (1.0f - dim);
         const float lineLum = (182.0f + 48.0f * effFoc) * (1.0f - 0.65f * dim);
         const float lowLum = lineLum * 0.72f;
 
@@ -516,7 +517,7 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
             const float stemLo = (beaconY < kYZero) ? beaconY : kYZero;
             const float stemHi = (beaconY > kYZero) ? beaconY : kYZero;
             const float activeW = 1.0f - 0.78f * muteDim_[v];
-            const float effFoc = (hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - muteDim_[v]);
+            const float effFoc = (isHudColumnFocused(hud, v) ? 1.0f : 0.0f) * (1.0f - muteDim_[v]);
             const float stemScale = activeW * (1.0f + 0.18f * effFoc);
 
             for (int py = pyStart; py < pyEnd; ++py) {
@@ -556,7 +557,7 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
         const float beaconY =
             clampf(kYZero - driftLive_[v] * kMaxSpanPx, kYZero - kMaxSpanPx, kYZero + kMaxSpanPx);
         const float dim = muteDim_[v];
-        const float effFoc = (hud.focusedKnob == v ? 1.0f : 0.0f) * (1.0f - dim);
+        const float effFoc = (isHudColumnFocused(hud, v) ? 1.0f : 0.0f) * (1.0f - dim);
 
         if (spanPx > 0.8f) {
             const float brkLum = (118.0f + 44.0f * effFoc) * (1.0f - 0.65f * dim);

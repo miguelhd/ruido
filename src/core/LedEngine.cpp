@@ -51,9 +51,8 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
 
     smooth.subBreathWave01 =
         0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(smooth.animPhase * kSubAudioBreathHz)));
-    const float savePulseHz = saveArmedPulseHz(ctx.hud.saveArmed && ctx.hud.saveDeleteMode);
-    smooth.savePulse01 =
-        0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(smooth.animPhase * savePulseHz)));
+    const SavePageMode saveMode = ctx.hud.saveArmed ? ctx.hud.savePageMode : SavePageMode::Store;
+    smooth.savePulse01 = evalSaveArmedPulse01(saveMode, smooth.animPhase);
 
     const float pitchMode = ctx.state.global.pitchPressureMode ? 1.0f : 0.0f;
     const uint8_t stutMask = ctx.telemetry.stutterGateMask.load(std::memory_order_relaxed);
@@ -157,7 +156,7 @@ void stepAndComputePanelLeds(float dtSec, const LedInputContext& ctx, LedSmoothS
     outLeds.buttonLeds[static_cast<size_t>(ButtonId::Home)] = nonHomePageOpen ? 0.15f : 1.0f;
     if (ctx.hud.saveArmed) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] =
-            0.25f + 0.75f * smooth.savePulse01;
+            computeSaveArmedButtonLed(ctx.hud.savePageMode, smooth.savePulse01);
     } else if (ctx.hud.snapshotDirty) {
         outLeds.buttonLeds[static_cast<size_t>(ButtonId::Save)] =
             ctx.state.global.masterRun ? (0.12f + 0.16f * smooth.subBreathWave01) : 0.15f;
@@ -237,8 +236,8 @@ void applyPresetKnobSceneLeds(float dtSec, const HudState& hud, bool toastHoldAc
         smooth.presetSceneLedQ16 = 0u;
         return;
     }
-    const bool active = toastHoldActive && !hud.snapshotSavedToast && !hud.snapshotDeletedToast &&
-                        (hud.mode == HudMode::SnapshotSlot);
+    const bool active =
+        toastHoldActive && !hasSnapshotResultToast(hud) && (hud.mode == HudMode::SnapshotSlot);
     const float cur01 = static_cast<float>(smooth.presetSceneLedQ16) * (1.0f / 65535.0f);
     const float next01 = stepHudFadeLinear(cur01, active, clampf(dtSec, 0.0f, 0.25f));
     smooth.presetSceneLedQ16 = static_cast<uint16_t>(next01 * 65535.0f + 0.5f);

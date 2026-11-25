@@ -181,6 +181,14 @@ void SnapshotBank::saveSlot(uint8_t slot, EngineControlState& state) noexcept {
     syncKnobMorphAnchor();
 }
 
+void SnapshotBank::initSlot(uint8_t slot, EngineControlState& state) noexcept {
+    momentaryActive_ = false;
+    momentaryBlend_ = 0.0f;
+    const PatchSnapshot initSnap = encodePatchSnapshot(EngineControlState::makeDefault());
+    applyPatchFrame(decodePatchSnapshot(initSnap), state);
+    saveSlot(slot, state);
+}
+
 bool SnapshotBank::deleteSlot(uint8_t slot, EngineControlState& state) noexcept {
     const uint8_t idx = slot & 3u;
     if (momentaryActive_) {

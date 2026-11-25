@@ -133,7 +133,8 @@ inline void dispersiveShell(const float* src, float* dst, size_t n, float alpha,
 
 // 2-pass in-place separable [1, 3, 4, 3, 1]/12 blur on 60x60 quarter-res bloom grid
 template <size_t Width, size_t Height>
-inline void blurSeparableBloomGrid(std::array<uint16_t, Width * Height>& grid) noexcept {
+inline void blurSeparableBloomGrid(std::array<uint16_t, Width * Height>& grid,
+                                   void (*coProcYield)() noexcept = nullptr) noexcept {
     std::array<uint16_t, Width> lineTmp{};
     for (size_t pass = 0u; pass < 2u; ++pass) {
         for (size_t by = 0u; by < Height; ++by) {
@@ -151,6 +152,9 @@ inline void blurSeparableBloomGrid(std::array<uint16_t, Width * Height>& grid) n
             }
             for (size_t bx = 0u; bx < Width; ++bx) {
                 row[bx] = lineTmp[bx];
+            }
+            if (coProcYield != nullptr && (by & 15u) == 15u) {
+                coProcYield();
             }
         }
 
@@ -174,6 +178,9 @@ inline void blurSeparableBloomGrid(std::array<uint16_t, Width * Height>& grid) n
             }
             for (size_t by = 0u; by < Height; ++by) {
                 grid[by * Width + bx] = lineTmp[by];
+            }
+            if (coProcYield != nullptr && (bx & 15u) == 15u) {
+                coProcYield();
             }
         }
     }

@@ -46,7 +46,7 @@ void HudSceneView::reset() noexcept {
     morphPhase_ = 0.0f;
     latchedOccupiedMask_ = 0x0Fu;
     latchedSlot_ = 0u;
-    latchedDeleteMode_ = false;
+    latchedPageMode_ = SavePageMode::Store;
     primed_ = false;
 }
 
@@ -78,13 +78,16 @@ void HudSceneView::update(float dtClamped, const HudState& effectiveHud) noexcep
     if (saveAct) {
         latchedOccupiedMask_ = effectiveHud.snapshotOccupiedMask;
         latchedSlot_ = effectiveHud.snapshotSlot & 3u;
-        latchedDeleteMode_ = effectiveHud.saveDeleteMode;
+        latchedPageMode_ = effectiveHud.savePageMode;
 
         const float savePulse01 = static_cast<float>(effectiveHud.savePulseQ8) * (1.0f / 255.0f);
-        const float pulseGlow = 0.25f + 0.70f * clampf(savePulse01, 0.0f, 1.0f);
+        const float pulseGlow =
+            computeSaveArmedSceneKeyGlow(effectiveHud.savePageMode, savePulse01);
         for (size_t s = 0u; s < kNumSnapshots; ++s) {
-            const bool occ = (effectiveHud.snapshotOccupiedMask & (1u << s)) != 0u;
-            const float tgt = (!effectiveHud.saveDeleteMode || occ) ? pulseGlow : 0.0f;
+            const float tgt = isSaveArmedSlotTargetable(effectiveHud.savePageMode,
+                                                        effectiveHud.snapshotOccupiedMask, s)
+                                  ? pulseGlow
+                                  : 0.0f;
             sceneKeyGlow_[s] = slewScalar(sceneKeyGlow_[s], tgt, alpha, 0.002f);
         }
         return;
@@ -105,19 +108,24 @@ void HudSceneView::compositeSaveStrip(int y0, int y1, uint8_t* lumBuf, uint8_t a
     const bool liveSave = isSaveActive(frameHud);
     const uint8_t occMask = liveSave ? frameHud.snapshotOccupiedMask : latchedOccupiedMask_;
     const uint8_t actSlot = liveSave ? (frameHud.snapshotSlot & 3u) : latchedSlot_;
-    const bool deleteMode = liveSave ? frameHud.saveDeleteMode : latchedDeleteMode_;
+    const SavePageMode pageMode = liveSave ? frameHud.savePageMode : latchedPageMode_;
+    const bool deleteMode = (pageMode == SavePageMode::Delete);
 
-    // 1. SEL-Matched Mode Carousel Banner (`y = 33..49`: `STORE SCENE >` <-> `< DELETE SCENE`)
+    // 1. SEL-Matched Mode Carousel Banner (`STORE SCENE >` <-> `< DELETE SCENE >` <-> `< INIT
+    // SCENE`)
     if (y1 > 30 && y0 < 52) {
-        if (deleteMode) {
+        if (pageMode != SavePageMode::Store) {
             cv.drawSans(kFontSansMedium, kKeybedCarouselArrowLeftX, kKeybedCarouselArrowY, "<",
                         132u, 0);
-        } else {
+        }
+        if (pageMode != SavePageMode::Init) {
             cv.drawSansRight(kFontSansMedium, kKeybedCarouselArrowRightX, kKeybedCarouselArrowY,
                              ">", 132u, 0);
         }
-        cv.drawSansCentered(kFontSansBold, 120, kKeybedCarouselTitleY,
-                            deleteMode ? "DELETE SCENE" : "STORE SCENE", 255u, 0);
+        const char* title = deleteMode                         ? "DELETE SCENE"
+                            : (pageMode == SavePageMode::Init) ? "INIT SCENE"
+                                                               : "STORE SCENE";
+        cv.drawSansCentered(kFontSansBold, 120, kKeybedCarouselTitleY, title, 255u, 0);
     }
 
     // 2. Open, Container-Free 4-Slot Status Columns (`ACTIVE` / `STORED` / `EMPTY`)
@@ -157,11 +165,13 @@ void HudSceneView::compositeSaveStrip(int y0, int y1, uint8_t* lumBuf, uint8_t a
 
     // 4. Calm 2-Line Footer (`y = 202..228`; suppressed when `KNOB 1-4` strip wakes)
     if (y1 > 200 && y0 < 234 && frameHud.knobBank == KnobBankMode::None) {
-        const char* line1 = !deleteMode       ? "TAP SCENE KEY TO STORE"
-                            : (occMask == 0u) ? "NO STORED SCENES"
-                                              : "TAP SCENE KEY TO DELETE";
-        const char* line2 =
-            !deleteMode ? "TAP SAVE OR SELECT TO DELETE" : "TAP SAVE OR HOME TO EXIT";
+        const char* line1 = deleteMode
+                                ? ((occMask == 0u) ? "NO STORED SCENES" : "TAP SCENE KEY TO DELETE")
+                            : (pageMode == SavePageMode::Init) ? "SET SCENE TO NEUTRAL"
+                                                               : "TAP SCENE KEY TO STORE";
+        const char* line2 = deleteMode                         ? "TAP SAVE OR SELECT TO INIT"
+                            : (pageMode == SavePageMode::Init) ? "TAP SAVE OR HOME TO EXIT"
+                                                               : "TAP SAVE OR SELECT TO DELETE";
         cv.drawSansCentered(kFontSansSmall, 120, kKeybedFooterLine1Y, line1, 148u, 0);
         cv.drawSansCentered(kFontSansSmall, 120, kKeybedFooterLine2Y, line2, 122u, 0);
     }

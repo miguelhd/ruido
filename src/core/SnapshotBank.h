@@ -101,6 +101,10 @@ class SnapshotBank {
     // Store current synthesis patch into slot 0..3 (`SAVE` + Key 9-12).
     void saveSlot(uint8_t slot, EngineControlState& state) noexcept;
 
+    // Initialize slot 0..3 to an unmodulated startup patch and activate it (`SAVE` -> `INIT SCENE`
+    // + Key 9-12).
+    void initSlot(uint8_t slot, EngineControlState& state) noexcept;
+
     // Clear slot 0..3 into a CRC-valid `EMPTY` state (`SAVE` -> `DELETE SCENE` + Key 9-12);
     // returns true if the slot held a scene prior to deletion.
     bool deleteSlot(uint8_t slot, EngineControlState& state) noexcept;

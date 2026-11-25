@@ -21,22 +21,6 @@ constexpr float kPunchBusSlewSec = 0.0085f;    // 8.5 ms punch-in bus surge / du
 constexpr float kVoiceSumScale = 0.36f;        // Headroom scaling into masterBusSoftClip
 constexpr std::array<float, kNumOscillators> kWideFanPans = {-1.0f, -0.52f, 0.52f, 1.0f};
 
-RUIDO_NOINLINE void applyVoiceLfoSlot(const VoiceLfoFrame& lfo, float& baseHz, float& modPw,
-                                      float& hpBase, float& hpResBase, float& lpBase,
-                                      float& lpResBase, float& modAmp, float& modPan) noexcept {
-    const auto& td = lfo.targetDepths;
-    baseHz = applyLfoPitchHz(baseHz, td[static_cast<size_t>(LfoTarget::Pitch)], lfo.raw);
-    modPw = applyLfoPulseWidth(modPw, td[static_cast<size_t>(LfoTarget::PulseWidth)], lfo.raw);
-    hpBase = applyLfoCutoffHz(hpBase, td[static_cast<size_t>(LfoTarget::HpCutoff)], lfo.raw);
-    hpResBase =
-        applyLfoResonance(hpResBase, td[static_cast<size_t>(LfoTarget::HpResonance)], lfo.raw);
-    lpBase = applyLfoCutoffHz(lpBase, td[static_cast<size_t>(LfoTarget::LpCutoff)], lfo.raw);
-    lpResBase =
-        applyLfoResonance(lpResBase, td[static_cast<size_t>(LfoTarget::LpResonance)], lfo.raw);
-    modAmp = applyLfoAmplitude(modAmp, td[static_cast<size_t>(LfoTarget::Amplitude)], lfo.raw);
-    modPan = applyLfoPan(modPan, td[static_cast<size_t>(LfoTarget::Pan)], lfo.raw);
-}
-
 } // namespace
 
 RUIDO_NOINLINE void DroneEngineCore::init(EngineSharedBuses& buses, float baseSampleRate) noexcept {
@@ -55,6 +39,7 @@ RUIDO_NOINLINE void DroneEngineCore::init(EngineSharedBuses& buses, float baseSa
     decimator_.reset();
     coeffCache_ = {};
     filterCoeffs_ = {};
+    spanCoeffs_ = {};
     crushStates_ = {};
     rhythmState_.init(baseSampleRate_, kPunchBusSlewSec);
     stutterPhases_.fill(0x80000000u);
@@ -63,6 +48,8 @@ RUIDO_NOINLINE void DroneEngineCore::init(EngineSharedBuses& buses, float baseSa
     voiceRisingMaskDelay_.fill(0u);
     voiceScopeDelay_ = {};
     voiceScopeDelayWrite_ = 0u;
+    silentFilterMask_ = 0u;
+    inFlightSpan_.valid = false;
 
     // Smoothers step once per 44.118 kHz output audio frame (100% sample-accurate audio rate
     // smoothing while saving 4x redundant coefficient / pan updates inside the 4x inner loop).
@@ -278,17 +265,25 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
     std::array<float, kNumOscillators> blockVoicePeak{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> lastGateHigh{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> lastDriftNorm{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<VoiceLfoFrame, kNumVoiceLfos> lfoFrames;
+    auto& lfoFrames = lfoFrames_;
     uint8_t lastStutterMask = 0x0Fu;
 
     const bool fastMod = lfoBank_.hasFastModulation() || rhythmState_.hasFastRhythm();
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+    const size_t maxSubBlock = fastMod ? 8u : kMaxFilterSpanFrames;
+#else
     const size_t maxSubBlock = fastMod ? 1u : kMaxFilterSpanFrames;
+#endif
 
+    size_t curSpanSlot = 0u;
+    inFlightSpan_.valid = false;
     for (size_t baseFrame = 0u; baseFrame < numFrames;) {
         const size_t remFrames = numFrames - baseFrame;
         const size_t chunk = (remFrames < maxSubBlock) ? remFrames : maxSubBlock;
         const auto stride = static_cast<uint32_t>(chunk);
         const bool isLastChunk = ((baseFrame + chunk) == numFrames);
+        const size_t curBuf = curSpanSlot & 1u;
+        ++curSpanSlot;
 
         // Step smoothers, 8x dual voice LFOs & prepare filter/pan coeffs per sub-block
         const float runScale = masterRunSmoother_.nextN(stride);
@@ -358,12 +353,12 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
             float modPan = sm.potSmoothers.nextN(5u, stride);
 
             if (lfoA.activeDepth > 0.0f) {
-                applyVoiceLfoSlot(lfoA, baseHz, modPw, hpBase, hpResBase, lpBase, lpResBase, modAmp,
-                                  modPan);
+                VoiceLfoBank::applySlot(lfoA, baseHz, modPw, hpBase, hpResBase, lpBase, lpResBase,
+                                        modAmp, modPan);
             }
             if (lfoB.activeDepth > 0.0f) {
-                applyVoiceLfoSlot(lfoB, baseHz, modPw, hpBase, hpResBase, lpBase, lpResBase, modAmp,
-                                  modPan);
+                VoiceLfoBank::applySlot(lfoB, baseHz, modPw, hpBase, hpResBase, lpBase, lpResBase,
+                                        modAmp, modPan);
             }
 
             const float pitchMul =
@@ -423,6 +418,7 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
             }
             gainL[i] = voiceGain * cache.panL;
             gainR[i] = voiceGain * cache.panR;
+            spanCoeffs_[curBuf][i] = filterCoeffs_[i];
         }
 
         if (!prevStatesValid_) {
@@ -452,12 +448,13 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
                                    ? 0.0625f
                                    : ((chunk == 8u) ? 0.125f : (1.0f / static_cast<float>(chunk)));
 
-        auto& spanSub = spanSub_;
-        std::array<uint8_t, kMaxFilterSpanFrames> spanRising;
+        auto& curSpanSub = spanSub_[curBuf];
+        std::array<uint8_t, kMaxFilterSpanFrames> spanRising{};
 
+        // 1. Synthesize `curBuf` oscillators while Core 0 is still filtering `inFlightSpan_`!
         if (useFastOsc4x) {
             std::array<uint8_t, kNumOscillators> risingCounts;
-            oscBank_.processSpan4x(spanSub.data(), spanRising.data(), risingCounts, chunk,
+            oscBank_.processSpan4x(curSpanSub.data(), spanRising.data(), risingCounts, chunk,
                                    prevOscFreqHz_, oscFreqs, prevPulseWidth_, oscPulseWidths,
                                    oscDrifts, coupling, effFreeze, hardSync, prevOscSamples_,
                                    prevCapRamp_, isLastChunk ? &lastGateHigh : nullptr,
@@ -466,174 +463,60 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
                 crushStates_[v].divCounter =
                     static_cast<uint8_t>((crushStates_[v].divCounter + risingCounts[v]) & 7u);
             }
-
-            if (coProc_ == nullptr || chunk < 4u ||
-                !coProc_->processBalanced4x(spanSub, chunk, filters_, filterCoeffs_)) {
-#if defined(__Pi32__)
-                for (size_t v = 0u; v < kNumOscillators; ++v) {
-                    filters_[v].processSpan4x(spanSub[v].data(), chunk, filterCoeffs_[v]);
-                }
-#else
-                std::array<std::array<float, kOversampleFactor>, kNumOscillators> quadSub{};
-                for (size_t k = 0u; k < chunk; ++k) {
-                    for (size_t v = 0u; v < kNumOscillators; ++v) {
-                        quadSub[v] = spanSub[v][k];
-                    }
-                    Ms20DualFilter::processQuadBank4x(filters_, quadSub, filterCoeffs_);
-                    for (size_t v = 0u; v < kNumOscillators; ++v) {
-                        spanSub[v][k] = quadSub[v];
-                    }
-                }
-#endif
-            }
-            for (size_t v = 0u; v < kNumOscillators; ++v) {
-                crushStates_[v].snhPhase = 0u;
-                const float rest = sanitizeState(spanSub[v][chunk - 1u][kOversampleFactor - 1u]);
-                crushStates_[v].heldSample = rest;
-                crushStates_[v].capSample = rest;
-            }
         } else {
             const PatchedSpanContext patchCtx{
                 chunk,   invChunk,  isLastChunk, anyXmod,  anyFold,    anyCrush,
-                anyRing, effFreeze, coupling,    hardSync, ringModMix, hzToOversampledPhaseU32_,
+                anyRing, effFreeze, coupling,    hardSync, ringModMix,
             };
-            renderPatchedOscFilterSpan4x(patchCtx, oscBank_, filters_, filterCoeffs_,
-                                         spanSub.data(), spanRising.data(), prevOscFreqHz_,
-                                         oscFreqs, prevPulseWidth_, oscPulseWidths, oscDrifts,
-                                         xmodDepths, foldDepths, crushDepths, prevOscSamples_,
-                                         prevCapRamp_, crushStates_, lastGateHigh, lastDriftNorm);
+            renderPatchedOscSpan4x(patchCtx, oscBank_, curSpanSub.data(), spanRising.data(),
+                                   prevOscFreqHz_, oscFreqs, prevPulseWidth_, oscPulseWidths,
+                                   oscDrifts, xmodDepths, foldDepths, crushDepths, prevOscSamples_,
+                                   prevCapRamp_, crushStates_, lastGateHigh, lastDriftNorm);
         }
         if (stoppedSilent) {
             spanRising.fill(0u);
         }
 
-        // Stereo VCA mix at unity, batch 4x -> 1x linear-phase FIR decimation, unity scope tap,
-        // and post-scope MASTER volume trim so the oscilloscope stays independent of MASTER volume.
-        std::array<float, kNumOscillators> curGainL = prevGainL_, curGainR = prevGainR_;
-        std::array<float, kNumOscillators> curScope = prevScopeScale_;
-        std::array<float, kNumOscillators> stepGainL, stepGainR, stepScope;
-        for (size_t i = 0u; i < kNumOscillators; ++i) {
-            stepGainL[i] = (gainL[i] - prevGainL_[i]) * invChunk;
-            stepGainR[i] = (gainR[i] - prevGainR_[i]) * invChunk;
-            stepScope[i] = (voiceScopeScale[i] - prevScopeScale_[i]) * invChunk;
-        }
-        float curRun = prevRunScale_;
-        const float stepRun = (runScale - prevRunScale_) * invChunk;
-        float curTrim = prevMasterTrim_;
-        const float stepTrim = (masterTrim - prevMasterTrim_) * invChunk;
-        size_t scopeWritePos = 0u;
-        const size_t scopeAvail = buses.scopeBuffer.beginPushSpan(chunk, scopeWritePos);
-
-        std::array<float, kNumOscillators> chunkRawPeak{0.0f, 0.0f, 0.0f, 0.0f};
-        auto& osStereoSpan = osStereoSpan_;
-
-        for (size_t k = 0u; k < chunk; ++k) {
-            if (k + 1u == chunk) {
-                curGainL = gainL;
-                curGainR = gainR;
-                curRun = runScale;
-            } else {
-                for (size_t i = 0u; i < kNumOscillators; ++i) {
-                    curGainL[i] += stepGainL[i];
-                    curGainR[i] += stepGainR[i];
-                }
-                curRun += stepRun;
-            }
-            const float gL0 = curGainL[0], gL1 = curGainL[1], gL2 = curGainL[2], gL3 = curGainL[3];
-            const auto s0 = spanSub[0][k];
-            const auto s1 = spanSub[1][k];
-            const auto s2 = spanSub[2][k];
-            const auto s3 = spanSub[3][k];
-            auto& osStereo = osStereoSpan[k];
-            const std::array<float, kNumOscillators> vAccum{
-                s0[0] + s0[1] + s0[2] + s0[3],
-                s1[0] + s1[1] + s1[2] + s1[3],
-                s2[0] + s2[1] + s2[2] + s2[3],
-                s3[0] + s3[1] + s3[2] + s3[3],
-            };
-            for (size_t i = 0u; i < kNumOscillators; ++i) {
-                spanSub[i][k][0] = vAccum[i];
-                const float vAbs = absf(vAccum[i]);
-                if (vAbs > chunkRawPeak[i]) {
-                    chunkRawPeak[i] = vAbs;
-                }
-            }
-
-            if (chunkExactMono) {
-                for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
-                    const float sumMono =
-                        s0[sub] * gL0 + s1[sub] * gL1 + s2[sub] * gL2 + s3[sub] * gL3;
-                    const float busMono = masterBusSoftClip(sumMono) * curRun;
-                    osStereo[sub] = {busMono, busMono};
-                }
-            } else {
-                const float gR0 = curGainR[0], gR1 = curGainR[1], gR2 = curGainR[2],
-                            gR3 = curGainR[3];
-                for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
-                    const float sumL =
-                        s0[sub] * gL0 + s1[sub] * gL1 + s2[sub] * gL2 + s3[sub] * gL3;
-                    const float sumR =
-                        s0[sub] * gR0 + s1[sub] * gR1 + s2[sub] * gR2 + s3[sub] * gR3;
-                    osStereo[sub] = {masterBusSoftClip(sumL) * curRun,
-                                     masterBusSoftClip(sumR) * curRun};
-                }
-            }
+        // 2. Join `inFlightSpan_` filters, immediately launch `curBuf` onto Core 0, then mix &
+        //    decimate `inFlightSpan_` in parallel while Core 0 filters `curBuf`!
+        const bool hadPrevSpan = inFlightSpan_.valid;
+        InFlightFilterSpan completedSpan = inFlightSpan_;
+        if (hadPrevSpan) {
+            finishInFlightFilterStage(completedSpan);
         }
 
-        StereoFrame* decimatedSpan = osStereoSpan[0].data();
-        decimator_.processSpan4x(osStereoSpan.data(), decimatedSpan, chunk);
+        bool curCoProcHandled = false;
+        launchSpanFilters(curBuf, chunk, prevGainL_, gainL, prevGainR_, gainR, prevScopeScale_,
+                          voiceScopeScale, curCoProcHandled);
 
-        for (size_t k = 0u; k < chunk; ++k) {
-            const size_t frame = baseFrame + k;
-            if (k + 1u == chunk) {
-                curScope = voiceScopeScale;
-                curTrim = masterTrim;
-            } else {
-                for (size_t i = 0u; i < kNumOscillators; ++i) {
-                    curScope[i] += stepScope[i];
-                }
-                curTrim += stepTrim;
-            }
-
-            const float rawL = sanitizeState(decimatedSpan[k].left);
-            const float rawR = sanitizeState(decimatedSpan[k].right);
-            const float outL = dacSafetyClip(rawL * curTrim);
-            const float outR = dacSafetyClip(rawR * curTrim);
-
-            outLeft[frame] = outL;
-            outRight[frame] = outR;
-
-            const float absL = absf(outL);
-            const float absR = absf(outR);
-            blockPeakL = (absL > blockPeakL) ? absL : blockPeakL;
-            blockPeakR = (absR > blockPeakR) ? absR : blockPeakR;
-
-            // Delay 4-voice rising-edge triggers & scope taps by 36 base frames to match FIR delay
-            std::array<int16_t, kNumOscillators> curVoiceQ13;
-            for (size_t i = 0u; i < kNumOscillators; ++i) {
-                curVoiceQ13[i] = quantizeVoiceScopeQ13(spanSub[i][k][0] * curScope[i]);
-            }
-            const uint32_t writeSlot = voiceScopeDelayWrite_;
-            voiceScopeDelay_[writeSlot] = curVoiceQ13;
-            voiceRisingMaskDelay_[writeSlot] = spanRising[k];
-            const uint32_t nextDelaySlot =
-                (writeSlot + 1u < kScopeAlignDelaySlots) ? (writeSlot + 1u) : 0u;
-            voiceScopeDelayWrite_ = nextDelaySlot;
-            if (k < scopeAvail) {
-                ScopeFrame& dst = buses.scopeBuffer.slotAt(scopeWritePos + k);
-                dst.leftQ13 = quantizeVoiceScopeQ13(dacSafetyClip(rawL));
-                dst.rightQ13 = quantizeVoiceScopeQ13(dacSafetyClip(rawR));
-                dst.voiceQ13 = voiceScopeDelay_[nextDelaySlot];
-                dst.voiceRisingMask = voiceRisingMaskDelay_[nextDelaySlot];
-            }
+        if (hadPrevSpan) {
+            mixAndFlushCompletedSpan(completedSpan, buses, outLeft, outRight, blockVoicePeak,
+                                     blockPeakL, blockPeakR);
         }
-        for (size_t i = 0u; i < kNumOscillators; ++i) {
-            const float scaledPeak = chunkRawPeak[i] * 0.25f * vcaGates[i] * runScale;
-            blockVoicePeak[i] = (scaledPeak > blockVoicePeak[i]) ? scaledPeak : blockVoicePeak[i];
-        }
-        if (scopeAvail > 0u) {
-            buses.scopeBuffer.commitPushSpan(scopeWritePos + scopeAvail);
-        }
+
+        inFlightSpan_ = {
+            prevGainL_,
+            gainL,
+            prevGainR_,
+            gainR,
+            prevScopeScale_,
+            voiceScopeScale,
+            vcaGates,
+            crushDepths,
+            spanRising,
+            curBuf,
+            baseFrame,
+            chunk,
+            invChunk,
+            prevRunScale_,
+            runScale,
+            prevMasterTrim_,
+            masterTrim,
+            chunkExactMono,
+            anyCrush,
+            curCoProcHandled,
+            true,
+        };
 
         prevOscFreqHz_ = oscFreqs;
         prevPulseWidth_ = oscPulseWidths;
@@ -644,6 +527,12 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         prevMasterTrim_ = masterTrim;
         prevExactMono_ = exactMono;
         baseFrame += chunk;
+    }
+    if (inFlightSpan_.valid) {
+        finishInFlightFilterStage(inFlightSpan_);
+        mixAndFlushCompletedSpan(inFlightSpan_, buses, outLeft, outRight, blockVoicePeak,
+                                 blockPeakL, blockPeakR);
+        inFlightSpan_.valid = false;
     }
 
     const bool blockStopped = !latestState.global.masterRun && (prevRunScale_ <= 1.0e-4f);
@@ -667,6 +556,7 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         buses.telemetry.lfoDriftPacked[s].store(lfoFrames[s].driftPacked,
                                                 std::memory_order_relaxed);
     }
+    hwCacheFlushInvalidateRange(&buses.telemetry, sizeof(buses.telemetry));
 }
 
 } // namespace ruido

@@ -287,7 +287,8 @@ inline uint32_t loadBootNvsBlobs(RuidoFm1BlobLoadFn loadFn, RuidoController& ctr
 inline uint32_t pollAndSaveNvsBlobs(uint32_t nowMs, uint32_t forceFlush, RuidoFm1BlobSaveFn saveFn,
                                     RuidoFm1PreEraseFn preEraseFn, RuidoController& ctrl,
                                     Fm1NvsRuntimeState& nvs,
-                                    RuidoFm1TailWriteFn tailWriteFn = nullptr) noexcept {
+                                    RuidoFm1TailWriteFn tailWriteFn = nullptr,
+                                    uint32_t availAudioBlocks = 16u) noexcept {
     nvs.pendingSlotMask = static_cast<uint8_t>(nvs.pendingSlotMask | ctrl.consumeSavedSlotMask());
     if (ctrl.consumeSettingsDirty()) {
         nvs.pendingSettingsSave = 1u;
@@ -302,7 +303,9 @@ inline uint32_t pollAndSaveNvsBlobs(uint32_t nowMs, uint32_t forceFlush, RuidoFm
     const auto& hud = ctrl.hud();
     const bool keysIdle = (hud.heldBlackMask == 0u) && (hud.heldWhiteMask == 0u) &&
                           !ctrl.snapshots().isTransitioning();
-    const bool idleReady = keysIdle && (nowMs - nvs.lastPanelTouchMs) >= kNvsSettingsDebounceMs;
+    const bool audioRingReady = !ctrl.state().global.masterRun || (availAudioBlocks >= 12u);
+    const bool idleReady =
+        keysIdle && audioRingReady && (nowMs - nvs.lastPanelTouchMs) >= kNvsSettingsDebounceMs;
     const bool saveSettingsNow =
         (nvs.pendingSettingsSave != 0u) && (saveSlotsNow || forceFlush != 0u || idleReady);
     const bool saveLiveNow =
@@ -390,6 +393,10 @@ inline uint32_t pollAndSaveNvsBlobs(uint32_t nowMs, uint32_t forceFlush, RuidoFm
                     ++nvs.savesOk;
                 }
                 ++writes;
+                // Spread background `CFG` + `LIVE` auto-saves across separate audio-refill ticks!
+                if (!saveSlotsNow && forceFlush == 0u && ctrl.state().global.masterRun) {
+                    return writes;
+                }
             } else if (canEraseBgSector) {
                 ensurePreErase();
                 if (saveFn(kNvsSettingsBlobIdx, &blob, static_cast<uint32_t>(sizeof(blob))) == 0) {

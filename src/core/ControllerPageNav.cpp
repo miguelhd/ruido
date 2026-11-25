@@ -73,12 +73,45 @@ void RuidoController::closeAllPages() noexcept {
     hud_.lfoPageOpen = hud_.editPageOpen = hud_.configPageOpen = hud_.selPageOpen = false;
 }
 
+void RuidoController::clearKnobFocus() noexcept {
+    hud_.focusedKnob = kNoFocusedKnob;
+    knobFocusMask_ = 0u;
+    knobTurnHoldQ8_.fill(0u);
+    syncFocusedColumnMask();
+}
+
+void RuidoController::recordKnobFocus(uint8_t knobIndex) noexcept {
+    if (knobIndex >= kNumOscillators) {
+        clearKnobFocus();
+        return;
+    }
+    uint8_t liveTurningMask = 0u;
+    for (uint8_t i = 0u; i < kNumOscillators; ++i) {
+        if (knobTurnHoldQ8_[i] > 0u) {
+            liveTurningMask |= static_cast<uint8_t>(1u << i);
+        }
+    }
+    hud_.focusedKnob = knobIndex;
+    knobFocusMask_ = static_cast<uint8_t>(liveTurningMask | (1u << knobIndex));
+    knobTurnHoldQ8_[knobIndex] = 255u;
+    syncFocusedColumnMask();
+}
+
+void RuidoController::syncFocusedColumnMask() noexcept {
+    uint8_t mask = knobFocusMask_;
+    if (!hud_.shiftHeld && !hud_.saveArmed && isPerOscKnobBank(hud_.knobBank)) {
+        const uint16_t exprWhite = static_cast<uint16_t>(hud_.heldWhiteMask & 0x0FFFu);
+        mask |= static_cast<uint8_t>((exprWhite & 0x0Fu) | ((exprWhite >> 4u) & 0x0Fu) |
+                                     ((exprWhite >> 8u) & 0x0Fu));
+    }
+    hud_.focusedColumnMask = static_cast<uint8_t>(mask & 0x0Fu);
+}
+
 void RuidoController::resetPageNav() noexcept {
     selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
-    hud_.focusedKnob = kNoFocusedKnob;
     closeAllPages();
     hud_.saveArmed = false;
-    hud_.saveDeleteMode = false;
+    clearKnobFocus();
 }
 
 void RuidoController::setLatchedPage(HudMode mode, ButtonId button) noexcept {
@@ -97,7 +130,7 @@ void RuidoController::triggerHud(HudMode mode, uint8_t voiceIndex, uint8_t knobI
     dismissedByHome_ = false;
     hud_.mode = mode;
     hud_.focusedVoice = static_cast<uint8_t>(voiceIndex & 3u);
-    hud_.focusedKnob = (knobIndex < kNumOscillators) ? knobIndex : kNoFocusedKnob;
+    recordKnobFocus(knobIndex);
     const float holdSec = (mode == HudMode::RailCoupling && !hasNonHomePageOpen(hud_))
                               ? kHudCouplingHoldSec
                               : kHudToastHoldSec;
@@ -111,19 +144,22 @@ void RuidoController::latchSwitchHud(HudMode mode, ButtonId button) noexcept {
     if (button != ButtonId::Count) {
         hud_.lastButton = button;
     }
-    hud_.focusedKnob = kNoFocusedKnob;
     hud_.mode = mode;
+    clearKnobFocus();
     env_.latchPage();
 }
 
 void RuidoController::latchKnobEdit(KnobBankMode bank, HudMode mode, uint8_t knobIdx,
                                     uint8_t voiceIdx) noexcept {
     dismissedByHome_ = false;
+    if (hud_.knobBank != bank) {
+        knobTurnHoldQ8_.fill(0u);
+    }
     hud_.knobBank = bank;
-    hud_.focusedKnob = knobIdx;
     hud_.focusedVoice = static_cast<uint8_t>(voiceIdx & 3u);
     latchedHudMode_ = mode;
     hud_.mode = mode;
+    recordKnobFocus(knobIdx);
     env_.latchPage();
 }
 
@@ -143,15 +179,15 @@ void RuidoController::restoreLatchedFields() noexcept {
 void RuidoController::restoreOrDissolveHud() noexcept {
     if (keyboard_.isShiftHeld()) {
         dismissedByHome_ = false;
-        hud_.focusedKnob = kNoFocusedKnob;
         hud_.knobBank = KnobBankMode::None;
         hud_.mode = HudMode::ShiftMap;
+        clearKnobFocus();
         env_.latchPage();
         return;
     }
     if (keyboard_.anyKeyHeld()) {
         dismissedByHome_ = false;
-        hud_.focusedKnob = kNoFocusedKnob;
+        clearKnobFocus();
         // GLOBAL CONFIG > Key Pressure doubles as a touch test: keys still play, but the list stays
         // on screen so the row's live pressure meter remains visible while squeezing.
         if (hud_.configPageOpen && hud_.configSubView == ConfigSubView::List &&
@@ -201,13 +237,14 @@ void RuidoController::restoreOrDissolveHud() noexcept {
     hud_.knobBank = baseKnobBank();
     if (latchedHudMode_ != HudMode::None) {
         restoreLatchedFields();
-        hud_.focusedKnob = kNoFocusedKnob;
+        clearKnobFocus();
         env_.latchPage();
         return;
     }
     if (env_.beginFadeOut()) {
         hud_.mode = HudMode::None;
         hud_.opacity = 0.0f;
+        clearKnobFocus();
     }
 }
 
@@ -220,7 +257,7 @@ void RuidoController::syncModifierHud() noexcept {
         if (hud_.mode == HudMode::None) {
             hud_.mode = HudMode::KnobRate;
         }
-        hud_.focusedKnob = kNoFocusedKnob;
+        clearKnobFocus();
         env_.active = true;
         if (!knobTurnedDuringRateHold_) {
             env_.holdRemainingSec = 0.0f;
@@ -254,12 +291,12 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
                     !hud_.scopeFrozen) {
                     hud_.mode = HudMode::KnobRate;
                     hud_.knobBank = KnobBankMode::Frequency;
-                    hud_.focusedKnob = kNoFocusedKnob;
+                    clearKnobFocus();
                 }
             }
             if (hud_.mode == HudMode::None) {
                 hud_.mode = HudMode::KnobRate;
-                hud_.focusedKnob = kNoFocusedKnob;
+                clearKnobFocus();
             }
             env_.active = true;
         } else {
@@ -352,7 +389,7 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
             triggerHud(HudMode::AudioOutput, hud_.focusedVoice, kNoFocusedKnob);
         } else {
             hud_.saveArmed = false;
-            hud_.saveDeleteMode = false;
+            hud_.savePageMode = SavePageMode::Store;
             hud_.knobBank = KnobBankMode::Frequency;
             latchSwitchHud(HudMode::AudioOutput, button);
         }
@@ -420,21 +457,21 @@ void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
 
     if (button == ButtonId::Save) {
         closeAllPages();
-        hud_.snapshotSavedToast = false;
-        hud_.snapshotDeletedToast = false;
+        hud_.snapshotToast = SnapshotToastKind::None;
         selectTickAccum_ = 0;
         if (!hud_.saveArmed) {
             hud_.saveArmed = true;
-            hud_.saveDeleteMode = false;
+            hud_.savePageMode = SavePageMode::Store;
             hud_.knobBank = KnobBankMode::None;
             latchSwitchHud(HudMode::SaveArmed, ButtonId::Save);
-        } else if (!hud_.saveDeleteMode) {
-            hud_.saveDeleteMode = true;
+        } else if (static_cast<uint8_t>(hud_.savePageMode) + 1u <
+                   static_cast<uint8_t>(SavePageMode::Count)) {
+            hud_.savePageMode =
+                static_cast<SavePageMode>(static_cast<uint8_t>(hud_.savePageMode) + 1u);
             hud_.knobBank = KnobBankMode::None;
             latchSwitchHud(HudMode::SaveArmed, ButtonId::Save);
         } else {
             hud_.saveArmed = false;
-            hud_.saveDeleteMode = false;
             setLatchedPage(HudMode::None, ButtonId::Count);
             if (keys_.isAnyMomentaryHudHoldActive(hud_.scopeFrozen)) {
                 if (!keyboard_.anyKeyHeld() && !hud_.scopeFrozen && hud_.rateHoldActive) {

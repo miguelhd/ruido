@@ -286,15 +286,12 @@ static void run_platform_poll_safe(void) {
     g_in_platform_poll = 0u;
 }
 
-/* Intercept dinghy's `[0..4088]` integer `master_q12` on Core 0 main loop so `MASTER` pot scaling
- * happens smoothly in float32 inside `DroneEngineCore` BEFORE TPDF quantization, while `platform.c`
- * sees exact unity (4096). */
+/* Read dinghy's `[0..4088]` integer `ruido_raw_master_q12` on Core 0 main loop so `MASTER` pot
+ * scaling happens smoothly in float32 inside `DroneEngineCore` BEFORE TPDF quantization, while
+ * `platform.c`'s `master_q12` remains permanently locked at unity (4096) with zero ISR race. */
 static inline void sync_master_pot_target(void) {
-    int32_t mq = master_q12;
-    if (mq != RUIDO_UNITY_MASTER_Q12) {
-        master_q12 = RUIDO_UNITY_MASTER_Q12;
-        ruido_fm1_set_master_q12((uint32_t)(mq > 0 ? mq : 0));
-    }
+    int32_t mq = ruido_raw_master_q12;
+    ruido_fm1_set_master_q12((uint32_t)(mq > 0 ? mq : 0));
 }
 
 static void poll_midi_clock(void) {
@@ -350,7 +347,7 @@ static void poll_panel_inputs(uint32_t now_ms) {
 #include "fm1_nvs_glue.h"
 
 static void app_idle(void) {
-    if (g_idle_assist_ok && !g_in_app_idle) {
+    if (g_idle_assist_ok && !g_in_app_idle && !in_audio) {
         g_in_app_idle = 1u;
         ruido_fm1_assist_dsp();
         poll_midi_clock();
@@ -468,8 +465,8 @@ static void app_main(void) {
         platform_poll();
     }
     g_in_platform_poll = 0u;
-    if (master_q12 >= 0) {
-        init_mq = (uint32_t)master_q12;
+    if (ruido_raw_master_q12 >= 0) {
+        init_mq = (uint32_t)ruido_raw_master_q12;
     }
     master_q12 = RUIDO_UNITY_MASTER_Q12;
 

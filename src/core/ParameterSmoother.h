@@ -5,7 +5,47 @@
 #include <array>
 #include <cstddef>
 
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+#define RUIDO_SMOOTHER_COLD RUIDO_NOINLINE
+#else
+#define RUIDO_SMOOTHER_COLD inline
+#endif
+
 namespace ruido {
+
+// Exact closed-form (1 - coeff)^steps decay factor via straight-line squaring for common sub-block
+// sizes (16/8/4) and binary exponentiation otherwise — eliminates serial per-sample smoother loops.
+RUIDO_ALWAYS_INLINE float powPoleDecay(float coeff, uint32_t steps) noexcept {
+    const float r = 1.0f - coeff;
+    if (steps == 16u) {
+        const float r2 = r * r;
+        const float r4 = r2 * r2;
+        const float r8 = r4 * r4;
+        return r8 * r8;
+    }
+    if (steps == 8u) {
+        const float r2 = r * r;
+        const float r4 = r2 * r2;
+        return r4 * r4;
+    }
+    if (steps == 4u) {
+        const float r2 = r * r;
+        return r2 * r2;
+    }
+    float acc = 1.0f;
+    float base = r;
+    uint32_t n = steps;
+    while (n != 0u) {
+        if ((n & 1u) != 0u) {
+            acc *= base;
+        }
+        n >>= 1u;
+        if (n != 0u) {
+            base *= base;
+        }
+    }
+    return acc;
+}
 
 // Clickless one-pole exponential smoother with automatic snap-to-target to prevent
 // denormal creep and save FPU work when controls are stationary.
@@ -52,17 +92,24 @@ class OnePoleSmoother {
         if (state_ == target_ || steps == 0u) {
             return state_;
         }
-        float out = state_;
-        for (uint32_t k = 0u; k < steps; ++k) {
-            out = stepActive();
-            if (state_ == target_) {
-                break;
-            }
-        }
-        return out;
+        return advanceActive(steps);
     }
 
   private:
+    RUIDO_SMOOTHER_COLD float advanceActive(uint32_t steps) noexcept {
+        if (steps == 1u) {
+            return stepActive();
+        }
+        const float nextState = target_ + powPoleDecay(coeff_, steps) * (state_ - target_);
+        const float snapTol = 1.0e-5f * (1.0f + absf(target_));
+        if (nextState == state_ || absf(target_ - nextState) <= snapTol) {
+            state_ = target_;
+            return target_;
+        }
+        state_ = nextState;
+        return nextState;
+    }
+
     float stepActive() noexcept {
         const float diff = target_ - state_;
         const float nextState = state_ + coeff_ * diff;
@@ -116,21 +163,29 @@ template <size_t N> class OnePoleSmootherBank {
     }
 
     RUIDO_ALWAYS_INLINE float nextN(size_t idx, uint32_t steps) noexcept {
-        const float tgt = target_[idx];
-        if (state_[idx] == tgt || steps == 0u) {
+        if (state_[idx] == target_[idx] || steps == 0u) {
             return state_[idx];
         }
-        float out = state_[idx];
-        for (uint32_t k = 0u; k < steps; ++k) {
-            out = stepActive(idx);
-            if (state_[idx] == tgt) {
-                break;
-            }
-        }
-        return out;
+        return advanceChannel(idx, steps);
     }
 
   private:
+    RUIDO_SMOOTHER_COLD float advanceChannel(size_t idx, uint32_t steps) noexcept {
+        if (steps == 1u) {
+            return stepActive(idx);
+        }
+        const float cur = state_[idx];
+        const float tgt = target_[idx];
+        const float nextState = tgt + powPoleDecay(coeff_, steps) * (cur - tgt);
+        const float snapTol = 1.0e-5f * (1.0f + absf(tgt));
+        if (nextState == cur || absf(tgt - nextState) <= snapTol) {
+            state_[idx] = tgt;
+            return tgt;
+        }
+        state_[idx] = nextState;
+        return nextState;
+    }
+
     float stepActive(size_t idx) noexcept {
         const float cur = state_[idx];
         const float tgt = target_[idx];
@@ -186,17 +241,25 @@ class VactrolSmoother {
         if (state_ == target_ || steps == 0u) {
             return state_;
         }
-        float out = state_;
-        for (uint32_t k = 0u; k < steps; ++k) {
-            out = stepActive();
-            if (state_ == target_) {
-                break;
-            }
-        }
-        return out;
+        return advanceActive(steps);
     }
 
   private:
+    RUIDO_SMOOTHER_COLD float advanceActive(uint32_t steps) noexcept {
+        if (steps == 1u) {
+            return stepActive();
+        }
+        const float coeff = (target_ > state_) ? riseCoeff_ : fallCoeff_;
+        const float nextState = target_ + powPoleDecay(coeff, steps) * (state_ - target_);
+        const float snapTol = 1.0e-5f * (1.0f + absf(target_));
+        if (nextState == state_ || absf(target_ - nextState) <= snapTol) {
+            state_ = target_;
+            return target_;
+        }
+        state_ = nextState;
+        return nextState;
+    }
+
     float stepActive() noexcept {
         const float diff = target_ - state_;
         const float coeff = (diff > 0.0f) ? riseCoeff_ : fallCoeff_;
@@ -273,17 +336,32 @@ class CriticallyDampedSmoother {
         if ((s2_ == target_ && s1_ == target_) || steps == 0u) {
             return s2_;
         }
-        float out = s2_;
-        for (uint32_t k = 0u; k < steps; ++k) {
-            out = stepActive();
-            if (s2_ == target_ && s1_ == target_) {
-                break;
-            }
-        }
-        return out;
+        return advanceActive(steps);
     }
 
   private:
+    RUIDO_SMOOTHER_COLD float advanceActive(uint32_t steps) noexcept {
+        if (steps == 1u) {
+            return stepActive();
+        }
+        const float tgt = target_;
+        const float e1 = s1_ - tgt;
+        const float e2 = s2_ - tgt;
+        const float rN = powPoleDecay(coeff_, steps);
+        const float next1 = tgt + rN * e1;
+        const float next2 = tgt + rN * (e2 + (static_cast<float>(steps) * coeff_) * e1);
+        const float snapTol = 1.0e-5f * (1.0f + absf(tgt));
+        if ((next1 == s1_ && next2 == s2_) ||
+            (absf(tgt - next2) <= snapTol && absf(tgt - next1) <= snapTol)) {
+            s1_ = tgt;
+            s2_ = tgt;
+            return tgt;
+        }
+        s1_ = next1;
+        s2_ = next2;
+        return next2;
+    }
+
     float stepActive() noexcept {
         const float next1 = s1_ + coeff_ * (target_ - s1_);
         const float next2 = s2_ + coeff_ * (next1 - s2_);
@@ -345,17 +423,34 @@ template <size_t N> class CriticallyDampedSmootherBank {
         if ((s2_[idx] == tgt && s1_[idx] == tgt) || steps == 0u) {
             return s2_[idx];
         }
-        float out = s2_[idx];
-        for (uint32_t k = 0u; k < steps; ++k) {
-            out = stepActive(idx);
-            if (s2_[idx] == tgt && s1_[idx] == tgt) {
-                break;
-            }
-        }
-        return out;
+        return advanceChannel(idx, steps);
     }
 
   private:
+    RUIDO_SMOOTHER_COLD float advanceChannel(size_t idx, uint32_t steps) noexcept {
+        if (steps == 1u) {
+            return stepActive(idx);
+        }
+        const float cur1 = s1_[idx];
+        const float cur2 = s2_[idx];
+        const float tgt = target_[idx];
+        const float e1 = cur1 - tgt;
+        const float e2 = cur2 - tgt;
+        const float rN = powPoleDecay(coeff_, steps);
+        const float next1 = tgt + rN * e1;
+        const float next2 = tgt + rN * (e2 + (static_cast<float>(steps) * coeff_) * e1);
+        const float snapTol = 1.0e-5f * (1.0f + absf(tgt));
+        if ((next1 == cur1 && next2 == cur2) ||
+            (absf(tgt - next2) <= snapTol && absf(tgt - next1) <= snapTol)) {
+            s1_[idx] = tgt;
+            s2_[idx] = tgt;
+            return tgt;
+        }
+        s1_[idx] = next1;
+        s2_[idx] = next2;
+        return next2;
+    }
+
     float stepActive(size_t idx) noexcept {
         const float cur2 = s2_[idx];
         const float cur1 = s1_[idx];
@@ -425,12 +520,16 @@ class LogFreqSmoother {
         if (octSmoother_.isSettled() || steps == 0u) {
             return currentHz_;
         }
+        return advanceActive(steps);
+    }
+
+  private:
+    RUIDO_SMOOTHER_COLD float advanceActive(uint32_t steps) noexcept {
         const float oct = octSmoother_.nextN(steps);
         currentHz_ = octSmoother_.isSettled() ? targetHz_ : fastExp2(oct);
         return currentHz_;
     }
 
-  private:
     float stepActive() noexcept {
         const float oct = octSmoother_.next();
         currentHz_ = octSmoother_.isSettled() ? targetHz_ : fastExp2(oct);
@@ -471,12 +570,16 @@ template <size_t N> class LogFreqSmootherBank {
         if (octSmoothers_.isSettled(idx) || steps == 0u) {
             return currentHz_[idx];
         }
+        return advanceChannel(idx, steps);
+    }
+
+  private:
+    RUIDO_SMOOTHER_COLD float advanceChannel(size_t idx, uint32_t steps) noexcept {
         const float oct = octSmoothers_.nextN(idx, steps);
         currentHz_[idx] = octSmoothers_.isSettled(idx) ? targetHz_[idx] : fastExp2(oct);
         return currentHz_[idx];
     }
 
-  private:
     CriticallyDampedSmootherBank<N> octSmoothers_{};
     std::array<float, N> targetHz_{};
     std::array<float, N> currentHz_{};

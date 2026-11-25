@@ -13,9 +13,11 @@ namespace ruido {
 struct VoiceLfoFrame {
     float raw = 0.0f;         // [-1.0, +1.0] bipolar LFO wave output
     float phase01 = 0.0f;     // [0.0, 1.0) instantaneous phase
-    float activeDepth = 0.0f; // > 0 when any targetDepths[t] > 0 (fast skip when LFO is idle)
+    float activeDepth = 0.0f; // > 0 when any target is active (fast skip when LFO is idle)
     uint32_t driftPacked = 0u;
-    // Per-target effective depths in [0.0, 1.0] (clicklessly crossfaded on live target changes)
+    uint8_t singleTarget = 0u;
+    bool crossfading = false;
+    // Per-target effective depths in [0.0, 1.0] (populated during 12.5 ms target crossfades)
     std::array<float, static_cast<size_t>(LfoTarget::Count)> targetDepths{};
 };
 
@@ -42,6 +44,10 @@ class VoiceLfoBank {
 
     void stepSubBlock(std::array<VoiceLfoFrame, kNumVoiceLfos>& out, uint32_t stride,
                       bool freeze = false, bool forceWaveEval = true) noexcept;
+
+    static void applySlot(const VoiceLfoFrame& lfo, float& baseHz, float& modPw, float& hpBase,
+                          float& hpResBase, float& lpBase, float& lpResBase, float& modAmp,
+                          float& modPan) noexcept;
 
     void stepFrame(std::array<VoiceLfoFrame, kNumVoiceLfos>& out, bool freeze = false,
                    bool forceWaveEval = true) noexcept {

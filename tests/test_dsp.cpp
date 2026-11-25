@@ -523,8 +523,9 @@ void testMs20FilterPassbandAndSmartPark() {
                     static_cast<double>(fProbe), gainDb);
     }
 
-    // Verify Smart-Park resonance muting is GONE: HP=12 Hz, HP RES=1.0 actively self-oscillates
-    // in deep sub-bass, and LP=24 kHz, LP RES=1.0 self-oscillates cleanly in 4x oversampled space!
+    // Verify Smart-Park resonance muting is GONE in sub-bass (HP=12 Hz, HP RES=1.0 actively
+    // self-oscillates), while above 12.2 kHz analog OTA GBW roll-off prevents autonomous
+    // ultrasonic mosquito self-oscillation while preserving active high-frequency resonant boost!
     filter.reset();
     (void)filter.processSample(0.5f, 12.0f, 1.0f, 28000.0f, 0.0f, ruido::kInvOversampledRate);
     double subTailEnergy = 0.0;
@@ -542,12 +543,12 @@ void testMs20FilterPassbandAndSmartPark() {
                 subOscRms);
 
     filter.reset();
-    (void)filter.processSample(0.5f, 2.0f, 0.0f, 24000.0f, 1.0f, ruido::kInvOversampledRate);
+    (void)filter.processSample(0.5f, 2.0f, 0.0f, 16000.0f, 1.0f, ruido::kInvOversampledRate);
     double ultraSq = 0.0;
     float ultraPeak = 0.0f;
     for (size_t n = 0u; n < 88236u; ++n) {
         const float y =
-            filter.processSample(0.0f, 2.0f, 0.0f, 24000.0f, 1.0f, ruido::kInvOversampledRate);
+            filter.processSample(0.0f, 2.0f, 0.0f, 16000.0f, 1.0f, ruido::kInvOversampledRate);
         if (!isFiniteNonSubnormal(y)) {
             ultraPeak = 999.0f;
         }
@@ -557,9 +558,30 @@ void testMs20FilterPassbandAndSmartPark() {
         }
     }
     const double ultraRms = std::sqrt(ultraSq / 44118.0);
-    EXPECT_TRUE(ultraRms > 0.10 && ultraPeak < 3.5f,
-                "24 kHz Korg35 ultrasonic self-oscillation unstable (RMS=%.3f, Peak=%.3f)",
+    EXPECT_TRUE(ultraRms < 1.0e-3 && ultraPeak < 3.5f,
+                "16 kHz OTA GBW taper failed to damp ultrasonic whistle (RMS=%.4e, Peak=%.3f)",
                 ultraRms, static_cast<double>(ultraPeak));
+
+    // Verify 14 kHz resonant peak still boosts a driven 14 kHz carrier cleanly (> +5 dB vs RES=0%)
+    auto measureDriven14kRms = [&](float lpRes) -> double {
+        filter.reset();
+        double sq = 0.0;
+        for (size_t n = 0u; n < 16384u; ++n) {
+            const float x = 0.15f * std::sin(ruido::kTwoPi * 14000.0f * static_cast<float>(n) *
+                                             ruido::kInvOversampledRate);
+            const float y =
+                filter.processSample(x, 2.0f, 0.0f, 14000.0f, lpRes, ruido::kInvOversampledRate);
+            if (n >= 4096u) {
+                sq += static_cast<double>(y) * static_cast<double>(y);
+            }
+        }
+        return std::sqrt(sq / 12288.0);
+    };
+    const double rms14kFlat = measureDriven14kRms(0.0f);
+    const double rms14kRes = measureDriven14kRms(1.0f);
+    EXPECT_TRUE(rms14kRes > rms14kFlat * 1.80,
+                "14 kHz OTA GBW taper muted high-frequency resonant sheen (res=%.4f vs flat=%.4f)",
+                rms14kRes, rms14kFlat);
 
     // Verify musical Rev 2 zone (reso = 0.55) < 3% pitch tracking AND Korg35 (reso = 0.95) scream
     // across 200 Hz, 1 kHz, and 8 kHz on both independent LPF and independent HPF!
@@ -660,19 +682,35 @@ void testMs20FilterPassbandAndSmartPark() {
                     static_cast<double>(targetFc), measuredHz);
     }
 
-    // Verify early MS-20 self-oscillation onset (LP Reso=0.45 already sustains limit cycle)
+    // Verify calibrated 50% MS-20 self-oscillation threshold:
+    //  - Warm pad range (LP Reso=0.48, Factory Scenes 1-3) rings warmly and decays without whistle
+    //  - Singing Rev 2 onset (LP Reso=0.52) sustains a clean limit cycle
     filter.reset();
-    (void)filter.processSample(0.02f, 2.0f, 0.0f, 800.0f, 0.45f, ruido::kInvOversampledRate);
+    (void)filter.processSample(0.5f, 2.0f, 0.0f, 800.0f, 0.48f, ruido::kInvOversampledRate);
+    double padDecaySq = 0.0;
+    for (size_t n = 0u; n < 88236u; ++n) {
+        const float y =
+            filter.processSample(0.0f, 2.0f, 0.0f, 800.0f, 0.48f, ruido::kInvOversampledRate);
+        if (n >= 44118u) {
+            padDecaySq += static_cast<double>(y) * static_cast<double>(y);
+        }
+    }
+    const double padDecayRms = std::sqrt(padDecaySq / 44118.0);
+    EXPECT_TRUE(padDecayRms < 1.0e-3, "Warm pad Reso=0.48 unexpectedly self-oscillated (RMS=%.4e)",
+                padDecayRms);
+
+    filter.reset();
+    (void)filter.processSample(0.02f, 2.0f, 0.0f, 800.0f, 0.52f, ruido::kInvOversampledRate);
     double earlyOscSq = 0.0;
     for (size_t n = 0u; n < 88236u; ++n) {
         const float y =
-            filter.processSample(0.0f, 2.0f, 0.0f, 800.0f, 0.45f, ruido::kInvOversampledRate);
+            filter.processSample(0.0f, 2.0f, 0.0f, 800.0f, 0.52f, ruido::kInvOversampledRate);
         if (n >= 44118u) {
             earlyOscSq += static_cast<double>(y) * static_cast<double>(y);
         }
     }
     const double earlyOscRms = std::sqrt(earlyOscSq / 44118.0);
-    EXPECT_TRUE(earlyOscRms > 0.25, "Expected sustained self-oscillation by Reso=0.45 (RMS=%.3f)",
+    EXPECT_TRUE(earlyOscRms > 0.20, "Expected sustained self-oscillation by Reso=0.52 (RMS=%.3f)",
                 earlyOscRms);
 
     // Verify simultaneous dual HPF (220 Hz) + LPF (880 Hz) Korg35 self-oscillation screams cleanly!

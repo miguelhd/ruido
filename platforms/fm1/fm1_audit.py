@@ -72,6 +72,9 @@ def audit_firmware_image(
     forbidden_url = b"firmware" + b"hub"
     if forbidden_url in img.lower() or forbidden_url in fwsc_bytes.lower():
         errors.append("ruido.bin / ruido.fwsc contains forbidden third-party URL string")
+    usb_product_desc = b"\x16\x03" + "Ruido FM-1".encode("utf-16le")
+    if usb_product_desc not in img:
+        errors.append("ruido.bin missing 'Ruido FM-1' UTF-16LE USB iProduct string descriptor")
 
     rt_dis = extract_dis_section(dis, ".ram_text")
     c1_dis = extract_dis_section(dis, ".c1_text")
@@ -86,6 +89,7 @@ def audit_firmware_image(
     boot_post_sp_ops: list[str] = []
     in_boot_post = False
     dsp_fdiv = 0
+    c1_flushinv = 0
     for ln in c1_dis.splitlines():
         if not ln.startswith(" "):
             m_c1_lbl = sym_label_re.match(ln.strip())
@@ -98,6 +102,8 @@ def audit_firmware_image(
         asm = mm.group(3)
         if "(f)" in asm and " / " in asm:
             dsp_fdiv += 1
+        if "flushinv" in asm:
+            c1_flushinv += 1
         if in_boot_post and ("sp" in asm or "call " in asm):
             boot_post_sp_ops.append(f"{mm.group(1)}: {asm.strip()}")
         if re.search(r"\b(idle|lockset)\b", asm):
@@ -112,6 +118,10 @@ def audit_firmware_image(
         errors.append(f".c1_text contains forbidden idle/lockset instructions: {c1_bad_ops[:3]}")
     if boot_post_sp_ops:
         errors.append(f"ruido_fm1_c1_boot_post must be stackless leaf, found: {boot_post_sp_ops[:3]}")
+    if c1_flushinv < 20:
+        errors.append(
+            f".c1_text missing CacheSync flushinv instructions (found {c1_flushinv}, expected >= 20)"
+        )
 
     bad_sections: list[str] = []
     for ln in hdrs.splitlines():

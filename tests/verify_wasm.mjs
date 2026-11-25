@@ -399,18 +399,21 @@ ex.wasm_ui_button(7, 0);
 ex.wasm_ui_tick_and_render(0.2);
 assert.equal(f32[summaryIdx + 45], 0.0);
 
-// Verify 3-step SAVE cycle (1st = STORE SCENE, 2nd = DELETE SCENE, 3rd = clean 150ms exit),
-// then store current patch into SCENE 2 (Key 10 = white 9)
+// Verify 4-step SAVE cycle (1st = STORE SCENE, 2nd = DELETE SCENE, 3rd = INIT SCENE,
+// 4th = clean 150ms exit), then store current patch into SCENE 2 (Key 10 = white 9)
 const osc1HzBeforeSave = f32[summaryIdx + 0];
 ex.wasm_ui_button(9, 1);
 ex.wasm_ui_button(9, 0);
-assert.equal(f32[summaryIdx + 38], 1.0); // 1/2 STORE SCENE armed
+assert.equal(f32[summaryIdx + 38], 1.0); // 1/3 STORE SCENE armed
 ex.wasm_ui_button(9, 1);
 ex.wasm_ui_button(9, 0);
-assert.equal(f32[summaryIdx + 38], 1.0); // 2/2 DELETE SCENE armed
+assert.equal(f32[summaryIdx + 38], 1.0); // 2/3 DELETE SCENE armed
 ex.wasm_ui_button(9, 1);
 ex.wasm_ui_button(9, 0);
-assert.equal(f32[summaryIdx + 38], 0.0); // 3rd press exits cleanly!
+assert.equal(f32[summaryIdx + 38], 1.0); // 3/3 INIT SCENE armed
+ex.wasm_ui_button(9, 1);
+ex.wasm_ui_button(9, 0);
+assert.equal(f32[summaryIdx + 38], 0.0); // 4th press exits cleanly!
 ex.wasm_ui_tick_and_render(0.2);
 
 ex.wasm_ui_button(9, 1);

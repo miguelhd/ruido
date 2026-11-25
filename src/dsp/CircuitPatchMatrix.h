@@ -5,6 +5,7 @@
 #include "core/LfoMath.h"
 #include "dsp/SallenKeyFilter.h"
 #include "dsp/SchmittOscillatorBank.h"
+#include "dsp/VoiceFilterCoProcessor.h"
 
 #include <array>
 #include <cstddef>
@@ -118,15 +119,17 @@ applyRippleSubXorPreFilter4x(std::array<float, kNumOscillators>& oscSamples, uin
 
 // 5b. CRUSH post-filter stage: CD4013 zero-order S&H clock decimator (16 kHz -> 165 Hz) + R-2R
 //     stepped DAC rung quantizer capturing resonant Korg35 filter ringing before 4x->1x FIR.
-inline void applySampleHoldCrushPostFilter4x(
-    std::array<std::array<float, kOversampleFactor>, kNumOscillators>& voiceSub,
-    const std::array<float, kNumOscillators>& crushDepth, float hzToOversampledPhaseU32,
-    std::array<VoiceCrushState, kNumOscillators>& st) noexcept {
+//     Hoists per-voice S&H clock increment and R-2R step reciprocals across the full `chunk` span.
+RUIDO_NOINLINE inline void
+applySpanCrushPostFilter4x(VoiceFilterCoProcessor::VoiceSpanBuffer& spanSub, size_t chunk,
+                           const std::array<float, kNumOscillators>& crushDepth,
+                           float hzToOversampledPhaseU32,
+                           std::array<VoiceCrushState, kNumOscillators>& st) noexcept {
     for (size_t v = 0u; v < kNumOscillators; ++v) {
         const float d = clampf(crushDepth[v], 0.0f, 1.0f);
         if (d <= 1.0e-4f) {
             st[v].snhPhase = 0u;
-            const float rest = sanitizeState(voiceSub[v][kOversampleFactor - 1u]);
+            const float rest = sanitizeState(spanSub[v][chunk - 1u][kOversampleFactor - 1u]);
             st[v].heldSample = rest;
             st[v].capSample = rest;
             continue;
@@ -135,25 +138,32 @@ inline void applySampleHoldCrushPostFilter4x(
         const float incF = snhHz * hzToOversampledPhaseU32;
         const uint32_t inc = (incF >= 1.0f) ? static_cast<uint32_t>(incF) : 1u;
         const float steps = 10.0f - 7.5f * d;
-        const float invSteps = 1.0f / steps;
+        const float invSteps = fastRecipPos(steps);
         const float wet = smoothstep01(d * 2.5f);
 
-        for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
-            const float raw = voiceSub[v][sub];
-            const uint32_t prev = st[v].snhPhase;
-            st[v].snhPhase = prev + inc;
-            if (st[v].snhPhase < prev) {
+        float* smp = spanSub[v][0].data();
+        const size_t total = chunk * kOversampleFactor;
+        uint32_t phase = st[v].snhPhase;
+        float held = st[v].heldSample;
+        float cap = st[v].capSample;
+        for (size_t idx = 0u; idx < total; ++idx) {
+            const float raw = smp[idx];
+            const uint32_t prev = phase;
+            phase = prev + inc;
+            if (phase < prev) {
                 const float railClamped = clampf(raw, -1.35f, 1.35f) * steps;
                 const auto qInt =
                     static_cast<int32_t>(railClamped + ((railClamped >= 0.0f) ? 0.5f : -0.5f));
-                st[v].heldSample = sanitizeState(static_cast<float>(qInt) * invSteps);
+                held = sanitizeState(static_cast<float>(qInt) * invSteps);
             }
             // CD4013/CD4066 transmission-gate RON * CHOLD RC slew (~90 us settle at 176.472 kHz):
             // preserves sharp 16 kHz -> 165 Hz staircases while rounding 1-tick Dirac rail clicks.
-            st[v].capSample =
-                sanitizeState(st[v].capSample + 0.24f * (st[v].heldSample - st[v].capSample));
-            voiceSub[v][sub] = raw + (st[v].capSample - raw) * wet;
+            cap = sanitizeState(cap + 0.24f * (held - cap));
+            smp[idx] = raw + (cap - raw) * wet;
         }
+        st[v].snhPhase = phase;
+        st[v].heldSample = held;
+        st[v].capSample = cap;
     }
 }
 
@@ -212,9 +222,8 @@ inline uint8_t renderPatchedOscFrame4x(
     return voiceRisingInFrame;
 }
 
-// 7. Out-of-line sub-block driver for Circuit Lab patched spans (keeps
-// DroneEngineCore::processBlock
-//    compact in .c1_text and prevents rare patched-mode register spills onto the fast-path stack).
+// 7. Out-of-line pre-filter sub-block driver for Circuit Lab patched oscillator spans; filtering
+//    then runs through the shared dual-core `VoiceFilterCoProcessor` pipeline.
 struct PatchedSpanContext {
     size_t chunk = 0u;
     float invChunk = 1.0f;
@@ -227,73 +236,166 @@ struct PatchedSpanContext {
     float coupling = 0.0f;
     float hardSync = 0.0f;
     float ringModMix = 0.0f;
-    float hzToOversampledPhaseU32 = 0.0f;
 };
 
-RUIDO_NOINLINE inline void renderPatchedOscFilterSpan4x(
-    const PatchedSpanContext& ctx, SchmittOscillatorBank& oscBank,
-    std::array<Ms20DualFilter, kNumOscillators>& filters,
-    const std::array<Ms20DualFilter::Coeffs, kNumOscillators>& filterCoeffs,
-    std::array<std::array<float, kOversampleFactor>, 16>* spanSub, uint8_t* spanRising,
-    const std::array<float, kNumOscillators>& prevOscFreqHz,
-    const std::array<float, kNumOscillators>& oscFreqs,
-    const std::array<float, kNumOscillators>& prevPulseWidth,
-    const std::array<float, kNumOscillators>& oscPulseWidths,
-    const std::array<float, kNumOscillators>& oscDrifts,
-    const std::array<float, kNumOscillators>& xmodDepths,
-    const std::array<float, kNumOscillators>& foldDepths,
-    const std::array<float, kNumOscillators>& crushDepths,
-    std::array<float, kNumOscillators>& prevOscSamples,
-    std::array<float, kNumOscillators>& prevCapRamp,
-    std::array<VoiceCrushState, kNumOscillators>& crushStates,
-    std::array<float, kNumOscillators>& lastGateHigh,
-    std::array<float, kNumOscillators>& lastDriftNorm) noexcept {
-    OscillatorBankOutput oscOut;
+RUIDO_NOINLINE inline void
+renderPatchedOscSpan4x(const PatchedSpanContext& ctx, SchmittOscillatorBank& oscBank,
+                       std::array<std::array<float, kOversampleFactor>, 16>* spanSub,
+                       uint8_t* spanRising, const std::array<float, kNumOscillators>& prevOscFreqHz,
+                       const std::array<float, kNumOscillators>& oscFreqs,
+                       const std::array<float, kNumOscillators>& prevPulseWidth,
+                       const std::array<float, kNumOscillators>& oscPulseWidths,
+                       const std::array<float, kNumOscillators>& oscDrifts,
+                       const std::array<float, kNumOscillators>& xmodDepths,
+                       const std::array<float, kNumOscillators>& foldDepths,
+                       const std::array<float, kNumOscillators>& crushDepths,
+                       std::array<float, kNumOscillators>& prevOscSamples,
+                       std::array<float, kNumOscillators>& prevCapRamp,
+                       std::array<VoiceCrushState, kNumOscillators>& crushStates,
+                       std::array<float, kNumOscillators>& lastGateHigh,
+                       std::array<float, kNumOscillators>& lastDriftNorm) noexcept {
+    // Hoist per-voice XMod / Wavefold / Sub-XOR depths & cap-ramp mask across the entire span!
+    std::array<float, kNumOscillators> xmodClamped{};
+    std::array<float, kNumOscillators> xmodOctSpan{};
+    std::array<float, kNumOscillators> foldClamped{};
+    std::array<float, kNumOscillators> foldGain{};
+    std::array<float, kNumOscillators> foldMix{};
+    std::array<float, kNumOscillators> crushClamped{};
+    std::array<float, kNumOscillators> crushSubMix{};
+    uint8_t needCapMask = 0u;
+    for (size_t v = 0u; v < kNumOscillators; ++v) {
+        const float xd = clampf(xmodDepths[v], 0.0f, 1.0f);
+        xmodClamped[v] = xd;
+        if (xd > 1.0e-4f) {
+            xmodOctSpan[v] = 3.2f * xd * (0.25f + 0.75f * xd);
+            needCapMask |= static_cast<uint8_t>(1u << ((v + 1u) & 3u));
+        }
+        const float fd = clampf(foldDepths[v], 0.0f, 1.0f);
+        foldClamped[v] = fd;
+        if (fd > 1.0e-4f) {
+            foldGain[v] = computeWavefoldStages(fd);
+            foldMix[v] = smoothstep01(fd * 2.4f);
+            needCapMask |= static_cast<uint8_t>(1u << v);
+        }
+        const float cd = clampf(crushDepths[v], 0.0f, 1.0f);
+        crushClamped[v] = cd;
+        if (cd > 1.0e-4f) {
+            crushSubMix[v] = 0.76f * smoothstep01(cd * 1.7f);
+        }
+    }
+    const float ringMix = clampf(ctx.ringModMix, 0.0f, 1.0f);
+    const float invSpan4x = 0.25f * ctx.invChunk;
+
+    SchmittOscillatorBank::PatchedSpanState oscSt{};
+    oscBank.preparePatchedSpan(oscSt, ctx.invChunk, prevOscFreqHz, oscFreqs, prevPulseWidth,
+                               oscPulseWidths, oscDrifts, ctx.coupling, ctx.stasisFreeze,
+                               ctx.hardSync, needCapMask);
+
+    std::array<float, kNumOscillators> curBaseFreq = prevOscFreqHz;
+    std::array<float, kNumOscillators> freqStep4x{};
+    for (size_t i = 0u; i < kNumOscillators; ++i) {
+        freqStep4x[i] = (oscFreqs[i] - prevOscFreqHz[i]) * invSpan4x;
+    }
+
+    std::array<float, kNumOscillators> oscSamples = prevOscSamples;
+    std::array<float, kNumOscillators> oscCapRamp = prevCapRamp;
+
     for (size_t k = 0u; k < ctx.chunk; ++k) {
-        const bool isLastFrame = ctx.isLastChunk && ((k + 1u) == ctx.chunk);
-        const float alpha0 = static_cast<float>(k) * ctx.invChunk;
-        const float alpha1 =
-            (k + 1u == ctx.chunk) ? 1.0f : (static_cast<float>(k + 1u) * ctx.invChunk);
-        std::array<float, kNumOscillators> frameStartFreq, frameEndFreq, framePw;
-        for (size_t i = 0u; i < kNumOscillators; ++i) {
-            const float df = oscFreqs[i] - prevOscFreqHz[i];
-            frameStartFreq[i] = prevOscFreqHz[i] + df * alpha0;
-            frameEndFreq[i] = prevOscFreqHz[i] + df * alpha1;
-            framePw[i] = prevPulseWidth[i] + (oscPulseWidths[i] - prevPulseWidth[i]) * alpha1;
-        }
-        std::array<std::array<float, kOversampleFactor>, kNumOscillators> voiceSub;
-        const uint8_t voiceRisingInFrame = renderPatchedOscFrame4x(
-            oscBank, oscOut, voiceSub, frameStartFreq, frameEndFreq, framePw, oscDrifts,
-            ctx.coupling, ctx.stasisFreeze, ctx.hardSync, ctx.anyXmod, ctx.anyFold, ctx.anyCrush,
-            ctx.anyRing, ctx.ringModMix, xmodDepths, foldDepths, crushDepths, prevOscSamples,
-            prevCapRamp, crushStates);
-        if (isLastFrame) {
-            lastGateHigh = oscOut.gateHigh;
-            lastDriftNorm = oscOut.driftNorm;
-        }
-#if defined(__SSE__) || defined(__ARM_NEON) || defined(__wasm__)
-        Ms20DualFilter::processQuadBank4x(filters, voiceSub, filterCoeffs);
-#else
-        for (size_t v = 0u; v < kNumOscillators; ++v) {
-            filters[v].processSpan4x(&voiceSub[v], 1u, filterCoeffs[v]);
-        }
-#endif
-        if (ctx.anyCrush) {
-            applySampleHoldCrushPostFilter4x(voiceSub, crushDepths, ctx.hzToOversampledPhaseU32,
-                                             crushStates);
-        } else {
-            for (size_t v = 0u; v < kNumOscillators; ++v) {
-                crushStates[v].snhPhase = 0u;
-                const float rest = sanitizeState(voiceSub[v][kOversampleFactor - 1u]);
-                crushStates[v].heldSample = rest;
-                crushStates[v].capSample = rest;
+        oscBank.beginPatchedFrame(oscSt);
+        uint8_t voiceRisingInFrame = 0u;
+
+        for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
+            std::array<float, kNumOscillators> subFreqs;
+            for (size_t i = 0u; i < kNumOscillators; ++i) {
+                curBaseFreq[i] += freqStep4x[i];
+                subFreqs[i] = curBaseFreq[i];
+            }
+            if (ctx.anyXmod) {
+                for (size_t v = 0u; v < kNumOscillators; ++v) {
+                    if (xmodOctSpan[v] > 0.0f) {
+                        const size_t nbr = (v + 1u) & 3u;
+                        const float modWave = 0.72f * prevCapRamp[nbr] +
+                                              0.28f * clampf(prevOscSamples[v], -1.25f, 1.25f);
+                        subFreqs[v] = clampf(subFreqs[v] * fastExp2(xmodOctSpan[v] * modWave),
+                                             0.005f, 21200.0f);
+                    }
+                }
+            }
+
+            const uint8_t risingMask =
+                oscBank.stepPatchedSubSample(oscSt, subFreqs, oscSamples, oscCapRamp);
+            prevOscSamples = oscSamples;
+            prevCapRamp = oscCapRamp;
+            std::array<float, kNumOscillators> patched = oscSamples;
+
+            if (ctx.anyXmod) {
+                const std::array<float, kNumOscillators> s = patched;
+                for (size_t v = 0u; v < kNumOscillators; ++v) {
+                    const float xd = xmodClamped[v];
+                    if (xd > 1.0e-4f) {
+                        const size_t nbr = (v + 1u) & 3u;
+                        const float xorTear = clampf(s[v] * oscCapRamp[nbr] * 1.35f, -1.15f, 1.15f);
+                        patched[v] = s[v] + (xorTear - s[v]) * (0.58f * xd);
+                    }
+                }
+            }
+            if (ctx.anyFold) {
+                for (size_t v = 0u; v < kNumOscillators; ++v) {
+                    if (foldMix[v] > 0.0f) {
+                        const float asym = 0.20f * foldClamped[v] * clampf(patched[v], -1.0f, 1.0f);
+                        const float folded =
+                            1.12f * evalAnalogSine(wrapLfoPhase01(
+                                        0.25f * (oscCapRamp[v] * foldGain[v] + asym)));
+                        patched[v] += (folded - patched[v]) * foldMix[v];
+                    }
+                }
+            }
+            if (ctx.anyCrush) {
+                for (size_t v = 0u; v < kNumOscillators; ++v) {
+                    if (((risingMask >> v) & 1u) != 0u) {
+                        crushStates[v].divCounter =
+                            static_cast<uint8_t>((crushStates[v].divCounter + 1u) & 7u);
+                    }
+                    const float cd = crushClamped[v];
+                    if (cd > 1.0e-4f) {
+                        const uint8_t cnt = crushStates[v].divCounter;
+                        const float sub1 = ((cnt & 1u) != 0u) ? 1.0f : -1.0f;
+                        const float sub2 = ((cnt & 2u) != 0u) ? 1.0f : -1.0f;
+                        const float sub3 = ((cnt & 4u) != 0u) ? 1.0f : -1.0f;
+                        const float s = clampf(patched[v], -1.1f, 1.1f);
+                        const float xor1 = -s * sub1;
+                        const float cascade = clampf(0.58f * xor1 + 0.32f * cd * sub2 +
+                                                         0.28f * (cd * cd) * (xor1 * sub3),
+                                                     -1.15f, 1.15f);
+                        patched[v] += (cascade - patched[v]) * crushSubMix[v];
+                    }
+                }
+            } else if (risingMask != 0u) {
+                for (size_t v = 0u; v < kNumOscillators; ++v) {
+                    if (((risingMask >> v) & 1u) != 0u) {
+                        crushStates[v].divCounter =
+                            static_cast<uint8_t>((crushStates[v].divCounter + 1u) & 7u);
+                    }
+                }
+            }
+            if (ctx.anyRing && ringMix > 1.0e-4f) {
+                const std::array<float, kNumOscillators> s = patched;
+                for (size_t i = 0u; i < kNumOscillators; ++i) {
+                    const float ring = clampf(s[i] * s[(i + 1u) & 3u], -1.25f, 1.25f);
+                    patched[i] = s[i] + (ring - s[i]) * ringMix;
+                }
+            }
+
+            voiceRisingInFrame |= risingMask;
+            for (size_t i = 0u; i < kNumOscillators; ++i) {
+                spanSub[i][k][sub] = patched[i];
             }
         }
         spanRising[k] = voiceRisingInFrame;
-        for (size_t v = 0u; v < kNumOscillators; ++v) {
-            spanSub[v][k] = voiceSub[v];
-        }
     }
+
+    oscBank.finishPatchedSpan(ctx.isLastChunk ? &lastGateHigh : nullptr,
+                              ctx.isLastChunk ? &lastDriftNorm : nullptr);
 }
 
 } // namespace ruido

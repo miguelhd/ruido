@@ -255,7 +255,7 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
     const float alphaFocus = snapPan ? 1.0f : (1.0f - fastExpNeg(dtClamped * (1.0f / 0.042f)));
 
     const bool spotlightActive = (rawHud.knobBank == KnobBankMode::Panning) &&
-                                 (rawHud.focusedKnob < kNumOscillators) && !monoCollapse_;
+                                 (effectiveFocusedColumnMask(rawHud) != 0u) && !monoCollapse_;
     hasFocusSmooth_ =
         slewScalar(hasFocusSmooth_, spotlightActive ? 1.0f : 0.0f, alphaFocus, 0.002f);
 
@@ -287,7 +287,7 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
             0.0f, 1.0f);
         const float halfW = 18.5f - 6.0f * octAboveBass;
         const float tgtInvW2 = 1.0f / (halfW * halfW);
-        const float tgtFocus = (spotlightActive && rawHud.focusedKnob == v) ? 1.0f : 0.0f;
+        const float tgtFocus = (spotlightActive && isHudColumnFocused(rawHud, v)) ? 1.0f : 0.0f;
         const float aGate = (control.keyMod.stutterDepth[v] > 1.0e-4f) ? alphaChop : alphaPos;
 
         panX_[v] = slewScalar(panX_[v], kPanCenterX + livePan * kPanHalfSpanX, alphaPos, 0.02f);

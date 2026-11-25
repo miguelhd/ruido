@@ -83,7 +83,15 @@ inline float masterQ12ToGain(uint32_t master_q12) noexcept {
     return ruido::fm1::masterQ12ToGain(master_q12);
 }
 
+inline void syncCore1StatsToStatus() noexcept {
+    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.c1Blocks);
+    g_ruido_fm1_status.c1_blocks = g_ruido_ic_ctrl.c1Blocks.load(std::memory_order_acquire);
+    g_ruido_fm1_status.c1_last64_ticks =
+        g_ruido_ic_ctrl.c1Last64Ticks.load(std::memory_order_relaxed);
+}
+
 inline void refreshGate43StatusWords() noexcept {
+    syncCore1StatsToStatus();
     const auto* ctrl = controller();
     const auto& hud = ctrl->hud();
     const auto& st = ctrl->state();
@@ -167,6 +175,10 @@ void ruido_fm1_construct(uint32_t initial_master_q12) {
     g_ruido_ic_ctrl.c1BenchTicks.store(0u, std::memory_order_relaxed);
     g_ruido_ic_ctrl.c1FlashHold.store(0u, std::memory_order_relaxed);
     g_ruido_ic_ctrl.c1FlashAck.store(0u, std::memory_order_relaxed);
+    g_ruido_ic_ctrl.c1Blocks.store(0u, std::memory_order_relaxed);
+    g_ruido_ic_ctrl.c1Last64Ticks.store(0u, std::memory_order_relaxed);
+    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.c1Blocks);
 
     g_latest_master_gain = masterQ12ToGain(initial_master_q12);
     ruido::fm1::callC1Far(ruido_fm1_c1_construct, 1.0f);
@@ -299,8 +311,10 @@ uint32_t ruido_fm1_nvs_poll_save(uint32_t now_ms, uint32_t force_flush, RuidoFm1
     if (save_fn == nullptr || g_ruido_ic_ctrl.engineReady.load(std::memory_order_acquire) == 0u) {
         return 0u;
     }
-    const uint32_t writes = ruido::fm1::pollAndSaveNvsBlobs(
-        now_ms, force_flush, save_fn, pre_erase_fn, *controller(), g_nvs_state, tail_write_fn);
+    const uint32_t availBlocks = ruidoAudioRing()->availableBlocks();
+    const uint32_t writes =
+        ruido::fm1::pollAndSaveNvsBlobs(now_ms, force_flush, save_fn, pre_erase_fn, *controller(),
+                                        g_nvs_state, tail_write_fn, availBlocks);
     if (writes > 0u) {
         refreshGate43StatusWords();
     }
@@ -393,7 +407,9 @@ void ruido_fm1_flash_hold_end(void) {
 void ruido_fm1_assist_dsp(void) {
     if (checkCore1SelfFault()) {
         if (g_ruido_ic_ctrl.engineReady.load(std::memory_order_relaxed) != 0u) {
-            ruido::fm1::callC1Far(ruido_fm1_c1_pump_solo_ring, 2u);
+            const uint32_t avail = ruidoAudioRing()->availableBlocks();
+            const uint32_t pumpCount = (avail < 8u) ? 4u : 2u;
+            ruido::fm1::callC1Far(ruido_fm1_c1_pump_solo_ring, pumpCount);
         }
         return;
     }
@@ -492,6 +508,7 @@ void ruido_fm1_audio(int32_t* out_lr_q15, uint32_t num_frames) {
         offset += chunk;
     }
 
+    syncCore1StatsToStatus();
     const bool c1Faulted = (g_ruido_ic_ctrl.c1SelfFault.load(std::memory_order_acquire) != 0u) ||
                            (g_ruido_ic_ctrl.c1FallbackActive.load(std::memory_order_acquire) != 0u);
     if (hadMiss && !c1Faulted &&
@@ -530,9 +547,11 @@ uint32_t ruido_fm1_usb_feed(const int32_t* in_lr_q15, uint32_t num_in_frames, ui
     if (g_ruido_ic_ctrl.engineReady.load(std::memory_order_acquire) == 0u) {
         return 0u;
     }
-    return usbResampler()->processBlockToRing(in_lr_q15, num_in_frames, rate_48k != 0u, fill_frames,
-                                              target_fill, ua_ring_buf, ua_ring_mask, write_pos,
-                                              free_slots, stream_seq);
+    const ruido::fm1::RuidoUsbFeedParams params{
+        in_lr_q15,   num_in_frames, rate_48k,  fill_frames, target_fill,
+        ua_ring_buf, ua_ring_mask,  write_pos, free_slots,  stream_seq,
+    };
+    return ruido::fm1::callC1Far(ruido_fm1_c1_usb_feed, usbResampler(), &params);
 }
 
 void ruido_fm1_on_midi_rt(uint8_t status_byte) {
@@ -574,10 +593,11 @@ void ruido_fm1_tick_and_prepare_ms(uint32_t elapsed_ms) {
     auto* ui = renderer();
 
     ruido_fm1_assist_dsp();
+    ruido::hwCacheFlushInvalidateRange(&buses->telemetry, sizeof(buses->telemetry));
     ctrl->tick(dt_sec, buses->telemetry);
     ledMod()->updateTargets(ctrl->leds());
     ruido_fm1_assist_dsp();
-    ui->ingestScopeRing(buses->scopeBuffer);
+    ui->ingestScopeRing(buses->scopeBuffer, []() noexcept { ruido_fm1_assist_dsp(); });
     ruido_fm1_assist_dsp();
     ui->prepareFrame(dt_sec, ctrl->state(), ctrl->hud(), buses->telemetry,
                      []() noexcept { ruido_fm1_assist_dsp(); });
@@ -598,9 +618,10 @@ const uint16_t* ruido_fm1_render_strip_be(uint16_t y_start, uint8_t slot) {
     /* Drain Core 1's 44.1 kHz 2048-frame scope ring 4x per frame so zero samples are ever dropped
      */
     if ((y_start & 63u) == 0u && y_start != 0u) {
-        renderer()->ingestScopeRing(ruidoSharedBuses()->scopeBuffer);
+        renderer()->ingestScopeRing(ruidoSharedBuses()->scopeBuffer,
+                                    []() noexcept { ruido_fm1_assist_dsp(); });
     }
-    constexpr uint16_t kSliceRows = 2u;
+    constexpr uint16_t kSliceRows = 4u;
     static_assert(ruido::kScanlineStripHeight % kSliceRows == 0u, "kSliceRows must divide strip");
     for (uint16_t rowOff = 0u; rowOff < ruido::kScanlineStripHeight; rowOff += kSliceRows) {
         ruido_fm1_assist_dsp();

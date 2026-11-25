@@ -69,7 +69,7 @@ HudGaugeTargets computeHudGaugeTargets(const EngineControlState& control, const 
     }
 
     for (uint8_t k = 0u; k < 4u; ++k) {
-        out.focused[k] = (hud.focusedKnob == k) && isKnobFocusableMode(hud.mode);
+        out.focused[k] = isHudColumnFocused(hud, k) && isColumnSpotlightMode(hud);
 
         if (hud.knobBank == KnobBankMode::GlobalFilter) {
             const GlobalColumnSummary gs =

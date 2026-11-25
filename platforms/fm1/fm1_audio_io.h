@@ -10,6 +10,7 @@
 //
 // Pure embedded C++17 (zero SDK/GPL headers) so identical math is verified in `tests/test_dsp`.
 
+#include "core/CacheSync.h"
 #include "core/Config.h"
 #include "core/DspMath.h"
 
@@ -83,10 +84,12 @@ class Fm1TpdfQuantizer {
     uint32_t rngR_ = 0x85EBCA6Bu;
 };
 
-struct Fm1AudioBlock {
+struct alignas(kHwCacheLineBytes) Fm1AudioBlock {
     std::array<int16_t, 2u * kBlockFrames> lr{};
     int32_t peakAbsQ15 = 0;
 };
+static_assert(sizeof(Fm1AudioBlock) % kHwCacheLineBytes == 0u,
+              "Fm1AudioBlock must be an exact multiple of 32-byte L1 D-Cache lines");
 
 class Fm1AudioBlockRing {
   public:
@@ -100,10 +103,12 @@ class Fm1AudioBlockRing {
             blk.lr.fill(0);
             blk.peakAbsQ15 = 0;
         }
+        hwCacheFlushInvalidateRange(this, sizeof(*this));
     }
 
     // Core 1 producer: inspect next slot if ring is not full (`(w - r) < kNumBlocks`).
     Fm1AudioBlock* beginPush() noexcept {
+        hwCacheFlushInvalidateLine(&readIdx_);
         const uint32_t w = writeIdx_.load(std::memory_order_relaxed);
         const uint32_t r = readIdx_.load(std::memory_order_acquire);
         if ((w - r) >= kNumBlocks) {
@@ -114,25 +119,33 @@ class Fm1AudioBlockRing {
 
     void commitPush() noexcept {
         const uint32_t w = writeIdx_.load(std::memory_order_relaxed);
+        hwCacheFlushInvalidateRange(&blocks_[w & kMask], sizeof(Fm1AudioBlock));
         writeIdx_.store(w + 1u, std::memory_order_release);
+        hwCacheFlushInvalidateLine(&writeIdx_);
     }
 
     // Core 0 ALNK0 DMA consumer: inspect oldest ready block if available.
     const Fm1AudioBlock* beginPop() const noexcept {
+        hwCacheFlushInvalidateLine(&writeIdx_);
         const uint32_t r = readIdx_.load(std::memory_order_relaxed);
         const uint32_t w = writeIdx_.load(std::memory_order_acquire);
         if (r == w) {
             return nullptr;
         }
-        return &blocks_[r & kMask];
+        const Fm1AudioBlock* blk = &blocks_[r & kMask];
+        hwCacheFlushInvalidateRange(blk, sizeof(Fm1AudioBlock));
+        return blk;
     }
 
     void commitPop() noexcept {
         const uint32_t r = readIdx_.load(std::memory_order_relaxed);
         readIdx_.store(r + 1u, std::memory_order_release);
+        hwCacheFlushInvalidateLine(&readIdx_);
     }
 
     uint32_t availableBlocks() const noexcept {
+        hwCacheFlushInvalidateLine(&writeIdx_);
+        hwCacheFlushInvalidateLine(&readIdx_);
         const uint32_t w = writeIdx_.load(std::memory_order_acquire);
         const uint32_t r = readIdx_.load(std::memory_order_acquire);
         return w - r;

@@ -35,7 +35,7 @@ class ScopeHudRenderer {
     bool isBootIntroActive() const noexcept { return bootIntro_.isActive(); }
 
     // Drain available audio scope samples from Core 1's lock-free SPSC ring buffer.
-    void ingestScopeRing(ScopeRingBuffer& ring) noexcept;
+    void ingestScopeRing(ScopeRingBuffer& ring, void (*coProcYield)() noexcept = nullptr) noexcept;
 
     // Directly push a batch of ScopeFrames (used when simulator bridges frames over IPC).
     void pushScopeSamples(const ScopeFrame* frames, size_t count) noexcept;
@@ -67,7 +67,8 @@ class ScopeHudRenderer {
     int computeScanlineSyncShift(int py) const noexcept;
     void updateHudGauges(float dtClamped, bool snapImmediate) noexcept;
     void compositeHudStrip(uint16_t yStart, uint16_t stripHeight, uint8_t* lumBuf,
-                           uint16_t* linScratch, uint8_t hudAlpha8) const noexcept;
+                           uint16_t* linScratch, uint8_t hudAlpha8,
+                           void (*coProcYield)() noexcept = nullptr) const noexcept;
 
     static constexpr uint16_t kSubStripRows = 8u;
 

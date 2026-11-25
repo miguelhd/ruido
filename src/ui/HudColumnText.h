@@ -81,11 +81,13 @@ inline GlobalColumnSummary evaluateGlobalFilterColumn(uint8_t knobIdx,
     return s;
 }
 
-constexpr bool isKnobFocusableMode(HudMode mode) noexcept {
-    return mode == HudMode::VoiceFrequency || mode == HudMode::PulseWidth ||
-           mode == HudMode::VoiceDrift || mode == HudMode::VoiceFilter ||
-           mode == HudMode::Amplitude || mode == HudMode::Panning || mode == HudMode::VoiceGate ||
-           mode == HudMode::VoicePressure || mode == HudMode::VoiceLfo;
+constexpr bool isColumnSpotlightMode(const HudState& hud) noexcept {
+    return hud.mode == HudMode::VoiceFrequency || hud.mode == HudMode::PulseWidth ||
+           hud.mode == HudMode::VoiceDrift || hud.mode == HudMode::VoiceFilter ||
+           hud.mode == HudMode::Amplitude || hud.mode == HudMode::Panning ||
+           hud.mode == HudMode::VoiceGate || hud.mode == HudMode::VoicePressure ||
+           hud.mode == HudMode::VoiceLfo ||
+           (hud.mode == HudMode::KeyboardPlay && isPerOscKnobBank(hud.knobBank));
 }
 
 inline void formatHeaderDriveValue(float ampVal, char* rightText, size_t rightCap) noexcept {
@@ -143,13 +145,17 @@ inline void formatSnapshotHeader(const HudState& hud, char* leftMain, size_t lef
     }
     appendStr(leftMain, 0u, leftMainCap, "SCENE");
     if (hud.mode == HudMode::SaveArmed) {
-        appendStr(rightText, 0u, rightCap, hud.saveDeleteMode ? "DELETE" : "SAVE");
+        const char* modeLabel = (hud.savePageMode == SavePageMode::Delete) ? "DELETE"
+                                : (hud.savePageMode == SavePageMode::Init) ? "INIT"
+                                                                           : "SAVE";
+        appendStr(rightText, 0u, rightCap, modeLabel);
         return;
     }
     const bool isKeyRecall =
         ((hud.mode == HudMode::KeyboardPlay || hud.mode == HudMode::ShiftMap) &&
          hud.activePunch == KeyPunchKind::SnapshotRecall);
-    if (hud.snapshotOccupiedMask == 0u && !isKeyRecall && !hud.snapshotDeletedToast) {
+    if (hud.snapshotOccupiedMask == 0u && !isKeyRecall &&
+        hud.snapshotToast != SnapshotToastKind::Deleted) {
         appendStr(rightText, 0u, rightCap, "ALL EMPTY");
         return;
     }
@@ -165,21 +171,18 @@ inline void formatSnapshotHeader(const HudState& hud, char* leftMain, size_t lef
     const bool activeOcc = (hud.snapshotOccupiedMask & (1u << activeSlot)) != 0u;
     const uint8_t dispSlot =
         isKeyRecall ? (hud.activePunchVoice & 3u)
-                    : ((hud.snapshotSavedToast || hud.snapshotDeletedToast || !activeOcc)
-                           ? (hud.snapshotToastSlot & 3u)
-                           : activeSlot);
+                    : ((hasSnapshotResultToast(hud) || !activeOcc) ? (hud.snapshotToastSlot & 3u)
+                                                                   : activeSlot);
     const bool dispOcc = (hud.snapshotOccupiedMask & (1u << dispSlot)) != 0u;
 
-    if (hud.snapshotDeletedToast) {
+    if (hud.snapshotToast != SnapshotToastKind::None) {
         size_t sp = appendStr(leftSuffix, 0u, suffixCap, " ");
         appendUInt(leftSuffix, sp, suffixCap, static_cast<uint32_t>(dispSlot + 1u));
-        appendStr(rightText, 0u, rightCap, "DELETED");
-        return;
-    }
-    if (hud.snapshotSavedToast) {
-        size_t sp = appendStr(leftSuffix, 0u, suffixCap, " ");
-        appendUInt(leftSuffix, sp, suffixCap, static_cast<uint32_t>(dispSlot + 1u));
-        appendStr(rightText, 0u, rightCap, "SAVED");
+        const char* toastStr = (hud.snapshotToast == SnapshotToastKind::Deleted) ? "DELETED"
+                               : (hud.snapshotToast == SnapshotToastKind::Initialized)
+                                   ? "INITIALIZED"
+                                   : "SAVED";
+        appendStr(rightText, 0u, rightCap, toastStr);
         return;
     }
     if (!dispOcc && (isKeyRecall || activeWeights == 0u)) {

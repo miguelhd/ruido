@@ -190,8 +190,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         }
         if (encoder == EncoderId::Presets) {
             hud_.lastEncoder = EncoderId::Presets;
-            hud_.snapshotSavedToast = false;
-            hud_.snapshotDeletedToast = false;
+            hud_.snapshotToast = SnapshotToastKind::None;
             const uint8_t prevSlot = snapshots_.activeSlot();
             if (snapshots_.morphByEncoder(ticks, rate, state_)) {
                 if (snapshots_.activeSlot() != prevSlot) {
@@ -225,7 +224,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         }
         if (hud_.saveArmed) {
             hud_.saveArmed = false;
-            hud_.saveDeleteMode = false;
+            hud_.savePageMode = SavePageMode::Store;
             if (latchedHudMode_ == HudMode::SaveArmed) {
                 setLatchedPage(HudMode::None, ButtonId::Count);
             }
@@ -244,9 +243,11 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
     if (encoder == EncoderId::Select) {
         if (hud_.saveArmed) {
             hud_.lastEncoder = EncoderId::Select;
-            const int32_t curMode = hud_.saveDeleteMode ? 1 : 0;
-            const int32_t nextMode = stepClampedDetent(curMode, 1, ticks, rate, selectTickAccum_);
-            hud_.saveDeleteMode = (nextMode != 0);
+            constexpr int32_t kMaxSaveMode = static_cast<int32_t>(SavePageMode::Count) - 1;
+            const int32_t curMode = static_cast<int32_t>(hud_.savePageMode);
+            const int32_t nextMode =
+                stepClampedDetent(curMode, kMaxSaveMode, ticks, rate, selectTickAccum_);
+            hud_.savePageMode = static_cast<SavePageMode>(nextMode);
             hud_.knobBank = KnobBankMode::None;
             if (keyboard_.anyKeyHeld()) {
                 keyboard_.evaluate(state_, hud_);
@@ -329,13 +330,12 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
         hud_.lastEncoder = EncoderId::Presets;
         if (hud_.saveArmed) {
             hud_.saveArmed = false;
-            hud_.saveDeleteMode = false;
+            hud_.savePageMode = SavePageMode::Store;
             if (latchedHudMode_ == HudMode::SaveArmed) {
                 setLatchedPage(HudMode::None, ButtonId::Count);
             }
         }
-        hud_.snapshotSavedToast = false;
-        hud_.snapshotDeletedToast = false;
+        hud_.snapshotToast = SnapshotToastKind::None;
 
         const uint8_t prevSlot = snapshots_.activeSlot();
         if (snapshots_.morphByEncoder(ticks, rate, state_)) {
@@ -365,7 +365,7 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
     }
     if (hud_.saveArmed) {
         hud_.saveArmed = false;
-        hud_.saveDeleteMode = false;
+        hud_.savePageMode = SavePageMode::Store;
         if (latchedHudMode_ == HudMode::SaveArmed) {
             setLatchedPage(HudMode::None, ButtonId::Count);
         }

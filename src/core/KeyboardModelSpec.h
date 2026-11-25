@@ -35,7 +35,7 @@ inline constexpr float kLedSceneStored = kLedZone2Rest;   // 40% occupied stored
 inline constexpr float kLedSceneActive = 0.80f;           // 80% active scene ceiling
 
 inline constexpr bool isSceneLiveMorphActive(const HudState& hud) noexcept {
-    if (hud.saveArmed || hud.snapshotSavedToast || hud.snapshotDeletedToast) {
+    if (hud.saveArmed || hasSnapshotResultToast(hud)) {
         return false;
     }
     return hud.snapshotGliding || hud.mode == HudMode::SnapshotSlot ||
@@ -87,8 +87,41 @@ constexpr const KeyboardModelSpec& keyboardModelSpec(KeyboardModel model) noexce
     return (idx < kKeyboardModelSpecs.size()) ? kKeyboardModelSpecs[idx] : kKeyboardModelSpecs[0];
 }
 
-constexpr float saveArmedPulseHz(bool deleteMode) noexcept {
-    return deleteMode ? 5.00f : 2.50f;
+inline float evalSaveArmedPulse01(SavePageMode mode, float animPhase) noexcept {
+    if (mode == SavePageMode::Init) {
+        // Calm 0.625 Hz (1.60 s) double-pulse loop (exact 625x integer multiple of 1000.0 s
+        // animPhase wrap): two gentle 360 ms analog-sine swells separated by a 64 ms trough,
+        // followed by an 816 ms quiet rest pause.
+        constexpr float kInitLoopHz = 0.625f;
+        const float u = wrapLfoPhase01(animPhase * kInitLoopHz);
+        float x = -1.0f;
+        if (u < 0.225f) {
+            x = u * (1.0f / 0.225f);
+        } else if (u >= 0.265f && u < 0.490f) {
+            x = (u - 0.265f) * (1.0f / 0.225f);
+        }
+        if (x >= 0.0f) {
+            return clampf(0.5f * (1.0f - evalAnalogSine(wrapLfoPhase01(x + 0.25f))), 0.0f, 1.0f);
+        }
+        return 0.0f;
+    }
+    const float hz = (mode == SavePageMode::Delete) ? 5.00f : 2.50f;
+    return 0.5f * (1.0f + evalAnalogSine(wrapLfoPhase01(animPhase * hz)));
+}
+
+constexpr float computeSaveArmedButtonLed(SavePageMode mode, float pulse01) noexcept {
+    const float p = clampf(pulse01, 0.0f, 1.0f);
+    return (mode == SavePageMode::Init) ? (0.20f + 0.80f * p) : (0.25f + 0.75f * p);
+}
+
+constexpr float computeSaveArmedSceneKeyGlow(SavePageMode mode, float pulse01) noexcept {
+    const float p = clampf(pulse01, 0.0f, 1.0f);
+    return (mode == SavePageMode::Init) ? (0.20f + 0.75f * p) : (0.25f + 0.70f * p);
+}
+
+constexpr bool isSaveArmedSlotTargetable(SavePageMode mode, uint8_t occupiedMask,
+                                         size_t slot) noexcept {
+    return mode != SavePageMode::Delete || ((occupiedMask & (1u << (slot & 3u))) != 0u);
 }
 
 inline float computeLatchKeyLed(const HudState& hud) noexcept {
@@ -106,8 +139,8 @@ inline float computeLatchKeyLed(const HudState& hud) noexcept {
 //  - Functional States: `0%` unassigned/silent, `15%` assigned rest (`EMPTY` scene / `LATCH`),
 //    `40%` `STORED` scene, `50%` sub-audio `< 20 Hz`, `80%` `ACTIVE` scene & audible `MUTE`/`SOLO`,
 //    `100%` `SHIFT` beacon / squeezed pad, `2.5 Hz` blink when `LATCH` is active.
-//  - Pure-Blinking `SAVE`/`DELETE` Rule: When `saveArmed`, ONLY actionable `SCENE` keys blink and
-//    all other 23 keyboard keys rest at `0%`.
+//  - Pure-Blinking `SAVE`/`INIT`/`DELETE` Rule: When `saveArmed`, ONLY actionable `SCENE` keys
+//    blink and all other 23 keyboard keys rest at `0%`.
 inline void computeKeyboardModelRestLeds(KeyboardModel model, const EngineControlState& state,
                                          const HudState& hud,
                                          std::array<float, kNumBlackKeys>& outBlack,
@@ -117,10 +150,11 @@ inline void computeKeyboardModelRestLeds(KeyboardModel model, const EngineContro
 
     if (hud.saveArmed) {
         const float savePulse01 = static_cast<float>(hud.savePulseQ8) * (1.0f / 255.0f);
-        const float pulse = 0.25f + 0.70f * clampf(savePulse01, 0.0f, 1.0f);
+        const float pulse = computeSaveArmedSceneKeyGlow(hud.savePageMode, savePulse01);
         for (size_t s = 0u; s < kNumSnapshots; ++s) {
-            const bool occ = (hud.snapshotOccupiedMask & (1u << s)) != 0u;
-            outWhite[kSceneWhiteKeyBase + s] = (!hud.saveDeleteMode || occ) ? pulse : 0.0f;
+            outWhite[kSceneWhiteKeyBase + s] =
+                isSaveArmedSlotTargetable(hud.savePageMode, hud.snapshotOccupiedMask, s) ? pulse
+                                                                                         : 0.0f;
         }
         return;
     }
