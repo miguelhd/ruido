@@ -11,7 +11,7 @@ Major sound engine upgrade with warmer analog synthesis and smoother performance
 
 User Guide: https://noisexrecords.com/ruido
 
-Send feedback or comments to ruido@noisexrecords.com
+Questions, ideas, or feedback? Feel free to reach out at [ruido@noisexrecords.com](mailto:ruido@noisexrecords.com).
 
 ## v0.7.3 (`FM-1_312`) — 2026-11-23
 
