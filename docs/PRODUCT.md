@@ -99,9 +99,9 @@ At idle, on `HOME (FREQUENCY)`, on `SEL`, on `GLOBAL CONFIG`, and during keybed 
   3. **`Mute Mode`:** `MOMENTARY` *(default)* / `LATCHING` (applies to `MUTE 1-4` and `SOLO 1-4`).
   4. **`Scene Mode`:** `LATCHING` *(default)* / `MOMENTARY` (`LATCHING` stays on the recalled scene; `MOMENTARY` morphs back on key release).
   5. **`MIDI Clock In`:** `AUTO` *(default, syncs `30-300 BPM` `24 PPQN` clock over 3.5 mm TRS and USB-C MIDI)* / `OFF`.
-  6. **`MIDI Transport In`:** `OFF` *(default)* / `PHASE` *(resets bar phase on Start)* / `RUN/STOP` *(starts and mutes audio with MIDI Start/Continue/Stop)*.
+  6. **`MIDI Transport In`:** `OFF` *(default)* / `BAR RESET` *(realigns Beat 1 on MIDI Start without stopping audio)* / `RUN/STOP` *(starts and mutes audio with MIDI Start/Continue/Stop)*.
   7. **`MIDI Channel In`:** `OMNI` *(default)* / `CH 1-16`.
-  8. **`Factory Reset`:** Two-detent confirmation on `ALGORITHM` (`CCW` cancels) for **`Factory Presets`** (restores default sound, all 4 scenes, and config) or **`Clean Init`** (loads an unmodulated startup sound, clears scenes to `EMPTY`, and keeps config).
+  8. **`Factory Reset`:** Six-detent confirmation on `ALGORITHM` (`CCW` cancels) for **`Factory Presets`** (restores default sound, all 4 scenes, and config) or **`Clean Init`** (loads an unmodulated startup sound, clears scenes to `EMPTY`, and keeps config).
   9. **`About`:** Displays version, instrument summary, author, license, user guide URL (`noisexrecords.com/ruido`), and repository URL.
 - **`ENV`, `ARP`, `SEQ`, `REC`:** Unassigned (`0%` LED at rest). A press nudges the scope horizontally and flashes the button LED with no change to audio or open pages.
 

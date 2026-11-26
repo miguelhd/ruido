@@ -8,6 +8,14 @@
 
 namespace ruido {
 
+using CoProcYieldFn = void (*)() noexcept;
+
+RUIDO_ALWAYS_INLINE void yieldCoProcEvery(CoProcYieldFn fn, size_t idx, size_t mask) noexcept {
+    if (fn != nullptr && (idx & mask) == 0u) {
+        fn();
+    }
+}
+
 // Canonical full-screen graph viewport & optical reference styling (shared across FILTER, PAN,
 // LEVEL, DUTY, DRIFT, and LFO so baseline position, opacity, and guide filaments never drift).
 inline constexpr float kGraphTopY = 26.0f;
@@ -118,13 +126,20 @@ inline void shadeUnipolarGraphColumn(size_t colX, float yA, float yB, float zero
         }
 
         const float vy = pyF - yMid;
-        const float segT = clampf(vy * dy * invL2, -0.5f, 0.5f);
-        const float ey = vy - dy * segT;
-        const float d2 = segT * segT + ey * ey;
-        const float perpDist = d2 * fastInvSqrt(d2 + 0.25f);
+        float perpDist = 0.0f;
+        if (absDy == 0.0f && vy >= 4.0f) {
+            perpDist = vy - 0.125f / vy;
+        } else {
+            const float segT = clampf(vy * dy * invL2, -0.5f, 0.5f);
+            const float ey = vy - dy * segT;
+            const float d2 = segT * segT + ey * ey;
+            perpDist = d2 * fastInvSqrt(d2 + 0.25f);
+        }
         const float vDist = (vy > 0.0f) ? vy : 0.0f;
         const float effDist = 0.65f * vDist + 0.35f * perpDist;
-        const float baseTaper = smoothstep01((kGraphBaselineY - pyF) * (1.0f / 6.0f));
+        const float baseTaper = (pyF > kGraphBaselineY - 6.0f)
+                                    ? smoothstep01((kGraphBaselineY - pyF) * (1.0f / 6.0f))
+                                    : 1.0f;
         const float crestGlow = glowAmp * fastExpNeg(effDist * 0.048f) * baseTaper;
         int alpha = static_cast<int>((22.0f + crestGlow) * colScale * subEdge + 0.5f);
         if (alpha > 220) {

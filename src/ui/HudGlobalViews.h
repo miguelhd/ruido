@@ -22,7 +22,8 @@ class HudGlobalViews {
                 const LfoSignalArray& lfoOutput,
                 const std::array<float, kNumOscillators>& voicePeak,
                 const std::array<float, kNumOscillators>& voiceDriftNorm, uint8_t stutterGateMask,
-                const ScopeTraceEngine& traceEngine) noexcept;
+                const ScopeTraceEngine& traceEngine,
+                void (*coProcYield)() noexcept = nullptr) noexcept;
 
     float panPhase() const noexcept { return panPhase_; }
 
@@ -45,13 +46,14 @@ class HudGlobalViews {
 
     void compositePanStageStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                 uint16_t* linScratch, float effPanAlpha01, uint8_t alpha8,
-                                const HudState& hud) const noexcept;
+                                const HudState& hud,
+                                void (*coProcYield)() noexcept = nullptr) const noexcept;
     void compositeRailCouplingStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
-                                    uint16_t* linScratch, float effCouplingAlpha01,
-                                    uint8_t alpha8) const noexcept;
+                                    uint16_t* linScratch, float effCouplingAlpha01, uint8_t alpha8,
+                                    void (*coProcYield)() noexcept = nullptr) const noexcept;
     void compositeGlobalConfigStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
-                                    const EngineControlState& control,
-                                    const HudState& hud) const noexcept;
+                                    const EngineControlState& control, const HudState& hud,
+                                    void (*coProcYield)() noexcept = nullptr) const noexcept;
 
   private:
     static constexpr bool isPanStageActive(const HudState& rawHud) noexcept {

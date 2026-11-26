@@ -48,7 +48,7 @@ void HudGraphs::stepFadeOut(float dtClamped) noexcept {
 
 void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
                                   const std::array<ModulatedFilterParams, kNumOscillators>& mods,
-                                  bool unified) noexcept {
+                                  bool unified, CoProcYieldFn coProcYield) noexcept {
     float tgtHpX = filterHpBeadX_;
     float tgtHpY = filterHpBeadY_;
     float tgtHpInt = 0.0f;
@@ -69,6 +69,7 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
                                                         mods[0].lpCutoffHz, mods[0].lpResonance);
 
         for (size_t i = 0u; i < kFilterSweepPts; ++i) {
+            yieldCoProcEvery(coProcYield, i, 31u);
             const float freq = kFilterSweepFreqs[i];
             const int16_t yMain = dbToFilterYFixed(evalDualMs20Db(freq, mainC));
             for (size_t v = 0u; v < kNumOscillators; ++v) {
@@ -100,6 +101,7 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
             const DualMs20Coeffs c = makeDualMs20Coeffs(mods[v].hpCutoffHz, mods[v].hpResonance,
                                                         mods[v].lpCutoffHz, mods[v].lpResonance);
             for (size_t i = 0u; i < kFilterSweepPts; ++i) {
+                yieldCoProcEvery(coProcYield, i, 31u);
                 const int16_t yTgt = dbToFilterYFixed(evalDualMs20Db(kFilterSweepFreqs[i], c));
                 filterCurvesFixed_[v][i] =
                     slewQ8_6(filterCurvesFixed_[v][i], yTgt, alphaCurve, snapImmediate);
@@ -130,8 +132,8 @@ void HudGraphs::updateFilterGraph(float dtClamped, bool snapImmediate,
 
 void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate,
                                const EngineControlState& control, const HudState& effectiveHud,
-                               const LfoSignalArray& lfoOutput,
-                               const LfoDriftArray& lfoDriftPacked) noexcept {
+                               const LfoSignalArray& lfoOutput, const LfoDriftArray& lfoDriftPacked,
+                               CoProcYieldFn coProcYield) noexcept {
     std::array<int16_t, kTracePoints> curve0{};
     std::array<int16_t, kTracePoints> curveN{};
     float tgtBeadInt = 0.0f;
@@ -163,6 +165,7 @@ void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate,
                                                 ? unpackDriftKnots(lfoDriftPacked[bankIdx])
                                                 : kFallbackDriftKnots[bankIdx & 3u];
         for (size_t i = 0u; i < kTracePoints; ++i) {
+            yieldCoProcEvery(coProcYield, i, 63u);
             const float u = static_cast<float>(i) * kInvPts;
             const float w = evalMorphedLfoWave(u, sh, r, knots);
             const float yMain = clampf(kLfoYZero - ampPx * w, kLfoYTop, kLfoYBot);
@@ -203,7 +206,8 @@ void HudGraphs::updateLfoGraph(float dtClamped, bool snapImmediate,
 void HudGraphs::update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                        const HudState& effectiveHud, bool extraCenterViewActive,
                        const LfoSignalArray& lfoOutput, const LfoDriftArray& lfoDriftPacked,
-                       float rhythmPhase01, uint8_t stutterGateMask) noexcept {
+                       float rhythmPhase01, uint8_t stutterGateMask,
+                       CoProcYieldFn coProcYield) noexcept {
     const bool hudVisible =
         (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None) && !rawHud.shiftHeld;
     const bool rawFilterActive =
@@ -272,7 +276,7 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
                 }
             }
         }
-        updateFilterGraph(dtClamped, snapFilter, mods, unified);
+        updateFilterGraph(dtClamped, snapFilter, mods, unified, coProcYield);
     } else {
         filterGraphPhase_ = stepHudFadeLinear(filterGraphPhase_, false, dtClamped);
     }
@@ -280,7 +284,8 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
     if (rawLfoGraphActive) {
         const bool snapLfo = (lfoGraphPhase_ <= 0.015f);
         lfoGraphPhase_ = stepHudFadeLinear(lfoGraphPhase_, true, dtClamped);
-        updateLfoGraph(dtClamped, snapLfo, control, effectiveHud, lfoOutput, lfoDriftPacked);
+        updateLfoGraph(dtClamped, snapLfo, control, effectiveHud, lfoOutput, lfoDriftPacked,
+                       coProcYield);
     } else {
         lfoGraphPhase_ = stepHudFadeLinear(lfoGraphPhase_, false, dtClamped);
     }
@@ -292,7 +297,8 @@ void HudGraphs::update(float dtClamped, const EngineControlState& control, const
 void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                   uint16_t* linScratch, float effLfoAlpha01, uint8_t lfoAlpha8,
                                   const EngineControlState& control, const HudState& hud,
-                                  const LfoSignalArray& lfoPhase) const noexcept {
+                                  const LfoSignalArray& lfoPhase,
+                                  CoProcYieldFn coProcYield) const noexcept {
     if (lfoAlpha8 == 0u || y1 <= 12 || y0 >= 206) {
         return;
     }
@@ -312,6 +318,7 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
     if (y1 > static_cast<int>(kLfoYTop) - 1 && y0 <= static_cast<int>(kLfoYBot) + 1) {
         const auto& pts = lfoCurvesFixed_[0];
         for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+            yieldCoProcEvery(coProcYield, colX, 31u);
             const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
             const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
             const float dy = yB - yA;
@@ -414,6 +421,7 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
             const float sibWgt = lfoSiblingWeight_ * effLfoAlpha01;
             const auto& sibPts = lfoCurvesFixed_[1];
             for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                yieldCoProcEvery(coProcYield, colX, 63u);
                 splatPhotonSegment(static_cast<int>(colX),
                                    static_cast<float>(sibPts[colX]) * kFixedToPx,
                                    static_cast<float>(sibPts[colX + 1u]) * kFixedToPx, sibWgt,
@@ -424,13 +432,14 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
         if (mainCurveWgt > 0.004f) {
             const auto& pts = lfoCurvesFixed_[0];
             for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                yieldCoProcEvery(coProcYield, colX, 63u);
                 splatPhotonSegment(static_cast<int>(colX),
                                    static_cast<float>(pts[colX]) * kFixedToPx,
                                    static_cast<float>(pts[colX + 1u]) * kFixedToPx, mainCurveWgt,
                                    0.64f, y0, y1, linScratch);
             }
         }
-        screenBlendLinearStrip(stripHeight, 0u, kDisplayWidth, linScratch, lumBuf);
+        screenBlendLinearStrip(stripHeight, 0u, kDisplayWidth, linScratch, lumBuf, coProcYield);
     }
 
     const auto evalCurveBeadPos = [&](size_t curveIdx, float phase01, float& outX,
@@ -465,7 +474,8 @@ void HudGraphs::compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t*
 
 void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                      uint16_t* linScratch, float effFilterAlpha01,
-                                     uint8_t filterAlpha8) const noexcept {
+                                     uint8_t filterAlpha8,
+                                     CoProcYieldFn coProcYield) const noexcept {
     if (filterAlpha8 == 0u || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
     }
@@ -485,6 +495,7 @@ void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8
         for (size_t vc = 0u; vc < curveCount; ++vc) {
             const auto& pts = filterCurvesFixed_[vc];
             for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                yieldCoProcEvery(coProcYield, colX, 31u);
                 const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
                 const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
                 shadeUnipolarGraphColumn(colX, yA, yB, kFilterYZeroDb, 76.0f, colScale, y0, y1,
@@ -502,6 +513,7 @@ void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8
             for (size_t vc = 0u; vc < curveCount; ++vc) {
                 const auto& pts = filterCurvesFixed_[vc];
                 for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                    yieldCoProcEvery(coProcYield, colX, 31u);
                     const float yA = static_cast<float>(pts[colX]) * kFixedToPx;
                     const float yB = static_cast<float>(pts[colX + 1u]) * kFixedToPx;
                     splatUnipolarGraphSegment(colX, yA, yB, mainCurveWgt, y0, y1, linScratch);
@@ -509,7 +521,7 @@ void HudGraphs::compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8
             }
         }
 
-        screenBlendLinearStrip(stripHeight, 0u, kDisplayWidth, linScratch, lumBuf);
+        screenBlendLinearStrip(stripHeight, 0u, kDisplayWidth, linScratch, lumBuf, coProcYield);
     }
 
     const float singleVis = 1.0f - div;

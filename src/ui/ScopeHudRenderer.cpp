@@ -7,6 +7,7 @@
 #include "ui/GraphStyle.h"
 #include "ui/HudChrome.h"
 #include "ui/HudHeader.h"
+#include "ui/HudKeybedInspector.h"
 #include "ui/MonoCanvas.h"
 
 namespace ruido {
@@ -101,6 +102,7 @@ void ScopeHudRenderer::updateTraceForFrame(float dtSec, const EngineControlState
             traceEngine_.refreshOverdriveHair(control, hud.scopeFrozen);
         }
     }
+    ampGraph_.prepareOverdriveHair(traceEngine_.overdriveHair());
 }
 
 void ScopeHudRenderer::updateHudGauges(float dtClamped, bool snapImmediate) noexcept {
@@ -234,9 +236,11 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         graphs_.stepFadeOut(dtClamped);
         ampGraph_.stepFadeOut(dtClamped);
         globalViews_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_,
-                            frameVoiceDrift_, frameStutterGateMask_, traceEngine_);
+                            frameVoiceDrift_, frameStutterGateMask_, traceEngine_, coProcYield);
         keybedView_.update(dtClamped, control, hud, frameVoicePeak_, frameStutterGateMask_);
         sceneView_.update(dtClamped, hud);
+        frameHud_.capsuleToast = hud.capsuleToast;
+        frameHud_.capsuleAlphaQ8 = hud.capsuleAlphaQ8;
         frameHud_.opacity = smoothstep01(renderedOpacityLevel_);
         if (renderedOpacityLevel_ <= 0.001f && !graphs_.hasResidualPhase() &&
             !ampGraph_.hasResidualPhase() && !globalViews_.hasResidualPhase() &&
@@ -297,6 +301,8 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         effectiveHud.modeWipeQ8 = hud.modeWipeQ8;
         effectiveHud.phantomPinSeq = hud.phantomPinSeq;
         effectiveHud.phantomPinIndex = hud.phantomPinIndex;
+        effectiveHud.capsuleToast = hud.capsuleToast;
+        effectiveHud.capsuleAlphaQ8 = hud.capsuleAlphaQ8;
         if (releaseLatchHud_.mode != HudMode::KnobRate) {
             effectiveHud.rateHoldActive = hud.rateHoldActive;
             effectiveHud.knobRate = hud.knobRate;
@@ -374,7 +380,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
     }
 
     globalViews_.update(dtClamped, control, hud, frameLfoOutput_, frameVoicePeak_, frameVoiceDrift_,
-                        frameStutterGateMask_, traceEngine_);
+                        frameStutterGateMask_, traceEngine_, coProcYield);
     keybedView_.update(dtClamped, control, hud, frameVoicePeak_, frameStutterGateMask_,
                        frameRhythmPhase_);
     sceneView_.update(dtClamped, hud);
@@ -393,7 +399,7 @@ void ScopeHudRenderer::prepareFrame(float dtSec, const EngineControlState& contr
         graphsRawHud.lfoPageOpen = false;
     }
     graphs_.update(dtClamped, control, graphsRawHud, effectiveHud, extraCenterView, frameLfoOutput_,
-                   frameLfoDriftPacked_, frameRhythmPhase_, frameStutterGateMask_);
+                   frameLfoDriftPacked_, frameRhythmPhase_, frameStutterGateMask_, coProcYield);
     if (coProcYield != nullptr) {
         coProcYield();
     }
@@ -469,6 +475,15 @@ void ScopeHudRenderer::renderStrip(uint16_t yStart, uint16_t stripHeight, uint16
             compositeHudStrip(curY, chunkH, lumBuf.data(), linBuf.data(), hudAlpha8, coProcYield);
             if (coProcYield != nullptr) {
                 coProcYield();
+            }
+        }
+        if (frameHud_.capsuleAlphaQ8 > 0u && frameHud_.capsuleToast != CapsuleToastKind::None &&
+            y0 < 135 && y1 > 105) {
+            const uint8_t capAlpha8 = static_cast<uint8_t>(
+                static_cast<float>(frameHud_.capsuleAlphaQ8) * scopeVis + 0.5f);
+            if (capAlpha8 > 0u) {
+                const MonoStripCanvas capCv{lumBuf.data(), y0, y1, capAlpha8};
+                compositeCapsuleToastStrip(capCv, frameHud_.capsuleToast);
             }
         }
 
@@ -568,71 +583,74 @@ void ScopeHudRenderer::compositeHudStrip(uint16_t yStart, uint16_t stripHeight, 
 
     if (lfoAlpha8 > 0u) {
         graphs_.compositeLfoStrip(y0, y1, stripHeight, lumBuf, linScratch, effLfoAlpha01, lfoAlpha8,
-                                  frameControl_, frameHud_, frameLfoPhase_);
+                                  frameControl_, frameHud_, frameLfoPhase_, coProcYield);
         if (coProcYield != nullptr) {
             coProcYield();
         }
     }
     if (filterAlpha8 > 0u) {
         graphs_.compositeFilterStrip(y0, y1, stripHeight, lumBuf, linScratch, effFilterAlpha01,
-                                     filterAlpha8);
+                                     filterAlpha8, coProcYield);
         if (coProcYield != nullptr) {
             coProcYield();
         }
     }
     if (effEditGraphAlpha01 > 0.0f) {
         ampGraph_.compositeStrip(y0, y1, stripHeight, lumBuf, linScratch, hudAlpha01, frameHud_,
-                                 traceEngine_.overdriveHair());
+                                 traceEngine_.overdriveHair(), coProcYield);
         if (coProcYield != nullptr) {
             coProcYield();
         }
     }
     if (panAlpha8 > 0u) {
         globalViews_.compositePanStageStrip(y0, y1, stripHeight, lumBuf, linScratch, effPanAlpha01,
-                                            panAlpha8, frameHud_);
+                                            panAlpha8, frameHud_, coProcYield);
         if (coProcYield != nullptr) {
             coProcYield();
         }
     }
     if (couplingAlpha8 > 0u) {
         globalViews_.compositeRailCouplingStrip(y0, y1, stripHeight, lumBuf, linScratch,
-                                                effCouplingAlpha01, couplingAlpha8);
+                                                effCouplingAlpha01, couplingAlpha8, coProcYield);
         if (coProcYield != nullptr) {
             coProcYield();
         }
     }
     if (cfgAlpha8 > 0u) {
-        globalViews_.compositeGlobalConfigStrip(y0, y1, lumBuf, cfgAlpha8, frameControl_,
-                                                frameHud_);
+        globalViews_.compositeGlobalConfigStrip(y0, y1, lumBuf, cfgAlpha8, frameControl_, frameHud_,
+                                                coProcYield);
         if (coProcYield != nullptr) {
             coProcYield();
         }
     }
     if (keybedAlpha8 > 0u) {
-        keybedView_.compositeStrip(y0, y1, lumBuf, keybedAlpha8, frameHud_);
+        keybedView_.compositeStrip(y0, y1, lumBuf, keybedAlpha8, frameHud_, coProcYield);
         if (coProcYield != nullptr) {
             coProcYield();
         }
     }
     if (shiftAlpha8 > 0u) {
-        keybedView_.compositeShiftStrip(y0, y1, lumBuf, shiftAlpha8, frameControl_, frameHud_);
+        keybedView_.compositeShiftStrip(y0, y1, lumBuf, shiftAlpha8, frameControl_, frameHud_,
+                                        coProcYield);
         if (coProcYield != nullptr) {
             coProcYield();
         }
     }
     if (sceneView_.isSaveActive(frameHud_)) {
         if (presetSceneAlpha8 > 0u) {
-            sceneView_.compositePresetSceneStrip(y0, y1, lumBuf, presetSceneAlpha8, frameHud_);
+            sceneView_.compositePresetSceneStrip(y0, y1, lumBuf, presetSceneAlpha8, frameHud_,
+                                                 coProcYield);
         }
         if (saveAlpha8 > 0u) {
-            sceneView_.compositeSaveStrip(y0, y1, lumBuf, saveAlpha8, frameHud_);
+            sceneView_.compositeSaveStrip(y0, y1, lumBuf, saveAlpha8, frameHud_, coProcYield);
         }
     } else {
         if (saveAlpha8 > 0u) {
-            sceneView_.compositeSaveStrip(y0, y1, lumBuf, saveAlpha8, frameHud_);
+            sceneView_.compositeSaveStrip(y0, y1, lumBuf, saveAlpha8, frameHud_, coProcYield);
         }
         if (presetSceneAlpha8 > 0u) {
-            sceneView_.compositePresetSceneStrip(y0, y1, lumBuf, presetSceneAlpha8, frameHud_);
+            sceneView_.compositePresetSceneStrip(y0, y1, lumBuf, presetSceneAlpha8, frameHud_,
+                                                 coProcYield);
         }
     }
     if (coProcYield != nullptr) {

@@ -20,6 +20,33 @@ constexpr std::array<uint16_t, 65u> buildRecipCellQ16() noexcept {
 
 constexpr auto kRecipCellQ16 = buildRecipCellQ16();
 
+RUIDO_NOINLINE void rasterScopeCapSpan(uint16_t* linBuf, int y0, size_t colX, int rStart, int rEnd,
+                                       int32_t sumAB_Q6, int32_t dyQ6, int32_t dyInvL2Q15,
+                                       uint32_t dwellQ8) noexcept {
+    int32_t vyQ7 = (rStart << 7) - sumAB_Q6;
+    uint16_t* cellPtr = linBuf + static_cast<size_t>(rStart - y0) * kDisplayWidth + colX;
+    for (int py = rStart; py < rEnd; ++py, vyQ7 += 128, cellPtr += kDisplayWidth) {
+        int32_t segTQ15 = (vyQ7 * dyInvL2Q15) >> 7;
+        if (segTQ15 < -16384) {
+            segTQ15 = -16384;
+        } else if (segTQ15 > 16384) {
+            segTQ15 = 16384;
+        }
+        const int32_t eyQ7 = vyQ7 - ((dyQ6 * segTQ15 + 8192) >> 14);
+        if (eyQ7 <= -256 || eyQ7 >= 256) {
+            continue;
+        }
+        const int32_t segTQ7 = (segTQ15 + 128) >> 8;
+        const int32_t d2Q14 = segTQ7 * segTQ7 + eyQ7 * eyQ7;
+        if (d2Q14 < 64717) {
+            const auto lutIdx = static_cast<size_t>(d2Q14 >> 10);
+            const uint32_t add = (static_cast<uint32_t>(kGaussLut[lutIdx]) * dwellQ8) >> 8u;
+            const uint32_t next = static_cast<uint32_t>(*cellPtr) + add;
+            *cellPtr = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
+        }
+    }
+}
+
 } // namespace
 
 void ScopeTraceEngine::rebuildTilesAndBloom(void (*coProcYield)() noexcept) noexcept {
@@ -37,7 +64,7 @@ void ScopeTraceEngine::rebuildTilesAndBloom(void (*coProcYield)() noexcept) noex
         auto& colCache = strandColCache_[s];
 
         for (size_t tile = 0u; tile < kNumTiles; ++tile) {
-            if (coProcYield != nullptr && (tile == 10u || tile == 20u)) {
+            if (coProcYield != nullptr && (tile & 3u) == 3u) {
                 coProcYield();
             }
             int tileMin = static_cast<int>(kDisplayHeight);
@@ -51,8 +78,18 @@ void ScopeTraceEngine::rebuildTilesAndBloom(void (*coProcYield)() noexcept) noex
                 const float yLo = (yA < yB) ? yA : yB;
                 const float yHi = (yA > yB) ? yA : yB;
                 const float dy = yB - yA;
-                const float len2 = 1.0f + dy * dy;
-                const float dwell = (0.58f + 0.42f * fastInvSqrt(1.0f + 0.14f * dy * dy)) * wgt;
+                const float dy2 = dy * dy;
+                const float len2 = 1.0f + dy2;
+                float yInv = 1.0f;
+                {
+                    const float safeD = 1.0f + 0.14f * dy2;
+                    uint32_t bits = 0u;
+                    std::memcpy(&bits, &safeD, sizeof(bits));
+                    bits = 0x5F375A86u - (bits >> 1u);
+                    std::memcpy(&yInv, &bits, sizeof(yInv));
+                    yInv = yInv * (1.5f - (0.5f * safeD) * yInv * yInv);
+                }
+                const float dwell = (0.58f + 0.42f * yInv) * wgt;
 
                 const int rawTop = static_cast<int>(yLo + 512.0f) - 515;
                 const int rawBot = static_cast<int>(yHi + 512.0f) - 508;
@@ -86,7 +123,8 @@ void ScopeTraceEngine::rebuildTilesAndBloom(void (*coProcYield)() noexcept) noex
                 const int byStart = static_cast<int>((yLo + 512.0f) * 0.25f) - 128;
                 const int byEnd = static_cast<int>((yHi + 512.0f) * 0.25f) - 128;
                 if (byEnd >= 0 && byStart < static_cast<int>(kBloomHeight)) {
-                    const float segLen = clampf(len2 * fastInvSqrt(len2), 1.0f, 4.2f);
+                    const float segLen =
+                        (len2 >= 17.64f) ? 4.2f : clampf(len2 * fastInvSqrt(len2), 1.0f, 4.2f);
                     const uint32_t energyQ4 = static_cast<uint32_t>(1174.4f * dwell * segLen);
 
                     const size_t bx = col >> 2u;
@@ -141,12 +179,12 @@ void ScopeTraceEngine::renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t b
     std::memset(linBuf, 0, static_cast<size_t>(chunkH) * kDisplayWidth * sizeof(uint16_t));
 
     if (scopeValid_) {
-        uint8_t activeVisited = 0u;
+        uint32_t rasterCols = 0u;
         for (size_t s = 0u; s < kNumStrands; ++s) {
             if (strandWeightQ8_[s] == 0u) {
                 continue;
             }
-            if (coProcYield != nullptr && ((++activeVisited & 3u) == 0u)) {
+            if (coProcYield != nullptr) {
                 coProcYield();
             }
             const auto& yFixed = strandYFixed_[s];
@@ -167,6 +205,9 @@ void ScopeTraceEngine::renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t b
                     if (segBot <= y0 || segTop >= y1) {
                         continue;
                     }
+                    if (coProcYield != nullptr && ((++rasterCols & 31u) == 0u)) {
+                        coProcYield();
+                    }
 
                     const int pyS = (segTop < y0) ? y0 : segTop;
                     const int pyE = (segBot > y1) ? y1 : segBot;
@@ -175,32 +216,42 @@ void ScopeTraceEngine::renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t b
                     const int32_t dyQ6 = yB_Q6 - yA_Q6;
                     const int32_t dyInvL2Q15 = static_cast<int32_t>(cc.dyInvL2Q15);
                     const uint32_t dwellQ8 = static_cast<uint32_t>(cc.dwellQ8);
+                    const int32_t sumAB_Q6 = yA_Q6 + yB_Q6;
 
-                    // Exact Q7 vertical offset: (pyS * 128) - ((yA_Q6 + yB_Q6) = 2 * yMid_Q6)
-                    int32_t vyQ7 = (pyS << 7) - (yA_Q6 + yB_Q6);
-                    for (int py = pyS; py < pyE; ++py, vyQ7 += 128) {
-                        int32_t segTQ15 = (vyQ7 * dyInvL2Q15) >> 7;
-                        if (segTQ15 < -16384) {
-                            segTQ15 = -16384;
-                        } else if (segTQ15 > 16384) {
-                            segTQ15 = 16384;
-                        }
-                        const int32_t eyQ7 = vyQ7 - ((dyQ6 * segTQ15 + 8192) >> 14);
-                        if (eyQ7 <= -256 || eyQ7 >= 256) {
+                    const int32_t yLoQ6 = (yA_Q6 < yB_Q6) ? yA_Q6 : yB_Q6;
+                    const int32_t yHiQ6 = (yA_Q6 > yB_Q6) ? yA_Q6 : yB_Q6;
+                    if ((yHiQ6 - yLoQ6) >= 384) {
+                        const int innerTop = ((yLoQ6 + 32768 + 63) >> 6) - 511;
+                        const int innerBot = ((yHiQ6 + 32768) >> 6) - 512;
+                        const int cS = (innerTop > pyS) ? innerTop : pyS;
+                        const int cE = (innerBot < pyE) ? innerBot : pyE;
+                        if (cS < cE) {
+                            if (pyS < cS) {
+                                rasterScopeCapSpan(linBuf, y0, colX, pyS, cS, sumAB_Q6, dyQ6,
+                                                   dyInvL2Q15, dwellQ8);
+                            }
+                            int32_t segTQ15 = (((cS << 7) - sumAB_Q6) * dyInvL2Q15) >> 7;
+                            uint16_t* cellPtr =
+                                linBuf + static_cast<size_t>(cS - y0) * kDisplayWidth + colX;
+                            for (int py = cS; py < cE;
+                                 ++py, segTQ15 += dyInvL2Q15, cellPtr += kDisplayWidth) {
+                                const int32_t segTQ7 = (segTQ15 + 128) >> 8;
+                                const auto lutIdx =
+                                    static_cast<size_t>((segTQ7 * segTQ7) >> 10) & 63u;
+                                const uint32_t add =
+                                    (static_cast<uint32_t>(kGaussLut[lutIdx]) * dwellQ8) >> 8u;
+                                const uint32_t next = static_cast<uint32_t>(*cellPtr) + add;
+                                *cellPtr = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
+                            }
+                            if (cE < pyE) {
+                                rasterScopeCapSpan(linBuf, y0, colX, cE, pyE, sumAB_Q6, dyQ6,
+                                                   dyInvL2Q15, dwellQ8);
+                            }
                             continue;
                         }
-                        const int32_t segTQ7 = (segTQ15 + 128) >> 8;
-                        const int32_t d2Q14 = segTQ7 * segTQ7 + eyQ7 * eyQ7;
-                        if (d2Q14 < 64717) {
-                            const auto lutIdx = static_cast<size_t>(d2Q14 >> 10);
-                            const uint32_t add =
-                                (static_cast<uint32_t>(kGaussLut[lutIdx]) * dwellQ8) >> 8u;
-                            uint16_t& cell =
-                                linBuf[static_cast<size_t>(py - y0) * kDisplayWidth + colX];
-                            const uint32_t next = static_cast<uint32_t>(cell) + add;
-                            cell = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
-                        }
                     }
+                    rasterScopeCapSpan(linBuf, y0, colX, pyS, pyE, sumAB_Q6, dyQ6, dyInvL2Q15,
+                                       dwellQ8);
                 }
             }
         }
@@ -215,6 +266,9 @@ void ScopeTraceEngine::renderBackgroundChunk(int y0, uint16_t chunkH, uint32_t b
         uint8_t* lumRow = lumBuf + static_cast<size_t>(rowIdx) * kDisplayWidth;
         tonemapBloomScanline<kDisplayWidth, kBloomWidth, kBloomHeight>(
             py, bgKeepQ8, bloomGrid_.data(), linRow, lumRow);
+        if (coProcYield != nullptr && (rowIdx & 3u) == 3u) {
+            coProcYield();
+        }
     }
 }
 

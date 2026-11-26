@@ -25,7 +25,7 @@ void RuidoController::handleConfigEncoder(EncoderId encoder, int32_t ticks,
                 const int32_t nextAcc = static_cast<int32_t>(configTickAccum_) + ticks;
                 if (nextAcc <= -4) {
                     exitConfigSubView();
-                } else if (nextAcc >= 8) {
+                } else if (nextAcc >= static_cast<int32_t>(kFactoryResetConfirmTicks)) {
                     const bool cleanInit = (hud_.configSubView == ConfigSubView::CleanInitConfirm);
                     if (cleanInit) {
                         performCleanInit();
@@ -34,7 +34,7 @@ void RuidoController::handleConfigEncoder(EncoderId encoder, int32_t ticks,
                         performFactoryReset();
                         hud_.configSubView = ConfigSubView::FactoryResetDone;
                     }
-                    hud_.configResetTicks = 8u;
+                    hud_.configResetTicks = kFactoryResetConfirmTicks;
                 } else {
                     configTickAccum_ = static_cast<int8_t>(nextAcc);
                     hud_.configResetTicks = (nextAcc > 0) ? static_cast<uint8_t>(nextAcc) : 0u;
@@ -210,7 +210,6 @@ void RuidoController::onEncoderDelta(EncoderId encoder, int32_t ticks) noexcept 
             env_.latchPage();
             return;
         }
-        triggerUnassignedFeedback(0xFFu);
         return;
     }
 

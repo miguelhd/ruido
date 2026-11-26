@@ -46,6 +46,11 @@ class RuidoController {
     void onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexcept;
     void onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) noexcept;
 
+    // Coalesce multi-key matrix scans into a single `applyKeyboardPerformanceChange()` + bus
+    // publish at the end of the scan frame.
+    void beginKeyBatch() noexcept { keyBatchActive_ = true; }
+    void endKeyBatch() noexcept;
+
     // Transport-agnostic 1-byte MIDI System Real-Time clock sync (0xF8 / 0xFA / 0xFB / 0xFC)
     // across TRS UART, USB-MIDI, and Bluetooth BLE-MIDI (`msgTimestampSec < 0` uses internal time).
     void onMidiRealtime(uint8_t statusByte, float msgTimestampSec = -1.0f) noexcept;
@@ -56,7 +61,8 @@ class RuidoController {
     }
 
     // Advance 150 ms HUD envelope, MIDI clock timeout & refresh all 42 varibright PWM LED levels.
-    void tick(float dtSec, const EngineTelemetry& telemetry) noexcept;
+    void tick(float dtSec, const EngineTelemetry& telemetry,
+              void (*coProcYield)() noexcept = nullptr) noexcept;
 
     const EngineControlState& state() const noexcept { return state_; }
 
@@ -115,6 +121,7 @@ class RuidoController {
     void applyKeyboardModel(KeyboardModel nextModel) noexcept;
     bool tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active) noexcept;
     bool tryInterceptSaveBlackKey(BlackKeyId key, bool active) noexcept;
+    void commitOrDeferKeyboardChange() noexcept;
     void applyKeyboardPerformanceChange() noexcept;
     void syncModifierHud() noexcept;
     void restoreOrDissolveHud() noexcept;
@@ -125,6 +132,8 @@ class RuidoController {
                     uint8_t knobIndex = kNoFocusedKnob) noexcept;
     void latchSwitchHud(HudMode mode, ButtonId button = ButtonId::Count) noexcept;
     void latchKnobEdit(KnobBankMode bank, HudMode mode, uint8_t knobIdx, uint8_t voiceIdx) noexcept;
+    void triggerCapsuleToast(CapsuleToastKind kind) noexcept;
+    void stepCapsuleToast(float dtSec) noexcept;
     void publishState() noexcept;
     void updateLeds(float dtSec, const EngineTelemetry& telemetry) noexcept;
 
@@ -145,6 +154,8 @@ class RuidoController {
     bool stateDirty_ = false;
     bool settingsDirty_ = false;
     bool livePatchDirty_ = false;
+    bool keyBatchActive_ = false;
+    bool keyBatchDirty_ = false;
     uint16_t saveSwallowedWhiteMask_ = 0u;
     uint16_t saveSwallowedBlackMask_ = 0u;
     uint8_t savedSlotMask_ = 0u;
@@ -156,6 +167,7 @@ class RuidoController {
     std::array<uint8_t, kNumOscillators> knobTurnHoldQ8_{};
     HudMode latchedHudMode_ = HudMode::None;
     ButtonId latchedButton_ = ButtonId::Count;
+    uint16_t capsuleTimerTenthsMs_ = 0u;
     float masterPot_ = 0.85f;
     float masterPotHudAnchor_ = 0.85f;
 };

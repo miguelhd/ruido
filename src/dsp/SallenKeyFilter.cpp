@@ -31,6 +31,7 @@ Ms20DualFilter::Coeffs Ms20DualFilter::prepareCoeffs(float hpCutoffHz, float hpR
     const float hpFreqWake = smoothstep01((hpHz - kFilterCutoffMinHz) * (1.0f / 1.5f));
     const float lpFreqWake = smoothstep01((kFilterCutoffMaxHz - lpHz) * (1.0f / 900.0f));
 
+    const float hpNlActive = clampf(hpFreqWake + (1.0f - hpFreqWake) * hpResWake, 0.0f, 1.0f);
     const float hpWakeMax = (hpResWake > driveWake) ? hpResWake : driveWake;
     const float lpWakeMax = lpResWake;
     const float hpActive = clampf(hpFreqWake + (1.0f - hpFreqWake) * hpWakeMax, 0.0f, 1.0f);
@@ -40,7 +41,13 @@ Ms20DualFilter::Coeffs Ms20DualFilter::prepareCoeffs(float hpCutoffHz, float hpR
     const float lpChaos = computeKorg35Chaos(lpRes);
 
     c.hpLinearBypass = (hpActive <= 1.0e-4f);
-    if (!c.hpLinearBypass) {
+    c.hpLinearAcCouple = (!c.hpLinearBypass) && (hpNlActive <= 1.0e-4f);
+    if (c.hpLinearAcCouple) {
+        c.kHp = kMs20ButterworthK;
+        c.gHp = fastPrewarpTan(hpHz, invSampleRate);
+        const float onePlusGHp = 1.0f + c.gHp;
+        c.invLinDetHp = 1.0f / (onePlusGHp * onePlusGHp - c.gHp * c.kHp);
+    } else if (!c.hpLinearBypass) {
         c.kHp = applyOtaHfLoopTaper(mapResonanceToK(hpRes), hpHz);
         c.invOtaScaleHp = (hpActive > 0.05f) ? hpActive : 0.05f;
         c.otaScaleHp = 1.0f / c.invOtaScaleHp;
@@ -99,10 +106,20 @@ Ms20DualFilter::Coeffs Ms20DualFilter::prepareCoeffs(float hpCutoffHz, float hpR
 // Parked stages (HPF 2 Hz / LPF 28 kHz at 0% RES & 1.0x drive) are fully open, so they pass
 // straight through at zero cost. States are kept at the exact steady state of the open stage (HPF
 // at rest, LPF integrators tracking the input) so un-parking resumes clicklessly.
-RUIDO_ALWAYS_INLINE float Ms20DualFilter::processHighPass(OtaSallenKeyStage& st, float x,
-                                                          const Coeffs& c) noexcept {
+inline float Ms20DualFilter::processHighPass(OtaSallenKeyStage& st, float x,
+                                             const Coeffs& c) noexcept {
     if (c.hpLinearBypass) {
-        st.reset();
+        const float resid = st.s1 + st.s2;
+        if (resid != 0.0f) {
+            const float next = scrubFilterState(resid * 0.9988f);
+            st.s1 = next;
+            st.s2 = 0.0f;
+            st.hist1 = 0.0f;
+            st.hist2 = 0.0f;
+            return x + next;
+        }
+        st.hist1 = 0.0f;
+        st.hist2 = 0.0f;
         return x;
     }
 
@@ -110,9 +127,12 @@ RUIDO_ALWAYS_INLINE float Ms20DualFilter::processHighPass(OtaSallenKeyStage& st,
     float s2 = st.s2;
     float h1 = st.hist1;
     float h2 = st.hist2;
-    const float y2 = stepHpNonlinearPrecomputed(x, s1, s2, h1, h2, c.gHp, c.kHp, c.hpPos1, c.hpNeg1,
-                                                c.invHpPos1, c.invHpNeg1, c.hpRail2, c.invHpRail2,
-                                                c.hpDiodeSpan, c.invHpDiodeSpan);
+    const float y2 =
+        c.hpLinearAcCouple
+            ? stepHpLinearCapacitive(x, s1, s2, h1, h2, c.gHp, c.invLinDetHp)
+            : stepHpNonlinearPrecomputed(x, s1, s2, h1, h2, c.gHp, c.kHp, c.hpPos1, c.hpNeg1,
+                                         c.invHpPos1, c.invHpNeg1, c.hpRail2, c.invHpRail2,
+                                         c.hpDiodeSpan, c.invHpDiodeSpan);
     st.s1 = scrubFilterState(s1);
     st.s2 = scrubFilterState(s2);
     st.hist1 = scrubFilterState(h1);
@@ -153,20 +173,15 @@ float Ms20DualFilter::processPrepared(float input, const Coeffs& c) noexcept {
 }
 
 RUIDO_NOINLINE void
-Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& st,
-                                     std::array<float, kOversampleFactor>* frames4x,
-                                     size_t numFrames, const Coeffs& c) noexcept {
+Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& __restrict st,
+                                     std::array<float, kOversampleFactor>* __restrict frames4x,
+                                     size_t numFrames, const Coeffs& __restrict c) noexcept {
     const float inScale = c.hpInScale;
     const float preDrive = c.preDrive;
     const float driveBlend = c.driveBlend;
     const bool hasDrive = (driveBlend > 0.0f);
 
-    float s1 = st.s1;
-    float s2 = st.s2;
-    float h1 = st.hist1;
-    float h2 = st.hist2;
-
-    float* smp = frames4x[0].data();
+    float* __restrict smp = frames4x[0].data();
     const size_t total = numFrames * kOversampleFactor;
     if (c.hpLinearBypass) {
         if (hasDrive) {
@@ -182,22 +197,57 @@ Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& st,
                 smp[idx] = clampf(smp[idx], -16.0f, 16.0f);
             }
         }
-        st.reset();
+        float resid = st.s1 + st.s2;
+        if (resid != 0.0f) {
+            for (size_t idx = 0u; idx < total; ++idx) {
+                resid *= 0.9988f;
+                smp[idx] += resid;
+            }
+            st.s1 = scrubFilterState(resid);
+            st.s2 = 0.0f;
+            st.hist1 = 0.0f;
+            st.hist2 = 0.0f;
+        } else {
+            st.hist1 = 0.0f;
+            st.hist2 = 0.0f;
+        }
         return;
     }
+
     if (hasDrive) {
         for (size_t idx = 0u; idx < total; ++idx) {
-            const float rawIn = applyMs20InputOverdrive(smp[idx], preDrive, driveBlend);
-            smp[idx] = stepHpNonlinearPrecomputed(
-                rawIn * inScale, s1, s2, h1, h2, c.gHp, c.kHp, c.hpPos1, c.hpNeg1, c.invHpPos1,
-                c.invHpNeg1, c.hpRail2, c.invHpRail2, c.hpDiodeSpan, c.invHpDiodeSpan);
+            smp[idx] = applyMs20InputOverdrive(smp[idx], preDrive, driveBlend) * inScale;
         }
+    }
+
+    float s1 = st.s1;
+    float s2 = st.s2;
+    float h1 = st.hist1;
+    float h2 = st.hist2;
+    if (c.hpLinearAcCouple) {
+        const float g = c.gHp;
+        const float invLinDet = c.invLinDetHp;
+        for (size_t idx = 0u; idx < total; ++idx) {
+            const float x = hasDrive ? smp[idx] : (clampf(smp[idx], -16.0f, 16.0f) * inScale);
+            smp[idx] = stepHpLinearCapacitive(x, s1, s2, h1, h2, g, invLinDet);
+        }
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+    } else if ((c.gHp <= 0.065f || c.kHp <= 1.75f) && (total & 1u) == 0u) {
+        for (size_t idx = 0u; idx < total; idx += 2u) {
+            const float x0 = hasDrive ? smp[idx] : (clampf(smp[idx], -16.0f, 16.0f) * inScale);
+            const float x1 =
+                hasDrive ? smp[idx + 1u] : (clampf(smp[idx + 1u], -16.0f, 16.0f) * inScale);
+            stepHpPair4xPi32(x0, x1, smp[idx], smp[idx + 1u], s1, s2, h1, h2, c.gHp, c.kHp,
+                             c.hpPos1, c.hpNeg1, c.invHpPos1, c.invHpNeg1, c.hpRail2, c.invHpRail2,
+                             c.hpDiodeSpan, c.invHpDiodeSpan);
+        }
+#endif
     } else {
         for (size_t idx = 0u; idx < total; ++idx) {
-            const float rawIn = clampf(smp[idx], -16.0f, 16.0f);
-            smp[idx] = stepHpNonlinearPrecomputed(
-                rawIn * inScale, s1, s2, h1, h2, c.gHp, c.kHp, c.hpPos1, c.hpNeg1, c.invHpPos1,
-                c.invHpNeg1, c.hpRail2, c.invHpRail2, c.hpDiodeSpan, c.invHpDiodeSpan);
+            const float x = hasDrive ? smp[idx] : (clampf(smp[idx], -16.0f, 16.0f) * inScale);
+            smp[idx] = stepHpNonlinearPrecomputed(x, s1, s2, h1, h2, c.gHp, c.kHp, c.hpPos1,
+                                                  c.hpNeg1, c.invHpPos1, c.invHpNeg1, c.hpRail2,
+                                                  c.invHpRail2, c.hpDiodeSpan, c.invHpDiodeSpan);
         }
     }
 
@@ -208,13 +258,13 @@ Ms20DualFilter::processVoiceHpSpan4x(OtaSallenKeyStage& st,
 }
 
 RUIDO_NOINLINE void
-Ms20DualFilter::processVoiceLpSpan4x(OtaSallenKeyStage& st,
-                                     std::array<float, kOversampleFactor>* frames4x,
-                                     size_t numFrames, const Coeffs& c) noexcept {
+Ms20DualFilter::processVoiceLpSpan4x(OtaSallenKeyStage& __restrict st,
+                                     std::array<float, kOversampleFactor>* __restrict frames4x,
+                                     size_t numFrames, const Coeffs& __restrict c) noexcept {
     const float interScale = c.interStageScale;
     const float outScale = c.lpOutScale;
 
-    float* smp = frames4x[0].data();
+    float* __restrict smp = frames4x[0].data();
     const size_t total = numFrames * kOversampleFactor;
 
     if (c.lpLinearBypass) {
@@ -237,11 +287,26 @@ Ms20DualFilter::processVoiceLpSpan4x(OtaSallenKeyStage& st,
     float s2 = st.s2;
     float h1 = st.hist1;
     float h2 = st.hist2;
-    for (size_t idx = 0u; idx < total; ++idx) {
-        const float y2 = stepLpNonlinear(smp[idx] * interScale, s1, s2, h1, h2, c.gLp, c.kLp,
-                                         c.lpRail1, c.invLpRail1, c.lpPos2, c.lpNeg2, c.invLpPos2,
-                                         c.invLpNeg2, c.lpDiodeSpan, c.invLpDiodeSpan);
-        smp[idx] = y2 * outScale;
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+    if ((c.gLp <= 0.065f || c.kLp <= 1.75f) && (total & 1u) == 0u) {
+        for (size_t idx = 0u; idx < total; idx += 2u) {
+            float y0 = 0.0f;
+            float y1 = 0.0f;
+            stepLpPair4xPi32(smp[idx] * interScale, smp[idx + 1u] * interScale, y0, y1, s1, s2, h1,
+                             h2, c.gLp, c.kLp, c.lpRail1, c.invLpRail1, c.lpPos2, c.lpNeg2,
+                             c.invLpPos2, c.invLpNeg2, c.lpDiodeSpan, c.invLpDiodeSpan);
+            smp[idx] = y0 * outScale;
+            smp[idx + 1u] = y1 * outScale;
+        }
+    } else
+#endif
+    {
+        for (size_t idx = 0u; idx < total; ++idx) {
+            const float y2 = stepLpNonlinear(
+                smp[idx] * interScale, s1, s2, h1, h2, c.gLp, c.kLp, c.lpRail1, c.invLpRail1,
+                c.lpPos2, c.lpNeg2, c.invLpPos2, c.invLpNeg2, c.lpDiodeSpan, c.invLpDiodeSpan);
+            smp[idx] = y2 * outScale;
+        }
     }
 
     st.s1 = scrubFilterState(s1);
@@ -274,19 +339,30 @@ void Ms20DualFilter::processQuadBank4x(
     // --- Stage 1: 4-voice High-Pass ---
     const bool allHpBypass = coeffs[0].hpLinearBypass && coeffs[1].hpLinearBypass &&
                              coeffs[2].hpLinearBypass && coeffs[3].hpLinearBypass;
-    const bool noneHpBypass = !coeffs[0].hpLinearBypass && !coeffs[1].hpLinearBypass &&
-                              !coeffs[2].hpLinearBypass && !coeffs[3].hpLinearBypass;
+    const bool noneHpBypass = !coeffs[0].hpLinearBypass && !coeffs[0].hpLinearAcCouple &&
+                              !coeffs[1].hpLinearBypass && !coeffs[1].hpLinearAcCouple &&
+                              !coeffs[2].hpLinearBypass && !coeffs[2].hpLinearAcCouple &&
+                              !coeffs[3].hpLinearBypass && !coeffs[3].hpLinearAcCouple;
 
     if (allHpBypass) {
         for (size_t v = 0u; v < 4u; ++v) {
+            OtaSallenKeyStage& st = filters[v].hpf_;
             const float inScale = coeffs[v].hpInScale;
+            float resid = st.s1 + st.s2;
             for (size_t sub = 0u; sub < 4u; ++sub) {
-                voiceSamples[v][sub] =
-                    applyMs20InputOverdrive(voiceSamples[v][sub], coeffs[v].preDrive,
-                                            coeffs[v].driveBlend) *
-                    inScale;
+                float y = applyMs20InputOverdrive(voiceSamples[v][sub], coeffs[v].preDrive,
+                                                  coeffs[v].driveBlend) *
+                          inScale;
+                if (resid != 0.0f) {
+                    resid = scrubFilterState(resid * 0.9988f);
+                    y += resid;
+                }
+                voiceSamples[v][sub] = y;
             }
-            filters[v].hpf_.reset();
+            st.s1 = resid;
+            st.s2 = 0.0f;
+            st.hist1 = 0.0f;
+            st.hist2 = 0.0f;
         }
     } else if (noneHpBypass) {
         alignas(16) std::array<float, 4> s1{filters[0].hpf_.s1, filters[1].hpf_.s1,

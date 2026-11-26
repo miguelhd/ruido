@@ -42,10 +42,12 @@ class HudSceneView {
     void update(float dtClamped, const HudState& effectiveHud) noexcept;
 
     void compositeSaveStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
-                            const HudState& frameHud) const noexcept;
+                            const HudState& frameHud,
+                            void (*coProcYield)() noexcept = nullptr) const noexcept;
 
     void compositePresetSceneStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
-                                   const HudState& frameHud) const noexcept;
+                                   const HudState& frameHud,
+                                   void (*coProcYield)() noexcept = nullptr) const noexcept;
 
   private:
     std::array<float, kNumSnapshots> sceneKeyGlow_{};

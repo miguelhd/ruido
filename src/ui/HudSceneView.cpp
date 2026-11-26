@@ -14,14 +14,15 @@ namespace {
 
 void compositeSceneKeybedAndBracket(const MonoStripCanvas& cv,
                                     const std::array<float, kNumSnapshots>& sceneGlow,
-                                    uint16_t activeWhiteMask, const HudState* liveHud) noexcept {
+                                    uint16_t activeWhiteMask, const HudState* liveHud,
+                                    void (*coProcYield)() noexcept) noexcept {
     std::array<float, kNumBlackKeys> blackGlow{};
     std::array<float, kNumWhiteKeys> whiteGlow{};
     for (size_t s = 0u; s < kNumSnapshots; ++s) {
         whiteGlow[kSceneWhiteKeyBase + s] = sceneGlow[s];
     }
     compositeFm1KeybedDiagram(cv, kKeybedDiagramTopY, blackGlow, whiteGlow, liveHud, 0x0000u,
-                              activeWhiteMask);
+                              activeWhiteMask, coProcYield);
 
     if (cv.y1 > 166 && cv.y0 < 194) {
         const float xL = whiteKeyDiagramCenterX(kSceneWhiteKeyBase) - kKeybedBracketOverhangX;
@@ -100,7 +101,8 @@ void HudSceneView::update(float dtClamped, const HudState& effectiveHud) noexcep
 }
 
 void HudSceneView::compositeSaveStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
-                                      const HudState& frameHud) const noexcept {
+                                      const HudState& frameHud,
+                                      void (*coProcYield)() noexcept) const noexcept {
     if (alpha8 == 0u || y1 <= 30 || y0 >= 234) {
         return;
     }
@@ -159,9 +161,12 @@ void HudSceneView::compositeSaveStrip(int y0, int y1, uint8_t* lumBuf, uint8_t a
 
     // 3. Shared 27-Key FM-1 Hardware Diagram + `"SCENE"` Bracket (pure blinking, zero key-hold
     // snap)
+    if (coProcYield != nullptr) {
+        coProcYield();
+    }
     const uint16_t activeWhiteMask =
         deleteMode ? static_cast<uint16_t>((occMask & 0x0Fu) << kSceneWhiteKeyBase) : 0x0F00u;
-    compositeSceneKeybedAndBracket(cv, sceneKeyGlow_, activeWhiteMask, nullptr);
+    compositeSceneKeybedAndBracket(cv, sceneKeyGlow_, activeWhiteMask, nullptr, coProcYield);
 
     // 4. Calm 2-Line Footer (`y = 202..228`; suppressed when `KNOB 1-4` strip wakes)
     if (y1 > 200 && y0 < 234 && frameHud.knobBank == KnobBankMode::None) {
@@ -178,7 +183,8 @@ void HudSceneView::compositeSaveStrip(int y0, int y1, uint8_t* lumBuf, uint8_t a
 }
 
 void HudSceneView::compositePresetSceneStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
-                                             const HudState& frameHud) const noexcept {
+                                             const HudState& frameHud,
+                                             void (*coProcYield)() noexcept) const noexcept {
     if (alpha8 == 0u || y1 <= 54 || y0 >= 224) {
         return;
     }
@@ -211,6 +217,9 @@ void HudSceneView::compositePresetSceneStrip(int y0, int y1, uint8_t* lumBuf, ui
                                  kPresetKeyBotY, kPresetKeyHalfW, fillGray, rimGray, 248u);
             fillKeybedSlitSDF(cv, cx, kPresetKeyTopY + 7.5f, kPresetKeyBotY - 7.5f, 1.35f,
                               !occ ? 0.15f : (0.38f + 0.62f * w01), -1.0f, true);
+            if (coProcYield != nullptr && s == 1u) {
+                coProcYield();
+            }
         }
     }
 

@@ -64,8 +64,8 @@ inline void drawShiftEncoderPointer(const MonoStripCanvas& cv, float cx, float c
 //  3. `Keys 9-12` (`SCENE` pressure pads) & `Keys 13-16` (`SOLO` switches) with bottom brackets
 //  4. `11th` corner key (`SHIFT` switch at `100%`) + `220 ms` `modeWipeQ8` LED wave sync
 inline void compositeFullChassisShiftStrip(const MonoStripCanvas& cv,
-                                           const EngineControlState& control,
-                                           const HudState& hud) noexcept {
+                                           const EngineControlState& control, const HudState& hud,
+                                           void (*coProcYield)() noexcept = nullptr) noexcept {
     const bool modelHot = (hud.shiftFocus == ShiftFocus::Model);
     const bool tempoHot = (hud.shiftFocus == ShiftFocus::Tempo);
     const bool sceneHot =
@@ -77,6 +77,9 @@ inline void compositeFullChassisShiftStrip(const MonoStripCanvas& cv,
     // 1. Outer FM-1 hardware chassis (`224 x 128 px` = `1.75 : 1` true FM-1 aspect ratio)
     if (cv.y1 > 28 && cv.y0 < 161) {
         fillKeybedStadiumSDF(cv, 8.0f, 30.0f, 232.0f, 158.0f, 11.5f, 8u, 48u, 246u);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
     }
 
     // 2. Upper Panel (`y = 34..85`): ghosted non-SHIFT hardware drawn first, then dedicated SHIFT
@@ -97,6 +100,9 @@ inline void compositeFullChassisShiftStrip(const MonoStripCanvas& cv,
         // Ghosted center-left `1:1` square screen glass bezel (`48x48`) + inner LCD (`34x34`)
         fillKeybedStadiumSDF(cv, 66.0f, 36.0f, 114.0f, 84.0f, 5.5f, 9u, 40u, 246u);
         fillKeybedStadiumSDF(cv, 73.0f, 43.0f, 107.0f, 77.0f, 1.8f, 10u, 30u, 244u);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
 
         // Ghosted right `4` encoders (`KNOB 1-4`) + recessed `2 x 6` button grid bezel
         for (int k = 0; k < 4; ++k) {
@@ -108,6 +114,12 @@ inline void compositeFullChassisShiftStrip(const MonoStripCanvas& cv,
             const float bx = 132.25f + static_cast<float>(c) * 15.5f;
             fillKeybedStadiumSDF(cv, bx - 6.0f, 58.5f, bx + 6.0f, 68.5f, 1.8f, 12u, 26u, 238u);
             fillKeybedStadiumSDF(cv, bx - 6.0f, 71.5f, bx + 6.0f, 81.5f, 1.8f, 12u, 26u, 238u);
+            if (coProcYield != nullptr && c == 2) {
+                coProcYield();
+            }
+        }
+        if (coProcYield != nullptr) {
+            coProcYield();
         }
 
         // Dedicated SHIFT encoders: SELECT (`KEYBOARD`) & ALGORITHM (`TEMPO`)
@@ -218,6 +230,9 @@ inline void compositeFullChassisShiftStrip(const MonoStripCanvas& cv,
                         fillKeybedSwitchDotSDF(cv, cx, kBMidY, wPulse, wPulse > 0.03f);
                     }
                 }
+                if (coProcYield != nullptr && (i & 3u) == 3u) {
+                    coProcYield();
+                }
             }
         }
 
@@ -227,6 +242,9 @@ inline void compositeFullChassisShiftStrip(const MonoStripCanvas& cv,
                 const float dotX = kWhiteBaseX + (static_cast<float>(gap) + 0.5f) * kWhitePitchX;
                 cv.drawOpticalBead(dotX, 121.5f, 0.34f, 0.90f);
             }
+        }
+        if (coProcYield != nullptr) {
+            coProcYield();
         }
 
         // Bottom 16 evenly spaced keys: `0..7` ghosted, `8..11` = `SCENE` pads, `12..15` = `SOLO`
@@ -277,6 +295,9 @@ inline void compositeFullChassisShiftStrip(const MonoStripCanvas& cv,
                                          kCapsuleHalfW, held ? 32u : 19u,
                                          static_cast<uint8_t>(held ? 252u : 148u), 248u);
                     fillKeybedSwitchDotSDF(cv, cx, kWMidY, g, true);
+                }
+                if (coProcYield != nullptr && (i & 3u) == 3u) {
+                    coProcYield();
                 }
             }
         }

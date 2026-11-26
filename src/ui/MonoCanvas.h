@@ -662,7 +662,8 @@ inline void splatPhotonSegment(int colX, float yA, float yB, float weight, float
 
 // Tonemap linear photon strip [xStart..xEnd) and screen-blend into 8-bit luminance buffer
 inline void screenBlendLinearStrip(uint16_t stripHeight, size_t xStart, size_t xEnd,
-                                   const uint16_t* linScratch, uint8_t* lumBuf) noexcept {
+                                   const uint16_t* linScratch, uint8_t* lumBuf,
+                                   void (*coProcYield)() noexcept = nullptr) noexcept {
     for (uint16_t r = 0u; r < stripHeight; ++r) {
         const uint16_t* linRow = linScratch + static_cast<size_t>(r) * kDisplayWidth;
         uint8_t* lumRow = lumBuf + static_cast<size_t>(r) * kDisplayWidth;
@@ -673,6 +674,9 @@ inline void screenBlendLinearStrip(uint16_t stripHeight, size_t xStart, size_t x
                 const uint32_t bg = lumRow[x];
                 lumRow[x] = static_cast<uint8_t>(255u - (((255u - bg) * (255u - addLum)) >> 8u));
             }
+        }
+        if (coProcYield != nullptr && (r & 3u) == 3u) {
+            coProcYield();
         }
     }
 }

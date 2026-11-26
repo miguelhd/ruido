@@ -157,6 +157,7 @@ class Fm1PanelState {
         prevButtonsMask_ = 0u;
         prevNotesMask_ = 0u;
         scanCursor_ = 0u;
+        pressureSubFrame_ = 0u;
         inputEventCount_ = 0u;
         masterInitialized_ = false;
         const float raw = clampf(initialMasterGain01, 0.0f, 1.0f);
@@ -261,7 +262,9 @@ class Fm1PanelState {
         const uint32_t mask27 = (1u << kFm1NumNoteKeys) - 1u;
         const uint32_t notes = curNotesMask & mask27;
         const uint32_t pEdges = notePressEdges & mask27;
+        const bool publishPressureFrame = ((++pressureSubFrame_ & 3u) == 0u);
 
+        ctrl.beginKeyBatch();
         for (uint8_t n = 0u; n < kFm1NumNoteKeys; ++n) {
             const uint32_t bit = 1u << n;
             const bool isDown = (notes & bit) != 0u;
@@ -302,7 +305,8 @@ class Fm1PanelState {
             } else if (isDown && km.saradcCh >= 0) {
                 const bool wasSeeded = adcSeeded_[n];
                 const float targetP = resolveTargetPressure(n, km, false);
-                if (!wasSeeded && adcSeeded_[n]) {
+                const bool justSeeded = !wasSeeded && adcSeeded_[n];
+                if (justSeeded) {
                     smoothedPressure_[n] = targetP;
                 } else {
                     smoothedPressure_[n] += 0.65f * (targetP - smoothedPressure_[n]);
@@ -310,12 +314,17 @@ class Fm1PanelState {
                         smoothedPressure_[n] = 1.0f;
                     }
                 }
-                if (absf(smoothedPressure_[n] - reportedPressure_[n]) >= 0.002f) {
-                    reportedPressure_[n] = smoothedPressure_[n];
-                    dispatchKeyPressure(ctrl, km, reportedPressure_[n]);
+                const float nextP = smoothedPressure_[n];
+                const bool hitEndpoint = (nextP >= 0.999f && reportedPressure_[n] < 0.999f) ||
+                                         (nextP <= 0.001f && reportedPressure_[n] > 0.001f);
+                if (justSeeded || hitEndpoint ||
+                    (publishPressureFrame && absf(nextP - reportedPressure_[n]) >= 0.006f)) {
+                    reportedPressure_[n] = nextP;
+                    dispatchKeyPressure(ctrl, km, nextP);
                 }
             }
         }
+        ctrl.endKeyBatch();
 
         prevNotesMask_ = notes;
         scheduleNextAdcNote(notes);
@@ -410,6 +419,7 @@ class Fm1PanelState {
     uint32_t prevButtonsMask_ = 0u;
     uint32_t prevNotesMask_ = 0u;
     uint8_t scanCursor_ = 0u;
+    uint8_t pressureSubFrame_ = 0u;
     uint32_t inputEventCount_ = 0u;
     bool masterInitialized_ = false;
     float lastMasterNorm_ = 0.5f;

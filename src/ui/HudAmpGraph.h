@@ -59,23 +59,27 @@ class HudAmpGraph {
                 const LfoSignalArray& lfoOutput,
                 const std::array<float, kNumOscillators>& voiceDriftNorm,
                 uint8_t stutterGateMask) noexcept;
+    void prepareOverdriveHair(const OverdriveHairTable& overdriveHair) noexcept;
 
     void compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint16_t* linScratch,
                         float hudAlpha01, const HudState& hud,
-                        const OverdriveHairTable& overdriveHair) const noexcept;
+                        const OverdriveHairTable& overdriveHair,
+                        CoProcYieldFn coProcYield = nullptr) const noexcept;
 
   private:
     void compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                              uint16_t* linScratch, float effAlpha01, uint8_t alpha8,
-                             const HudState& hud,
-                             const OverdriveHairTable& overdriveHair) const noexcept;
+                             const HudState& hud, const OverdriveHairTable& overdriveHair,
+                             CoProcYieldFn coProcYield) const noexcept;
     void compositeWidthStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                              uint16_t* linScratch, float effAlpha01, uint8_t alpha8,
-                             const HudState& hud) const noexcept;
+                             const HudState& hud, CoProcYieldFn coProcYield) const noexcept;
     void compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                              uint16_t* linScratch, float effAlpha01, uint8_t alpha8,
-                             const HudState& hud) const noexcept;
+                             const HudState& hud, CoProcYieldFn coProcYield) const noexcept;
 
+    OverdriveHairTable hairLayer1_{};
+    OverdriveHairTable hairLayer2_{};
     std::array<float, kNumOscillators> faderY_{kColYBot, kColYBot, kColYBot, kColYBot};
     std::array<float, kNumOscillators> driveNorm_{0.0f, 0.0f, 0.0f, 0.0f};
     std::array<float, kNumOscillators> pulseWidth_{0.50f, 0.50f, 0.50f, 0.50f};
@@ -87,6 +91,7 @@ class HudAmpGraph {
     float driftPhase_ = 0.0f;
     bool masterRun_ = false;
     bool primed_ = false;
+    bool hairPrepared_ = false;
 };
 
 } // namespace ruido

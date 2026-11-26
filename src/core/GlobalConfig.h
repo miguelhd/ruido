@@ -49,6 +49,8 @@ inline constexpr char kRuidoVersionStr[] = RUIDO_VERSION_STR;
 inline constexpr char kRuidoPackageIdStr[] = RUIDO_PACKAGE_ID_STR;
 
 // Active sub-screen inside the right-panel GLO `GLOBAL CONFIG` overlay.
+inline constexpr uint8_t kFactoryResetConfirmTicks = 24u; // 6 CW detents (24 X4 quadrature ticks)
+
 enum class ConfigSubView : uint8_t {
     List = 0,
     FactoryResetConfirm = 1,

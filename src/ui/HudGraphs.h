@@ -144,7 +144,8 @@ class HudGraphs {
     void update(float dtClamped, const EngineControlState& control, const HudState& rawHud,
                 const HudState& effectiveHud, bool extraCenterViewActive,
                 const LfoSignalArray& lfoOutput, const LfoDriftArray& lfoDriftPacked,
-                float rhythmPhase01 = 0.0f, uint8_t stutterGateMask = 0x0Fu) noexcept;
+                float rhythmPhase01 = 0.0f, uint8_t stutterGateMask = 0x0Fu,
+                CoProcYieldFn coProcYield = nullptr) noexcept;
 
     float filterGraphPhase() const noexcept { return filterGraphPhase_; }
 
@@ -155,19 +156,20 @@ class HudGraphs {
     void compositeLfoStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                            uint16_t* linScratch, float effLfoAlpha01, uint8_t lfoAlpha8,
                            const EngineControlState& control, const HudState& hud,
-                           const LfoSignalArray& lfoPhase) const noexcept;
+                           const LfoSignalArray& lfoPhase,
+                           CoProcYieldFn coProcYield = nullptr) const noexcept;
 
     void compositeFilterStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
-                              uint16_t* linScratch, float effFilterAlpha01,
-                              uint8_t filterAlpha8) const noexcept;
+                              uint16_t* linScratch, float effFilterAlpha01, uint8_t filterAlpha8,
+                              CoProcYieldFn coProcYield = nullptr) const noexcept;
 
   private:
     void updateFilterGraph(float dtClamped, bool snapImmediate,
                            const std::array<ModulatedFilterParams, kNumOscillators>& mods,
-                           bool unified) noexcept;
+                           bool unified, CoProcYieldFn coProcYield) noexcept;
     void updateLfoGraph(float dtClamped, bool snapImmediate, const EngineControlState& control,
                         const HudState& effectiveHud, const LfoSignalArray& lfoOutput,
-                        const LfoDriftArray& lfoDriftPacked) noexcept;
+                        const LfoDriftArray& lfoDriftPacked, CoProcYieldFn coProcYield) noexcept;
 
     std::array<std::array<int16_t, kFilterSweepPts>, kNumOscillators> filterCurvesFixed_{};
     float filterDivergenceSmooth_ = 0.0f;

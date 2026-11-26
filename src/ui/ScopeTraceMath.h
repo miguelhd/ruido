@@ -207,6 +207,54 @@ inline void tonemapBloomScanline(int py, uint32_t bgKeepQ8, const uint16_t* bloo
     const uint16_t* bRow0 = bloomGrid + by0 * BloomW;
     const uint16_t* bRow1 = bloomGrid + by1 * BloomW;
 
+    const auto emitPx = [&](size_t colX, uint32_t bloomE) noexcept {
+        uint32_t totalE = static_cast<uint32_t>(linRow[colX]) + bloomE;
+        if (totalE == 0u) {
+            lumRow[colX] = 0u;
+            return;
+        }
+        if (totalE > 4095u) {
+            totalE = 4095u;
+        }
+        uint32_t lum = kTonemapLut[totalE >> 2u];
+        if (bgKeepQ8 < 256u) {
+            lum = (lum * bgKeepQ8 + 128u) >> 8u;
+        }
+        lumRow[colX] = static_cast<uint8_t>(lum);
+    };
+
+    if constexpr (DisplayW == 4u * BloomW && BloomW >= 2u) {
+        uint32_t vL =
+            static_cast<uint32_t>(bRow0[0]) * invWy8 + static_cast<uint32_t>(bRow1[0]) * wy8;
+        const uint32_t eEdge0 = (vL + 32u) >> 6u;
+        emitPx(0u, eEdge0);
+        emitPx(1u, eEdge0);
+
+        for (size_t bx = 0u; bx + 1u < BloomW; ++bx) {
+            const uint32_t vR = static_cast<uint32_t>(bRow0[bx + 1u]) * invWy8 +
+                                static_cast<uint32_t>(bRow1[bx + 1u]) * wy8;
+            const size_t x = 2u + (bx << 2u);
+            if ((vL | vR) == 0u &&
+                (linRow[x] | linRow[x + 1u] | linRow[x + 2u] | linRow[x + 3u]) == 0u) {
+                lumRow[x] = 0u;
+                lumRow[x + 1u] = 0u;
+                lumRow[x + 2u] = 0u;
+                lumRow[x + 3u] = 0u;
+            } else {
+                emitPx(x, (vL * 7u + vR + 256u) >> 9u);
+                emitPx(x + 1u, (vL * 5u + vR * 3u + 256u) >> 9u);
+                emitPx(x + 2u, (vL * 3u + vR * 5u + 256u) >> 9u);
+                emitPx(x + 3u, (vL + vR * 7u + 256u) >> 9u);
+            }
+            vL = vR;
+        }
+
+        const uint32_t eEdge1 = (vL + 32u) >> 6u;
+        emitPx(DisplayW - 2u, eEdge1);
+        emitPx(DisplayW - 1u, eEdge1);
+        return;
+    }
+
     for (size_t colX = 0u; colX < DisplayW; ++colX) {
         const int numX8 = 2 * static_cast<int>(colX) - 3;
         size_t bx0 = 0u;

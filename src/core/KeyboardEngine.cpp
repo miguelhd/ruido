@@ -575,7 +575,7 @@ void KeyboardEngine::evaluate(EngineControlState& state, HudState& hud) const no
                            hud.activePunchValue);
         }
     }
-    if (isBlackHeld(kHoldBlackKeyIdx) &&
+    if (hud.selPageOpen && isBlackHeld(kHoldBlackKeyIdx) &&
         (shiftSwallowedBlackMask_ & (1u << kHoldBlackKeyIdx)) == 0u) {
         const float holdVal = holdActive_ ? ((hud.keyHoldCount > 0u) ? 1.0f : 0.5f) : 0.0f;
         physPunch.note(blackPressSeq_[kHoldBlackKeyIdx], KeyPunchKind::KeyHoldSwitch, 0u, holdVal);

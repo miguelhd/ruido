@@ -80,15 +80,17 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     RTEST_CHECK(ctrl.state().voices[1].lfoTarget == ruido::LfoTarget::LpResonance);
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
 
-    // 3. Anchored Left Title + Smooth 150 ms Top-Right FINE/COARSE Transition:
-    //    (a) Idle OCT- hold shows "FREQUENCY" on left + "FINE" on right; turning Knob1 keeps
-    //        "FREQUENCY" anchored on left while expanding top-right to "FINE · ... Hz"!
+    // 3. Momentary OCT- / OCT+ Hold + Smooth 150 ms Top-Right FINE/COARSE Transition:
+    //    (a) Idle OCT- hold never wakes a menu on its own (displays only the centered FINE capsule
+    //        indicator); turning Knob1 wakes VoiceFrequency and keeps the toast pinned while held!
     ctrl.reset();
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true);
     ctrl.tick(0.200f, tel);
     RTEST_CHECK(ctrl.hud().rateHoldActive);
     RTEST_CHECK(ctrl.hud().knobRate == ruido::KnobRate::Fine);
-    RTEST_CHECK(nearF(ctrl.hud().opacity, 1.0f));
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::None && nearF(ctrl.hud().opacity, 0.0f));
+    RTEST_CHECK(ctrl.hud().capsuleToast == ruido::CapsuleToastKind::Fine &&
+                ctrl.hud().capsuleAlphaQ8 == 255u);
 
     std::array<uint16_t, 240u * 24u> hdrRateOnly{};
     std::array<uint16_t, 240u * 24u> hdrRateKnob{};
@@ -100,29 +102,24 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     renderer.renderStrip(0u, 24u, hdrRateOnly.data());
 
     ctrl.onEncoderDelta(ruido::EncoderId::Knob1, 8);
+    ctrl.tick(0.200f, tel);
     RTEST_CHECK(ctrl.hud().rateHoldActive);
     RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::VoiceFrequency);
+    RTEST_CHECK(nearF(ctrl.hud().opacity, 1.0f));
     silentSt = ctrl.state();
     silentSt.global.masterRun = false;
     silentSt.global.masterTrim = 0.0f;
     renderer.prepareFrame(0.016f, silentSt, ctrl.hud(), tel);
     renderer.renderStrip(0u, 24u, hdrRateKnob.data());
 
-    bool leftFreqLocked = true;
     size_t rightReadoutDiffs = 0u;
     for (size_t y = 6u; y <= 19u; ++y) {
-        for (size_t x = 10u; x <= 80u; ++x) {
-            if (hdrRateOnly[y * 240u + x] != hdrRateKnob[y * 240u + x]) {
-                leftFreqLocked = false;
-            }
-        }
         for (size_t x = 140u; x <= 230u; ++x) {
             if (hdrRateOnly[y * 240u + x] != hdrRateKnob[y * 240u + x]) {
                 ++rightReadoutDiffs;
             }
         }
     }
-    RTEST_CHECK(leftFreqLocked);
     RTEST_CHECK(rightReadoutDiffs > 40u);
 
     // Releasing OCT- after turning a knob preserves the remaining 1.5 s toast hold!
@@ -213,24 +210,25 @@ inline void runUnified150msFadesAndRateSplitHeaderTests(CheckFn checkFn) {
     ctrl.onButtonEvent(ruido::ButtonId::Home, false);
     ctrl.tick(0.200f, tel);
 
-    // Pressing HOME while OCT+ is physically held preserves COARSE hold cleanly
+    // Pressing HOME while OCT+ is physically held closes the page and preserves COARSE capsule hold
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, true);
     ctrl.onButtonEvent(ruido::ButtonId::Lfo, false);
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);
     ctrl.tick(0.200f, tel);
     ctrl.onButtonEvent(ruido::ButtonId::Home, true);
     ctrl.onButtonEvent(ruido::ButtonId::Home, false);
-    ctrl.tick(0.050f, tel);
+    ctrl.tick(0.075f, tel); // Halfway through 150 ms page fade-out
     RTEST_CHECK(!ctrl.hud().lfoPageOpen);
     RTEST_CHECK(ctrl.hud().rateHoldActive);
     RTEST_CHECK(ctrl.hud().knobRate == ruido::KnobRate::Coarse);
-    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::KnobRate);
-    RTEST_CHECK(nearF(ctrl.hud().opacity, 1.0f));
-    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
-    ctrl.tick(0.075f, tel); // Halfway through 150 ms fade-out
+    RTEST_CHECK(ctrl.hud().capsuleToast == ruido::CapsuleToastKind::Coarse &&
+                ctrl.hud().capsuleAlphaQ8 == 255u);
     RTEST_CHECK(nearF(ctrl.hud().opacity, 0.50f, 0.03f));
     ctrl.tick(0.100f, tel);
-    RTEST_CHECK(nearF(ctrl.hud().opacity, 0.0f));
+    RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::None && nearF(ctrl.hud().opacity, 0.0f));
+    ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
+    RTEST_CHECK(ctrl.hud().capsuleToast == ruido::CapsuleToastKind::None &&
+                ctrl.hud().capsuleAlphaQ8 == 0u);
 
     // 4. Bug-fix regressions:
     // (a) Slow MASTER pot sweep (0.0006 per call) wakes MasterLevel once cumulative delta > 0.002
@@ -765,16 +763,16 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(ctrl.hud().config.midiChannel == 0u);
 
     // Rows 7..8: Operational sub-screens (Factory Reset, Ruido)
-    // 7a. FACTORY RESET requires 2 CW detents (8 ticks), cancels on CCW, and resets NVS + patch
+    // 7a. FACTORY RESET requires 6 CW detents (24 ticks), cancels on CCW, and resets NVS + patch
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4);
     RTEST_CHECK(ctrl.hud().configCursor == 7u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::FactoryReset),
                             "Factory Reset") == 0);
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetConfirm);
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // 1 detent (50% progress) -> NOT reset yet
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 12); // 3 detents (50%) -> NOT reset yet
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetConfirm);
-    RTEST_CHECK(ctrl.hud().configResetTicks == 4u);
+    RTEST_CHECK(ctrl.hud().configResetTicks == 12u);
     renderer.prepareFrame(0.025f, quietSt, ctrl.hud(), tel);
     verifyViewStripsAndCenter(false);
     {
@@ -790,10 +788,10 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
         RTEST_CHECK(leftLumSum > rightLumSum * 3u);
         RTEST_CHECK(s16[120u * 240u + 4u] == 0u); // Zero background scope flatline bleed
     }
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -8); // CCW cancels back to list safely
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -16); // CCW cancels back to list safely
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::List);
 
-    // Mutate config + delete Scene 1, then run full 2-detent FACTORY RESET confirmation
+    // Mutate config + delete Scene 1, then run full 6-detent FACTORY RESET confirmation
     ctrl.onButtonEvent(ruido::ButtonId::Save, true);
     ctrl.onButtonEvent(ruido::ButtonId::Save, false);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // DELETE SCENE
@@ -811,8 +809,8 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
         ctrl.onEncoderDelta(ruido::EncoderId::Select, -4);
     }
     RTEST_CHECK(ctrl.hud().configCursor == 7u);
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // Enter confirm
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8); // 2 CW detents -> confirm reset!
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);  // Enter confirm
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 24); // 6 CW detents -> confirm reset!
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetDone);
     RTEST_CHECK(ctrl.snapshots().occupiedMask() == 0x0Fu);
     RTEST_CHECK(ctrl.consumeSavedSlotMask() == 0x0Fu);
@@ -838,8 +836,8 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(ctrl.hud().configCursor == 7u);
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // Enter Factory Reset
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetConfirm);
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // Half-arm (4 ticks = 50%)
-    RTEST_CHECK(ctrl.hud().configResetTicks == 4u);
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 12); // Half-arm (12 ticks = 50%)
+    RTEST_CHECK(ctrl.hud().configResetTicks == 12u);
     ctrl.onEncoderDelta(ruido::EncoderId::Select, 4); // Switch to CLEAN INIT -> resets progress!
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::CleanInitConfirm);
     RTEST_CHECK(ctrl.hud().configResetTicks == 0u);
@@ -848,7 +846,7 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     (void)ctrl.consumeSavedSlotMask();
     (void)ctrl.consumeSettingsDirty();
     (void)ctrl.consumeLivePatchDirty();
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8); // 2 CW detents -> confirm CLEAN INIT!
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 24); // 6 CW detents -> confirm CLEAN INIT!
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::CleanInitDone);
     RTEST_CHECK(ctrl.snapshots().occupiedMask() == 0x00u);
     RTEST_CHECK(ctrl.hud().snapshotOccupiedMask == 0x00u);
@@ -891,8 +889,8 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     // Restore Factory Defaults cleanly before proceeding to Credits test
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, -4); // CCW BACK: Exit CleanInitDone -> List
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::List);
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4); // Enter Factory Reset
-    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 8); // Confirm Factory Presets
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);  // Enter Factory Reset
+    ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 24); // Confirm Factory Presets
     RTEST_CHECK(ctrl.hud().configSubView == ruido::ConfigSubView::FactoryResetDone);
     RTEST_CHECK(ctrl.snapshots().occupiedMask() == 0x0Fu);
     RTEST_CHECK(!ctrl.state().global.monoCollapse);
@@ -906,7 +904,7 @@ template <typename CheckFn> inline void runGlobalFiveModesAndConfigMenuTests(Che
     RTEST_CHECK(ctrl.hud().configCursor == 8u);
     RTEST_CHECK(std::strcmp(ruido::globalConfigItemLabel(ruido::ConfigItemId::Credits), "About") ==
                 0);
-    RTEST_CHECK(std::strcmp(ruido::kRuidoVersionStr, "0.7.3") == 0);
+    RTEST_CHECK(std::strcmp(ruido::kRuidoVersionStr, "0.8.0") == 0);
     RTEST_CHECK(ruido::measureSansText(ruido::kFontSansMedium, "Hern\xC3\xA1ndez", 0) ==
                 ruido::measureSansText(ruido::kFontSansMedium, "Hernandez", 0));
     ctrl.onEncoderDelta(ruido::EncoderId::Algorithm, 4);
@@ -4110,9 +4108,11 @@ template <typename CheckFn> inline void runKeyboardModelAndLiveMixerTests(CheckF
         RTEST_CHECK(ctrl.hud().saveArmed && ctrl.hud().savePageMode == ruido::SavePageMode::Init);
         ctrl.onButtonEvent(ruido::ButtonId::Save, true);
         ctrl.onButtonEvent(ruido::ButtonId::Save, false);
-        ctrl.tick(0.02f, tel);
+        for (int i = 0; i < 10; ++i)
+            ctrl.tick(0.02f, tel);
         RTEST_CHECK(!ctrl.hud().saveArmed);
-        RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::KnobRate);
+        RTEST_CHECK(ctrl.hud().mode == ruido::HudMode::None &&
+                    ctrl.hud().capsuleToast == ruido::CapsuleToastKind::Fine);
         ctrl.onButtonEvent(ruido::ButtonId::OctMinus, false);
         ctrl.tick(0.02f, tel);
 
@@ -5244,6 +5244,81 @@ template <typename CheckFn> inline void runRhythmLabAndMidiClockTests(CheckFn ch
         hwCtrl.onWhiteKeyGate(ruido::kMuteWhiteKeyBase + 2u, false);
         hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
         RTEST_CHECK(hwCtrl.state().keyMod.muteMask == 0x01u);
+
+        // (g) Momentary 2C Center Stadium Capsule (`LATCH ON`, `LATCH OFF`, `SHIFT`, `FINE`,
+        // `COARSE`) overlays `y = 96..120` for 1.0 s without hijacking Top Bar or active features:
+        hwCtrl.reset();
+        hwRen.reset();
+        for (int f = 0; f < 80; ++f) {
+            hwRen.prepareFrame(0.050f, hwQuietSt, hwCtrl.hud(), tel);
+        }
+        // 1. Tapping LATCH on Clean Scope triggers LATCH ON capsule while keeping HudMode::None:
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, true);
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
+        RTEST_CHECK(hwCtrl.hud().capsuleToast == ruido::CapsuleToastKind::LatchOn);
+        RTEST_CHECK(hwCtrl.hud().mode == ruido::HudMode::None && hwCtrl.hud().opacity == 0.0f);
+        hwCtrl.tick(0.200f, tel); // Past 150 ms fade-in -> 100% hold opacity
+        RTEST_CHECK(hwCtrl.hud().capsuleAlphaQ8 == 255u);
+        hwRen.prepareFrame(0.020f, hwQuietSt, hwCtrl.hud(), tel);
+        hwRen.renderFullScreenStrips(hwImg.data());
+        uint32_t capsuleCenterLum = 0u;
+        for (size_t y = 112u; y <= 127u; ++y) {
+            for (size_t x = 90u; x <= 150u; ++x) {
+                capsuleCenterLum += hwG6(x, y);
+            }
+        }
+        RTEST_CHECK(capsuleCenterLum > 400u);
+        // After 1.0 s hold + 150 ms fade-out (total > 1.30 s), capsule dissolves completely:
+        for (int f = 0; f < 30; ++f) {
+            hwCtrl.tick(0.050f, tel);
+        }
+        RTEST_CHECK(hwCtrl.hud().capsuleToast == ruido::CapsuleToastKind::None &&
+                    hwCtrl.hud().capsuleAlphaQ8 == 0u);
+
+        // 2. Holding LOW PASS (Op4) + tapping LATCH off preserves LOW PASS KeyboardPlay HUD:
+        hwCtrl.onBlackKeyPressure(ruido::BlackKeyId::Op4, 0.75f);
+        RTEST_CHECK(hwCtrl.hud().mode == ruido::HudMode::KeyboardPlay &&
+                    hwCtrl.hud().activePunch == ruido::KeyPunchKind::DubLpfDrop);
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, true);
+        RTEST_CHECK(hwCtrl.hud().capsuleToast == ruido::CapsuleToastKind::LatchOff);
+        RTEST_CHECK(hwCtrl.hud().mode == ruido::HudMode::KeyboardPlay &&
+                    hwCtrl.hud().activePunch == ruido::KeyPunchKind::DubLpfDrop);
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::Mono, false);
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::Op4, false);
+
+        // 3. SHIFT opens the full-chassis SHIFT illustration without triggering a center capsule,
+        // encoder movement on KNOB 1-4 while holding SHIFT never triggers unassigned recoil, and
+        // OCT-/OCT+ show `FINE` / `COARSE` capsules strictly while the button is pressed (zero
+        // lingering after release):
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, true);
+        RTEST_CHECK(hwCtrl.hud().mode == ruido::HudMode::ShiftMap &&
+                    hwCtrl.hud().capsuleToast == ruido::CapsuleToastKind::None);
+        const uint8_t phantomSeqBeforeKnob = hwCtrl.hud().phantomPinSeq;
+        hwCtrl.onEncoderDelta(ruido::EncoderId::Knob1, 4);
+        hwCtrl.onEncoderDelta(ruido::EncoderId::Knob3, -4);
+        RTEST_CHECK(hwCtrl.hud().phantomPinSeq == phantomSeqBeforeKnob);
+        hwCtrl.onBlackKeyEvent(ruido::BlackKeyId::ScopeFreezeKey, false);
+
+        hwCtrl.onButtonEvent(ruido::ButtonId::OctMinus, true);
+        RTEST_CHECK(hwCtrl.hud().capsuleToast == ruido::CapsuleToastKind::Fine);
+        hwCtrl.onButtonEvent(ruido::ButtonId::OctPlus, true);
+        RTEST_CHECK(hwCtrl.hud().capsuleToast == ruido::CapsuleToastKind::Coarse);
+        for (int f = 0; f < 30; ++f) {
+            hwCtrl.tick(0.050f, tel);
+        }
+        // Stays visible at 100% while held, reverts to FINE when OCT+ is released while OCT- stays
+        // held, and disappears immediately with zero lingering when OCT- is released:
+        RTEST_CHECK(hwCtrl.hud().rateHoldActive &&
+                    hwCtrl.hud().capsuleToast == ruido::CapsuleToastKind::Coarse &&
+                    hwCtrl.hud().capsuleAlphaQ8 == 255u);
+        hwCtrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
+        RTEST_CHECK(hwCtrl.hud().rateHoldActive &&
+                    hwCtrl.hud().capsuleToast == ruido::CapsuleToastKind::Fine &&
+                    hwCtrl.hud().capsuleAlphaQ8 == 255u);
+        hwCtrl.onButtonEvent(ruido::ButtonId::OctMinus, false);
+        RTEST_CHECK(!hwCtrl.hud().rateHoldActive &&
+                    hwCtrl.hud().capsuleToast == ruido::CapsuleToastKind::None &&
+                    hwCtrl.hud().capsuleAlphaQ8 == 0u);
     }
 #undef RTEST_CHECK
 }

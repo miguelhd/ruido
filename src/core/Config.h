@@ -12,6 +12,7 @@ inline constexpr float kOversampledRate = kBaseSampleRate * 4.0f; // 176472.0f
 inline constexpr float kInvOversampledRate = 1.0f / kOversampledRate;
 inline constexpr size_t kBlockFrames = 64u;
 inline constexpr size_t kOversampledBlockFrames = kBlockFrames * kOversampleFactor;
+inline constexpr size_t kMaxFilterSpanFrames = 32u;
 
 // Voice, dual-LFO & snapshot topology
 inline constexpr size_t kNumOscillators = 4u;

@@ -11,6 +11,10 @@
 namespace ruido {
 
 void HudAmpGraph::reset() noexcept {
+    for (size_t v = 0u; v < kNumOscillators; ++v) {
+        hairLayer1_[v].fill(0.0f);
+        hairLayer2_[v].fill(0.0f);
+    }
     faderY_.fill(kColYBot);
     driveNorm_.fill(0.0f);
     pulseWidth_.fill(0.50f);
@@ -22,6 +26,7 @@ void HudAmpGraph::reset() noexcept {
     driftPhase_ = 0.0f;
     masterRun_ = false;
     primed_ = false;
+    hairPrepared_ = false;
 }
 
 void HudAmpGraph::clearImmediate() noexcept {
@@ -30,9 +35,11 @@ void HudAmpGraph::clearImmediate() noexcept {
     driftPhase_ = 0.0f;
     masterRun_ = false;
     primed_ = false;
+    hairPrepared_ = false;
 }
 
 void HudAmpGraph::stepFadeOut(float dtClamped) noexcept {
+    hairPrepared_ = false;
     phase_ = stepHudFadeLinear(phase_, false, dtClamped);
     widthPhase_ = stepHudFadeLinear(widthPhase_, false, dtClamped);
     driftPhase_ = stepHudFadeLinear(driftPhase_, false, dtClamped);
@@ -101,11 +108,29 @@ void HudAmpGraph::update(float dtClamped, const EngineControlState& control, con
         driftLive_[v] = slewScalar(driftLive_[v], tgtDrLive, alphaDrift, 0.002f);
         muteDim_[v] = slewScalar(muteDim_[v], tgtDim, aGate, 0.005f);
     }
+    hairPrepared_ = false;
+}
+
+void HudAmpGraph::prepareOverdriveHair(const OverdriveHairTable& overdriveHair) noexcept {
+    if (phase_ <= 0.002f) {
+        hairPrepared_ = false;
+        return;
+    }
+    for (size_t v = 0u; v < kNumOscillators; ++v) {
+        if (muteDim_[v] < 0.92f && driveNorm_[v] > 0.005f && (kKneeY - faderY_[v]) > 1.2f) {
+            smoothZeroPhase(overdriveHair[v].data(), hairLayer1_[v].data(), kOverdriveHairPoints,
+                            0.35f, 1u);
+            smoothZeroPhase(overdriveHair[v].data(), hairLayer2_[v].data(), kOverdriveHairPoints,
+                            0.38f, 2u);
+        }
+    }
+    hairPrepared_ = true;
 }
 
 void HudAmpGraph::compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                  uint16_t* linScratch, float hudAlpha01, const HudState& hud,
-                                 const OverdriveHairTable& overdriveHair) const noexcept {
+                                 const OverdriveHairTable& overdriveHair,
+                                 CoProcYieldFn coProcYield) const noexcept {
     if (hudAlpha01 <= 0.002f || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
     }
@@ -114,14 +139,16 @@ void HudAmpGraph::compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* 
         float wAlpha01 = 0.0f;
         const uint8_t wAlpha8 = resolveSubViewAlpha(widthPhase_, hudAlpha01, wAlpha01);
         if (wAlpha8 > 0u) {
-            compositeWidthStrip(y0, y1, stripHeight, lumBuf, linScratch, wAlpha01, wAlpha8, hud);
+            compositeWidthStrip(y0, y1, stripHeight, lumBuf, linScratch, wAlpha01, wAlpha8, hud,
+                                coProcYield);
         }
     }
     if (driftPhase_ > 0.002f) {
         float dAlpha01 = 0.0f;
         const uint8_t dAlpha8 = resolveSubViewAlpha(driftPhase_, hudAlpha01, dAlpha01);
         if (dAlpha8 > 0u) {
-            compositeDriftStrip(y0, y1, stripHeight, lumBuf, linScratch, dAlpha01, dAlpha8, hud);
+            compositeDriftStrip(y0, y1, stripHeight, lumBuf, linScratch, dAlpha01, dAlpha8, hud,
+                                coProcYield);
         }
     }
     if (phase_ > 0.002f) {
@@ -129,15 +156,15 @@ void HudAmpGraph::compositeStrip(int y0, int y1, uint16_t stripHeight, uint8_t* 
         const uint8_t lAlpha8 = resolveSubViewAlpha(phase_, hudAlpha01, lAlpha01);
         if (lAlpha8 > 0u) {
             compositeLevelStrip(y0, y1, stripHeight, lumBuf, linScratch, lAlpha01, lAlpha8, hud,
-                                overdriveHair);
+                                overdriveHair, coProcYield);
         }
     }
 }
 
 void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                       uint16_t* linScratch, float effAlpha01, uint8_t alpha8,
-                                      const HudState& hud,
-                                      const OverdriveHairTable& overdriveHair) const noexcept {
+                                      const HudState& hud, const OverdriveHairTable& overdriveHair,
+                                      CoProcYieldFn coProcYield) const noexcept {
     if (alpha8 == 0u || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
     }
@@ -162,6 +189,9 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
         const float masterE = clampf(effAlpha01, 0.0f, 1.0f);
 
         for (size_t v = 0u; v < kNumOscillators; ++v) {
+            if (coProcYield != nullptr) {
+                coProcYield();
+            }
             const int cxInt = hudColumnCenterX(v);
             const float cx = static_cast<float>(cxInt);
             const float fy = faderY_[v];
@@ -179,8 +209,12 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
             const float stemBaseE = (240.0f + 840.0f * levelCurve) * activeW * focBoost;
 
             const float stemTop = (drv > 0.005f) ? kKneeY : fy;
-            const int xLo = cxInt - 4;
-            const int xHi = cxInt + 4;
+            constexpr std::array<float, 4> kStemEdgeProfile = {
+                1.0f,
+                fastExpNeg((1.0f - 0.52f) * (1.0f - 0.52f) * 2.10f),
+                fastExpNeg((2.0f - 0.52f) * (2.0f - 0.52f) * 2.10f),
+                fastExpNeg((3.0f - 0.52f) * (3.0f - 0.52f) * 2.10f),
+            };
 
             for (int py = pyStart; py < pyEnd; ++py) {
                 const float pyF = static_cast<float>(py);
@@ -194,23 +228,29 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
                     continue;
                 }
                 uint16_t* linRow = linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
-                for (int px = xLo; px <= xHi; ++px) {
-                    const float dx = absf(static_cast<float>(px) - cx);
-                    const float edgeD = (dx > 0.52f) ? (dx - 0.52f) : 0.0f;
-                    const float energy = rowE * fastExpNeg(edgeD * edgeD * 2.10f);
-                    if (energy >= 1.0f) {
-                        const uint32_t add = static_cast<uint32_t>(energy * masterE + 0.5f);
-                        const uint32_t next = static_cast<uint32_t>(linRow[px]) + add;
-                        linRow[px] = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
+                for (int d = 0; d <= 3; ++d) {
+                    const float energy = rowE * kStemEdgeProfile[static_cast<size_t>(d)];
+                    if (energy < 1.0f) {
+                        break;
+                    }
+                    const uint32_t add = static_cast<uint32_t>(energy * masterE + 0.5f);
+                    if (add == 0u) {
+                        break;
+                    }
+                    const uint32_t nextL = static_cast<uint32_t>(linRow[cxInt - d]) + add;
+                    linRow[cxInt - d] = static_cast<uint16_t>((nextL > 4095u) ? 4095u : nextL);
+                    if (d > 0) {
+                        const uint32_t nextR = static_cast<uint32_t>(linRow[cxInt + d]) + add;
+                        linRow[cxInt + d] = static_cast<uint16_t>((nextR > 4095u) ? 4095u : nextR);
                     }
                 }
             }
 
             const float hZone = kKneeY - fy;
-            if (dim < 0.92f && drv > 0.005f && hZone > 1.2f) {
+            const int kneeClipY = static_cast<int>(kKneeY) + 1;
+            const int driveYEnd = (pyEnd < kneeClipY) ? pyEnd : kneeClipY;
+            if (dim < 0.92f && drv > 0.005f && hZone > 1.2f && pyStart < driveYEnd) {
                 const float peakW = 4.15f * fastExp2(0.75f * fastLog2(clampf(drv, 0.001f, 1.0f)));
-                const int kneeClipY = static_cast<int>(kKneeY) + 1;
-                const int driveYEnd = (pyEnd < kneeClipY) ? pyEnd : kneeClipY;
 
                 // Subtle CRT phosphor bloom confined strictly to the > 70% V-cone drive region
                 int auraY0 = static_cast<int>(fy - 3.0f);
@@ -221,6 +261,7 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
                     const float invHZone = 1.0f / hZone;
                     const float auraBaseE = (30.0f + 48.0f * drv) * activeW * focBoost * masterE;
                     for (int py = auraY0; py < driveYEnd; ++py) {
+                        yieldCoProcEvery(coProcYield, static_cast<size_t>(py), 3u);
                         const float pyF = static_cast<float>(py);
                         const float u = clampf((kKneeY - pyF) * invHZone, 0.0f, 1.0f);
                         const float tipFade =
@@ -232,35 +273,45 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
                         const float halfSpan = 0.95f + u * (peakW * 0.62f + 0.85f);
                         const float invFalloff = 1.0f / (halfSpan * halfSpan * 1.35f);
                         const int axRange = static_cast<int>(halfSpan * 2.1f) + 2;
-                        int ax0 = cxInt - axRange;
-                        int ax1 = cxInt + axRange;
-                        if (ax0 < 2) {
-                            ax0 = 2;
-                        }
-                        if (ax1 > 237) {
-                            ax1 = 237;
-                        }
                         uint16_t* linRow =
                             linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
-                        for (int px = ax0; px <= ax1; ++px) {
-                            const float dx = static_cast<float>(px) - cx;
+                        for (int d = 0; d <= axRange; ++d) {
+                            const float dx = static_cast<float>(d);
                             const uint32_t add = static_cast<uint32_t>(
                                 rowE * fastExpNeg(dx * dx * invFalloff) + 0.5f);
-                            if (add > 0u) {
-                                const uint32_t next = static_cast<uint32_t>(linRow[px]) + add;
-                                linRow[px] = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
+                            if (add == 0u) {
+                                break;
+                            }
+                            const int xL = cxInt - d;
+                            if (xL >= 2 && xL <= 237) {
+                                const uint32_t nextL = static_cast<uint32_t>(linRow[xL]) + add;
+                                linRow[xL] = static_cast<uint16_t>((nextL > 4095u) ? 4095u : nextL);
+                            }
+                            if (d > 0) {
+                                const int xR = cxInt + d;
+                                if (xR >= 2 && xR <= 237) {
+                                    const uint32_t nextR = static_cast<uint32_t>(linRow[xR]) + add;
+                                    linRow[xR] =
+                                        static_cast<uint16_t>((nextR > 4095u) ? 4095u : nextR);
+                                }
                             }
                         }
                     }
                 }
 
-                OverdriveHairArray layer1{};
-                OverdriveHairArray layer2{};
-                smoothZeroPhase(overdriveHair[v].data(), layer1.data(), kOverdriveHairPoints, 0.35f,
-                                1u);
-                smoothZeroPhase(overdriveHair[v].data(), layer2.data(), kOverdriveHairPoints, 0.38f,
-                                2u);
-                const float* layers[3] = {overdriveHair[v].data(), layer1.data(), layer2.data()};
+                OverdriveHairArray fbLayer1{};
+                OverdriveHairArray fbLayer2{};
+                const float* l1Ptr = hairLayer1_[v].data();
+                const float* l2Ptr = hairLayer2_[v].data();
+                if (!hairPrepared_) {
+                    smoothZeroPhase(overdriveHair[v].data(), fbLayer1.data(), kOverdriveHairPoints,
+                                    0.35f, 1u);
+                    smoothZeroPhase(overdriveHair[v].data(), fbLayer2.data(), kOverdriveHairPoints,
+                                    0.38f, 2u);
+                    l1Ptr = fbLayer1.data();
+                    l2Ptr = fbLayer2.data();
+                }
+                const float* layers[3] = {overdriveHair[v].data(), l1Ptr, l2Ptr};
                 constexpr float kLayerBaseE[3] = {350.0f, 205.0f, 130.0f};
 
                 int nPts = static_cast<int>(hZone * 1.45f + 0.5f);
@@ -271,7 +322,17 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
                 }
                 const float invNPts = 1.0f / static_cast<float>(nPts);
                 constexpr float kHairMaxIdx = static_cast<float>(kOverdriveHairPoints - 1u);
+                const auto evalClipped = [](const float* layer, float uPt,
+                                            float gain) noexcept -> float {
+                    const float idxF = uPt * kHairMaxIdx;
+                    const size_t i0 = static_cast<size_t>(idxF);
+                    const size_t i1 = (i0 + 1u < kOverdriveHairPoints) ? (i0 + 1u) : i0;
+                    const float rawVal =
+                        layer[i0] + (idxF - static_cast<float>(i0)) * (layer[i1] - layer[i0]);
+                    return clampf(rawVal * gain, -1.0f, 1.0f);
+                };
 
+                size_t activeSegCount = 0u;
                 for (size_t s = 0u; s < 3u; ++s) {
                     const float layerE =
                         kLayerBaseE[s] * (1.00f + 0.46f * drv) * activeW * focBoost * masterE;
@@ -279,76 +340,85 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
                         (1.15f + 2.35f * drv) * (1.0f - 0.14f * static_cast<float>(s));
                     float px0 = cx;
                     float py0 = kKneeY;
+                    bool havePrevX = true;
 
                     for (int i = 1; i <= nPts; ++i) {
                         const float u = static_cast<float>(i) * invNPts;
                         const float cy = kKneeY - u * hZone;
-                        const float idxF = u * kHairMaxIdx;
-                        const size_t i0 = static_cast<size_t>(idxF);
-                        const size_t i1 = (i0 + 1u < kOverdriveHairPoints) ? (i0 + 1u) : i0;
-                        const float rawVal = layers[s][i0] + (idxF - static_cast<float>(i0)) *
-                                                                 (layers[s][i1] - layers[s][i0]);
-                        const float clipped = clampf(rawVal * layerGain, -1.0f, 1.0f);
+                        int segY1 = static_cast<int>(py0) + 4;
+                        if (segY1 <= pyStart) {
+                            break;
+                        }
+                        if (segY1 > driveYEnd) {
+                            segY1 = driveYEnd;
+                        }
+                        int segY0 = static_cast<int>(cy) - 3;
+                        if (segY0 < pyStart) {
+                            segY0 = pyStart;
+                        }
+                        if (segY0 >= segY1) {
+                            havePrevX = false;
+                            py0 = cy;
+                            continue;
+                        }
+                        if (!havePrevX) {
+                            const float uPrev = static_cast<float>(i - 1) * invNPts;
+                            px0 = cx + evalClipped(layers[s], uPrev, layerGain) * (uPrev * peakW);
+                            havePrevX = true;
+                        }
+                        yieldCoProcEvery(coProcYield, activeSegCount++, 1u);
+                        const float clipped = evalClipped(layers[s], u, layerGain);
                         const float cx1 = cx + clipped * (u * peakW);
                         const float segE = layerE * ((absf(clipped) >= 0.93f) ? 1.48f : 1.0f);
                         const float segBloomE = segE * (0.14f + 0.14f * drv) * u;
                         const float baseR2 = 0.27f * (1.0f - u);
                         const float coreFalloff = 0.95f + 1.00f * u;
-
-                        const float yLoF = (py0 < cy) ? py0 : cy;
-                        const float yHiF = (py0 > cy) ? py0 : cy;
-                        int segY0 = static_cast<int>(yLoF) - 3;
-                        int segY1 = static_cast<int>(yHiF) + 4;
-                        if (segY0 < pyStart) {
-                            segY0 = pyStart;
+                        const float coreMaxD2 = 3.8f + baseR2;
+                        const float maxD2 =
+                            (segBloomE < 0.5f)
+                                ? coreMaxD2
+                                : ((segBloomE < 2.5f) ? 5.5f : ((segBloomE < 5.0f) ? 9.0f : 12.5f));
+                        const int padX = (maxD2 <= 4.1f) ? 3 : 4;
+                        const float xLoF = (px0 < cx1) ? px0 : cx1;
+                        const float xHiF = (px0 > cx1) ? px0 : cx1;
+                        int segX0 = static_cast<int>(xLoF) - padX;
+                        int segX1 = static_cast<int>(xHiF) + padX;
+                        if (segX0 < 2) {
+                            segX0 = 2;
                         }
-                        if (segY1 > driveYEnd) {
-                            segY1 = driveYEnd;
+                        if (segX1 > 237) {
+                            segX1 = 237;
                         }
-                        if (segY0 < segY1) {
-                            const float xLoF = (px0 < cx1) ? px0 : cx1;
-                            const float xHiF = (px0 > cx1) ? px0 : cx1;
-                            int segX0 = static_cast<int>(xLoF) - 4;
-                            int segX1 = static_cast<int>(xHiF) + 4;
-                            if (segX0 < 2) {
-                                segX0 = 2;
-                            }
-                            if (segX1 > 237) {
-                                segX1 = 237;
-                            }
-                            const float vx = cx1 - px0;
-                            const float vy = cy - py0;
-                            const float len2 = vx * vx + vy * vy;
-                            const float invLen2 = (len2 > 1.0e-5f) ? (1.0f / len2) : 0.0f;
+                        const float vx = cx1 - px0;
+                        const float vy = cy - py0;
+                        const float len2 = vx * vx + vy * vy;
+                        const float invLen2 = (len2 > 1.0e-5f) ? (1.0f / len2) : 0.0f;
 
-                            for (int py = segY0; py < segY1; ++py) {
-                                uint16_t* linRow =
-                                    linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
-                                const float wy = static_cast<float>(py) - py0;
-                                for (int px = segX0; px <= segX1; ++px) {
-                                    const float wx = static_cast<float>(px) - px0;
-                                    const float t =
-                                        (invLen2 > 0.0f)
-                                            ? clampf((wx * vx + wy * vy) * invLen2, 0.0f, 1.0f)
-                                            : 0.0f;
-                                    const float ddx = wx - t * vx;
-                                    const float ddy = wy - t * vy;
-                                    const float d2 = ddx * ddx + ddy * ddy;
-                                    if (d2 < 12.5f) {
-                                        const float effD2 = (d2 > baseR2) ? (d2 - baseR2) : 0.0f;
-                                        const float core =
-                                            (effD2 < 3.8f)
-                                                ? (segE * fastExpNeg(effD2 * coreFalloff))
-                                                : 0.0f;
-                                        const float bloom = segBloomE * fastExpNeg(d2 * 0.28f);
-                                        const uint32_t add =
-                                            static_cast<uint32_t>(core + bloom + 0.5f);
-                                        if (add > 0u) {
-                                            const uint32_t next =
-                                                static_cast<uint32_t>(linRow[px]) + add;
-                                            linRow[px] = static_cast<uint16_t>(
-                                                (next > 4095u) ? 4095u : next);
-                                        }
+                        for (int py = segY0; py < segY1; ++py) {
+                            uint16_t* linRow =
+                                linScratch + static_cast<size_t>(py - y0) * kDisplayWidth;
+                            const float wy = static_cast<float>(py) - py0;
+                            const float wyVy = wy * vy;
+                            for (int px = segX0; px <= segX1; ++px) {
+                                const float wx = static_cast<float>(px) - px0;
+                                const float t = (invLen2 > 0.0f)
+                                                    ? clampf((wx * vx + wyVy) * invLen2, 0.0f, 1.0f)
+                                                    : 0.0f;
+                                const float ddx = wx - t * vx;
+                                const float ddy = wy - t * vy;
+                                const float d2 = ddx * ddx + ddy * ddy;
+                                if (d2 < maxD2) {
+                                    const float effD2 = (d2 > baseR2) ? (d2 - baseR2) : 0.0f;
+                                    const float core =
+                                        (effD2 < 3.8f) ? (segE * fastExpNeg(effD2 * coreFalloff))
+                                                       : 0.0f;
+                                    const float bloom = segBloomE * fastExpNeg(d2 * 0.28f);
+                                    const uint32_t add = static_cast<uint32_t>(core + bloom + 0.5f);
+                                    if (add > 0u) {
+                                        const uint32_t next =
+                                            static_cast<uint32_t>(linRow[px]) + add;
+                                        linRow[px] =
+                                            static_cast<uint16_t>((next > 4095u) ? 4095u : next);
                                     }
                                 }
                             }
@@ -385,7 +455,8 @@ void HudAmpGraph::compositeLevelStrip(int y0, int y1, uint16_t stripHeight, uint
 
 void HudAmpGraph::compositeWidthStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                       uint16_t* linScratch, float effAlpha01, uint8_t alpha8,
-                                      const HudState& hud) const noexcept {
+                                      const HudState& hud,
+                                      CoProcYieldFn coProcYield) const noexcept {
     constexpr float kYHigh = 74.0f;
     constexpr float kYMid = 114.0f;
     constexpr float kYLow = 154.0f;
@@ -406,6 +477,9 @@ void HudAmpGraph::compositeWidthStrip(int y0, int y1, uint16_t stripHeight, uint
         const float masterE = clampf(effAlpha01, 0.0f, 1.0f);
 
         for (size_t v = 0u; v < kNumOscillators; ++v) {
+            if (coProcYield != nullptr) {
+                coProcYield();
+            }
             const int cxInt = hudColumnCenterX(v);
             const float cx = static_cast<float>(cxInt);
             const float x0 = cx - kHalfSpanX;
@@ -483,7 +557,8 @@ void HudAmpGraph::compositeWidthStrip(int y0, int y1, uint16_t stripHeight, uint
 
 void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                       uint16_t* linScratch, float effAlpha01, uint8_t alpha8,
-                                      const HudState& hud) const noexcept {
+                                      const HudState& hud,
+                                      CoProcYieldFn coProcYield) const noexcept {
     constexpr float kYZero = 108.0f;
     constexpr float kMaxSpanPx = 56.0f;
 
@@ -510,6 +585,9 @@ void HudAmpGraph::compositeDriftStrip(int y0, int y1, uint16_t stripHeight, uint
         const float masterE = clampf(effAlpha01, 0.0f, 1.0f);
 
         for (size_t v = 0u; v < kNumOscillators; ++v) {
+            if (coProcYield != nullptr) {
+                coProcYield();
+            }
             const int cxInt = hudColumnCenterX(v);
             const float spanPx = clampf(driftAmt_[v], 0.0f, 1.0f) * kMaxSpanPx;
             const float beaconY = clampf(kYZero - driftLive_[v] * kMaxSpanPx, kYZero - kMaxSpanPx,

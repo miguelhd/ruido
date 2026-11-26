@@ -56,7 +56,8 @@ void compositeFm1KeybedDiagram(const MonoStripCanvas& cv, float topY,
                                const std::array<float, kNumWhiteKeys>& whiteGlow,
                                const HudState* liveHud = nullptr,
                                uint16_t activeBlackMask = 0x07FFu,
-                               uint16_t activeWhiteMask = 0xFFFFu) noexcept;
+                               uint16_t activeWhiteMask = 0xFFFFu,
+                               void (*coProcYield)() noexcept = nullptr) noexcept;
 
 // Reusable scanline-composited Two-Bay Keyboard Explorer (`SEL`) & Universal Full-Chassis
 // `SHIFT` Map (`HudMode::ShiftMap`; `0 B` extra framebuffer RAM).
@@ -95,12 +96,12 @@ class HudKeybedView {
                 const std::array<float, kNumOscillators>& voicePeak, uint8_t stutterGateMask,
                 float rhythmPhase01 = 0.0f) noexcept;
 
-    void compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
-                        const HudState& frameHud) const noexcept;
+    void compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8, const HudState& frameHud,
+                        void (*coProcYield)() noexcept = nullptr) const noexcept;
 
     void compositeShiftStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
-                             const EngineControlState& control,
-                             const HudState& frameHud) const noexcept;
+                             const EngineControlState& control, const HudState& frameHud,
+                             void (*coProcYield)() noexcept = nullptr) const noexcept;
 
   private:
     std::array<float, kNumBlackKeys> blackGlow_{};

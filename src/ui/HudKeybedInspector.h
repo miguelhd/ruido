@@ -521,4 +521,90 @@ inline void drawKeybedBottomPressureBar(const MonoStripCanvas& cv, float press01
     cv.drawOpticalBead(fillEnd, kBarY, 0.95f, 2.05f);
 }
 
+inline void measureCapsuleInkBounds(const char* mainTxt, const char* subTxt, int& outMinX,
+                                    int& outMaxX, int& outMainAdvance) noexcept {
+    int penX = 0;
+    int minX = 1000;
+    int maxX = -1000;
+    auto scan = [&](const SansFont& font, const char* str) noexcept {
+        if (str == nullptr) {
+            return;
+        }
+        for (size_t i = 0u; str[i] != '\0'; ++i) {
+            bool acute = false;
+            const unsigned char baseUc = decodeSansGlyphChar(str, i, acute);
+            const GlyphMetrics& gm = font.metrics[static_cast<size_t>(baseUc - 32u)];
+            if (gm.width > 0u) {
+                const int gx0 = penX + static_cast<int>(gm.xOffset);
+                const int gx1 = gx0 + static_cast<int>(gm.width) - 1;
+                if (gx0 < minX) {
+                    minX = gx0;
+                }
+                if (gx1 > maxX) {
+                    maxX = gx1;
+                }
+            }
+            penX += static_cast<int>(gm.advance);
+        }
+    };
+    scan(kFontSansBold, mainTxt);
+    outMainAdvance = penX;
+    scan(kFontSansMedium, subTxt);
+    if (minX > maxX) {
+        minX = 0;
+        maxX = 0;
+    }
+    outMinX = minX;
+    outMaxX = maxX;
+}
+
+// Momentary center stadium capsule toast (`y = 107.5..131.5`, centered at `(119.5, 119.5)`, no
+// indicator dot) for LATCH ON / LATCH OFF and FINE / COARSE modifier engagement.
+inline void compositeCapsuleToastStrip(const MonoStripCanvas& cv, CapsuleToastKind kind) noexcept {
+    if (kind == CapsuleToastKind::None || cv.y0 >= 135 || cv.y1 <= 105) {
+        return;
+    }
+    const char* mainTxt = "";
+    const char* subTxt = "";
+    uint8_t mainGray = 255u;
+    uint8_t subGray = 196u;
+    uint8_t borderGray = 184u;
+    switch (kind) {
+    case CapsuleToastKind::LatchOn:
+        mainTxt = "LATCH";
+        subTxt = " ON";
+        break;
+    case CapsuleToastKind::LatchOff:
+        mainTxt = "LATCH";
+        subTxt = " OFF";
+        mainGray = 168u;
+        subGray = 122u;
+        borderGray = 82u;
+        break;
+    case CapsuleToastKind::Fine:
+        mainTxt = "FINE";
+        break;
+    case CapsuleToastKind::Coarse:
+        mainTxt = "COARSE";
+        break;
+    case CapsuleToastKind::None:
+    default:
+        return;
+    }
+    int minX = 0;
+    int maxX = 0;
+    int mainAdv = 0;
+    measureCapsuleInkBounds(mainTxt, subTxt, minX, maxX, mainAdv);
+    const int inkW = maxX - minX + 1;
+    const int inkLeft = (static_cast<int>(kDisplayWidth) - inkW) / 2;
+    const int tx = inkLeft - minX;
+    const float cx = static_cast<float>(inkLeft) + 0.5f * static_cast<float>(inkW - 1);
+    const float halfW = 0.5f * static_cast<float>(inkW - 1) + 12.5f;
+    fillKeybedStadiumSDF(cv, cx - halfW, 107.5f, cx + halfW, 131.5f, 12.0f, 13u, borderGray, 236u);
+    cv.drawSans(kFontSansBold, tx, 112, mainTxt, mainGray);
+    if (subTxt[0] != '\0') {
+        cv.drawSans(kFontSansMedium, tx + mainAdv, 112, subTxt, subGray);
+    }
+}
+
 } // namespace ruido

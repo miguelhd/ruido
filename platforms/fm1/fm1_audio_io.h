@@ -93,7 +93,7 @@ static_assert(sizeof(Fm1AudioBlock) % kHwCacheLineBytes == 0u,
 
 class Fm1AudioBlockRing {
   public:
-    static constexpr uint32_t kNumBlocks = 16u; // Power of 2: 16 x 64 = 1024 frames (4 DMA halves)
+    static constexpr uint32_t kNumBlocks = 32u; // Power of 2: 32 x 64 = 2048 frames (8 DMA halves)
     static constexpr uint32_t kMask = kNumBlocks - 1u;
 
     void reset() noexcept {
@@ -151,6 +151,14 @@ class Fm1AudioBlockRing {
         return w - r;
     }
 
+    // Consumer-local query on Core 0 (`readIdx_` is owned by Core 0): invalidates only `writeIdx_`.
+    uint32_t availableBlocksOnConsumer() const noexcept {
+        hwCacheFlushInvalidateLine(&writeIdx_);
+        const uint32_t w = writeIdx_.load(std::memory_order_acquire);
+        const uint32_t r = readIdx_.load(std::memory_order_relaxed);
+        return w - r;
+    }
+
   private:
     alignas(64) std::atomic<uint32_t> writeIdx_{0u};
     alignas(64) std::atomic<uint32_t> readIdx_{0u};
@@ -180,10 +188,10 @@ class Fm1UsbDriftResampler {
     // 16-bit USB ring `ring` (`ringSize` power of 2) starting at `writePos`, servoing fractional
     // step rate so `fillFrames` stays centered on `targetFill` under +-50 ppm host SOF drift.
     // Returns number of output USB frames written (or 0 on ring overrun guard).
-    uint32_t processBlockToRing(const int32_t* inLrQ15, uint32_t numInFrames, bool rate48k,
-                                int32_t fillFrames, int32_t targetFill, uint32_t* ring,
-                                uint32_t ringMask, uint32_t writePos, uint32_t freeSlots,
-                                uint32_t streamSeq = 0u) noexcept {
+    uint32_t processBlockToRing(const int32_t* __restrict inLrQ15, uint32_t numInFrames,
+                                bool rate48k, int32_t fillFrames, int32_t targetFill,
+                                uint32_t* __restrict ring, uint32_t ringMask, uint32_t writePos,
+                                uint32_t freeSlots, uint32_t streamSeq = 0u) noexcept {
         if (inLrQ15 == nullptr || ring == nullptr || numInFrames == 0u) {
             return 0u;
         }
@@ -217,32 +225,46 @@ class Fm1UsbDriftResampler {
         constexpr float kNorm = 1.0f / 32768.0f;
         constexpr float kOutScale = 32768.0f / Fm1TpdfQuantizer::kFloatToQ15Scale;
         uint32_t outCount = 0u;
+        float hL0 = histL_[0];
+        float hL1 = histL_[1];
+        float hL2 = histL_[2];
+        float hL3 = histL_[3];
+        float hR0 = histR_[0];
+        float hR1 = histR_[1];
+        float hR2 = histR_[2];
+        float hR3 = histR_[3];
+        float ph = phase_;
+        Fm1TpdfQuantizer dither = dither_;
 
         for (uint32_t i = 0u; i < numInFrames; ++i) {
-            histL_[0] = histL_[1];
-            histL_[1] = histL_[2];
-            histL_[2] = histL_[3];
-            histL_[3] = static_cast<float>(inLrQ15[2u * i]) * kNorm;
+            hL0 = hL1;
+            hL1 = hL2;
+            hL2 = hL3;
+            hL3 = static_cast<float>(inLrQ15[2u * i]) * kNorm;
 
-            histR_[0] = histR_[1];
-            histR_[1] = histR_[2];
-            histR_[2] = histR_[3];
-            histR_[3] = static_cast<float>(inLrQ15[2u * i + 1u]) * kNorm;
+            hR0 = hR1;
+            hR1 = hR2;
+            hR2 = hR3;
+            hR3 = static_cast<float>(inLrQ15[2u * i + 1u]) * kNorm;
 
-            while (phase_ < 1.0f) {
-                const float yL = evalHermite4pt(histL_[0], histL_[1], histL_[2], histL_[3], phase_);
-                const float yR = evalHermite4pt(histR_[0], histR_[1], histR_[2], histR_[3], phase_);
-                const int16_t sL = dither_.quantizeLeft(yL, kOutScale);
-                const int16_t sR = dither_.quantizeRight(yR, kOutScale);
+            while (ph < 1.0f) {
+                const float yL = evalHermite4pt(hL0, hL1, hL2, hL3, ph);
+                const float yR = evalHermite4pt(hR0, hR1, hR2, hR3, ph);
+                const int16_t sL = dither.quantizeLeft(yL, kOutScale);
+                const int16_t sR = dither.quantizeRight(yR, kOutScale);
                 const uint32_t packed = static_cast<uint32_t>(static_cast<uint16_t>(sL)) |
                                         (static_cast<uint32_t>(static_cast<uint16_t>(sR)) << 16u);
                 ring[(writePos + outCount) & ringMask] = packed;
                 ++outCount;
-                phase_ += step;
+                ph += step;
             }
-            phase_ -= 1.0f;
+            ph -= 1.0f;
         }
 
+        histL_ = {hL0, hL1, hL2, hL3};
+        histR_ = {hR0, hR1, hR2, hR3};
+        phase_ = ph;
+        dither_ = dither;
         return outCount;
     }
 

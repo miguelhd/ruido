@@ -37,6 +37,7 @@ void RuidoController::reset() noexcept {
     savedSlotMask_ = 0u;
     latchedHudMode_ = HudMode::None;
     latchedButton_ = ButtonId::Count;
+    capsuleTimerTenthsMs_ = 0u;
     selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
     shiftBlinkPhaseQ8_ = 64u;
     knobFocusMask_ = 0u;
@@ -72,6 +73,95 @@ bool RuidoController::syncClockState() noexcept {
 }
 
 constexpr float kShiftModelPulseHz = 0.50f;
+constexpr uint16_t kCapsuleFadeTenthsMs = 1500u;  // 150.0 ms fade-in / fade-out
+constexpr uint16_t kCapsuleHoldTenthsMs = 10000u; // 1000.0 ms (1.0 s) hold
+constexpr uint16_t kCapsuleTotalTenthsMs =
+    static_cast<uint16_t>(kCapsuleFadeTenthsMs + kCapsuleHoldTenthsMs + kCapsuleFadeTenthsMs);
+
+uint8_t computeCapsuleAlphaQ8(uint16_t timerTenthsMs) noexcept {
+    if (timerTenthsMs == 0u) {
+        return 0u;
+    }
+    constexpr uint16_t kHoldStartTenthsMs =
+        static_cast<uint16_t>(kCapsuleFadeTenthsMs + kCapsuleHoldTenthsMs);
+    if (timerTenthsMs > kHoldStartTenthsMs) {
+        const uint16_t elapsed = static_cast<uint16_t>(kCapsuleTotalTenthsMs - timerTenthsMs);
+        const float t =
+            static_cast<float>(elapsed) * (1.0f / static_cast<float>(kCapsuleFadeTenthsMs));
+        const uint8_t a8 = static_cast<uint8_t>(smoothstep01(t) * 255.0f + 0.5f);
+        return (a8 > 0u) ? a8 : 1u;
+    }
+    if (timerTenthsMs >= kCapsuleFadeTenthsMs) {
+        return 255u;
+    }
+    const float t =
+        static_cast<float>(timerTenthsMs) * (1.0f / static_cast<float>(kCapsuleFadeTenthsMs));
+    return static_cast<uint8_t>(smoothstep01(t) * 255.0f + 0.5f);
+}
+
+void RuidoController::triggerCapsuleToast(CapsuleToastKind kind) noexcept {
+    if (kind == CapsuleToastKind::None) {
+        capsuleTimerTenthsMs_ = 0u;
+        hud_.capsuleToast = CapsuleToastKind::None;
+        hud_.capsuleAlphaQ8 = 0u;
+        return;
+    }
+    constexpr uint16_t kHoldStartTenthsMs =
+        static_cast<uint16_t>(kCapsuleFadeTenthsMs + kCapsuleHoldTenthsMs);
+    hud_.capsuleToast = kind;
+    if (capsuleTimerTenthsMs_ == 0u) {
+        capsuleTimerTenthsMs_ = kCapsuleTotalTenthsMs;
+    } else if (capsuleTimerTenthsMs_ < kCapsuleFadeTenthsMs) {
+        capsuleTimerTenthsMs_ =
+            static_cast<uint16_t>(kCapsuleTotalTenthsMs - capsuleTimerTenthsMs_);
+    } else if (capsuleTimerTenthsMs_ <= kHoldStartTenthsMs) {
+        capsuleTimerTenthsMs_ = kHoldStartTenthsMs;
+    }
+    hud_.capsuleAlphaQ8 = computeCapsuleAlphaQ8(capsuleTimerTenthsMs_);
+}
+
+void RuidoController::stepCapsuleToast(float dtSec) noexcept {
+    if (capsuleTimerTenthsMs_ == 0u) {
+        hud_.capsuleToast = CapsuleToastKind::None;
+        hud_.capsuleAlphaQ8 = 0u;
+        return;
+    }
+    const bool isRateCapsule = (hud_.capsuleToast == CapsuleToastKind::Fine ||
+                                hud_.capsuleToast == CapsuleToastKind::Coarse);
+    if (isRateCapsule && !hud_.rateHoldActive) {
+        capsuleTimerTenthsMs_ = 0u;
+        hud_.capsuleToast = CapsuleToastKind::None;
+        hud_.capsuleAlphaQ8 = 0u;
+        return;
+    }
+    constexpr uint16_t kHoldStartTenthsMs =
+        static_cast<uint16_t>(kCapsuleFadeTenthsMs + kCapsuleHoldTenthsMs);
+    const uint32_t stepTenths = static_cast<uint32_t>(dtSec * 10000.0f + 0.5f);
+    if (isRateCapsule && hud_.rateHoldActive) {
+        if (capsuleTimerTenthsMs_ > kHoldStartTenthsMs) {
+            const uint32_t remFade = capsuleTimerTenthsMs_ - kHoldStartTenthsMs;
+            capsuleTimerTenthsMs_ = (stepTenths >= remFade)
+                                        ? kHoldStartTenthsMs
+                                        : static_cast<uint16_t>(capsuleTimerTenthsMs_ - stepTenths);
+        } else {
+            capsuleTimerTenthsMs_ = kHoldStartTenthsMs;
+        }
+        hud_.capsuleAlphaQ8 = computeCapsuleAlphaQ8(capsuleTimerTenthsMs_);
+        return;
+    }
+    if (stepTenths >= capsuleTimerTenthsMs_) {
+        capsuleTimerTenthsMs_ = 0u;
+        hud_.capsuleToast = CapsuleToastKind::None;
+        hud_.capsuleAlphaQ8 = 0u;
+        return;
+    }
+    capsuleTimerTenthsMs_ = static_cast<uint16_t>(capsuleTimerTenthsMs_ - stepTenths);
+    hud_.capsuleAlphaQ8 = computeCapsuleAlphaQ8(capsuleTimerTenthsMs_);
+    if (hud_.capsuleAlphaQ8 == 0u && capsuleTimerTenthsMs_ < kCapsuleFadeTenthsMs) {
+        capsuleTimerTenthsMs_ = 0u;
+        hud_.capsuleToast = CapsuleToastKind::None;
+    }
+}
 
 void RuidoController::snapShiftBlinkToPeak() noexcept {
     const float basePh = wrapLfoPhase01(ledSmooth_.animPhase * kShiftModelPulseHz);
@@ -155,15 +245,30 @@ void RuidoController::applyKeyboardPerformanceChange() noexcept {
         }
         (void)syncClockState();
     }
-    (void)keyboard_.consumeHoldToggledEvent();
+    if (keyboard_.consumeHoldToggledEvent()) {
+        triggerCapsuleToast(keyboard_.isKeyHoldLatched() ? CapsuleToastKind::LatchOn
+                                                         : CapsuleToastKind::LatchOff);
+    }
 
     keyboard_.evaluate(state_, hud_);
+    const bool keepHoldInPerfMask =
+        hud_.selPageOpen ||
+        (hud_.configPageOpen && hud_.configSubView == ConfigSubView::List &&
+         hud_.configCursor == static_cast<uint8_t>(ConfigItemId::PressureTouch));
+    const uint16_t hudBlackMask =
+        keepHoldInPerfMask ? hud_.heldBlackMask
+                           : static_cast<uint16_t>(hud_.heldBlackMask &
+                                                   ~static_cast<uint16_t>(1u << kHoldBlackKeyIdx));
+    keys_.anyPerfKeyHeld =
+        (hudBlackMask != 0u) || (hud_.heldWhiteMask != 0u) || keyboard_.isShiftHeld();
     if (!hud_.shiftHeld) {
         hud_.shiftFocus = ShiftFocus::Idle;
     } else if (hud_.activePunch == KeyPunchKind::SpotlightSolo) {
         hud_.shiftFocus = ShiftFocus::Idle;
     }
-    syncModifierHud();
+    if (hud_.lastBlackKey != BlackKeyId::Mono || keepHoldInPerfMask || keys_.anyPerfKeyHeld) {
+        syncModifierHud();
+    }
     syncFocusedColumnMask();
     publishState();
 }
@@ -188,6 +293,22 @@ bool RuidoController::tryInterceptSaveBlackKey(BlackKeyId key, bool active) noex
     return true;
 }
 
+void RuidoController::commitOrDeferKeyboardChange() noexcept {
+    if (keyBatchActive_) {
+        keyBatchDirty_ = true;
+        return;
+    }
+    applyKeyboardPerformanceChange();
+}
+
+void RuidoController::endKeyBatch() noexcept {
+    keyBatchActive_ = false;
+    if (keyBatchDirty_) {
+        keyBatchDirty_ = false;
+        applyKeyboardPerformanceChange();
+    }
+}
+
 void RuidoController::onBlackKeyEvent(BlackKeyId key, bool pressed) noexcept {
     if (static_cast<size_t>(key) >= kNumBlackKeys || tryInterceptSaveBlackKey(key, pressed)) {
         return;
@@ -195,10 +316,11 @@ void RuidoController::onBlackKeyEvent(BlackKeyId key, bool pressed) noexcept {
     if (key == BlackKeyId::ScopeFreezeKey && pressed && !keyboard_.isShiftHeld()) {
         snapShiftBlinkToPeak();
         hud_.shiftFocus = ShiftFocus::Idle;
+        triggerCapsuleToast(CapsuleToastKind::None);
     }
     keyboard_.setBlackGate(key, pressed);
     hud_.lastBlackKey = key;
-    applyKeyboardPerformanceChange();
+    commitOrDeferKeyboardChange();
 }
 
 void RuidoController::onBlackKeyPressure(BlackKeyId key, float pressure) noexcept {
@@ -209,10 +331,11 @@ void RuidoController::onBlackKeyPressure(BlackKeyId key, float pressure) noexcep
     if (key == BlackKeyId::ScopeFreezeKey && pressure > 0.001f && !keyboard_.isShiftHeld()) {
         snapShiftBlinkToPeak();
         hud_.shiftFocus = ShiftFocus::Idle;
+        triggerCapsuleToast(CapsuleToastKind::None);
     }
     keyboard_.setBlackPressure(key, pressure);
     hud_.lastBlackKey = key;
-    applyKeyboardPerformanceChange();
+    commitOrDeferKeyboardChange();
 }
 
 bool RuidoController::tryInterceptSnapSaveKey(uint8_t whiteKeyIndex, bool active) noexcept {
@@ -331,7 +454,7 @@ void RuidoController::onWhiteKeyGate(uint8_t whiteKeyIndex, bool pressed) noexce
         return;
     }
     keyboard_.setWhiteGate(whiteKeyIndex, pressed);
-    applyKeyboardPerformanceChange();
+    commitOrDeferKeyboardChange();
 }
 
 void RuidoController::onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) noexcept {
@@ -340,7 +463,7 @@ void RuidoController::onWhiteKeyPressure(uint8_t whiteKeyIndex, float pressure) 
         return;
     }
     keyboard_.setWhitePressure(whiteKeyIndex, pressure);
-    applyKeyboardPerformanceChange();
+    commitOrDeferKeyboardChange();
 }
 
 void RuidoController::onMidiRealtime(uint8_t statusByte, float msgTimestampSec) noexcept {
@@ -367,7 +490,8 @@ void RuidoController::onMidiRealtime(uint8_t statusByte, float msgTimestampSec) 
     }
 }
 
-void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexcept {
+void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry,
+                           void (*coProcYield)() noexcept) noexcept {
     const float dt = clampf(dtSec, 0.0f, 0.25f);
     if (dt > 0.0f) {
         constexpr float kMultiKnobChordWindowSec = 0.350f;
@@ -390,14 +514,21 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
             livePatchDirty_ = true;
         }
         snapshots_.syncHud(hud_);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
         keyboard_.evaluate(state_, hud_);
         publishState();
     } else if (wasTransitioning != snapshots_.isTransitioning()) {
         snapshots_.syncHud(hud_);
     }
+    if (coProcYield != nullptr) {
+        coProcYield();
+    }
 
     const bool modPinned = hud_.rateHoldActive;
-    const bool momentaryPinned = keys_.isAnyMomentaryHudHoldActive(hud_.scopeFrozen);
+    const bool momentaryPinned = keys_.isAnyMomentaryHudHoldActive(hud_.scopeFrozen) ||
+                                 (hud_.rateHoldActive && knobTurnedDuringRateHold_);
     const bool switchLatched = (latchedHudMode_ != HudMode::None);
     hud_.modifierHeld = modPinned;
 
@@ -406,7 +537,7 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
     env_.step(dt, momentaryPinned, switchLatched, toastExpired, dissolvedToIdle, hud_.opacity);
     if (toastExpired) {
         clearKnobFocus();
-        if (keyboard_.anyKeyHeld()) {
+        if (keys_.isAnyPerformanceKeyHeld()) {
             restoreOrDissolveHud();
         } else {
             restoreLatchedFields();
@@ -419,6 +550,10 @@ void RuidoController::tick(float dtSec, const EngineTelemetry& telemetry) noexce
         clearKnobFocus();
     }
     syncFocusedColumnMask();
+    stepCapsuleToast(dt);
+    if (coProcYield != nullptr) {
+        coProcYield();
+    }
 
     updateLeds(dt, telemetry);
 }

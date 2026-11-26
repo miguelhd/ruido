@@ -36,12 +36,14 @@ inline float evalPanBellY(float x, float cx, float apexH, float invW2) noexcept 
 }
 
 inline void shadePanoramaCurveSkirt(int y0, int y1, uint8_t* lumBuf, float cx, float apexH,
-                                    float invW2, float colScale) noexcept {
+                                    float invW2, float colScale,
+                                    CoProcYieldFn coProcYield) noexcept {
     if (colScale <= 0.004f) {
         return;
     }
     float yA = evalPanBellY(0.0f, cx, apexH, invW2);
     for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+        yieldCoProcEvery(coProcYield, colX, 31u);
         const float yB = evalPanBellY(static_cast<float>(colX + 1u), cx, apexH, invW2);
         shadeUnipolarGraphColumn(colX, yA, yB, kPanZeroRef, 74.0f, colScale, y0, y1, lumBuf);
         yA = yB;
@@ -154,7 +156,8 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
                             const HudState& rawHud, const LfoSignalArray& lfoOutput,
                             const std::array<float, kNumOscillators>& voicePeak,
                             const std::array<float, kNumOscillators>& voiceDriftNorm,
-                            uint8_t stutterGateMask, const ScopeTraceEngine& traceEngine) noexcept {
+                            uint8_t stutterGateMask, const ScopeTraceEngine& traceEngine,
+                            CoProcYieldFn coProcYield) noexcept {
     const bool hudVisible =
         (rawHud.opacity > 0.004f) && (rawHud.mode != HudMode::None) && !rawHud.shiftHeld;
     const bool panActive = isPanStageActive(rawHud);
@@ -210,10 +213,11 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
         if (control.global.masterRun && traceEngine.hasLiveAudioHistory() &&
             !traceEngine.isStreamStalled(rawHud.scopeFrozen)) {
             if (!rawHud.scopeFrozen || snapCoupling) {
-                buildCouplingFromLiveHistory(
-                    dtClamped, snapCoupling, couplingSmooth_, couplingChaos_, liveHz, voiceMuted,
-                    traceEngine, couplingWinSamplesSmooth_, couplingFullSpanSmooth_, capAct_,
-                    couplingSagQ8_, couplingRampQ8_, couplingWrapPacked_, couplingSyncMask_);
+                buildCouplingFromLiveHistory(dtClamped, snapCoupling, couplingSmooth_,
+                                             couplingChaos_, liveHz, voiceMuted, traceEngine,
+                                             couplingWinSamplesSmooth_, couplingFullSpanSmooth_,
+                                             capAct_, couplingSagQ8_, couplingRampQ8_,
+                                             couplingWrapPacked_, couplingSyncMask_, coProcYield);
             }
         } else {
             for (size_t v = 0u; v < kNumOscillators; ++v) {
@@ -301,7 +305,8 @@ void HudGlobalViews::update(float dtClamped, const EngineControlState& control,
 
 void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf,
                                             uint16_t* linScratch, float effPanAlpha01,
-                                            uint8_t alpha8, const HudState& hud) const noexcept {
+                                            uint8_t alpha8, const HudState& hud,
+                                            CoProcYieldFn coProcYield) const noexcept {
     (void)hud;
     if (alpha8 == 0u || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
@@ -330,7 +335,7 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
                 const float spotScale = 0.16f + 0.76f * fW;
                 const float baseFill = 0.34f + hF * (spotScale - 0.34f);
                 shadePanoramaCurveSkirt(y0, y1, lumBuf, panX_[v], apexH_[v], invWidth2_[v],
-                                        baseFill * activeW * effPanAlpha01);
+                                        baseFill * activeW * effPanAlpha01, coProcYield);
             }
         }
     }
@@ -353,6 +358,7 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
             const float invW2 = invWidth2_[v];
             float yA = evalPanBellY(0.0f, cx, apexH, invW2);
             for (size_t colX = 0u; colX < kDisplayWidth; ++colX) {
+                yieldCoProcEvery(coProcYield, colX, 31u);
                 const float yB = evalPanBellY(static_cast<float>(colX + 1u), cx, apexH, invW2);
                 splatUnipolarGraphSegment(colX, yA, yB, weight, y0, y1, linScratch);
                 yA = yB;
@@ -392,11 +398,11 @@ void HudGlobalViews::compositePanStageStrip(int y0, int y1, uint16_t stripHeight
 
 void HudGlobalViews::compositeRailCouplingStrip(int y0, int y1, uint16_t stripHeight,
                                                 uint8_t* lumBuf, uint16_t* linScratch,
-                                                float effCouplingAlpha01,
-                                                uint8_t alpha8) const noexcept {
+                                                float effCouplingAlpha01, uint8_t alpha8,
+                                                CoProcYieldFn coProcYield) const noexcept {
     renderCouplingStrip(y0, y1, stripHeight, lumBuf, linScratch, effCouplingAlpha01, alpha8,
                         couplingSmooth_, couplingChaos_, couplingSagQ8_, couplingRampQ8_,
-                        couplingWrapPacked_, couplingSyncMask_, capAct_, muteDim_);
+                        couplingWrapPacked_, couplingSyncMask_, capAct_, muteDim_, coProcYield);
 }
 
 namespace {
@@ -411,9 +417,10 @@ void compositeConfigSubViewStrip(const MonoStripCanvas& cv, const HudState& hud)
                                   ? 1u
                                   : 0u;
         const bool isDone = isResetDoneSubView(hud.configSubView);
+        const uint32_t maxT = kFactoryResetConfirmTicks;
         const uint32_t clampedTicks =
-            isDone ? 8u : ((hud.configResetTicks > 8u) ? 8u : hud.configResetTicks);
-        const float norm = static_cast<float>(clampedTicks) * (1.0f / 8.0f);
+            isDone ? maxT : ((hud.configResetTicks > maxT) ? maxT : hud.configResetTicks);
+        const float norm = static_cast<float>(clampedTicks) * (1.0f / static_cast<float>(maxT));
 
         // 1. Native 2-Row GLOBAL CONFIG List (`y = 44, 72`, `h = 24`, inline bottom hairline)
         for (size_t r = 0u; r < 2u; ++r) {
@@ -508,13 +515,17 @@ void compositeConfigSubViewStrip(const MonoStripCanvas& cv, const HudState& hud)
 
 void HudGlobalViews::compositeGlobalConfigStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
                                                 const EngineControlState& control,
-                                                const HudState& hud) const noexcept {
+                                                const HudState& hud,
+                                                CoProcYieldFn coProcYield) const noexcept {
     if (alpha8 == 0u || y1 <= 24 || y0 >= 234) {
         return;
     }
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
     if (hud.configSubView != ConfigSubView::List) {
         compositeConfigSubViewStrip(cv, hud);
+        if (coProcYield != nullptr) {
+            coProcYield();
+        }
         return;
     }
     if (y1 <= 38 || y0 >= 232) {
@@ -590,6 +601,9 @@ void HudGlobalViews::compositeGlobalConfigStrip(int y0, int y1, uint8_t* lumBuf,
                 mcv.drawVerticalSlit(kPressMeterX0 + span * pressPeak01_, yLine - 3.0f,
                                      yLine + 1.0f, 230.0f);
             }
+        }
+        if (coProcYield != nullptr) {
+            coProcYield();
         }
     }
 }

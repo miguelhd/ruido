@@ -50,6 +50,8 @@ extern RuidoBootDiag g_ruido_boot_diag;
 
 /* Snapshot live Core 1 fault words into `g_ruido_boot_diag` (cheap; call per frame / stage). */
 void ruido_fm1_diag_sync_c1(void);
+uint32_t ruido_fm1_diag_max_c1_ticks(void);
+void ruido_fm1_diag_clear_counters(void);
 
 typedef int (*RuidoFm1BlobLoadFn)(uint32_t idx, void* dst, uint32_t len);
 typedef int (*RuidoFm1BlobSaveFn)(uint32_t idx, const void* src, uint32_t len);
@@ -118,6 +120,11 @@ void ruido_fm1_flash_hold_end(void);
 /* Opportunistically assist Core 1 by claiming a pending `Voices 2-3` 4x ZDF filter span in
  * `.c1_text` SRAM (`0` branch cost when no span is waiting). Safe from `app_idle` & main loop. */
 void ruido_fm1_assist_dsp(void);
+
+/* Query ready 64-frame blocks in `Fm1AudioBlockRing` (`0..16`, or `16` when muted / solo / pre-arm)
+ * so Core 0 soft-real-time LCD strip pacing yields cleanly whenever the 16-block audio cushion dips
+ * below `min_blocks`. */
+uint32_t ruido_fm1_audio_cushion_blocks(void);
 
 /* Route dinghy's `[0..4088]` quadratic `MASTER` pot reading on Core 0 into `RuidoController`. */
 void ruido_fm1_set_master_q12(uint32_t master_q12);

@@ -111,6 +111,10 @@ void RuidoController::resetPageNav() noexcept {
     selectTickAccum_ = targetTickAccum_ = configTickAccum_ = 0;
     closeAllPages();
     hud_.saveArmed = false;
+    if (!hud_.rateHoldActive || (hud_.capsuleToast != CapsuleToastKind::Fine &&
+                                 hud_.capsuleToast != CapsuleToastKind::Coarse)) {
+        triggerCapsuleToast(CapsuleToastKind::None);
+    }
     clearKnobFocus();
 }
 
@@ -185,7 +189,7 @@ void RuidoController::restoreOrDissolveHud() noexcept {
         env_.latchPage();
         return;
     }
-    if (keyboard_.anyKeyHeld()) {
+    if (keys_.isAnyPerformanceKeyHeld()) {
         dismissedByHome_ = false;
         clearKnobFocus();
         // GLOBAL CONFIG > Key Pressure doubles as a touch test: keys still play, but the list stays
@@ -250,65 +254,32 @@ void RuidoController::restoreOrDissolveHud() noexcept {
 
 void RuidoController::syncModifierHud() noexcept {
     hud_.modifierHeld = hud_.rateHoldActive;
-    if (keyboard_.isShiftHeld() || keyboard_.anyKeyHeld()) {
-        restoreOrDissolveHud();
-    } else if (hud_.rateHoldActive) {
-        hud_.knobBank = baseKnobBank();
-        if (hud_.mode == HudMode::None) {
-            hud_.mode = HudMode::KnobRate;
-        }
-        clearKnobFocus();
-        env_.active = true;
-        if (!knobTurnedDuringRateHold_) {
-            env_.holdRemainingSec = 0.0f;
-        }
-    } else {
-        restoreOrDissolveHud();
-    }
+    restoreOrDissolveHud();
 }
 
 void RuidoController::onButtonEvent(ButtonId button, bool pressed) noexcept {
     if (button == ButtonId::OctMinus || button == ButtonId::OctPlus) {
-        const bool wasRateHeld = keys_.setRateButton(button, pressed);
+        const KnobRate prevRate = keys_.activeKnobRate();
+        (void)keys_.setRateButton(button, pressed);
         const bool nowRateHeld = keys_.isRateHeld();
         hud_.knobRate = keys_.activeKnobRate();
         hud_.rateHoldActive = nowRateHeld;
         hud_.modifierHeld = nowRateHeld;
-
+        if (nowRateHeld && !keyboard_.isShiftHeld() && hud_.knobRate != prevRate &&
+            (hud_.knobRate == KnobRate::Fine || hud_.knobRate == KnobRate::Coarse)) {
+            triggerCapsuleToast((hud_.knobRate == KnobRate::Fine) ? CapsuleToastKind::Fine
+                                                                  : CapsuleToastKind::Coarse);
+        } else if (!nowRateHeld && (hud_.capsuleToast == CapsuleToastKind::Fine ||
+                                    hud_.capsuleToast == CapsuleToastKind::Coarse)) {
+            triggerCapsuleToast(CapsuleToastKind::None);
+        }
+        if (!nowRateHeld) {
+            knobTurnedDuringRateHold_ = false;
+        }
         if (keyboard_.isShiftHeld()) {
             hud_.knobBank = KnobBankMode::None;
             hud_.mode = HudMode::ShiftMap;
             env_.latchPage();
-            return;
-        }
-        if (nowRateHeld) {
-            dismissedByHome_ = false;
-            if (!wasRateHeld) {
-                knobTurnedDuringRateHold_ = false;
-                const bool nonRateToast = (hud_.mode == HudMode::ScopeTimebase);
-                if ((env_.holdRemainingSec <= 0.0f || nonRateToast) &&
-                    latchedHudMode_ == HudMode::None && !keyboard_.anyKeyHeld() &&
-                    !hud_.scopeFrozen) {
-                    hud_.mode = HudMode::KnobRate;
-                    hud_.knobBank = KnobBankMode::Frequency;
-                    clearKnobFocus();
-                }
-            }
-            if (hud_.mode == HudMode::None) {
-                hud_.mode = HudMode::KnobRate;
-                clearKnobFocus();
-            }
-            env_.active = true;
-        } else {
-            const bool hadKnobToast = knobTurnedDuringRateHold_;
-            knobTurnedDuringRateHold_ = false;
-            if (keyboard_.anyKeyHeld() || hud_.scopeFrozen) {
-                syncModifierHud();
-            } else if (hadKnobToast && env_.holdRemainingSec > 0.0f) {
-                hud_.knobBank = baseKnobBank();
-            } else {
-                restoreOrDissolveHud();
-            }
         }
         return;
     }

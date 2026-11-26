@@ -129,7 +129,32 @@ RUIDO_ALWAYS_INLINE float decimateStage2Mono(float s0, float s1, float* __restri
     const float* r = odd + (nextOw + kPairs);
     const float* l = r - 1;
 
-#if !(defined(__SSE__) || defined(__ARM_NEON) || defined(__wasm__))
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+    // 95-tap (P = 24, Kaiser beta = 8.2, > 81.6 dB FIR stopband, 0.004 dB ripple, exact 0.0 dB DC
+    // gain & 31-sample Stage-2 group delay) matched to FM-1's 16-bit TPDF-dithered DAC ceiling.
+    static constexpr std::array<float, 24> kStage2Pi32Taps = {
+        3.177867234e-01f, -1.045240462e-01f, 6.105801463e-02f, -4.188959301e-02f,
+        3.086609952e-02f, -2.359173633e-02f, 1.838186011e-02f, -1.445362531e-02f,
+        1.139373332e-02f, -8.962356485e-03f, 7.009196561e-03f, -5.433501676e-03f,
+        4.163460806e-03f, -3.144969232e-03f, 2.335251775e-03f, -1.699154498e-03f,
+        1.206960646e-03f, -8.330997080e-04f, 5.553860101e-04f, -3.545652144e-04f,
+        2.140324650e-04f, -1.196367084e-04f, 5.951775165e-05f, -2.394500189e-05f,
+    };
+    (void)kStage2Taps;
+    const float* hp = kStage2Pi32Taps.data();
+    float acc0 = 0.5f * s0Del;
+    float acc1 = 0.0f;
+    for (size_t i = 0u; i < 24u; i += 4u) {
+        acc0 += hp[0] * (r[0] + l[0]);
+        acc1 += hp[1] * (r[1] + l[-1]);
+        acc0 += hp[2] * (r[2] + l[-2]);
+        acc1 += hp[3] * (r[3] + l[-3]);
+        hp += 4;
+        r += 4;
+        l -= 4;
+    }
+    return acc0 + acc1;
+#elif !(defined(__SSE__) || defined(__ARM_NEON) || defined(__wasm__))
     const float* hp = kStage2Taps.data();
     float acc0 = 0.5f * s0Del;
     float acc1 = 0.0f;

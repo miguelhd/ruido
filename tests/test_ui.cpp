@@ -287,6 +287,10 @@ void testAllControlsDisplayOnScreen() {
         ctrl.onBlackKeyEvent(key, true);
         if (key == ruido::BlackKeyId::Poly) {
             CHECK(ctrl.hud().mode == ruido::HudMode::None);
+        } else if (key == ruido::BlackKeyId::Mono) {
+            CHECK(ctrl.hud().mode == ruido::HudMode::None &&
+                  ctrl.hud().capsuleToast != ruido::CapsuleToastKind::None &&
+                  ctrl.hud().capsuleAlphaQ8 > 0u);
         } else {
             CHECK(ctrl.hud().mode != ruido::HudMode::None);
         }
@@ -315,9 +319,15 @@ void testAllControlsDisplayOnScreen() {
         ctrl.onButtonEvent(button, true);
         const bool isPhantom = (button == ruido::ButtonId::Env || button == ruido::ButtonId::Arp ||
                                 button == ruido::ButtonId::Seq || button == ruido::ButtonId::Rec);
+        const bool isRateMod =
+            (button == ruido::ButtonId::OctMinus || button == ruido::ButtonId::OctPlus);
         if (isPhantom) {
             CHECK(ctrl.hud().mode == ruido::HudMode::None);
             CHECK(ctrl.hud().phantomPinSeq == static_cast<uint8_t>(prevSeq + 1u));
+        } else if (isRateMod) {
+            CHECK(ctrl.hud().mode == ruido::HudMode::None);
+            CHECK(ctrl.hud().capsuleToast != ruido::CapsuleToastKind::None &&
+                  ctrl.hud().capsuleAlphaQ8 > 0u);
         } else {
             CHECK(ctrl.hud().mode != ruido::HudMode::None);
         }
@@ -355,7 +365,10 @@ void testButtonsOctavesKeybedAndPressure() {
 
     // Momentary OCT- / OCT+ Knob Rate holds, LIFO chording, LEDs & immediate release dissolve
     ruido::EngineTelemetry tel{};
-    ctrl.tick(0.016f, tel);
+    for (int i = 0; i < 20; ++i) {
+        ctrl.tick(0.100f, tel);
+    }
+    CHECK(ctrl.hud().mode == ruido::HudMode::None);
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Standard);
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)], 0.15f));
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctPlus)], 0.15f));
@@ -363,8 +376,10 @@ void testButtonsOctavesKeybedAndPressure() {
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, true);
     ctrl.tick(0.250f, tel);
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Fine);
-    CHECK(ctrl.hud().mode == ruido::HudMode::KnobRate);
-    CHECK(near(ctrl.hud().opacity, 1.0f));
+    CHECK(ctrl.hud().mode == ruido::HudMode::None);
+    CHECK(near(ctrl.hud().opacity, 0.0f));
+    CHECK(ctrl.hud().capsuleToast == ruido::CapsuleToastKind::Fine &&
+          ctrl.hud().capsuleAlphaQ8 == 255u);
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)], 1.0f));
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctPlus)], 0.15f));
 
@@ -373,21 +388,25 @@ void testButtonsOctavesKeybedAndPressure() {
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, true);
     ctrl.tick(0.016f, tel);
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Coarse);
+    CHECK(ctrl.hud().capsuleToast == ruido::CapsuleToastKind::Coarse);
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctPlus)], 1.0f));
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)], 0.15f));
 
     ctrl.onButtonEvent(ruido::ButtonId::OctPlus, false);
     ctrl.tick(0.016f, tel);
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Fine);
+    CHECK(ctrl.hud().capsuleToast == ruido::CapsuleToastKind::Fine);
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)], 1.0f));
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctPlus)], 0.15f));
 
-    // Releasing OCT- immediately returns to Standard, dims LED to 15%, and dissolves in 150 ms
+    // Releasing OCT- immediately returns to Standard, clears capsule indicator, and dims LED to 15%
     ctrl.onButtonEvent(ruido::ButtonId::OctMinus, false);
     CHECK(ctrl.hud().knobRate == ruido::KnobRate::Standard);
+    CHECK(ctrl.hud().capsuleToast == ruido::CapsuleToastKind::None &&
+          ctrl.hud().capsuleAlphaQ8 == 0u);
     ctrl.tick(0.075f, tel);
     CHECK(near(ctrl.leds().buttonLeds[static_cast<size_t>(ruido::ButtonId::OctMinus)], 0.15f));
-    CHECK(near(ctrl.hud().opacity, 0.50f, 0.03f));
+    CHECK(near(ctrl.hud().opacity, 0.0f));
 
     // LFO and FX buttons open their latching pages without altering base voice frequency;
     // unconnected switches (ENV, ARP, SEQ, REC) leave HUD mode untouched and spark a dim LED glint:

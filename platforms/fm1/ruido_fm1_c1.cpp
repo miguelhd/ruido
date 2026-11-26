@@ -349,10 +349,7 @@ void ruido_fm1_c1_assist_dsp(void) {
     if (!coproc->hasPendingWork()) {
         return;
     }
-    uint32_t saved_icfg = 0u;
-    __asm__ volatile("%0 = icfg\n\tcli" : "=r"(saved_icfg)::"memory");
     (void)coproc->tryAssist();
-    __asm__ volatile("csync\n\ticfg = %0" ::"r"(saved_icfg) : "memory");
 }
 
 uint32_t ruido_fm1_c1_usb_feed(ruido::Fm1UsbDriftResampler* resampler,
@@ -373,6 +370,7 @@ void ruido_fm1_cpu1_loop(void) {
     auto* ring = ruidoAudioRing();
     auto* core = ruidoDspCore();
     auto* buses = ruidoSharedBuses();
+    auto* rt = ruidoC1Runtime();
     uint32_t idleSpins = 0u;
     for (;;) {
         if (pollSramCanaryFault(16u)) {
@@ -447,6 +445,16 @@ void ruido_fm1_cpu1_loop(void) {
         ruido::fm1::hwMemoryBarrier();
 
         g_ruido_ic_ctrl.c1Last64Ticks.store(dt, std::memory_order_relaxed);
+        ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.c0ResetMaxReq);
+        const uint32_t resetSeq = g_ruido_ic_ctrl.c0ResetMaxReq.load(std::memory_order_acquire);
+        uint32_t prevMax = g_ruido_ic_ctrl.c1Max64Ticks.load(std::memory_order_relaxed);
+        if (resetSeq != rt->seenResetSeq) {
+            rt->seenResetSeq = resetSeq;
+            prevMax = 0u;
+        }
+        if (dt > prevMax) {
+            g_ruido_ic_ctrl.c1Max64Ticks.store(dt, std::memory_order_relaxed);
+        }
         const uint32_t nextBlocks = g_ruido_ic_ctrl.c1Blocks.load(std::memory_order_relaxed) + 1u;
         g_ruido_ic_ctrl.c1Blocks.store(nextBlocks, std::memory_order_release);
         ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.c1Blocks);

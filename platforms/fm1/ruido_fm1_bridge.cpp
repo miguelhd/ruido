@@ -34,8 +34,9 @@ namespace {
 
 constexpr size_t kAudioChunkFrames = ruido::kBlockFrames;
 constexpr size_t kStripPixels = ruido::kDisplayWidth * ruido::kScanlineStripHeight;
-constexpr uint32_t kC1StallFallbackCallbacks = 3u;
-constexpr uint32_t kC1BenchSpinLimit = 40000u;
+constexpr uint32_t kC1StallFallbackCallbacks = 16u;
+constexpr uint32_t kC1BenchTimeoutTicks = 20000u * 24u; // 20 ms @ 24 MHz TIMER4
+constexpr uint32_t kC1BenchMaxSpins = 5000000u;
 constexpr uint32_t kC1FlashHoldTimeoutTicks = 10000u * 24u; // 10 ms @ 24 MHz TIMER4
 constexpr uint32_t kTicksPer64Sec = 1536000000u;            // 64 s * 24,000,000 Hz TIMER4 crystal
 constexpr float kInvTimer4Hz = 1.0f / 24000000.0f;
@@ -63,6 +64,9 @@ uint32_t g_midi_t4_mod64 = 0u;
 uint32_t g_midi_rt_events = 0u;
 ruido::fm1::Fm1NvsRuntimeState g_nvs_state{};
 uint32_t g_solo_reason = 0u;
+volatile uint8_t g_c0_in_assist = 0u;
+uint32_t g_last_empty_assist_t4 = 0u;
+uint8_t g_assist_t4_valid = 0u;
 
 inline ruido::RuidoController* controller() noexcept {
     return reinterpret_cast<ruido::RuidoController*>(g_ctrl_arena);
@@ -177,8 +181,11 @@ void ruido_fm1_construct(uint32_t initial_master_q12) {
     g_ruido_ic_ctrl.c1FlashAck.store(0u, std::memory_order_relaxed);
     g_ruido_ic_ctrl.c1Blocks.store(0u, std::memory_order_relaxed);
     g_ruido_ic_ctrl.c1Last64Ticks.store(0u, std::memory_order_relaxed);
+    g_ruido_ic_ctrl.c1Max64Ticks.store(0u, std::memory_order_relaxed);
+    g_ruido_ic_ctrl.c0ResetMaxReq.store(0u, std::memory_order_relaxed);
     ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
     ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.c1Blocks);
+    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.c0ResetMaxReq);
 
     g_latest_master_gain = masterQ12ToGain(initial_master_q12);
     ruido::fm1::callC1Far(ruido_fm1_c1_construct, 1.0f);
@@ -209,6 +216,8 @@ void ruido_fm1_construct(uint32_t initial_master_q12) {
     g_midi_t4_prev = 0u;
     g_midi_t4_mod64 = 0u;
     g_midi_rt_events = 0u;
+    g_last_empty_assist_t4 = 0u;
+    g_assist_t4_valid = 0u;
     g_nvs_state.reset();
     refreshGate43StatusWords();
 }
@@ -223,6 +232,19 @@ void ruido_fm1_diag_sync_c1(void) {
         (g_ruido_ic_ctrl.c1SelfFault.load(std::memory_order_relaxed) != 0u) ? 0x100u : 0u;
     const uint32_t bootBit = (g_ruido_ic_ctrl.c1Booted != 0u) ? 0x200u : 0u;
     g_ruido_boot_diag.c1_state = (g_solo_reason & 0xFFu) | selfBit | bootBit;
+}
+
+uint32_t ruido_fm1_diag_max_c1_ticks(void) {
+    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.c1Blocks);
+    return g_ruido_ic_ctrl.c1Max64Ticks.load(std::memory_order_acquire);
+}
+
+void ruido_fm1_diag_clear_counters(void) {
+    g_ruido_fm1_status.c1_flags = g_ruido_fm1_status.c1_flags & ~0xFF00u;
+    g_ruido_fm1_status.peak_abs_q15 = 0;
+    const uint32_t nextReq = g_ruido_ic_ctrl.c0ResetMaxReq.load(std::memory_order_relaxed) + 1u;
+    g_ruido_ic_ctrl.c0ResetMaxReq.store(nextReq, std::memory_order_release);
+    ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.c0ResetMaxReq);
 }
 
 void ruido_fm1_set_coproc_enabled(uint32_t enabled) {
@@ -246,13 +268,15 @@ uint32_t ruido_fm1_measure_bench64_ticks(void) {
         g_ruido_ic_ctrl.c1BenchTicks.store(0u, std::memory_order_relaxed);
         g_ruido_ic_ctrl.c1BenchReq.store(1u, std::memory_order_release);
         ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
+        const uint32_t t0 = *kTimer4CntReg;
         uint32_t spins = 0u;
         while (g_ruido_ic_ctrl.c1BenchReq.load(std::memory_order_acquire) != 0u) {
             if ((spins & 63u) == 0u) {
                 ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl);
                 ruido::fm1::flushCacheLine(&g_ruido_ic_ctrl.engineReady);
             }
-            if (checkCore1SelfFault() || ++spins >= kC1BenchSpinLimit) {
+            if (checkCore1SelfFault() || (*kTimer4CntReg - t0) >= kC1BenchTimeoutTicks ||
+                ++spins >= kC1BenchMaxSpins) {
                 engageCore1Fallback(4u);
                 return measureSoloBench64Ticks();
             }
@@ -405,17 +429,44 @@ void ruido_fm1_flash_hold_end(void) {
 }
 
 void ruido_fm1_assist_dsp(void) {
+    if (g_c0_in_assist != 0u) {
+        return;
+    }
     if (checkCore1SelfFault()) {
         if (g_ruido_ic_ctrl.engineReady.load(std::memory_order_relaxed) != 0u) {
             const uint32_t avail = ruidoAudioRing()->availableBlocks();
-            const uint32_t pumpCount = (avail < 8u) ? 4u : 2u;
+            const uint32_t pumpCount = (avail < 12u) ? 6u : 2u;
+            g_c0_in_assist = 1u;
             ruido::fm1::callC1Far(ruido_fm1_c1_pump_solo_ring, pumpCount);
+            g_c0_in_assist = 0u;
         }
         return;
     }
-    if (ruidoCoProc()->hasPendingWork()) {
-        ruido::fm1::callC1Far(ruido_fm1_c1_assist_dsp);
+    const uint32_t now_t4 = *kTimer4CntReg;
+    if (g_assist_t4_valid != 0u && (now_t4 - g_last_empty_assist_t4) < (24u * 24u)) {
+        return;
     }
+    if (ruidoCoProc()->hasPendingWork()) {
+        g_assist_t4_valid = 0u;
+        g_c0_in_assist = 1u;
+        ruido::fm1::callC1Far(ruido_fm1_c1_assist_dsp);
+        g_c0_in_assist = 0u;
+    } else {
+        g_last_empty_assist_t4 = *kTimer4CntReg;
+        g_assist_t4_valid = 1u;
+    }
+}
+
+uint32_t ruido_fm1_audio_cushion_blocks(void) {
+    if (g_ruido_ic_ctrl.engineReady.load(std::memory_order_relaxed) == 0u ||
+        g_ruido_ic_ctrl.c1FallbackActive.load(std::memory_order_relaxed) != 0u ||
+        g_ruido_ic_ctrl.c1SelfFault.load(std::memory_order_relaxed) != 0u) {
+        return ruido::Fm1AudioBlockRing::kNumBlocks;
+    }
+    if (!controller()->state().global.masterRun) {
+        return ruido::Fm1AudioBlockRing::kNumBlocks;
+    }
+    return ruidoAudioRing()->availableBlocksOnConsumer();
 }
 
 void ruido_fm1_set_master_q12(uint32_t master_q12) {
@@ -434,14 +485,13 @@ void ruido_fm1_poll_panel(uint32_t now_ms, uint32_t pressed_btns, uint32_t relea
     }
     auto* ctrl = controller();
     auto* pnl = panel();
+    ruido_fm1_assist_dsp();
     const bool btnOrEnc =
         pnl->pollButtonsAndEncoders(*ctrl, pressed_btns, released_btns, cur_btns, enc_steps);
-    if (btnOrEnc) {
-        ruido_fm1_assist_dsp();
-    }
+    ruido_fm1_assist_dsp();
     const bool keyTouched = pnl->pollKeysAndPressure(*ctrl, cur_notes, note_press_edges);
+    ruido_fm1_assist_dsp();
     if (btnOrEnc || keyTouched) {
-        ruido_fm1_assist_dsp();
         g_nvs_state.lastPanelTouchMs = now_ms;
         renderer()->notifyUserInput();
     }
@@ -594,7 +644,8 @@ void ruido_fm1_tick_and_prepare_ms(uint32_t elapsed_ms) {
 
     ruido_fm1_assist_dsp();
     ruido::hwCacheFlushInvalidateRange(&buses->telemetry, sizeof(buses->telemetry));
-    ctrl->tick(dt_sec, buses->telemetry);
+    ctrl->tick(dt_sec, buses->telemetry, []() noexcept { ruido_fm1_assist_dsp(); });
+    ruido_fm1_assist_dsp();
     ledMod()->updateTargets(ctrl->leds());
     ruido_fm1_assist_dsp();
     ui->ingestScopeRing(buses->scopeBuffer, []() noexcept { ruido_fm1_assist_dsp(); });

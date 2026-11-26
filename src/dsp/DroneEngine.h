@@ -32,7 +32,7 @@ class DroneEngineCore {
         lfoBank_.setAnalogCharacterEnabled(enableDrift);
     }
 
-    // Optional lock-free dual-core 2+2 voice filter work-stealing co-processor (nullptr = solo).
+    // Optional lock-free dual-core `3+1` voice filter work-stealing co-processor (nullptr = solo).
     void attachFilterCoProcessor(VoiceFilterCoProcessor* coProc) noexcept { coProc_ = coProc; }
 
     void snapParametersToLatest(EngineSharedBuses& buses) noexcept;
@@ -94,7 +94,7 @@ class DroneEngineCore {
                            const std::array<float, kNumOscillators>& endGainR,
                            const std::array<float, kNumOscillators>& startScope,
                            const std::array<float, kNumOscillators>& endScope,
-                           bool& outCoProcHandled) noexcept;
+                           bool heavyCore1PreFilter, bool& outCoProcHandled) noexcept;
     void mixAndFlushCompletedSpan(const InFlightFilterSpan& span, EngineSharedBuses& buses,
                                   float* outLeft, float* outRight,
                                   std::array<float, kNumOscillators>& blockVoicePeak,
@@ -158,7 +158,9 @@ class DroneEngineCore {
     alignas(kHwCacheLineBytes) std::array<VoiceFilterCoProcessor::VoiceSpanBuffer, 2> spanSub_{};
     alignas(kHwCacheLineBytes) std::array<std::array<StereoFrame, kOversampleFactor>,
                                           kMaxFilterSpanFrames> osStereoSpan_{};
-    InFlightFilterSpan inFlightSpan_{};
+    std::array<InFlightFilterSpan, 2> spanMeta_{};
+    size_t inFlightMetaIdx_ = 0u;
+    bool hasInFlightSpan_ = false;
 };
 
 // Complete Core 1 portable synthesis & filtering engine composing `EngineSharedBuses` +

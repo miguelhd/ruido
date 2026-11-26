@@ -53,12 +53,16 @@ struct alignas(64) Fm1InterCoreControl {
     // Cache line 2: Core 1 exclusive runtime telemetry (never dirtied by Core 0 or TIMER5 ISR)
     alignas(64) std::atomic<uint32_t> c1Blocks{0u};
     std::atomic<uint32_t> c1Last64Ticks{0u};
+    std::atomic<uint32_t> c1Max64Ticks{0u};
+    // Cache line 1 flag to reset Core 1 max64Ticks high-water mark from Core 0
+    alignas(64) std::atomic<uint32_t> c0ResetMaxReq{0u};
 };
 
 struct alignas(64) Fm1C1DspRuntime {
     Fm1TpdfQuantizer quantizer{};
     volatile uint8_t soloHalfRateActive = 0u;
     volatile uint8_t inSoloDsp = 0u;
+    uint32_t seenResetSeq = 0u;
     float soloHistL[3]{0.0f, 0.0f, 0.0f};
     float soloHistR[3]{0.0f, 0.0f, 0.0f};
 };

@@ -60,6 +60,8 @@ static uint8_t g_in_app_idle = 0u;
 static uint8_t g_lcd_inited = 0u;
 static uint8_t g_last_ota_kind = 0xFFu;
 
+#include "fm1_usb_diag.h"
+
 static inline void mark_boot_stage(uint16_t stage) {
     g_ruido_boot_diag.magic = RUIDO_BOOT_DIAG_MAGIC;
     g_ruido_boot_diag.stage = stage;
@@ -233,7 +235,9 @@ void fm1_timer5_irq(void) {
         FM1_PR(FM1_PA, FM1_PU) |= m;
         FM1_PR(FM1_PA, FM1_DIE) |= m;
         g_adc_inflight = 0u;
-        ruido_fm1_adc_put_sample(g_adc_inflight_note, val);
+        if (((g_virt_notes >> g_adc_inflight_note) & 1u) == 0u) {
+            ruido_fm1_adc_put_sample(g_adc_inflight_note, val);
+        }
     }
 
     prev_frames = fm1_in.frames;
@@ -298,9 +302,12 @@ static void poll_midi_clock(void) {
     uint8_t st = 0u;
     uint8_t d1 = 0u;
     uint8_t d2 = 0u;
-    while (midi_get(&st, &d1, &d2) != 0) {
+    int src = 0;
+    while ((src = midi_get(&st, &d1, &d2)) != 0) {
         if (st == 0xF8u || st == 0xFAu || st == 0xFBu || st == 0xFCu) {
             ruido_fm1_on_midi_rt(st);
+        } else if (src == 1 && st == 0xBFu) {
+            handle_usb_diag_cc(d1, d2);
         }
     }
 }
@@ -340,6 +347,8 @@ static void poll_panel_inputs(uint32_t now_ms) {
     }
     fm1__unlock(lock_k);
 
+    apply_usb_diag_virtual_inputs(&pressed_btns, &released_btns, &cur_btns, &note_edges, &cur_notes,
+                                  enc_steps);
     ruido_fm1_poll_panel(now_ms, pressed_btns, released_btns, cur_btns, enc_steps, cur_notes,
                          note_edges);
 }
@@ -441,7 +450,9 @@ static void app_main(void) {
     uint32_t init_mq = 2048u;
     uint32_t allow_core1 = 1u;
     uint32_t last_lcd_ms = 0u;
+    uint32_t last_lcd_done_ms = 0u;
     uint32_t last_poll_ms = 0u;
+    uint32_t cached_cushion = 32u;
     uint32_t first_frame = 1u;
     uint8_t lcd_slot = 0u;
 
@@ -528,6 +539,7 @@ static void app_main(void) {
     mark_boot_stage(0x0080u);
 
     last_lcd_ms = fm1_ms;
+    last_lcd_done_ms = last_lcd_ms;
     last_poll_ms = last_lcd_ms - 1u;
     for (;;) {
         uint32_t now_ms = fm1_ms;
@@ -567,10 +579,16 @@ static void app_main(void) {
             (void)ruido_fm1_nvs_poll_save(now_ms, 0u, nvs_save_c1_safe, nvs_tail_write_c1_safe,
                                           prepare_for_nvs_erase);
             g_idle_assist_ok = 1u;
+            cached_cushion = ruido_fm1_audio_cushion_blocks();
             ruido_fm1_assist_dsp();
         }
 
-        if (first_frame || (uint32_t)(now_ms - last_lcd_ms) >= RUIDO_LCD_FRAME_PERIOD_MS) {
+        const uint32_t req_lcd_period = (cached_cushion >= 24u)
+                                            ? RUIDO_LCD_FRAME_PERIOD_MS
+                                            : ((cached_cushion >= 16u) ? 28u : 48u);
+        const uint32_t req_lcd_gap = (cached_cushion >= 24u) ? 2u : 12u;
+        if (first_frame || ((uint32_t)(now_ms - last_lcd_ms) >= req_lcd_period &&
+                            (uint32_t)(now_ms - last_lcd_done_ms) >= req_lcd_gap)) {
             uint32_t elapsed_ms = first_frame ? RUIDO_LCD_FRAME_PERIOD_MS : (now_ms - last_lcd_ms);
             uint16_t y = 0u;
 
@@ -596,12 +614,15 @@ static void app_main(void) {
                     last_poll_ms = fm1_ms;
                     run_platform_poll_safe();
                     sync_master_pot_target();
+                    cached_cushion = ruido_fm1_audio_cushion_blocks();
                 }
                 const uint16_t* strip_be = ruido_fm1_render_strip_be(y, lcd_slot);
                 ruido_fm1_assist_dsp();
                 lcd_blit(0u, y, 240u, 16u, strip_be);
                 lcd_slot ^= 1u;
             }
+            cached_cushion = ruido_fm1_audio_cushion_blocks();
+            last_lcd_done_ms = fm1_ms;
             if (g_ruido_fm1_status.lcd_frames == 0u) {
                 mark_boot_stage(0x0090u);
             } else {

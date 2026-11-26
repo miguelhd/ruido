@@ -500,6 +500,59 @@ def _gate_oct_rescue(
     return logs, errs
 
 
+def _gate_live_drive_filter(fwsc_path: pathlib.Path, status_addr: int) -> tuple[list[str], list[str]]:
+    """Verify zero ring underruns while PLAY is active under OP1 (DRIVE) + OP4/OP5 (FILTER) HUDs."""
+    logs: list[str] = []
+    errs: list[str] = []
+    timed_env = {**os.environ, "FM1_LCD_TIMED": "1"}
+    stress_keys = (
+        "550-580:PLAY,600:enc2:+12,610:enc3:+12,620:enc4:+12,630:enc5:+12,"
+        "680-1350:n1,850-1150:n0,1400-1950:n8,1500-1950:n10"
+    )
+    out = run_cmd(
+        [
+            "fm1-emu",
+            "--fwsc",
+            str(fwsc_path),
+            "--ms",
+            "2000",
+            "--quiet",
+            "--keys",
+            stress_keys,
+            "--dump",
+            f"{status_addr:#x}",
+            "16",
+        ],
+        env=timed_env,
+    )
+    sw = parse_dump_words(out)
+    if len(sw) < 16:
+        errs.append(f"Gate 4.3 live DRIVE+FILTER dump incomplete: {sw}")
+        return logs, errs
+
+    cal = sw[5]
+    insns_per_tick = 8000.0 / max(1, cal)
+    c1_last64_insns = (sw[9] * insns_per_tick) / 64.0
+    c1_flags = sw[11]
+    underruns = (c1_flags >> 8) & 0xFF
+    assist = (c1_flags >> 16) & 0xFFFF
+    lcd_frames = sw[2]
+    peak_q15 = sw[7]
+    if underruns != 0 or lcd_frames < 20 or peak_q15 <= 1000 or assist == 0:
+        errs.append(
+            f"Gate 4.3 live DRIVE+FILTER underrun check failed: underruns={underruns}, "
+            f"lcd_frames={lcd_frames}, assist={assist}, c1_last64={c1_last64_insns:.0f} insns/f, "
+            f"peak_q15={peak_q15}"
+        )
+    else:
+        logs.append(
+            f"  fm1-emu Live Stress: PASS (OP1 DRIVE + OP4/OP5 FILTER, lcd_frames={lcd_frames}, "
+            f"c0_assist={assist}, c1_last64=~{c1_last64_insns:.0f} insns/f, "
+            f"peak_q15={peak_q15}, underruns=0)"
+        )
+    return logs, errs
+
+
 def run_emu_gates(
     *,
     fwsc_path: pathlib.Path,
@@ -508,13 +561,14 @@ def run_emu_gates(
     status_addr: int,
     bootguard_addr: int,
 ) -> list[str]:
-    """Run all 5 disjoint `fm1-emu` SoC gates concurrently and print deterministic results."""
+    """Run all 6 disjoint `fm1-emu` SoC gates concurrently and print deterministic results."""
     tasks = [
         lambda: _gate_timed_lcd(fwsc_path, status_addr),
         lambda: _gate_panel_midi(fwsc_path, status_addr),
         lambda: _gate_usr_nvs(fwsc_path, raw_flash_head, img, status_addr),
         lambda: _gate_flaky_c1(fwsc_path, status_addr),
         lambda: _gate_oct_rescue(fwsc_path, bootguard_addr, status_addr),
+        lambda: _gate_live_drive_filter(fwsc_path, status_addr),
     ]
     with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
         results = list(pool.map(lambda fn: fn(), tasks))

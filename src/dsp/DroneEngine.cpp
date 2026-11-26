@@ -49,7 +49,9 @@ RUIDO_NOINLINE void DroneEngineCore::init(EngineSharedBuses& buses, float baseSa
     voiceScopeDelay_ = {};
     voiceScopeDelayWrite_ = 0u;
     silentFilterMask_ = 0u;
-    inFlightSpan_.valid = false;
+    spanMeta_ = {};
+    inFlightMetaIdx_ = 0u;
+    hasInFlightSpan_ = false;
 
     // Smoothers step once per 44.118 kHz output audio frame (100% sample-accurate audio rate
     // smoothing while saving 4x redundant coefficient / pan updates inside the 4x inner loop).
@@ -270,13 +272,14 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
 
     const bool fastMod = lfoBank_.hasFastModulation() || rhythmState_.hasFastRhythm();
 #if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
-    const size_t maxSubBlock = fastMod ? 8u : kMaxFilterSpanFrames;
+    (void)fastMod;
+    constexpr size_t maxSubBlock = kMaxFilterSpanFrames;
 #else
-    const size_t maxSubBlock = fastMod ? 1u : kMaxFilterSpanFrames;
+    const size_t maxSubBlock = fastMod ? 1u : 16u;
 #endif
 
     size_t curSpanSlot = 0u;
-    inFlightSpan_.valid = false;
+    hasInFlightSpan_ = false;
     for (size_t baseFrame = 0u; baseFrame < numFrames;) {
         const size_t remFrames = numFrames - baseFrame;
         const size_t chunk = (remFrames < maxSubBlock) ? remFrames : maxSubBlock;
@@ -324,7 +327,11 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         const bool anyFilterMacro = (surge > 0.22f) || (dubDrop > 1.0e-4f) ||
                                     (hpfSweep > 1.0e-4f) || (filterScream > 1.0e-4f) ||
                                     (rhythmFrame.pluckDepth > 1.0e-4f);
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+        const bool refreshCoeffs = ((baseFrame & 31u) == 0u) || isLastChunk;
+#else
         const bool refreshCoeffs = (chunk >= 4u) || ((baseFrame & 3u) == 0u) || isLastChunk;
+#endif
 
         for (size_t i = 0u; i < kNumOscillators; ++i) {
             VoiceSmoothers& sm = voiceSmoothers_[i];
@@ -387,9 +394,21 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
             }
             const VoiceChannelGain chGain = computeVoiceChannelGain(modAmp);
 
-            if (refreshCoeffs && (mod.hpCutoffHz != cache.hpHz || mod.hpResonance != cache.hpRes ||
+#if defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__)
+            const bool coeffsDirty =
+                refreshCoeffs &&
+                (cache.hpHz < 0.0f || absf(mod.hpCutoffHz - cache.hpHz) > cache.hpHz * 3.0e-4f ||
+                 absf(mod.hpResonance - cache.hpRes) > 1.5e-4f ||
+                 absf(mod.lpCutoffHz - cache.lpHz) > cache.lpHz * 3.0e-4f ||
+                 absf(mod.lpResonance - cache.lpRes) > 1.5e-4f ||
+                 absf(chGain.preDrive - cache.preDrive) > 5.0e-4f);
+#else
+            const bool coeffsDirty =
+                refreshCoeffs && (mod.hpCutoffHz != cache.hpHz || mod.hpResonance != cache.hpRes ||
                                   mod.lpCutoffHz != cache.lpHz || mod.lpResonance != cache.lpRes ||
-                                  chGain.preDrive != cache.preDrive)) {
+                                  chGain.preDrive != cache.preDrive);
+#endif
+            if (coeffsDirty) {
                 cache.hpHz = mod.hpCutoffHz;
                 cache.hpRes = mod.hpResonance;
                 cache.lpHz = mod.lpCutoffHz;
@@ -444,9 +463,11 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         const bool anyRing = (ringModMix > 1.0e-4f);
         const bool useFastOsc4x = !anyXmod && !anyFold && !anyCrush && !anyRing;
         const bool chunkExactMono = prevExactMono_ && exactMono;
-        const float invChunk = (chunk == 16u)
-                                   ? 0.0625f
-                                   : ((chunk == 8u) ? 0.125f : (1.0f / static_cast<float>(chunk)));
+        const float invChunk =
+            (chunk == 32u)
+                ? 0.03125f
+                : ((chunk == 16u) ? 0.0625f
+                                  : ((chunk == 8u) ? 0.125f : (1.0f / static_cast<float>(chunk))));
 
         auto& curSpanSub = spanSub_[curBuf];
         std::array<uint8_t, kMaxFilterSpanFrames> spanRising{};
@@ -477,46 +498,48 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
             spanRising.fill(0u);
         }
 
-        // 2. Join `inFlightSpan_` filters, immediately launch `curBuf` onto Core 0, then mix &
-        //    decimate `inFlightSpan_` in parallel while Core 0 filters `curBuf`!
-        const bool hadPrevSpan = inFlightSpan_.valid;
-        InFlightFilterSpan completedSpan = inFlightSpan_;
+        // 2. Join previous in-flight filters, immediately launch `curBuf` onto Core 0, then mix &
+        //    decimate previous span in parallel while Core 0 filters `curBuf`!
+        const bool hadPrevSpan = hasInFlightSpan_;
+        const size_t prevMetaIdx = inFlightMetaIdx_ & 1u;
         if (hadPrevSpan) {
-            finishInFlightFilterStage(completedSpan);
+            finishInFlightFilterStage(spanMeta_[prevMetaIdx]);
         }
 
         bool curCoProcHandled = false;
         launchSpanFilters(curBuf, chunk, prevGainL_, gainL, prevGainR_, gainR, prevScopeScale_,
-                          voiceScopeScale, curCoProcHandled);
+                          voiceScopeScale, !useFastOsc4x || anyCrush, curCoProcHandled);
 
         if (hadPrevSpan) {
-            mixAndFlushCompletedSpan(completedSpan, buses, outLeft, outRight, blockVoicePeak,
-                                     blockPeakL, blockPeakR);
+            mixAndFlushCompletedSpan(spanMeta_[prevMetaIdx], buses, outLeft, outRight,
+                                     blockVoicePeak, blockPeakL, blockPeakR);
+            spanMeta_[prevMetaIdx].valid = false;
         }
 
-        inFlightSpan_ = {
-            prevGainL_,
-            gainL,
-            prevGainR_,
-            gainR,
-            prevScopeScale_,
-            voiceScopeScale,
-            vcaGates,
-            crushDepths,
-            spanRising,
-            curBuf,
-            baseFrame,
-            chunk,
-            invChunk,
-            prevRunScale_,
-            runScale,
-            prevMasterTrim_,
-            masterTrim,
-            chunkExactMono,
-            anyCrush,
-            curCoProcHandled,
-            true,
-        };
+        InFlightFilterSpan& dstSpan = spanMeta_[curBuf];
+        dstSpan.startGainL = prevGainL_;
+        dstSpan.endGainL = gainL;
+        dstSpan.startGainR = prevGainR_;
+        dstSpan.endGainR = gainR;
+        dstSpan.startScope = prevScopeScale_;
+        dstSpan.endScope = voiceScopeScale;
+        dstSpan.vcaGates = vcaGates;
+        dstSpan.crushDepths = crushDepths;
+        dstSpan.rising = spanRising;
+        dstSpan.bufIdx = curBuf;
+        dstSpan.baseFrame = baseFrame;
+        dstSpan.chunk = chunk;
+        dstSpan.invChunk = invChunk;
+        dstSpan.startRun = prevRunScale_;
+        dstSpan.endRun = runScale;
+        dstSpan.startTrim = prevMasterTrim_;
+        dstSpan.endTrim = masterTrim;
+        dstSpan.chunkExactMono = chunkExactMono;
+        dstSpan.anyCrush = anyCrush;
+        dstSpan.coProcHandled = curCoProcHandled;
+        dstSpan.valid = true;
+        inFlightMetaIdx_ = curBuf;
+        hasInFlightSpan_ = true;
 
         prevOscFreqHz_ = oscFreqs;
         prevPulseWidth_ = oscPulseWidths;
@@ -528,11 +551,13 @@ void DroneEngineCore::processBlock(EngineSharedBuses& buses, float* outLeft, flo
         prevExactMono_ = exactMono;
         baseFrame += chunk;
     }
-    if (inFlightSpan_.valid) {
-        finishInFlightFilterStage(inFlightSpan_);
-        mixAndFlushCompletedSpan(inFlightSpan_, buses, outLeft, outRight, blockVoicePeak,
-                                 blockPeakL, blockPeakR);
-        inFlightSpan_.valid = false;
+    if (hasInFlightSpan_) {
+        InFlightFilterSpan& tailSpan = spanMeta_[inFlightMetaIdx_ & 1u];
+        finishInFlightFilterStage(tailSpan);
+        mixAndFlushCompletedSpan(tailSpan, buses, outLeft, outRight, blockVoicePeak, blockPeakL,
+                                 blockPeakR);
+        tailSpan.valid = false;
+        hasInFlightSpan_ = false;
     }
 
     const bool blockStopped = !latestState.global.masterRun && (prevRunScale_ <= 1.0e-4f);

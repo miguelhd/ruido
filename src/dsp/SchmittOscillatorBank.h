@@ -23,7 +23,7 @@ struct OscillatorBankOutput {
 //  - Per-inverter threshold duty calibration (~49.2% - 50.9%) for subtle analog even harmonics
 //  - Independent slow 1/f-like thermal pitch drift per voice
 //  - Shared Vdd power-rail threshold coupling (`ALGORITHM` knob) for weak injection locking
-//  - Subtle RC coupling capacitor roof tilt + DC blocking
+//  - Passive RC coupling capacitor roof tilt (1.5 Hz HPF) + pot/bus rise-time slew (6.5 kHz LPF)
 class SchmittOscillatorBank {
   public:
     SchmittOscillatorBank() noexcept;
@@ -45,19 +45,18 @@ class SchmittOscillatorBank {
 
     // Fast 4x-oversampled multi-frame span synthesis path for unpatched voices (hoists coupling,
     // hard-sync thresholds, PWM duty reciprocals, and denormal scrubbing across `numFrames`).
-    void processSpan4x(std::array<std::array<float, kOversampleFactor>, 16>* __restrict spanSub,
-                       uint8_t* __restrict spanRising,
-                       std::array<uint8_t, kNumOscillators>& totalRisingCounts, size_t numFrames,
-                       const std::array<float, kNumOscillators>& __restrict startFreqHz,
-                       const std::array<float, kNumOscillators>& __restrict endFreqHz,
-                       const std::array<float, kNumOscillators>& __restrict startPw,
-                       const std::array<float, kNumOscillators>& __restrict endPw,
-                       const std::array<float, kNumOscillators>& __restrict drift,
-                       float circuitCoupling, bool freezeDrift, float hardSync,
-                       std::array<float, kNumOscillators>& outLastSamples,
-                       std::array<float, kNumOscillators>& outLastCapRamp,
-                       std::array<float, kNumOscillators>* optGateHigh = nullptr,
-                       std::array<float, kNumOscillators>* optDriftNorm = nullptr) noexcept;
+    void processSpan4x(
+        std::array<std::array<float, kOversampleFactor>, kMaxFilterSpanFrames>* __restrict spanSub,
+        uint8_t* __restrict spanRising, std::array<uint8_t, kNumOscillators>& totalRisingCounts,
+        size_t numFrames, const std::array<float, kNumOscillators>& __restrict startFreqHz,
+        const std::array<float, kNumOscillators>& __restrict endFreqHz,
+        const std::array<float, kNumOscillators>& __restrict startPw,
+        const std::array<float, kNumOscillators>& __restrict endPw,
+        const std::array<float, kNumOscillators>& __restrict drift, float circuitCoupling,
+        bool freezeDrift, float hardSync, std::array<float, kNumOscillators>& outLastSamples,
+        std::array<float, kNumOscillators>& outLastCapRamp,
+        std::array<float, kNumOscillators>* optGateHigh = nullptr,
+        std::array<float, kNumOscillators>* optDriftNorm = nullptr) noexcept;
 
     // Precomputed span context for Circuit Lab patched sub-stepping (XMod / Fold / Crush / Ring):
     // hoists coupling thresholds, hard-sync thresholds, endpoint PWM duty reciprocals, and
@@ -72,7 +71,11 @@ class SchmittOscillatorBank {
         std::array<float, kNumOscillators> stepInvHigh{};
         std::array<float, kNumOscillators> stepInvLow{};
         std::array<float, kNumOscillators> driftClamped{};
+        std::array<float, kNumOscillators> railScaledScale{};
+        std::array<uint32_t, kNumOscillators> incHigh{};
+        std::array<uint32_t, kNumOscillators> incLow{};
         uint8_t needCapRampMask = 0x0Fu;
+        uint8_t xmodVoiceMask = 0x0Fu;
         bool syncActive = false;
         bool anyPwSweep = false;
         bool freezeDrift = false;
@@ -84,12 +87,21 @@ class SchmittOscillatorBank {
                             const std::array<float, kNumOscillators>& startPw,
                             const std::array<float, kNumOscillators>& endPw,
                             const std::array<float, kNumOscillators>& drift, float circuitCoupling,
-                            bool freezeDrift, float hardSync, uint8_t needCapRampMask) noexcept;
-    void beginPatchedFrame(PatchedSpanState& st) noexcept;
-    uint8_t stepPatchedSubSample(const PatchedSpanState& st,
+                            bool freezeDrift, float hardSync, uint8_t needCapRampMask,
+                            uint8_t xmodVoiceMask = 0x0Fu) noexcept;
+    void beginPatchedFrame(PatchedSpanState& st,
+                           const std::array<float, kNumOscillators>& frameFreqHz) noexcept;
+    uint8_t stepPatchedSubSample(PatchedSpanState& st,
                                  const std::array<float, kNumOscillators>& subFreqHz,
-                                 std::array<float, kNumOscillators>& outSamples,
+                                 bool recalcXmodInc, std::array<float, kNumOscillators>& outSamples,
                                  std::array<float, kNumOscillators>& outCapRamp) noexcept;
+    void stepPatchedSubPair(PatchedSpanState& st,
+                            const std::array<float, kNumOscillators>& pairFreqHz,
+                            std::array<float, kNumOscillators>& outSamples0,
+                            std::array<float, kNumOscillators>& outSamples1,
+                            std::array<float, kNumOscillators>& outCapRamp0,
+                            std::array<float, kNumOscillators>& outCapRamp1, uint8_t& outRising0,
+                            uint8_t& outRising1) noexcept;
     void finishPatchedSpan(std::array<float, kNumOscillators>* optGateHigh,
                            std::array<float, kNumOscillators>* optDriftNorm) noexcept;
 
@@ -119,9 +131,10 @@ class SchmittOscillatorBank {
         float naiveD2 = 1.0f;
         std::array<float, 4> blepResidual{0.0f, 0.0f, 0.0f, 0.0f};
 
-        // RC coupling capacitor roof sag / high-pass tilt state
+        // Passive RC coupling cap roof sag (1.5 Hz) + pot/cable rise-time slew (6.5 kHz)
         float rcCapState = 0.0f;
         float rcPrevInput = 0.0f;
+        float rcLpState = 0.0f;
 
         // Per-voice slow thermal pitch drift state
         uint32_t rngState = 1u;
@@ -152,7 +165,7 @@ class SchmittOscillatorBank {
     static uint32_t fastRisingEdge(VoiceState& v, uint32_t overLow, uint32_t incLow,
                                    uint32_t incHigh) noexcept;
     void processFastDroneSpan4x(
-        std::array<std::array<float, kOversampleFactor>, 16>* __restrict spanSub,
+        std::array<std::array<float, kOversampleFactor>, kMaxFilterSpanFrames>* __restrict spanSub,
         uint8_t* __restrict spanRising, std::array<uint8_t, kNumOscillators>& totalRisingCounts,
         size_t numFrames, float invSpan,
         const std::array<float, kNumOscillators>& __restrict startFreqHz,
@@ -162,7 +175,7 @@ class SchmittOscillatorBank {
         const std::array<float, kNumOscillators>& __restrict drift, float couplingGain,
         float minPull, float maxPull, bool freezeDrift) noexcept;
     void processCoupledSyncSpan4x(
-        std::array<std::array<float, kOversampleFactor>, 16>* __restrict spanSub,
+        std::array<std::array<float, kOversampleFactor>, kMaxFilterSpanFrames>* __restrict spanSub,
         uint8_t* __restrict spanRising, std::array<uint8_t, kNumOscillators>& totalRisingCounts,
         size_t numFrames, float invSpan,
         const std::array<float, kNumOscillators>& __restrict startFreqHz,
@@ -181,6 +194,7 @@ class SchmittOscillatorBank {
     float sampleRate_ = kOversampledRate;
     float hzToPhaseU32_ = 4294967296.0f / kOversampledRate;
     float rcHighpassPole_ = 0.9996f;
+    float rcLowpassAlpha_ = 0.207f;
 
     // Shared Vdd supply rail sag states (fast crowbar spike + starved-rail sync state)
     std::array<float, kNumOscillators> voiceRailSag_{0.0f, 0.0f, 0.0f, 0.0f};

@@ -77,7 +77,7 @@ struct ModifierKeyTracker {
     }
 
     bool isAnyMomentaryHudHoldActive(bool scopeFrozen) const noexcept {
-        return scopeFrozen || isRateHeld() || isAnyPerformanceKeyHeld();
+        return scopeFrozen || isAnyPerformanceKeyHeld();
     }
 };
 

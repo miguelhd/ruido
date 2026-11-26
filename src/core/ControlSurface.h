@@ -350,6 +350,14 @@ enum class SnapshotToastKind : uint8_t {
     Deleted = 3,
 };
 
+enum class CapsuleToastKind : uint8_t {
+    None = 0,
+    LatchOn = 1,
+    LatchOff = 2,
+    Fine = 3,
+    Coarse = 4,
+};
+
 struct HudState {
     GlobalConfigState config{};
     std::array<float, kNumSnapshots> snapshotWeights{1.0f, 0.0f, 0.0f, 0.0f};
@@ -378,7 +386,7 @@ struct HudState {
     uint8_t lfoVoiceFocus = 0u;           // 0..7 = LFO A/B OSC 1..4 (SELECT encoder on LFO Page)
     uint8_t configCursor = 0u;            // 0..kNumGlobalConfigItems-1 (SELECT in GLOBAL CONFIG)
     ConfigSubView configSubView = ConfigSubView::List; // Operational sub-screen in GLOBAL CONFIG
-    uint8_t configResetTicks = 0u;        // 0..8 CW confirmation ticks in FactoryResetConfirm
+    uint8_t configResetTicks = 0u;        // 0..24 CW confirmation ticks in FactoryResetConfirm
     uint8_t snapshotSlot = 0u;            // 0..3 active/selected Snapshot 1..4
     uint8_t snapshotToastSlot = 0u;       // 0..3 target slot for SAVE / DELETE / EMPTY toast
     uint8_t snapshotOccupiedMask = 0x0Fu; // Bits 0..3 = Scene 1..4 occupied (0 = deleted/EMPTY)
@@ -412,6 +420,8 @@ struct HudState {
     uint8_t phantomPinSeq = 0u;   // Incremented when an unconnected switch (ENV/ARP/SEQ/REC) fires
     uint8_t phantomPinIndex = 0u; // 0 = ENV, 1 = ARP, 2 = SEQ, 3 = REC
     uint8_t savePulseQ8 = 128u;   // [0..255] hardware-synced SAVE / LATCH LED pulse phase
+    CapsuleToastKind capsuleToast = CapsuleToastKind::None; // Momentary center stadium capsule
+    uint8_t capsuleAlphaQ8 = 0u; // [0..255] 150 ms fade-in -> 1.0 s hold -> 150 ms fade-out
 };
 
 constexpr bool hasSnapshotResultToast(const HudState& hud) noexcept {

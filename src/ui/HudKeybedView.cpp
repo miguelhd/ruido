@@ -42,7 +42,7 @@ void compositeFm1KeybedDiagram(const MonoStripCanvas& cv, float topY,
                                const std::array<float, kNumBlackKeys>& blackGlow,
                                const std::array<float, kNumWhiteKeys>& whiteGlow,
                                const HudState* liveHud, uint16_t activeBlackMask,
-                               uint16_t activeWhiteMask) noexcept {
+                               uint16_t activeWhiteMask, void (*coProcYield)() noexcept) noexcept {
     const float botY = topY + 72.0f;
     if (cv.y1 <= static_cast<int>(topY) - 2 || cv.y0 >= static_cast<int>(botY) + 3) {
         return;
@@ -51,6 +51,9 @@ void compositeFm1KeybedDiagram(const MonoStripCanvas& cv, float topY,
     // Two Separate Stadium Enclosures: Left 20-Pad Pressure Bay | Right 7-Switch Permanent Bay
     fillKeybedStadiumSDF(cv, 7.0f, topY, 166.5f, botY, 12.5f, 13u, 74u, 242u);
     fillKeybedStadiumSDF(cv, 170.5f, topY, 233.0f, botY, 12.5f, 13u, 74u, 242u);
+    if (coProcYield != nullptr) {
+        coProcYield();
+    }
 
     const uint16_t liveBlackMask =
         (liveHud != nullptr)
@@ -100,6 +103,9 @@ void compositeFm1KeybedDiagram(const MonoStripCanvas& cv, float topY,
                     cv.drawOpticalBead(cx, bMidY, (g - 0.25f) * 0.85f, 2.5f);
                 }
             }
+            if (coProcYield != nullptr && (i & 3u) == 3u) {
+                coProcYield();
+            }
         }
     }
 
@@ -109,6 +115,9 @@ void compositeFm1KeybedDiagram(const MonoStripCanvas& cv, float topY,
         }
     }
 
+    if (coProcYield != nullptr) {
+        coProcYield();
+    }
     const float wTop = topY + 40.0f;
     const float wBot = topY + 66.0f;
     const float wMidY = 0.5f * (wTop + wBot);
@@ -136,6 +145,9 @@ void compositeFm1KeybedDiagram(const MonoStripCanvas& cv, float topY,
                 fillKeybedSlitSDF(cv, cx, wTop + 4.2f, wBot - 4.2f, 1.12f, g, pFill, activeKey);
             } else {
                 fillKeybedSwitchDotSDF(cv, cx, wMidY, g, activeKey);
+            }
+            if (coProcYield != nullptr && (i & 3u) == 3u) {
+                coProcYield();
             }
         }
     }
@@ -312,7 +324,8 @@ void HudKeybedView::update(float dtClamped, const EngineControlState& control,
 }
 
 void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
-                                   const HudState& frameHud) const noexcept {
+                                   const HudState& frameHud,
+                                   void (*coProcYield)() noexcept) const noexcept {
     if (alpha8 == 0u || y1 <= 28 || y0 >= 230) {
         return;
     }
@@ -398,7 +411,7 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
     const uint16_t activeBlackMask =
         (frameHud.keyboardModel == KeyboardModel::RhythmLab) ? 0x07FFu : 0x05FFu;
     compositeFm1KeybedDiagram(cv, kKeybedDiagramTopY, blackGlow_, whiteGlow_, &frameHud,
-                              activeBlackMask, 0xFFFFu);
+                              activeBlackMask, 0xFFFFu, coProcYield);
 
     // 4. Bottom 4 Zone Brackets & Labels (`y = 167..190`: 3 Pressure Banks + Permanent MUTE)
     if (y1 > 166 && y0 < 192) {
@@ -438,13 +451,13 @@ void HudKeybedView::compositeStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alph
 }
 
 void HudKeybedView::compositeShiftStrip(int y0, int y1, uint8_t* lumBuf, uint8_t alpha8,
-                                        const EngineControlState& control,
-                                        const HudState& frameHud) const noexcept {
+                                        const EngineControlState& control, const HudState& frameHud,
+                                        void (*coProcYield)() noexcept) const noexcept {
     if (alpha8 == 0u || y1 <= 26 || y0 >= 230) {
         return;
     }
     const MonoStripCanvas cv{lumBuf, y0, y1, alpha8};
-    compositeFullChassisShiftStrip(cv, control, frameHud);
+    compositeFullChassisShiftStrip(cv, control, frameHud, coProcYield);
 }
 
 } // namespace ruido

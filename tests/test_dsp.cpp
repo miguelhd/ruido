@@ -1231,6 +1231,49 @@ void testDecimatorLinearPhaseCrest() {
     EXPECT_TRUE(decimCrest < 1.19,
                 "Excessive phase-dispersion overshoot in FIR decimator (crest=%.3f)", decimCrest);
     EXPECT_TRUE(crestRatio < 1.26, "Excessive full-engine crest factor (crest=%.3f)", crestRatio);
+
+    // Part C: Passive 6.5 kHz RC output pole rounds 2+ wide-open (LPF=28 kHz) beat needles
+    auto measureBeatCurvaturePeak = [&](bool enableRc) -> float {
+        engine.init(ruido::kBaseSampleRate);
+        engine.setAnalogCharacterEnabled(false, enableRc);
+        ruido::EngineControlState beatSt = makeRunningDefaultState();
+        beatSt.global.circuitCoupling = 0.0f;
+        beatSt.global.monoCollapse = true;
+        beatSt.voices[0].frequencyHz = 200.0f;
+        beatSt.voices[1].frequencyHz = 203.0f; // 3 beats/sec -> repeated 180 deg slivers
+        beatSt.voices[0].amplitude = ruido::kCleanAmpKnee;
+        beatSt.voices[1].amplitude = ruido::kCleanAmpKnee;
+        beatSt.voices[2].muted = true;
+        beatSt.voices[3].muted = true;
+        engine.controlBus().publish(beatSt);
+        engine.snapParametersToLatest();
+
+        for (int w = 0; w < 24; ++w) {
+            engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+            engine.scopeBuffer().popBatch(drain.data(), drain.size());
+        }
+        float maxD2 = 0.0f;
+        float p1 = outL[ruido::kBlockFrames - 1u];
+        float p2 = outL[ruido::kBlockFrames - 2u];
+        for (int b = 0; b < 700; ++b) {
+            engine.processBlock(outL.data(), outR.data(), ruido::kBlockFrames);
+            engine.scopeBuffer().popBatch(drain.data(), drain.size());
+            for (size_t i = 0u; i < ruido::kBlockFrames; ++i) {
+                const float x = outL[i];
+                maxD2 = std::max(maxD2, std::fabs(x - 2.0f * p1 + p2));
+                p2 = p1;
+                p1 = x;
+            }
+        }
+        return maxD2;
+    };
+    const float rawBeatD2 = measureBeatCurvaturePeak(false);
+    const float rcBeatD2 = measureBeatCurvaturePeak(true);
+    std::printf("  2-voice wide-open beat needle |d2x|: ideal 0ns = %.4f, passive RC = %.4f\n",
+                static_cast<double>(rawBeatD2), static_cast<double>(rcBeatD2));
+    EXPECT_TRUE(rcBeatD2 < 0.55f * rawBeatD2,
+                "Passive RC output pole failed to round wide-open beat needles (%.4f vs %.4f)",
+                static_cast<double>(rcBeatD2), static_cast<double>(rawBeatD2));
 }
 
 // 10. Real-Time Throughput Benchmark

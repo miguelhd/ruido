@@ -25,13 +25,15 @@ RUIDO_NOINLINE void DroneEngineCore::finishInFlightFilterStage(InFlightFilterSpa
     }
 }
 
-RUIDO_NOINLINE void DroneEngineCore::launchSpanFilters(
-    size_t bufIdx, size_t chunk, const std::array<float, kNumOscillators>& startGainL,
-    const std::array<float, kNumOscillators>& endGainL,
-    const std::array<float, kNumOscillators>& startGainR,
-    const std::array<float, kNumOscillators>& endGainR,
-    const std::array<float, kNumOscillators>& startScope,
-    const std::array<float, kNumOscillators>& endScope, bool& outCoProcHandled) noexcept {
+RUIDO_NOINLINE void
+DroneEngineCore::launchSpanFilters(size_t bufIdx, size_t chunk,
+                                   const std::array<float, kNumOscillators>& startGainL,
+                                   const std::array<float, kNumOscillators>& endGainL,
+                                   const std::array<float, kNumOscillators>& startGainR,
+                                   const std::array<float, kNumOscillators>& endGainR,
+                                   const std::array<float, kNumOscillators>& startScope,
+                                   const std::array<float, kNumOscillators>& endScope,
+                                   bool heavyCore1PreFilter, bool& outCoProcHandled) noexcept {
     auto& spanSub = spanSub_[bufIdx & 1u];
     const auto& coeffs = spanCoeffs_[bufIdx & 1u];
 
@@ -57,7 +59,7 @@ RUIDO_NOINLINE void DroneEngineCore::launchSpanFilters(
 
     const bool coProcHandled =
         (activeMask != 0u) && (coProc_ != nullptr) && (chunk >= 4u) &&
-        coProc_->beginBalanced4x(spanSub, chunk, filters_, coeffs, activeMask);
+        coProc_->beginBalanced4x(spanSub, chunk, filters_, coeffs, activeMask, heavyCore1PreFilter);
     outCoProcHandled = coProcHandled;
     if (activeMask != 0u && !coProcHandled) {
 #if !(defined(RUIDO_TARGET_PI32V2) || defined(__Pi32__) || defined(__pi32v2__))
@@ -99,23 +101,30 @@ DroneEngineCore::mixAndFlushCompletedSpan(const InFlightFilterSpan& span, Engine
     auto& osStereoSpan = osStereoSpan_;
 
     std::array<float, kNumOscillators> curGainL = span.startGainL, curGainR = span.startGainR;
-    std::array<float, kNumOscillators> stepGainL, stepGainR;
+    std::array<float, kNumOscillators> curScope = span.startScope;
+    std::array<float, kNumOscillators> stepGainL, stepGainR, stepScope;
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         stepGainL[i] = (span.endGainL[i] - span.startGainL[i]) * invChunk;
         stepGainR[i] = (span.endGainR[i] - span.startGainR[i]) * invChunk;
+        stepScope[i] = (span.endScope[i] - span.startScope[i]) * invChunk;
     }
     float curRun = span.startRun;
     const float stepRun = (span.endRun - span.startRun) * invChunk;
+
+    std::array<std::array<int16_t, kNumOscillators>, kMaxFilterSpanFrames> voiceQ13{};
+    std::array<float, kNumOscillators> chunkRawPeak{0.0f, 0.0f, 0.0f, 0.0f};
 
     for (size_t k = 0u; k < chunk; ++k) {
         if (k + 1u == chunk) {
             curGainL = span.endGainL;
             curGainR = span.endGainR;
+            curScope = span.endScope;
             curRun = span.endRun;
         } else {
             for (size_t i = 0u; i < kNumOscillators; ++i) {
                 curGainL[i] += stepGainL[i];
                 curGainR[i] += stepGainR[i];
+                curScope[i] += stepScope[i];
             }
             curRun += stepRun;
         }
@@ -123,43 +132,38 @@ DroneEngineCore::mixAndFlushCompletedSpan(const InFlightFilterSpan& span, Engine
         const auto s0 = spanSub[0][k], s1 = spanSub[1][k], s2 = spanSub[2][k], s3 = spanSub[3][k];
         auto& osStereo = osStereoSpan[k];
 
-        const float gR0 = chunkExactMono ? gL0 : curGainR[0];
-        const float gR1 = chunkExactMono ? gL1 : curGainR[1];
-        const float gR2 = chunkExactMono ? gL2 : curGainR[2];
-        const float gR3 = chunkExactMono ? gL3 : curGainR[3];
-        for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
-            const float sumL = s0[sub] * gL0 + s1[sub] * gL1 + s2[sub] * gL2 + s3[sub] * gL3;
-            const float busL = masterBusSoftClip(sumL) * curRun;
-            const float busR = chunkExactMono ? busL
-                                              : (masterBusSoftClip(s0[sub] * gR0 + s1[sub] * gR1 +
-                                                                   s2[sub] * gR2 + s3[sub] * gR3) *
-                                                 curRun);
-            osStereo[sub] = {busL, busR};
-        }
-    }
-
-    std::array<std::array<int16_t, kNumOscillators>, kMaxFilterSpanFrames> voiceQ13{};
-    std::array<float, kNumOscillators> chunkRawPeak{0.0f, 0.0f, 0.0f, 0.0f};
-    std::array<float, kNumOscillators> curScope = span.startScope;
-    std::array<float, kNumOscillators> stepScope;
-    for (size_t i = 0u; i < kNumOscillators; ++i) {
-        stepScope[i] = (span.endScope[i] - span.startScope[i]) * invChunk;
-    }
-    for (size_t k = 0u; k < chunk; ++k) {
-        if (k + 1u == chunk) {
-            curScope = span.endScope;
+        if (chunkExactMono) {
+            for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
+                const float sumL = s0[sub] * gL0 + s1[sub] * gL1 + s2[sub] * gL2 + s3[sub] * gL3;
+                const float busL = masterBusSoftClip(sumL) * curRun;
+                osStereo[sub] = {busL, busL};
+            }
         } else {
-            for (size_t i = 0u; i < kNumOscillators; ++i) {
-                curScope[i] += stepScope[i];
+            const float gR0 = curGainR[0], gR1 = curGainR[1], gR2 = curGainR[2], gR3 = curGainR[3];
+            for (size_t sub = 0u; sub < kOversampleFactor; ++sub) {
+                const float sumL = s0[sub] * gL0 + s1[sub] * gL1 + s2[sub] * gL2 + s3[sub] * gL3;
+                const float sumR = s0[sub] * gR0 + s1[sub] * gR1 + s2[sub] * gR2 + s3[sub] * gR3;
+                osStereo[sub] = {masterBusSoftClip(sumL) * curRun,
+                                 masterBusSoftClip(sumR) * curRun};
             }
         }
-        for (size_t i = 0u; i < kNumOscillators; ++i) {
-            const auto& s = spanSub[i][k];
-            const float vAccum = s[0] + s[1] + s[2] + s[3];
-            const float vAbs = absf(vAccum);
-            chunkRawPeak[i] = (vAbs > chunkRawPeak[i]) ? vAbs : chunkRawPeak[i];
-            voiceQ13[k][i] = quantizeVoiceScopeQ13(vAccum * curScope[i]);
-        }
+
+        const float vAcc0 = s0[0] + s0[1] + s0[2] + s0[3];
+        const float vAcc1 = s1[0] + s1[1] + s1[2] + s1[3];
+        const float vAcc2 = s2[0] + s2[1] + s2[2] + s2[3];
+        const float vAcc3 = s3[0] + s3[1] + s3[2] + s3[3];
+        const float vAbs0 = absf(vAcc0), vAbs1 = absf(vAcc1);
+        const float vAbs2 = absf(vAcc2), vAbs3 = absf(vAcc3);
+        chunkRawPeak[0] = (vAbs0 > chunkRawPeak[0]) ? vAbs0 : chunkRawPeak[0];
+        chunkRawPeak[1] = (vAbs1 > chunkRawPeak[1]) ? vAbs1 : chunkRawPeak[1];
+        chunkRawPeak[2] = (vAbs2 > chunkRawPeak[2]) ? vAbs2 : chunkRawPeak[2];
+        chunkRawPeak[3] = (vAbs3 > chunkRawPeak[3]) ? vAbs3 : chunkRawPeak[3];
+        voiceQ13[k] = {
+            quantizeVoiceScopeQ13(vAcc0 * curScope[0]),
+            quantizeVoiceScopeQ13(vAcc1 * curScope[1]),
+            quantizeVoiceScopeQ13(vAcc2 * curScope[2]),
+            quantizeVoiceScopeQ13(vAcc3 * curScope[3]),
+        };
     }
     for (size_t i = 0u; i < kNumOscillators; ++i) {
         const float scaledPeak = chunkRawPeak[i] * 0.25f * span.vcaGates[i] * span.endRun;

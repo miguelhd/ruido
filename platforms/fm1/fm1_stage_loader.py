@@ -36,6 +36,22 @@ def stage_platform_sources(fw: pathlib.Path) -> None:
     inp_src = (fw / "hal" / "fm1_input.h").read_text(encoding="utf-8")
     inp_src = replace_once(
         inp_src,
+        "#define FM1_DEB_PRESS 2u          /* frames closed in a row: a press (a frame = 11 ticks, ~1.1 ms) */",
+        "#define FM1_DEB_PRESS 3u          /* frames closed in a row: a press (a frame = 11 ticks, ~2.2 ms) */",
+        "fm1_input.h FM1_DEB_PRESS debounce count",
+    )
+    inp_src = replace_once(
+        inp_src,
+        "    fm1__led_lines(0);\n"
+        "    fm1_in.raw[p] = (uint8_t)fm1__rows();          /* column p has been latched one tick (the lines dark) */",
+        "    fm1__led_lines(0);\n"
+        "    if (lit)\n"
+        "        fm1__wait(2u);\n"
+        "    fm1_in.raw[p] = (uint8_t)fm1__rows();          /* column p has been latched one tick (the lines dark) */",
+        "fm1_input.h fm1_input_tick LED turn-off settle",
+    )
+    inp_src = replace_once(
+        inp_src,
         "static void fm1__frame(void)\n"
         "{\n"
         "    uint32_t e;                                    /* (the keys: fm1__keys, as each column is read) */\n"
@@ -87,20 +103,24 @@ def stage_platform_sources(fw: pathlib.Path) -> None:
         "    for (e = 0; e < FM1_NENC; e++) {\n"
         "        const uint8_t *m = FM1_ENC[e];\n"
         "        uint32_t cur = ((fm1_in.raw[m[0]] >> m[1]) & 1u) << 1 | ((fm1_in.raw[m[2]] >> m[3]) & 1u);\n"
-        "        uint32_t idx;\n"
+        "        uint32_t idx, raw_prev;\n"
         "        int32_t s;\n"
         "        if (fm1_in.enc_prev[e] == 0xFF) {\n"
         "            fm1_in.enc_prev[e] = (uint8_t)cur;\n"
         "            fm1_in.enc_rest[e] = (uint8_t)cur;\n"
-        "            fm1_in.enc_last[e] = 0;\n"
+        "            fm1_in.enc_last[e] = (uint8_t)cur;\n"
+        "            fm1_in.enc_still[e] = 0;\n"
+        "            continue;\n"
+        "        }\n"
+        "        raw_prev = fm1_in.enc_last[e] & 3u;\n"
+        "        if (cur != raw_prev) {\n"
+        "            fm1_in.enc_last[e] = (uint8_t)cur;\n"
         "            fm1_in.enc_still[e] = 0;\n"
         "            continue;\n"
         "        }\n"
         "        if (cur == fm1_in.enc_prev[e]) {\n"
         "            if (fm1_in.enc_still[e] < 0xFFFFu)\n"
         "                fm1_in.enc_still[e]++;\n"
-        "            if (fm1_in.enc_still[e] == 64u)\n"
-        "                fm1_in.enc_last[e] = 0;\n"
         "            if (fm1_in.enc_still[e] == FM1_REST_FRAMES && cur != fm1_in.enc_rest[e]) {\n"
         "                fm1_in.enc_rest[e] = (uint8_t)cur;\n"
         "                fm1_in.enc_sub[e] = 0;\n"
@@ -113,18 +133,16 @@ def stage_platform_sources(fw: pathlib.Path) -> None:
         "        s = fm1_in.enc_sub[e];\n"
         "        if ((0x4182u >> idx) & 1u) {\n"
         "            s++;\n"
-        "            fm1_in.enc_last[e] = 1;\n"
         "        } else if ((0x2814u >> idx) & 1u) {\n"
         "            s--;\n"
-        "            fm1_in.enc_last[e] = 2;\n"
-        "        } else if (s > 0 || (s == 0 && fm1_in.enc_last[e] == 1)) {\n"
+        "        } else if (s > 0) {\n"
         "            s += 2;\n"
-        "        } else if (s < 0 || (s == 0 && fm1_in.enc_last[e] == 2)) {\n"
+        "        } else if (s < 0) {\n"
         "            s -= 2;\n"
         "        }\n"
         "        if (cur == fm1_in.enc_rest[e]) {\n"
         "            int32_t mag = s < 0 ? -s : s;\n"
-        "            int32_t d = mag >= 2 ? (mag + 2) / 4 : 0;\n"
+        "            int32_t d = mag >= 3 ? (mag + 1) / 4 : 0;\n"
         "            if (d != 0)\n"
         "                fm1_in.enc_steps[e] = (int16_t)(fm1_in.enc_steps[e] + (s < 0 ? -d : d));\n"
         "            s = 0;\n"

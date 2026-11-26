@@ -34,6 +34,7 @@ class alignas(kHwCacheLineBytes) Ms20DualFilter {
         float invHpDiodeSpan = 0.032f;
         float invLinDetHp = 1.0f;
         bool hpLinearBypass = true;
+        bool hpLinearAcCouple = false;
 
         float gLp = 0.25f;
         float kLp = 0.58578644f;
@@ -70,6 +71,22 @@ class alignas(kHwCacheLineBytes) Ms20DualFilter {
     // ticks.
     void processSpan4x(std::array<float, kOversampleFactor>* frames4x, size_t numFrames,
                        const Coeffs& c) noexcept;
+
+    void processHpOnlySpan4x(std::array<float, kOversampleFactor>* frames4x, size_t numFrames,
+                             const Coeffs& c) noexcept {
+        if (frames4x != nullptr && numFrames > 0u) {
+            processVoiceHpSpan4x(hpf_, frames4x, numFrames, c);
+        }
+    }
+
+    void processLpOnlySpan4x(std::array<float, kOversampleFactor>* frames4x, size_t numFrames,
+                             const Coeffs& c) noexcept {
+        if (frames4x != nullptr && numFrames > 0u) {
+            processVoiceLpSpan4x(lpf_, frames4x, numFrames, c);
+        }
+    }
+
+    void flushHpStateCache() const noexcept { hwCacheFlushInvalidateRange(&hpf_, 32u); }
 
     // Lockstep 4-voice x 4x-oversampled bank processor: evaluates all 4 independent voice filters
     // in parallel FPU/SIMD lanes per sub-step while preserving exact per-voice circuit isolation.
@@ -108,8 +125,11 @@ class alignas(kHwCacheLineBytes) Ms20DualFilter {
                                      std::array<float, kOversampleFactor>* frames4x,
                                      size_t numFrames, const Coeffs& c) noexcept;
 
-    OtaSallenKeyStage hpf_{};
-    OtaSallenKeyStage lpf_{};
+    // Isolate HPF (bytes 0..31) and LPF (bytes 32..63) on separate 32 B AC791N L1 D-Cache lines so
+    // `VoiceFilterCoProcessor`'s 5+3 stage split can filter Stage-1 HPF on Core 0 and Stage-2 LPF
+    // on Core 1 with zero false sharing.
+    alignas(32) OtaSallenKeyStage hpf_{};
+    alignas(32) OtaSallenKeyStage lpf_{};
 };
 
 } // namespace ruido

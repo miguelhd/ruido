@@ -53,7 +53,7 @@ inline void buildCouplingFromLiveHistory(
     std::array<float, kNumOscillators>& ioCapAct, std::array<uint8_t, kCplPts>& outSagQ8,
     std::array<std::array<uint8_t, kCplPts>, kNumOscillators>& outRampQ8,
     std::array<std::array<uint8_t, kCplCols>, kNumOscillators>& outWrapPacked,
-    std::array<uint8_t, kCplCols>& outSyncMask) noexcept {
+    std::array<uint8_t, kCplCols>& outSyncMask, CoProcYieldFn coProcYield = nullptr) noexcept {
     const size_t histCount = traceEngine.historySampleCount();
     const size_t histWrite = traceEngine.historyWritePos();
     const auto& hist = traceEngine.rawHistory();
@@ -87,6 +87,7 @@ inline void buildCouplingFromLiveHistory(
     size_t chosenBack = 0u;
     float anchorFrac = 0.0f;
     for (size_t back = 0u; back < maxSearch; ++back) {
+        yieldCoProcEvery(coProcYield, back, 63u);
         const size_t pos = (latestStart + ScopeTraceEngine::kHistorySize - back) & kMask;
         if (unpackVoiceEdgeFlag(hist[pos].voiceEdgeQ12[trigVoice])) {
             chosenBack = back;
@@ -140,6 +141,7 @@ inline void buildCouplingFromLiveHistory(
     std::array<float, kNumOscillators> audioPeak{0.0f, 0.0f, 0.0f, 0.0f};
 
     for (size_t rel = 0u; rel < totalScan; ++rel) {
+        yieldCoProcEvery(coProcYield, rel, 63u);
         const CompactScopeSample& smp = hist[(originPos + rel) & kMask];
         for (size_t v = 0u; v < kNumOscillators; ++v) {
             if (rel >= preRoll) {
@@ -204,6 +206,7 @@ inline void buildCouplingFromLiveHistory(
     size_t scanRel = 0u;
     // Warm up `lastEdgeF` across `0 .. preRoll`
     while (scanRel < preRoll) {
+        yieldCoProcEvery(coProcYield, scanRel, 63u);
         const CompactScopeSample& smp = hist[(originPos + scanRel) & kMask];
         for (size_t v = 0u; v < kNumOscillators; ++v) {
             if (unpackVoiceEdgeFlag(smp.voiceEdgeQ12[v])) {
@@ -221,6 +224,7 @@ inline void buildCouplingFromLiveHistory(
     const float shareAmt = clampf(c * (1.0f / 0.45f), 0.0f, 1.0f);
 
     for (size_t col = 0u; col <= kCplCols; ++col) {
+        yieldCoProcEvery(coProcYield, col, 15u);
         const float sPt =
             static_cast<float>(preRoll) + anchorFrac + static_cast<float>(col) * samplesPerPx;
         const float sPrevCol = sPt - samplesPerPx;
@@ -358,7 +362,8 @@ renderCouplingStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint1
                     const std::array<std::array<uint8_t, kCplCols>, kNumOscillators>& wrapPacked,
                     const std::array<uint8_t, kCplCols>& syncMask,
                     const std::array<float, kNumOscillators>& capAct,
-                    const std::array<float, kNumOscillators>& muteDim) noexcept {
+                    const std::array<float, kNumOscillators>& muteDim,
+                    CoProcYieldFn coProcYield = nullptr) noexcept {
     if (alpha8 == 0u || y1 <= kGraphStripMinY1 || y0 >= kGraphStripMaxY0) {
         return;
     }
@@ -422,6 +427,7 @@ renderCouplingStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint1
     // 2. Live vertical coupling/sync filaments at real coincident oscillator pulses
     if (c > 0.02f) {
         for (size_t col = 1u; col + 1u < kCplCols; ++col) {
+            yieldCoProcEvery(coProcYield, col, 31u);
             const uint8_t sMask = syncMask[col];
             if (sMask == 0u) {
                 continue;
@@ -452,38 +458,42 @@ renderCouplingStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint1
                     static_cast<size_t>(stripHeight) * kDisplayWidth * sizeof(uint16_t));
 
         // (a) Top PWR rail soft downward glow + spine
-        for (size_t col = 0u; col < kCplCols; ++col) {
-            const int x = kCplTrackX0 + static_cast<int>(col);
-            const float wGap = pwrGapWeight(x);
-            if (wGap <= 0.02f) {
-                continue;
-            }
-            const float yA = evalPwrY(col);
-            const float yB = evalPwrY(col + 1u);
-            const float yMid = 0.5f * (yA + yB);
+        if (y1 > static_cast<int>(kCplPwrTopY) - 3 && y0 <= static_cast<int>(kCplPwrBotY) + 3) {
+            for (size_t col = 0u; col < kCplCols; ++col) {
+                yieldCoProcEvery(coProcYield, col, 15u);
+                const int x = kCplTrackX0 + static_cast<int>(col);
+                const float wGap = pwrGapWeight(x);
+                if (wGap <= 0.02f) {
+                    continue;
+                }
+                const float yA = evalPwrY(col);
+                const float yB = evalPwrY(col + 1u);
+                const float yMid = 0.5f * (yA + yB);
 
-            int pyStart = static_cast<int>(yMid);
-            if (pyStart < y0) {
-                pyStart = y0;
-            }
-            int pyEnd = static_cast<int>(kCplPwrBotY);
-            if (pyEnd > y1 - 1) {
-                pyEnd = y1 - 1;
-            }
-            for (int py = pyStart; py <= pyEnd; ++py) {
-                const float dy = static_cast<float>(py) - yMid;
-                if (dy >= 0.0f) {
-                    const float glowE = 82.0f * fastExpNeg(dy * 0.16f) * wGap * masterE;
-                    if (glowE >= 1.0f) {
-                        uint16_t& cell = linScratch[static_cast<size_t>(py - y0) * kDisplayWidth +
-                                                    static_cast<size_t>(x)];
-                        const uint32_t next =
-                            static_cast<uint32_t>(cell) + static_cast<uint32_t>(glowE + 0.5f);
-                        cell = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
+                int pyStart = static_cast<int>(yMid);
+                if (pyStart < y0) {
+                    pyStart = y0;
+                }
+                int pyEnd = static_cast<int>(kCplPwrBotY);
+                if (pyEnd > y1 - 1) {
+                    pyEnd = y1 - 1;
+                }
+                for (int py = pyStart; py <= pyEnd; ++py) {
+                    const float dy = static_cast<float>(py) - yMid;
+                    if (dy >= 0.0f) {
+                        const float glowE = 82.0f * fastExpNeg(dy * 0.16f) * wGap * masterE;
+                        if (glowE >= 1.0f) {
+                            uint16_t& cell =
+                                linScratch[static_cast<size_t>(py - y0) * kDisplayWidth +
+                                           static_cast<size_t>(x)];
+                            const uint32_t next =
+                                static_cast<uint32_t>(cell) + static_cast<uint32_t>(glowE + 0.5f);
+                            cell = static_cast<uint16_t>((next > 4095u) ? 4095u : next);
+                        }
                     }
                 }
+                splatPhotonSegment(x, yA, yB, 0.72f * wGap * masterE, 0.60f, y0, y1, linScratch);
             }
-            splatPhotonSegment(x, yA, yB, 0.72f * wGap * masterE, 0.60f, y0, y1, linScratch);
         }
 
         // (b) 4 Oscillator Charge-and-Fire Ramp Lanes with sub-pixel wrap distribution
@@ -503,6 +513,7 @@ renderCouplingStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint1
             const float dropWgt = spineWgt * 0.78f;
 
             for (size_t col = 0u; col < kCplCols; ++col) {
+                yieldCoProcEvery(coProcYield, col, 31u);
                 const int x = kCplTrackX0 + static_cast<int>(col);
                 const float rA = static_cast<float>(rampQ8[v][col]) * (1.0f / 255.0f);
                 const float rB = static_cast<float>(rampQ8[v][col + 1u]) * (1.0f / 255.0f);
@@ -560,13 +571,22 @@ renderCouplingStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint1
 
     // 4. Subtle sub-pixel optical beads at real synced resets / mid-cycle chops (>45% regime)
     if (ch > 0.04f) {
-        for (size_t col = 1u; col + 1u < kCplCols; ++col) {
-            const uint8_t sMask = syncMask[col];
-            for (size_t v = 0u; v < kNumOscillators; ++v) {
+        for (size_t v = 0u; v < kNumOscillators; ++v) {
+            if (actW[v] <= 0.05f) {
+                continue;
+            }
+            const float laneBot =
+                kCplLaneTop0 + static_cast<float>(v) * kCplLaneStride + kCplLaneHeight;
+            if (y1 < static_cast<int>(laneBot) - 3 || y0 > static_cast<int>(laneBot) + 3) {
+                continue;
+            }
+            for (size_t col = 1u; col + 1u < kCplCols; ++col) {
+                yieldCoProcEvery(coProcYield, col, 31u);
                 const uint8_t wp = wrapPacked[v][col];
-                if (wp == 0u || actW[v] <= 0.05f) {
+                if (wp == 0u) {
                     continue;
                 }
+                const uint8_t sMask = syncMask[col];
                 float uWrap = 0.5f;
                 float peak01 = 1.0f;
                 unpackCouplingWrap(wp, uWrap, peak01);
@@ -575,8 +595,6 @@ renderCouplingStrip(int y0, int y1, uint16_t stripHeight, uint8_t* lumBuf, uint1
                 if (syncedHere || midCycleChopped) {
                     const float xBead =
                         static_cast<float>(kCplTrackX0 + static_cast<int>(col)) + uWrap;
-                    const float laneBot =
-                        kCplLaneTop0 + static_cast<float>(v) * kCplLaneStride + kCplLaneHeight;
                     cv.drawOpticalBead(xBead, laneBot, 0.54f * ch * actW[v], 1.38f);
                 }
             }
